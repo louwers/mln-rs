@@ -240,7 +240,7 @@ pub(crate) struct PaintParameters<'a> {
 
     pub(crate) scissor_rect: ScissorRect,
     /// The frame that custom layers draw into, set before their prerender.
-    pub(crate) custom_layer_frame: Option<mln_style::layers::CustomLayerFrame>,
+    pub(crate) custom_layer_frame: Option<crate::layers::custom::CustomLayerFrame>,
 }
 
 impl<'a> PaintParameters<'a> {

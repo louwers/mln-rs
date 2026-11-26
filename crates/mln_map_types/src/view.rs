@@ -6,7 +6,7 @@ use std::f64::consts::PI;
 use geometry::Point;
 use glam::dcamera::rh::proj::opengl::perspective;
 use glam::{DMat4, DVec2, DVec3, DVec4};
-use mln_style_types::ProjectionDefinition;
+use mln_style::types::ProjectionDefinition;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::{DEFAULT_FOV, M2PI, TILE_SIZE_D};
 use mln_util::error::Error;

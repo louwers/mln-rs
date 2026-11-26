@@ -75,7 +75,6 @@ mln_sprite = { package = "mln-rs-sprite", path = "crates/mln_sprite", version = 
 mln_storage = { package = "mln-rs-storage", path = "crates/mln_storage", version = "=0.0.15", default-features = false }
 mln_storage_offline = { package = "mln-rs-storage-offline", path = "crates/mln_storage_offline", version = "=0.0.15" }
 mln_style = { package = "mln-rs-style", path = "crates/mln_style", version = "=0.0.15" }
-mln_style_types = { package = "mln-rs-style-types", path = "crates/mln_style_types", version = "=0.0.15" }
 mln_system_fonts = { package = "mln-rs-system-fonts", path = "crates/mln_system_fonts", version = "=0.0.15" }
 mln_text = { package = "mln-rs-text", path = "crates/mln_text", version = "=0.0.15" }
 mln_tile = { package = "mln-rs-tile", path = "crates/mln_tile", version = "=0.0.15" }

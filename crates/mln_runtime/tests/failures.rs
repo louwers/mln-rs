@@ -11,11 +11,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use mln_map::{MapEvent, MapMode, RenderMode};
+use mln_renderer::{CustomLayerHost, CustomLayerRenderParameters};
 use mln_runtime::{
     AttachOptions, BackendType, DemandMode, Device, DeviceOptions, ErrorKind, FrameDemand, FrameDisposition,
     FrameResult, LogicalExtent, Map, MapOptions, RenderSession, RenderTarget, Runtime, RuntimeEventKind,
 };
-use mln_style::layers::{CustomLayerHost, CustomLayerRenderParameters};
 use mln_util::size::Size;
 
 use crate::support::{EventLog, eventually, result_of, runtime, wait};

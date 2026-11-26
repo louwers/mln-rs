@@ -45,6 +45,20 @@ impl Style {
             return Err(conversion_error("style layer", &error));
         };
 
+        self.add_layer(layer, before_layer_id)
+    }
+
+    /// Adds `layer` below the layer named `before_layer_id`, or above every
+    /// layer when it is `None`.
+    ///
+    /// Fails as [`Style::add_layer_json`] does for a valid layer. The style
+    /// drops `layer`, and what it keeps alive, when it fails.
+    pub fn add_layer(&mut self, layer: Layer, before_layer_id: Option<&str>) -> Result<(), Error> {
+        if let Some(before) = before_layer_id
+            && self.get_layer(before).is_none()
+        {
+            return Err(Error::not_found(format!("before_layer_id {} does not exist", quote(before))));
+        }
         let id = layer.get_id();
         if self.get_layer(id).is_some() {
             return Err(Error::already_exists(format!("layer {} already exists", quote(id))));
@@ -68,30 +82,6 @@ impl Style {
                 )));
             }
         }
-        self.apply(Edit::AddLayer { layer, before: before_layer_id.map(str::to_owned) })
-    }
-
-    /// Adds a custom layer named `id` that `host` draws, below the layer
-    /// named `before_layer_id`, or above every layer when it is `None`.
-    ///
-    /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) if the style has no layer named
-    /// `before_layer_id`, and with `AlreadyExists` if it has a layer named
-    /// `id`. The style drops `host` when it fails.
-    pub fn add_custom_layer(
-        &mut self,
-        id: &str,
-        host: Arc<dyn crate::layers::CustomLayerHost>,
-        before_layer_id: Option<&str>,
-    ) -> Result<(), Error> {
-        if let Some(before) = before_layer_id
-            && self.get_layer(before).is_none()
-        {
-            return Err(Error::not_found(format!("before_layer_id {} does not exist", quote(before))));
-        }
-        if self.get_layer(id).is_some() {
-            return Err(Error::already_exists(format!("layer {} already exists", quote(id))));
-        }
-        let layer = Layer::custom(self.registry(), id, host);
         self.apply(Edit::AddLayer { layer, before: before_layer_id.map(str::to_owned) })
     }
 

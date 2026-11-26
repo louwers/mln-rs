@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_headless::HeadlessFrontend;
 use mln_map::{Map, MapMode, MapOptions};
+use mln_renderer::{Custom, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters};
 use mln_runtime::{BackendType, Device, DeviceOptions};
-use mln_style::layers::{CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters};
 use mln_util::error::ErrorKind;
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::Pool;
@@ -102,7 +102,8 @@ fn session(
             .unwrap();
     frontend.attach(&mut map);
     map.load_style_json(STYLE);
-    map.edit_style(|style| style.add_custom_layer("quad", host, before)).expect("the custom layer");
+    map.edit_style(|style| style.add_layer(Custom::layer(style.registry(), "quad", host), before))
+        .expect("the custom layer");
     Some((frontend, map))
 }
 
@@ -137,7 +138,7 @@ fn check(backend: BackendType, host: impl Fn() -> (Arc<dyn CustomLayerHost>, Arc
 }
 
 mod webgpu {
-    use mln_style::layers::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
+    use mln_renderer::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
 
     use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, QUAD_WGSL, check};
 
@@ -212,7 +213,7 @@ mod webgpu {
 #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
 #[expect(unsafe_code, reason = "the host draws through ash")]
 mod vulkan {
-    use mln_style::layers::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
+    use mln_renderer::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
     use mln_vulkan::ash::{self, vk};
 
     use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, QUAD_WGSL, check};
@@ -372,10 +373,10 @@ mod gl {
     use khronos_egl as egl;
     use mln_headless::HeadlessFrontend;
     use mln_map::Map;
+    use mln_renderer::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
     use mln_style::Edit;
-    use mln_style::layers::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
 
-    use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, Queue, check, session};
+    use super::{Arc, BackendType, Calls, Custom, CustomLayerHost, Mutex, Ordering, Queue, check, session};
 
     const VERTEX: &str = "#version 300 es
 const vec2 corners[6] = vec2[6](
@@ -495,8 +496,10 @@ void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }
     fn a_replaced_host_deinitializes_on_its_context() {
         check_end(|frontend, map| {
             map.edit_style(|style| style.apply(Edit::RemoveLayer("quad".to_owned()))).expect("the layer");
-            map.edit_style(|style| style.add_custom_layer("quad", Arc::new(Host::default()), None))
-                .expect("the new host");
+            map.edit_style(|style| {
+                style.add_layer(Custom::layer(style.registry(), "quad", Arc::new(Host::default())), None)
+            })
+            .expect("the new host");
             frontend.as_mut().unwrap().render(map).expect("a frame");
         });
     }
@@ -517,7 +520,7 @@ void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }
 mod metal {
     use std::sync::atomic::AtomicUsize;
 
-    use mln_style::layers::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
+    use mln_renderer::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
     use objc2::rc::Retained;
     use objc2::runtime::ProtocolObject;
     use objc2_foundation::NSString;
@@ -637,7 +640,7 @@ mod d3d12 {
     };
     use mln_d3d12::windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC};
     use mln_d3d12::{ShaderCompiler, ShaderStage};
-    use mln_style::layers::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
+    use mln_renderer::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
 
     use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, check};
 
@@ -772,7 +775,9 @@ float4 ps() : SV_Target {
 mod ending {
     use mln_style::Edit;
 
-    use super::{Arc, AtomicUsize, BackendType, CustomLayerHost, HeadlessFrontend, Map, Ordering, Queue, session};
+    use super::{
+        Arc, AtomicUsize, BackendType, Custom, CustomLayerHost, HeadlessFrontend, Map, Ordering, Queue, session,
+    };
 
     /// A host that draws nothing, and counts how it ended.
     #[derive(Default)]
@@ -833,8 +838,10 @@ mod ending {
     fn a_replaced_host_deinitializes() {
         check_end(|frontend, map| {
             map.edit_style(|style| style.apply(Edit::RemoveLayer("quad".to_owned()))).expect("the layer");
-            map.edit_style(|style| style.add_custom_layer("quad", Arc::new(Host::default()), None))
-                .expect("the new host");
+            map.edit_style(|style| {
+                style.add_layer(Custom::layer(style.registry(), "quad", Arc::new(Host::default())), None)
+            })
+            .expect("the new host");
             frontend.as_mut().unwrap().render(map).expect("a frame");
         });
     }

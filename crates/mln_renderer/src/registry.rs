@@ -12,7 +12,7 @@ use mln_style::expression::Functions;
 use mln_style::expression::functions::{RegisterError, register_builtin_functions};
 use mln_style::layer::ErasedStyleLayerType;
 use mln_style::layers::{
-    Background, Circle, ColorRelief, Custom, Fill, FillExtrusion, Heatmap, Hillshade, Line, Raster, Symbol,
+    Background, Circle, ColorRelief, Fill, FillExtrusion, Heatmap, Hillshade, Line, Raster, Symbol,
 };
 use mln_style::source::ErasedStyleSourceType;
 use mln_style::sources::{
@@ -22,6 +22,7 @@ use mln_style::sources::{
 use mln_vec_map::VecMap;
 
 use crate::layer_type::{ErasedLayerType, LayerType, entry};
+use crate::layers::custom::Custom;
 use crate::source_type::{self, ErasedSourceType, SourceType};
 
 /// What a [`Registry`] is built from.
@@ -87,7 +88,7 @@ fn style_source_half(source_type: &'static dyn ErasedSourceType) -> &'static dyn
 }
 
 /// Adds the style specification's expression functions, layer types and
-/// source types, and the custom source types. Fails for a name that an
+/// source types, the custom layer type and the custom source types. Fails for a name that an
 /// earlier call took, or a role that an earlier function has.
 pub fn register_builtins(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
     register_builtin_functions(builder.functions_mut())?;

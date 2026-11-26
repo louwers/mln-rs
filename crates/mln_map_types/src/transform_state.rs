@@ -2,7 +2,7 @@ use std::f64::consts::PI;
 
 use geometry::Point;
 use glam::{DQuat, DVec3};
-use mln_style_types::ProjectionDefinition;
+use mln_style::types::ProjectionDefinition;
 use mln_util::constants;
 use mln_util::constants::{M2PI, TILE_SIZE_D};
 use mln_util::error::Error;

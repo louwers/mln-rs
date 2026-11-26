@@ -39,6 +39,8 @@ mln_frame_pacer.workspace = true
 mln_gestures.workspace = true
 mln_map.workspace = true
 mln_map_types.workspace = true
+# The custom layer type.
+mln_renderer.workspace = true
 mln_runtime.workspace = true
 mln_storage.workspace = true
 mln_style.workspace = true

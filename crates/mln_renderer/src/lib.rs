@@ -67,6 +67,9 @@ pub mod update_slot;
 pub mod util;
 
 pub use frame_projection::{ClipDepthRange, FrameProjection};
+pub use layers::custom::{
+    Custom, CustomHost, CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters,
+};
 pub(crate) use paint_property_binder::paint_property_binders;
 pub use registry::{Registry, RegistryBuilder, register_builtins};
 pub use renderer::{DrawnFrame, RenderTimings, Renderer, UpdatedFrame};

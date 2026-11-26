@@ -29,7 +29,7 @@ use crate::geometry::feature_index::{FeatureIndex, QueryRegion};
 use crate::gfx::context::Context;
 use crate::layer_drawing::{ChangedBuckets, DrapeDrawing, DrawGroup, DrawOrder, LayerDrawing};
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
-use crate::layers::render_custom_layer::EndedHosts;
+use crate::layers::custom::EndedHosts;
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;

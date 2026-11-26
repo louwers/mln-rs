@@ -1,5 +1,5 @@
 use glam::{DQuat, DVec3, DVec4};
-use mln_style_types::ProjectionDefinition;
+use mln_style::types::ProjectionDefinition;
 use mln_util::constants::{DEFAULT_FOV, LATITUDE_MAX};
 use mln_util::geo::LatLng;
 use mln_util::projection::Projection;
@@ -135,7 +135,7 @@ fn a_center_too_far_to_place_leaves_the_camera_unchanged() {
 /// return locations and matrices still don't panic.
 #[test]
 fn numbers_out_of_range_do_not_panic() {
-    use mln_style_types::ProjectionType;
+    use mln_style::types::ProjectionType;
     use mln_util::geo::{EdgeInsets, ScreenCoordinate, WrapMode};
 
     use crate::FreeCameraOptions;
@@ -725,7 +725,7 @@ fn raised(projection: ProjectionDefinition, zoom: f64, center_altitude: f64) -> 
 /// the camera's distance from it.
 #[test]
 fn the_globe_draws_the_center_at_its_altitude_at_the_center() {
-    use mln_style_types::ProjectionType;
+    use mln_style::types::ProjectionType;
     use mln_util::geo::WrapMode;
 
     use crate::VerticalPerspectiveProjection;
@@ -754,7 +754,7 @@ fn the_globe_draws_the_center_at_its_altitude_at_the_center() {
 /// that height, and at height 0 as the sea-level conversions, to the bit.
 #[test]
 fn globe_conversions_at_a_height_undo_each_other() {
-    use mln_style_types::ProjectionType;
+    use mln_style::types::ProjectionType;
     use mln_util::geo::{ScreenCoordinate, WrapMode};
 
     let state = raised(ProjectionDefinition::new(ProjectionType::VerticalPerspective), 14.0, 1000.0);
@@ -785,7 +785,7 @@ fn globe_conversions_at_a_height_undo_each_other() {
 /// altitude kept.
 #[test]
 fn moving_a_location_on_a_sphere_puts_it_at_the_point() {
-    use mln_style_types::ProjectionType;
+    use mln_style::types::ProjectionType;
     use mln_util::geo::{ScreenCoordinate, WrapMode};
 
     use crate::VerticalPerspectiveProjection;
@@ -816,7 +816,7 @@ fn moving_a_location_on_a_sphere_puts_it_at_the_point() {
 /// center's altitude.
 #[test]
 fn the_globe_hands_over_to_mercator_with_the_center_raised() {
-    use mln_style_types::ProjectionType;
+    use mln_style::types::ProjectionType;
     use mln_util::geo::ScreenCoordinate;
 
     let globe = ProjectionDefinition::new(ProjectionType::VerticalPerspective);
@@ -1003,7 +1003,7 @@ fn on_globe(pitch: f64, bearing: f64, center_altitude: f64) -> TransformState {
         extent: LogicalExtent::new(Size::new(512, 512), 1.0),
         projection_mode: ProjectionMode::default(),
         viewport: Viewport::default(),
-        projection: ProjectionDefinition::new(mln_style_types::ProjectionType::VerticalPerspective),
+        projection: ProjectionDefinition::new(mln_style::types::ProjectionType::VerticalPerspective),
     }
     .to_state()
     .unwrap();

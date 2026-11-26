@@ -1,5 +1,5 @@
 use glam::DVec2;
-use mln_style_types::ProjectionDefinition;
+use mln_style::types::ProjectionDefinition;
 use mln_util::geo::{EdgeInsets, LatLng, ScreenCoordinate, WrapMode};
 use mln_util::projection::Projection;
 use mln_util::size::Size;
@@ -300,7 +300,7 @@ fn globe_view(pitch: f64, center_altitude: f64, lowest: f64) -> View {
         extent: LogicalExtent::new(Size::new(512, 512), 1.0),
         projection_mode: ProjectionMode::default(),
         viewport: crate::Viewport::default(),
-        projection: ProjectionDefinition::new(mln_style_types::ProjectionType::VerticalPerspective),
+        projection: ProjectionDefinition::new(mln_style::types::ProjectionType::VerticalPerspective),
     }
     .to_state()
     .unwrap();
@@ -385,7 +385,7 @@ fn polar_view(pitch: f64, bearing: f64, center_altitude: f64) -> View {
         extent: LogicalExtent::new(Size::new(512, 512), 1.0),
         projection_mode: ProjectionMode::default(),
         viewport: crate::Viewport::default(),
-        projection: ProjectionDefinition::new(mln_style_types::ProjectionType::VerticalPerspective),
+        projection: ProjectionDefinition::new(mln_style::types::ProjectionType::VerticalPerspective),
     }
     .to_state()
     .unwrap();

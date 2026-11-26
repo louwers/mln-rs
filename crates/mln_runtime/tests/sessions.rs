@@ -1666,8 +1666,8 @@ fn cluster_queries_read_a_clustered_source() {
 /// A custom layer whose drawing hits a bug.
 struct PanickingLayer;
 
-impl mln_style::layers::CustomLayerHost for PanickingLayer {
-    fn prerender(&self, _parameters: &mut mln_style::layers::CustomLayerPrerenderParameters<'_>) {
+impl mln_renderer::CustomLayerHost for PanickingLayer {
+    fn prerender(&self, _parameters: &mut mln_renderer::CustomLayerPrerenderParameters<'_>) {
         panic!("a bug in the library");
     }
 }
@@ -1714,7 +1714,7 @@ fn a_runtime_that_a_panic_stopped_ends_the_work_of_its_sessions() {
 /// A custom layer whose teardown hits a bug.
 struct PanickingTeardown;
 
-impl mln_style::layers::CustomLayerHost for PanickingTeardown {
+impl mln_renderer::CustomLayerHost for PanickingTeardown {
     fn deinitialize(&self) {
         panic!("a bug in the library");
     }

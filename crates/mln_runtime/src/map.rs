@@ -9,9 +9,8 @@ use mln_map::{
     ProjectionMode, StyleLoadError, TransitionEnd, TransitionOutcome,
 };
 use mln_renderer::text::font_face_engine::FontFaceEngine;
-use mln_renderer::{Registry, UpdateReader};
+use mln_renderer::{Custom, CustomLayerHost, Registry, UpdateReader};
 use mln_style::Edit;
-use mln_style::layers::CustomLayerHost;
 use mln_text::GlyphCache;
 use mln_text::local_fonts::LocalGlyphs;
 use mln_util::error::{Error, ErrorKind};
@@ -1174,8 +1173,8 @@ impl Map {
     }
 
     /// Adds a custom layer named `layer_id` that `host` draws, below
-    /// `before_layer_id` or above every layer. See `Style::add_custom_layer`
-    /// for the errors. The map lets go of `host` once the style no longer has
+    /// `before_layer_id` or above every layer. See `Style::add_layer` for the
+    /// errors. The map lets go of `host` once the style no longer has
     /// the layer, and no renderer draws it.
     pub fn add_custom_layer(
         &self,
@@ -1185,7 +1184,10 @@ impl Map {
     ) -> Result<Completion<Applied>, Error> {
         let layer_id = layer_id.into();
         self.command(move |map| {
-            map.edit_loaded_style(|style| style.add_custom_layer(&layer_id, host, before_layer_id.as_deref()))
+            map.edit_loaded_style(|style| {
+                let layer = Custom::layer(style.registry(), &layer_id, host);
+                style.add_layer(layer, before_layer_id.as_deref())
+            })
         })
     }
 

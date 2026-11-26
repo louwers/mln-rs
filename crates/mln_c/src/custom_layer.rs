@@ -1,4 +1,4 @@
-//! Custom layers: the host's `mln_custom_layer_host` as the style's
+//! Custom layers: the host's `mln_custom_layer_host` as the renderer's
 //! `CustomLayerHost`, which hands the callbacks the backend's commands as the
 //! header's variants.
 
@@ -6,9 +6,7 @@ use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use mln_style::layers::{
-    CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters,
-};
+use mln_renderer::{CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters};
 
 use crate::callback::Registration;
 use crate::generated::types::{

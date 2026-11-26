@@ -33,7 +33,7 @@ use crate::globe_depth_pass::GlobeDepthPass;
 use crate::image_store::ImageStore;
 use crate::layer_drawing::{ChangedBuckets, DrawGroup, DrawOrder, SingleDraw};
 use crate::layer_type::ErasedEvaluatedLayer;
-use crate::layers::render_custom_layer::EndedHosts;
+use crate::layers::custom::EndedHosts;
 use crate::line_atlas::LineAtlas;
 use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;

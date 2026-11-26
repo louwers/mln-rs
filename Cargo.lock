@@ -2870,7 +2870,7 @@ dependencies = [
  "glam",
  "mln-rs-geometry",
  "mln-rs-math",
- "mln-rs-style-types",
+ "mln-rs-style",
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-wire",
@@ -3111,9 +3111,7 @@ dependencies = [
  "mln-rs-geojson",
  "mln-rs-geometry",
  "mln-rs-image",
- "mln-rs-map-types",
  "mln-rs-math",
- "mln-rs-style-types",
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
@@ -3137,15 +3135,6 @@ dependencies = [
  "mln-rs-util",
  "mln-rs-vec-map",
  "serde_json",
-]
-
-[[package]]
-name = "mln-rs-style-types"
-version = "0.0.15"
-dependencies = [
- "mln-rs-feature",
- "mln-rs-util",
- "mln-rs-wire",
 ]
 
 [[package]]

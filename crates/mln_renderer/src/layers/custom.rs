@@ -1,4 +1,18 @@
-// How a custom layer differs from the others:
+//! The `custom` layer type, whose layers a host draws with its own GPU
+//! commands: its style half ([`Custom`]) and its render half.
+
+// Differences from C++:
+// - The host's callbacks get the backend's live commands as an `Any` of the
+//   backend crate's type, where C++ has a parameters subclass per backend.
+//   Each frame's view and projection come with them, so the host never reads
+//   a camera newer than the frame.
+// - There is no `initialize`: the first prerender or render after the host
+//   starts, or after a `deinitialize` or `context_lost`, is for a new session.
+// - The style's layer holds the host, and its style data only refers to it,
+//   so a renderer that is leaked with its style data, because its graphics
+//   objects are gone, doesn't keep the host.
+//
+// How a custom layer draws differently from the others:
 // - The host's prerender runs in a step of its own after the layers' draws
 //   upload (`RenderLayer::prerender`), not in `update`, so it gets the frame's
 //   final projection, whose depth range depends on how many draw groups the
@@ -13,13 +27,14 @@
 //   in the orchestrator's `EndedHosts` until the renderer ends it with one
 //   (`end_hosts`).
 
-use std::sync::Arc;
+use std::any::Any;
+use std::sync::{Arc, Weak};
 
 use mln_gfx::gpu::Gpu;
-use mln_style::layer::LayerStyle;
-use mln_style::layers::{
-    Custom, CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters,
-};
+use mln_map_types::{FrameProjection, MapView};
+use mln_style::StyleRegistry;
+use mln_style::layer::{Layer, LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
+use mln_style::property::table::{PropertyTable, PropertyVisitor};
 use mln_util::logging::{Event, Log};
 
 use crate::bucket::NoBucket;
@@ -31,6 +46,130 @@ use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
 use crate::render_tile::NoTileBucket;
+
+/// The frame that a custom layer draws into.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CustomLayerFrame {
+    /// The camera, extent and scale factor that the frame shows.
+    pub view: MapView,
+    /// Where the frame draws the map, and the depth it writes there.
+    pub projection: FrameProjection,
+    /// The size of the frame's attachments, in physical pixels.
+    pub width: u32,
+    pub height: u32,
+}
+
+/// What [`CustomLayerHost::prerender`] gets.
+pub struct CustomLayerPrerenderParameters<'a> {
+    /// The frame's commands outside the map's render pass, as the backend's
+    /// type: `mln_vulkan::CustomLayerEncoder`, `mln_mtl::CustomLayerEncoder`,
+    /// `mln_gl::CustomLayerEncoder` or `mln_webgpu::CustomLayerEncoder`.
+    pub encoder: &'a mut dyn Any,
+    pub frame: &'a CustomLayerFrame,
+}
+
+/// What [`CustomLayerHost::render`] gets.
+pub struct CustomLayerRenderParameters<'a> {
+    /// The map's render pass, as the backend's type:
+    /// `mln_vulkan::CustomLayerPass`, `mln_mtl::CustomLayerPass`,
+    /// `mln_gl::CustomLayerPass` or `mln_webgpu::CustomLayerPass`, whose
+    /// docs say what the host may change.
+    pub pass: &'a mut dyn Any,
+    pub frame: &'a CustomLayerFrame,
+    /// The depth that the map's 2D layers write at the layer's place in the
+    /// style. The map draws its opaque 2D layers before `render`, those above
+    /// the layer too, and those wrote less depth.
+    pub layer_depth: f64,
+}
+
+/// Draws a custom layer with the host's own GPU commands, on the thread that
+/// renders the map.
+///
+/// Each frame that shows the layer calls `prerender` for every custom layer,
+/// bottom to top, before the map's render pass begins, then `render` at the
+/// layer's place in the pass. Once a renderer stops drawing the layer, it
+/// calls `deinitialize`, or `context_lost` when the renderer's graphics
+/// objects may be gone. The next `prerender` or `render` is for a new
+/// renderer, which can be on another device or backend.
+pub trait CustomLayerHost: Send + Sync {
+    fn prerender(&self, _parameters: &mut CustomLayerPrerenderParameters<'_>) {}
+
+    fn render(&self, _parameters: &mut CustomLayerRenderParameters<'_>) {}
+
+    /// Destroy the GPU objects made for the renderer that stopped: the GPU
+    /// no longer uses them.
+    fn deinitialize(&self) {}
+
+    /// Forget the GPU objects made for the renderer that stopped, without
+    /// destroying them.
+    fn context_lost(&self) {}
+}
+
+/// The `custom` layer type, whose layers a [`CustomLayerHost`] draws.
+pub struct Custom;
+
+static PROPERTIES: PropertyTable = PropertyTable::new(&[], &[]);
+
+impl StyleLayerType for Custom {
+    const INFO: LayerTypeInfo = LayerTypeInfo {
+        name: "custom",
+        source: SourceKind::None,
+        pass_3d: false,
+        fading_tiles: false,
+        cross_tile_index: false,
+        from_json: false,
+    };
+    const PROPERTIES: &'static PropertyTable = &PROPERTIES;
+
+    type LayoutProperties = NoProperties;
+    type PaintProperties = NoProperties;
+    type Extra = CustomHost;
+
+    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
+        None
+    }
+}
+
+impl Custom {
+    /// A layer named `id` that `host` draws, whose filter and visibility
+    /// parse against `registry`'s functions. The layer holds `host`, and
+    /// its style data only refers to it.
+    #[must_use]
+    pub fn layer(registry: &StyleRegistry, id: &str, host: Arc<dyn CustomLayerHost>) -> Layer {
+        let mut style = LayerStyle::<Custom>::new(id.to_owned(), String::new());
+        style.extra = CustomHost(Arc::downgrade(&host));
+        Layer::from_style_holding(Arc::new(style), Arc::clone(registry.functions()), Arc::new(host))
+    }
+}
+
+/// The host of a custom layer, as its style data refers to it: there while
+/// the style has the layer or a renderer draws it.
+#[derive(Clone)]
+pub struct CustomHost(Weak<dyn CustomLayerHost>);
+
+impl Default for CustomHost {
+    /// No host.
+    fn default() -> Self {
+        struct NoHost;
+        impl CustomLayerHost for NoHost {}
+        CustomHost(Weak::<NoHost>::new())
+    }
+}
+
+impl CustomHost {
+    /// The host, unless the style no longer has the layer and no renderer
+    /// draws it.
+    #[must_use]
+    pub fn get(&self) -> Option<Arc<dyn CustomLayerHost>> {
+        self.0.upgrade()
+    }
+
+    /// Whether `host` is this one.
+    #[must_use]
+    pub fn is(&self, host: &Arc<dyn CustomLayerHost>) -> bool {
+        std::ptr::addr_eq(self.0.as_ptr(), Arc::as_ptr(host))
+    }
+}
 
 impl LayerType for Custom {
     type Layout = NoLayout;
@@ -66,7 +205,7 @@ pub(crate) struct CustomDrawing {
 
 impl RenderCustomLayer {
     pub(crate) fn new(impl_: Arc<LayerStyle<Custom>>) -> Self {
-        let host = impl_.host();
+        let host = impl_.extra.get();
         let (mut base, values) = LayerValues::new(impl_);
         base.passes = RenderPass::Translucent;
         let drawing = CustomDrawing { host, frame: None, used: false, updated: false };
@@ -188,10 +327,10 @@ impl TypedLayer for RenderCustomLayer {
     /// one goes to `ended`, to hear that the renderer stopped.
     fn style_changed(&mut self, ended: &mut EndedHosts) {
         let drawing = &mut self.drawing;
-        let same = drawing.host.as_ref().is_some_and(|host| self.values.style.has_host(host));
+        let same = drawing.host.as_ref().is_some_and(|host| self.values.style.extra.is(host));
         if !same {
             ended.extend(drawing.take_host());
-            drawing.host = self.values.style.host();
+            drawing.host = self.values.style.extra.get();
         }
     }
 }
@@ -221,5 +360,35 @@ impl RenderLayer for RenderCustomLayer {
 
     fn lose_context(&mut self) {
         self.drawing.lose();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use mln_style::layer::LayerStyle;
+
+    use super::{Custom, CustomLayerHost};
+    use crate::Registry;
+
+    struct Host;
+
+    impl CustomLayerHost for Host {}
+
+    /// A renderer that is leaked with the style data, because its graphics
+    /// objects are gone, must not keep the host, whose user data the C API
+    /// releases once the host goes.
+    #[test]
+    fn the_style_data_of_a_removed_layer_doesnt_keep_its_host() {
+        let host: Arc<dyn CustomLayerHost> = Arc::new(Host);
+        let layer = Custom::layer(Registry::with_builtins().style(), "custom", Arc::clone(&host));
+        let style = LayerStyle::<Custom>::recover(layer.style()).unwrap();
+        assert!(style.extra.is(&host));
+        assert!(style.extra.get().is_some());
+        drop(layer);
+        assert!(style.extra.get().is_some(), "the caller still holds the host");
+        drop(host);
+        assert!(style.extra.get().is_none());
     }
 }

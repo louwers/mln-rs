@@ -1,7 +1,7 @@
 //! One view of a map: the camera, size and projection that a map snapshot or a
 //! rendered frame shows.
 
-use mln_style_types::ProjectionDefinition;
+use mln_style::types::ProjectionDefinition;
 use mln_util::constants;
 use mln_util::error::Error;
 use mln_util::geo::{EdgeInsets, LatLng, NorthOrientation, WrapMode};

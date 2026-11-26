@@ -256,8 +256,9 @@ pub struct LayerStyle<T: StyleLayerType> {
     pub(crate) base: LayerBase,
     pub layout: T::LayoutProperties,
     pub paint: T::PaintProperties,
+    /// The type's data that isn't a property, which tile workers don't get.
     #[wire(skip)]
-    pub(crate) extra: T::Extra,
+    pub extra: T::Extra,
 }
 
 // Written out: `derive(Clone)` would require `T: Clone` of the marker type.

@@ -4,6 +4,7 @@
 pub mod background;
 pub mod circle;
 pub mod color_relief;
+pub mod custom;
 pub mod fill;
 pub mod fill_extrusion;
 pub mod heatmap;
@@ -16,7 +17,6 @@ pub mod symbol;
 pub(crate) mod render_background_layer;
 pub(crate) mod render_circle_layer;
 pub(crate) mod render_color_relief_layer; // dem-heatmap
-pub(crate) mod render_custom_layer;
 pub(crate) mod render_fill_extrusion_layer;
 pub(crate) mod render_fill_layer;
 pub(crate) mod render_heatmap_layer; // dem-heatmap
