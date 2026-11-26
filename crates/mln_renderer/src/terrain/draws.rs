@@ -17,7 +17,7 @@ use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_map_types::View;
-use mln_tile_id::CanonicalTileID;
+use mln_style::tile_id::CanonicalTileID;
 
 use super::mesh::{TerrainMesh, TerrainVertex};
 use super::{DemBindings, DrapeStacks, Drapes, Surface, TerrainCover};

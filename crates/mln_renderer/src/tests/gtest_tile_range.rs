@@ -1,4 +1,4 @@
-use mln_tile_id::CanonicalTileID;
+use mln_style::tile_id::CanonicalTileID;
 use mln_tile_id::tile_range::TileRange;
 use mln_util::geo::{LatLng, LatLngBounds};
 

@@ -51,7 +51,6 @@ mln_renderer = { workspace = true, features = ["font-face-shaper"] }
 mln_storage = { workspace = true, features = ["sqlite", "stub-file-source"] }
 mln_style = { workspace = true, features = ["dsl"] }
 mln_text = { package = "mln-rs-text", path = "../mln_text" }
-mln_tile_id.workspace = true
 pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }
 serde_json.workspace = true
 # The custom layer test's hosts, which draw with each backend's own API.

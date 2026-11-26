@@ -7,8 +7,9 @@ use geo_types::{Coord, CoordNum, Geometry, LineString, MultiLineString, MultiPol
 use geometry::Point;
 use mln_util::constants::EXTENT;
 
-use super::{CanonicalTileID, GeometryCollection};
+use super::GeometryCollection;
 use crate::geometry::FeatureType;
+use crate::tile_id::CanonicalTileID;
 
 /// An index past the end of a vector, with the message libstdc++'s
 /// `std::vector::at` throws.

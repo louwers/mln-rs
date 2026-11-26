@@ -10,11 +10,12 @@ use mln_style::layers::Fill;
 use mln_style::property::evaluation::PropertyEvaluationParameters;
 use mln_style::property::transition::{TransitionOptions, TransitionParameters};
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_style::tile_id::CanonicalTileID;
 use mln_text::glyph::{GlyphIDType, GlyphMap, GlyphRange};
 use mln_text::glyph_pbf::parse_glyph_pbf;
 use mln_text::tagged_string::font_stack_hash;
 use mln_tile::{MltTile, MvtTile, TileData};
-use mln_tile_id::{CanonicalTileID, OverscaledTileID};
+use mln_tile_id::OverscaledTileID;
 use mln_vec_map::VecSet;
 
 use super::map_side::MapCodec;

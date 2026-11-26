@@ -6,12 +6,13 @@ use super::util::{StubGeometryTileFeature, property_map};
 use crate::expression::dsl::{self, get, get_str, image, linear, literal, literal_str, number, step, zoom};
 use crate::expression::parse::create_expression_from_str;
 use crate::expression::{Dependency, EvaluationContext, Functions, Image, Value};
-use crate::feature::{CanonicalTileID, GeometryCollection};
+use crate::feature::GeometryCollection;
 use crate::geometry::FeatureType;
 use crate::property::evaluated::Evaluated;
 use crate::property::evaluation::PropertyEvaluationParameters;
 use crate::property::expression::PropertyExpression;
 use crate::property::value::{PropertyValue, StyleValue as _};
+use crate::tile_id::CanonicalTileID;
 
 fn one_integer() -> StubGeometryTileFeature {
     StubGeometryTileFeature::new(property_map(&[("property", MbglValue::Uint(1))]))

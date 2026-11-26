@@ -11,9 +11,9 @@ use mln_util::range::Range;
 pub use super::custom::{CustomGeometrySourceHandle, TileOptions};
 use super::custom::{CustomGeometrySourceOptions, CustomGeometrySourceType, TileFunction, TileFunctions};
 use super::geojson::TileFeatures;
-use crate::feature::CanonicalTileID;
 use crate::log_target;
 use crate::source::{Source, SourceData};
+use crate::tile_id::CanonicalTileID;
 
 #[derive(Clone)]
 pub struct Options {

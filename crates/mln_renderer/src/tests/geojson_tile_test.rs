@@ -7,7 +7,8 @@ use mln_style::layer::{Layer, LayerStyle};
 use mln_style::layers::Circle;
 use mln_style::property::evaluation::PropertyEvaluationParameters;
 use mln_style::sources::geojson::{Features, GeoJSONData, TileFeatures};
-use mln_tile_id::{CanonicalTileID, OverscaledTileID};
+use mln_style::tile_id::CanonicalTileID;
+use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::pool::TaskGroup;
 

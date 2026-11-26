@@ -16,8 +16,8 @@ use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::layers::{Fill, Line};
 use mln_style::property::evaluated::Evaluated;
 use mln_style::property::value::PropertyValue;
+use mln_style::tile_id::CanonicalTileID;
 use mln_text::atlas::ImagePositions;
-use mln_tile_id::CanonicalTileID;
 use mln_util::identity::SimpleIdentity;
 use mln_vec_map::VecMap;
 

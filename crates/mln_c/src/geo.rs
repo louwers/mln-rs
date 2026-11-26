@@ -4,7 +4,7 @@
 
 use geo_types::Geometry;
 use geojson::GeoJson;
-use mln_tile_id::CanonicalTileID;
+use mln_style::tile_id::CanonicalTileID;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate};
 
 use crate::error::Error;

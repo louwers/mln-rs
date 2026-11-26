@@ -14,10 +14,10 @@ use mln_style::layers::FillExtrusion;
 use mln_style::layers::fill_extrusion_layer_properties::{FillExtrusionLayoutProperties, FillExtrusionPaintProperties};
 use mln_style::property::evaluated::Evaluated;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::LightAnchorType;
 use mln_text::atlas::ImagePositions;
 use mln_tile::geometry_tile_data::{is_boundary_edge, is_entirely_outside, limit_holes, round_polygon_corners};
-use mln_tile_id::CanonicalTileID;
 use mln_util::constants::{EARTH_RADIUS_M, EXTENT, M2PI};
 use mln_vec_map::VecMap;
 

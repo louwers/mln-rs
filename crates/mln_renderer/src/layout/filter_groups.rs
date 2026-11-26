@@ -169,8 +169,8 @@ mod tests {
     use mln_style::conversion::{Convertible, Error};
     use mln_style::expression::{EvaluationContext, Functions, GlobalStateMap};
     use mln_style::filter::convert_filter;
+    use mln_style::tile_id::CanonicalTileID;
     use mln_tile::{MltTile, MvtTile, TileData};
-    use mln_tile_id::CanonicalTileID;
     use mln_util::hash::HashMap;
     use mlt_core::encoder::{EncoderConfig, Network, Profile};
     use mlt_core::geo_types::Coord;

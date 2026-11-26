@@ -4,8 +4,9 @@
 use geo_types::{Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use mln_map::transform::Transform;
 use mln_map_types::{CameraLimits, CameraOptions, ConstrainMode, TileLodMode, ViewportMode};
+use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::ProjectionDefinition;
-use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
+use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, WrapMode};
 use mln_util::range::Range;

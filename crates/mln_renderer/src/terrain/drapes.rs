@@ -700,8 +700,8 @@ fn drape_texture(context: &mut Context, side: u32) -> SharedTexture {
 mod tests {
     use mln_map::transform::Transform;
     use mln_map_types::{CameraOptions, ConstrainMode, ViewportMode};
+    use mln_style::tile_id::CanonicalTileID;
     use mln_style::types::ProjectionDefinition;
-    use mln_tile_id::CanonicalTileID;
     use mln_util::geo::LatLng;
 
     use super::*;

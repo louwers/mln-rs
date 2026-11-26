@@ -7,8 +7,8 @@ use mln_style::feature::{GeometryCollection, GeometryCoordinate, GeometryCoordin
 use mln_style::geometry::FeatureType;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionLayoutProperties;
 use mln_style::subdivision_granularity::{SubdivisionGranularityExpression, SubdivisionGranularitySetting};
+use mln_style::tile_id::CanonicalTileID;
 use mln_text::atlas::ImagePositions;
-use mln_tile_id::CanonicalTileID;
 use mln_util::constants::EXTENT;
 use mln_vec_map::VecMap;
 

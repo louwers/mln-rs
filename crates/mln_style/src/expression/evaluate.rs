@@ -11,8 +11,9 @@ use crate::expression::forms::image::UnavailableImages;
 use crate::expression::type_::Type;
 use crate::expression::value::{Value, from_mbgl_value, type_of};
 use crate::feature::geojson_feature::GeoJSONFeature;
-use crate::feature::{CanonicalTileID, FeatureState, GeometryTileFeature};
+use crate::feature::{FeatureState, GeometryTileFeature};
 use crate::font_face::FontCoverage;
+use crate::tile_id::CanonicalTileID;
 
 pub type GlobalStateMap = ValueObject;
 

@@ -19,6 +19,7 @@ use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::padding::Padding;
 use mln_style::property::evaluated::Evaluated;
 use mln_style::property::value::PropertyValue;
+use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::{
     AlignmentType, AnchorOffsetPair, IconTextFitType, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType,
     TextJustifyType, TextRotationAlignmentType, TextTransformType, TextVariableAnchorType, TextWritingModeType,
@@ -30,7 +31,6 @@ use mln_text::glyph::{GlyphID, GlyphIDType, GlyphPositions, Shaping};
 use mln_text::shaping::{PositionedIcon, ShapingOptions, anchor_justification, shape_text};
 use mln_text::tagged_string::{SectionIndex, SectionOptions};
 use mln_text::{ShapedText, TaggedString, shape_arabic, starts_right_to_left};
-use mln_tile_id::CanonicalTileID;
 use mln_util::constants::{EXTENT, ONE_EM, TILE_SIZE_D};
 use mln_util::error::Error;
 use mln_util::range::Range;

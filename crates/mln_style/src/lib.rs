@@ -5,8 +5,8 @@
 //!
 //! It also holds the vocabulary that the style shares with the engine:
 //! colors (`color`), padding, interpolation, feature types (`geometry`),
-//! the Unicode script checks (`i18n`) and the projection's subdivision
-//! granularity.
+//! canonical tile ids (`tile_id`), the Unicode script checks (`i18n`) and
+//! the projection's subdivision granularity.
 //!
 //! A style parses against a [`StyleRegistry`]: the expression functions and
 //! layer types its JSON, property values and filters may name.
@@ -71,6 +71,7 @@ pub mod sprite;
 mod style;
 pub mod subdivision_granularity;
 pub mod terrain;
+pub mod tile_id;
 pub mod types;
 #[doc(hidden)]
 pub mod wire;

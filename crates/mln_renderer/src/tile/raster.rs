@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use mln_tile_id::CanonicalTileID;
+use mln_style::tile_id::CanonicalTileID;
 use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
 

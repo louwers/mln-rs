@@ -14,12 +14,12 @@ use mln_vec_map::VecMap;
 use crate::conversion::geojson::convert_json_geojson;
 use crate::conversion::{Convertible, Error as ConversionError};
 use crate::expression::{Expr, Functions, evaluate_accumulated, from_expression_value};
-use crate::feature::CanonicalTileID;
 use crate::layer::SourceKind;
 use crate::source::{
     Data, Described, Fetch, Load, OfflineResources, Respond, Source, SourceData, SourceSummary, SourceTypeInfo,
     StyleSourceType,
 };
+use crate::tile_id::CanonicalTileID;
 use crate::{Edit, log_target};
 
 /// The features of tile `id`. A tile past the maximum zoom or the last row

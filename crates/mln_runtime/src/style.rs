@@ -17,8 +17,8 @@ use mln_style::sources::{
     ImageSourceType, RasterDemSourceType, RasterSourceType, TileDataFormat, VectorSourceType, custom_vector_source,
     geojson_source,
 };
+use mln_style::tile_id::CanonicalTileID;
 use mln_style::{Edit, Source, SourceInstance, TransitionOptions};
-use mln_tile_id::CanonicalTileID;
 use mln_util::error::Error;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::hash::HashMap;

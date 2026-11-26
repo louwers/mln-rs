@@ -14,10 +14,10 @@ use mln_style::expression::{Dependency, EvaluationContext, Image, Value, ValueCo
 use mln_style::feature::GeometryTileFeature;
 use mln_style::property::evaluated::{Evaluated, Faded};
 use mln_style::property::expression::PropertyExpression;
+use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::LineCapType;
 use mln_text::atlas::ImagePositions;
 use mln_tile::TileLayer;
-use mln_tile_id::CanonicalTileID;
 use mln_util::feature::feature_id_to_string;
 use mln_util::range::Range;
 use mln_vec_map::VecMap;
@@ -842,7 +842,7 @@ macro_rules! paint_property_binders {
                 index: usize,
                 pattern_positions: &mln_text::atlas::ImagePositions,
                 pattern_dependencies: Option<&$crate::layout::pattern_layout::PatternDependency>,
-                canonical: &mln_tile_id::CanonicalTileID,
+                canonical: &mln_style::tile_id::CanonicalTileID,
                 formatted_section: &mln_style::expression::Value,
             ) {
                 let buffer = &mut self.interleaved_vertex_buffer;

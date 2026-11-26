@@ -24,12 +24,12 @@ use mln_storage::{FileSource, Kind, LoadingMethod, Request, Resource, Response};
 use mln_style::i18n::glyph_range_is_entirely_locally_generated;
 use mln_style::layer::SourceKind;
 use mln_style::source::{OfflineResources, SourceTypeInfo};
+use mln_style::tile_id::CanonicalTileID;
 use mln_style::{Parser, StyleRegistry};
 use mln_text::glyph::{
     GLYPH_RANGES_PER_FONT_STACK, GLYPHS_PER_GLYPH_RANGE, GlyphID, NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK,
     get_glyph_range,
 };
-use mln_tile_id::tile_id::CanonicalTileID;
 use mln_util::chrono::now;
 use mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
 use mln_util::hash::{HashMap, HashSet};

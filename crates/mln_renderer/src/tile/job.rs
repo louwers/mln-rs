@@ -16,9 +16,10 @@ use std::time::Duration;
 
 use mln_image::decoder;
 use mln_style::expression::GlobalStateMap;
+use mln_style::tile_id::CanonicalTileID;
 use mln_text::glyph::FontFaces;
 use mln_tile::TileData;
-use mln_tile_id::{CanonicalTileID, OverscaledTileID};
+use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
 use mln_util::image::PremultipliedImage;

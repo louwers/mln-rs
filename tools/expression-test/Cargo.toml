@@ -23,7 +23,6 @@ feature.workspace = true
 geo-types.workspace = true
 geojson.workspace = true
 mln_style.workspace = true
-mln_tile_id.workspace = true
 mln_util.workspace = true
 mln_vec_map.workspace = true
 serde_json.workspace = true

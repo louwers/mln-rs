@@ -33,7 +33,7 @@ use mln_storage::{FileSource, Kind, Resource, Responder, Response};
 use mln_style::sources::custom::TileFunction;
 use mln_style::sources::custom_geometry_source::CustomGeometrySourceHandle;
 use mln_style::sprite::Sprite;
-use mln_tile_id::CanonicalTileID;
+use mln_style::tile_id::CanonicalTileID;
 use mln_util::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::Pool;

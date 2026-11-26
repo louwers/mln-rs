@@ -14,9 +14,10 @@ use mln_util::constants::{DEGREES_MAX, EXTENT, LONGITUDE_MAX};
 use crate::conversion::{Convertible, Error};
 use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::{EvaluationContext, Expr, Node};
-use crate::feature::{CanonicalTileID, GeometryCoordinates, GeometryTileFeature};
+use crate::feature::{GeometryCoordinates, GeometryTileFeature};
 use crate::geometry::{FeatureType, to_feature_type};
 use crate::log_target;
+use crate::tile_id::CanonicalTileID;
 
 // --- util/geometry_util ---
 

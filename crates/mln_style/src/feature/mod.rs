@@ -9,9 +9,6 @@ mod tile_feature;
 pub use convert::{
     OutOfRange, classify_rings, convert_geometry, convert_geometry_to_tile, signed_area, to_geometry_collection,
 };
-// Tile ids stay with the tile pyramid, which the backends and the camera
-// read without the style.
-pub use mln_tile_id::CanonicalTileID;
 pub use tile_feature::{GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileFeature};
 
 pub use crate::geometry::FeatureType;

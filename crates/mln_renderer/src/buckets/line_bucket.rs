@@ -8,8 +8,8 @@ use mln_style::geometry::FeatureType;
 use mln_style::layers::Line;
 use mln_style::layers::line_layer_properties::{LineLayoutProperties, LinePaintProperties};
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_style::tile_id::CanonicalTileID;
 use mln_text::atlas::ImagePositions;
-use mln_tile_id::CanonicalTileID;
 use mln_util::feature::numeric_value_f64;
 use mln_vec_map::VecMap;
 

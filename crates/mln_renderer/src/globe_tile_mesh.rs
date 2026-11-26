@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 
 use geometry::Point;
 use mln_style::subdivision_granularity::{SubdivisionGranularityExpression, SubdivisionGranularitySetting};
-use mln_tile_id::CanonicalTileID;
+use mln_style::tile_id::CanonicalTileID;
 use mln_util::constants::EXTENT;
 
 use crate::gfx::context::Context;

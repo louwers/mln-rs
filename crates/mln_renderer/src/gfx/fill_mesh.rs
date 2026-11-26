@@ -3,8 +3,8 @@
 
 use geometry::Point;
 use mln_style::feature::{GeometryCollection, classify_rings, signed_area};
+use mln_style::tile_id::CanonicalTileID;
 use mln_tile::geometry_tile_data::limit_holes;
-use mln_tile_id::CanonicalTileID;
 
 use crate::buckets::fill_bucket::FillLayoutVertex;
 use crate::gfx::mesh::Indexed;

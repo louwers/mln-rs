@@ -17,8 +17,9 @@ use mln_map_types::{
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::layers::Raster;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_style::tile_id::CanonicalTileID;
 use mln_style::{Edit, Style};
-use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
+use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::constants::EXTENT;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;

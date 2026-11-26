@@ -11,7 +11,7 @@ use mln_style::conversion::Convertible;
 use mln_style::expression::{
     Dependency, EvaluationContext, Expr, Functions, ParsingContext, Type, TypeAnnotationOption,
 };
-use mln_tile_id::CanonicalTileID;
+use mln_style::tile_id::CanonicalTileID;
 use mln_vec_map::VecSet;
 
 use crate::abi::{self, Fields};

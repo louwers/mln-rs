@@ -314,7 +314,8 @@ mod tests {
     use std::sync::Arc;
 
     use ::mln_map::{RenderFrameStatus, RenderingStats};
-    use ::mln_tile_id::{CanonicalTileID, OverscaledTileID};
+    use ::mln_style::tile_id::CanonicalTileID;
+    use ::mln_tile_id::OverscaledTileID;
     use mln_storage::ResourceError;
 
     use super::*;

@@ -6,8 +6,9 @@ use crate::expression::value::Value;
 use crate::expression::{
     EvaluationContext, Expr, Functions, GlobalStateMap, dsl, evaluate_feature_with_context, is_expression,
 };
-use crate::feature::{CanonicalTileID, FeatureState};
+use crate::feature::FeatureState;
 use crate::font_face::{FontFace, FontFaces};
+use crate::tile_id::CanonicalTileID;
 
 /// A path relative to the C++ repository, in the copy of the files these
 /// tests read (testdata/).

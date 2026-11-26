@@ -21,9 +21,10 @@ use mln_style::sources::{
     vector_source,
 };
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::ProjectionDefinition;
 use mln_style::{Edit, Source, Style};
-use mln_tile_id::{CanonicalTileID, OverscaledTileID};
+use mln_tile_id::OverscaledTileID;
 use mln_util::error::Error;
 use mln_util::geo::LatLng;
 use mln_util::pool::{Pool, TaskGroup};

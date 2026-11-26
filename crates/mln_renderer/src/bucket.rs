@@ -9,9 +9,9 @@
 use std::any::Any;
 
 use mln_style::feature::{GeometryCollection, GeometryTileFeature};
+use mln_style::tile_id::CanonicalTileID;
 use mln_text::atlas::ImagePositions;
 use mln_tile::TileLayer;
-use mln_tile_id::CanonicalTileID;
 use mln_util::identity::SimpleIdentity;
 use mln_wire::{Reader, Wire, Writer};
 

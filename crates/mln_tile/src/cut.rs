@@ -12,7 +12,7 @@ use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
 use mln_style::feature::{GeometryCollection, GeometryCoordinates, GeometryTileFeature};
 use mln_style::geometry::FeatureType;
-use mln_tile_id::CanonicalTileID;
+use mln_style::tile_id::CanonicalTileID;
 use mln_util::constants::EXTENT;
 use mln_util::hash::HashMap;
 use mln_wire::{Reader, Wire, Writer, shared};

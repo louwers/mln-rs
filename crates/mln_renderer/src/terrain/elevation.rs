@@ -5,7 +5,8 @@ use std::sync::Arc;
 
 use glam::DVec2;
 use mln_map_types::{Elevation, TileCoordinate};
-use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
+use mln_style::tile_id::CanonicalTileID;
+use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::dem::{self, DemCoords, DemUnpack};
 use mln_util::geo::LatLng;
 use mln_util::hash::HashMap;

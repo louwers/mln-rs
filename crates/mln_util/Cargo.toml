@@ -37,6 +37,8 @@ web-time.workspace = true
 bench = []
 
 [dev-dependencies]
+# The tile ids of the LatLng gtests (src/tests/gtest/geo.rs).
+mln_style = { package = "mln-rs-style", path = "../mln_style" }
 mln_tile_id = { package = "mln-rs-tile-id", path = "../mln_tile_id" }
 serde_json.workspace = true
 

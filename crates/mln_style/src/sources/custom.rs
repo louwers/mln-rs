@@ -11,9 +11,9 @@ use mln_util::error::Error;
 use mln_util::geo::LatLngBounds;
 use mln_util::range::Range;
 
-use crate::feature::CanonicalTileID;
 use crate::layer::SourceKind;
 use crate::source::{Data, SourceData, SourceTypeInfo, StyleSourceType};
+use crate::tile_id::CanonicalTileID;
 
 /// How the host's GeoJSON is cut into tiles, as for a GeoJSON source.
 #[derive(Clone, Debug, PartialEq)]

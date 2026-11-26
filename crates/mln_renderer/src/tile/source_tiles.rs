@@ -1270,7 +1270,7 @@ impl SourceTiles {
         // The globe returns a feature once per tile, though the tile is
         // tested at three copies and can be rendered at two wraps: these are
         // where this tile's features start in each layer's results.
-        let mut canonical_tile: Option<mln_tile_id::CanonicalTileID> = None;
+        let mut canonical_tile: Option<mln_style::tile_id::CanonicalTileID> = None;
         let mut canonical_tile_start: mln_util::hash::HashMap<String, usize> = mln_util::hash::HashMap::default();
 
         for (id, key) in sorted_tiles {

@@ -18,8 +18,9 @@ use mln_map_types::{
     TransitionOutcome,
 };
 use mln_math::deg2rad;
+use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::ProjectionType;
-use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
+use mln_tile_id::UnwrappedTileID;
 use mln_util::UnitBezier;
 use mln_util::constants::{EXTENT, LATITUDE_MAX, LONGITUDE_MAX, MAX_ZOOM, TILE_SIZE_D};
 use mln_util::geo::LatLngBounds;

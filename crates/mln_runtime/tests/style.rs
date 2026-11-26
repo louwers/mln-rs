@@ -328,7 +328,7 @@ fn a_custom_source_drops_its_callbacks_once_it_leaves_the_style() {
 fn tile_commands_check_the_kind_of_their_source() {
     let (_runtime, map) = styled_map();
     add_geometry(&map, "geometry", &Probe::default()).unwrap();
-    let tile = mln_tile_id::CanonicalTileID::new(0, 0, 0);
+    let tile = mln_style::tile_id::CanonicalTileID::new(0, 0, 0);
     wait(map.set_custom_geometry_source_tile_data("geometry", tile, r#"{"type":"Point","coordinates":[0,0]}"#));
     wait(map.invalidate_custom_geometry_source_tile("geometry", tile));
     let wrong = wait_err(map.set_custom_vector_source_tile_data("geometry", tile, None, TileDataFormat::default()));

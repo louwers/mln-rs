@@ -3,7 +3,8 @@
 // `LatLngBounds(CanonicalTileID)` are the `from_*_tile` functions (mln_util
 // sits below mln_tile_id), called with the tile ids' fields.
 
-use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
+use mln_style::tile_id::CanonicalTileID;
+use mln_tile_id::UnwrappedTileID;
 
 use crate::Error;
 use crate::constants::{LATITUDE_MAX, LONGITUDE_MAX};

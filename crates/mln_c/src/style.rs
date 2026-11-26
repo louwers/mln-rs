@@ -11,7 +11,7 @@ use mln_style::expression::Functions;
 use mln_style::image::{ImageContent, Impl as StyleImage, TextFit};
 use mln_style::sources::TileDataFormat;
 use mln_style::sources::custom_geometry_source::TileOptions;
-use mln_tile_id::CanonicalTileID;
+use mln_style::tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::image::PremultipliedImage;
