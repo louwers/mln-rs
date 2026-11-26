@@ -37,7 +37,6 @@ use mln_style::property::table::{PropertyTable, PropertyVisitor};
 
 use crate::camera::{FrameProjection, MapView};
 use crate::draw::context::Context;
-use crate::layer::bucket::NoBucket;
 use crate::layer::layer_drawing::{DrawGroup, DrawOrder, LayerDrawing, TileMap};
 use crate::layer::layer_type::LayerType;
 use crate::layer::layout::NoLayout;
@@ -172,7 +171,6 @@ impl CustomHost {
 
 impl LayerType for Custom {
     type Layout = NoLayout;
-    type Bucket = NoBucket;
     type TileBucket<'a> = NoTileBucket;
 
     fn render_layer(style: Arc<LayerStyle<Custom>>) -> Box<dyn RenderLayer> {
