@@ -26,7 +26,10 @@ use crate::layer::bucket_geometry::{bucket_indexes, bucket_vertices, paint_verti
 use crate::layer::layer_drawing::{DrawList, FrameDraw, TileDraws, UniformWriter};
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::layout::{LayoutParameters, SourceLayer};
-use crate::layer::render_layer::{LayerBucket, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
+use crate::layer::render_layer::{
+    EvaluateCx, Evaluation, LayerBucket, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer, RenderLayerBase,
+    TypedLayer,
+};
 use crate::layers::circle::programs;
 use crate::layers::circle::ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use crate::layout::circle_layout::CircleLayout;
@@ -232,8 +235,7 @@ impl TypedLayer for RenderCircleLayer {
     type Type = Circle;
     type Drawing = TileDraws<StandingDraw>;
 
-    const STANDS: bool = true;
-    const HIDES_BEHIND_GROUND: bool = true;
+    const TERRAIN: OnTerrain = OnTerrain::Stands { hides_behind_ground: true };
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -243,17 +245,17 @@ impl TypedLayer for RenderCircleLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
-    fn passes(&self, evaluated: &EvaluatedLayer<Circle>) -> RenderPass {
-        let evaluated = &evaluated.paint;
+    fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
+        let evaluated = &cx.evaluated.paint;
         if (evaluated.circle_radius.constant_or(&1.0) > 0.0 || evaluated.circle_stroke_width.constant_or(&1.0) > 0.0)
             && (evaluated.circle_color.constant_or(&Color::black()).a > 0.0
                 || evaluated.circle_stroke_color.constant_or(&Color::black()).a > 0.0)
             && (evaluated.circle_opacity.constant_or(&1.0) > 0.0
                 || evaluated.circle_stroke_opacity.constant_or(&1.0) > 0.0)
         {
-            RenderPass::Translucent
+            Evaluation::TRANSLUCENT
         } else {
-            RenderPass::None
+            Evaluation::NONE
         }
     }
 
