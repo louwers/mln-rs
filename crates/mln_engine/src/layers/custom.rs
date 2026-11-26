@@ -39,7 +39,7 @@ use crate::camera::{FrameProjection, MapView};
 use crate::draw::context::Context;
 use crate::layer::bucket::NoBucket;
 use crate::layer::layer_drawing::{DrawGroup, DrawOrder, LayerDrawing, TileMap};
-use crate::layer::layer_type::{EvaluatedLayer, LayerType};
+use crate::layer::layer_type::LayerType;
 use crate::layer::layout::NoLayout;
 use crate::layer::render_layer::{LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::log_target;
@@ -114,7 +114,6 @@ impl StyleLayerType for Custom {
     const INFO: LayerTypeInfo = LayerTypeInfo {
         name: "custom",
         source: SourceKind::None,
-        pass_3d: false,
         fading_tiles: false,
         cross_tile_index: false,
         from_json: false,
@@ -317,10 +316,6 @@ impl TypedLayer for RenderCustomLayer {
 
     fn parts_mut(&mut self) -> PartsMut<'_, Self> {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
-    }
-
-    fn passes(&self, _evaluated: &EvaluatedLayer<Custom>) -> RenderPass {
-        RenderPass::Translucent
     }
 
     /// A new host for the same layer ID is a new layer to the host: the old
