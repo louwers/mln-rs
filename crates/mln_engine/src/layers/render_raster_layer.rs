@@ -18,7 +18,7 @@ use mln_style::bitmap::PremultipliedImage;
 use mln_style::hash::{HashMap, HashSet};
 use mln_style::layer::LayerStyle;
 use mln_style::layers::Raster;
-use mln_style::types::{LayerBlendType, RasterResamplingType, ResamplingType, TranslateAnchorType};
+use mln_style::types::{RasterResamplingType, ResamplingType, TranslateAnchorType};
 
 use super::cast_matrix;
 use crate::buckets::raster_bucket::{MaskQuads, RasterLayoutVertex};
@@ -36,17 +36,17 @@ use crate::layer::bucket_geometry::copied_vertices;
 use crate::layer::layer_drawing::{
     DrawGroup, DrawList, DrawObjectsMut, DrawOrder, FrameDraw, KeptDraw, LayerDrawing, LayerDraws, TileMap,
 };
-use crate::layer::layer_type::{EvaluatedLayer, LayerType};
+use crate::layer::layer_type::LayerType;
 use crate::layer::layout::NoLayout;
 use crate::layer::render_layer::{
-    LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+    EvaluateCx, Evaluation, LayerUpdateParameters, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer,
+    RenderLayerBase, TypedLayer,
 };
 use crate::layers::raster::programs;
 use crate::layers::raster::ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use crate::render::globe::globe_tile_mesh::GlobeTileMeshCache;
 use crate::render::layer_composite::Composite;
 use crate::render::paint_parameters::PaintParameters;
-use crate::render::pass::RenderPass;
 use crate::render::static_data::RenderStaticData;
 use crate::render::tile::FrameTile;
 use crate::render::tile_matrix::{projection_data, to_projection_ubo};
@@ -443,11 +443,7 @@ fn raster_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
 impl TypedLayer for RenderRasterLayer {
     type Type = Raster;
     type Drawing = RasterDrawing;
-    const DRAPES: bool = true;
-
-    fn blends(&self, evaluated: &EvaluatedLayer<Raster>) -> bool {
-        *evaluated.paint.raster_layer_blend.uniform() != LayerBlendType::Normal
-    }
+    const TERRAIN: OnTerrain = OnTerrain::Drapes;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -464,8 +460,9 @@ impl TypedLayer for RenderRasterLayer {
         }
     }
 
-    fn passes(&self, evaluated: &EvaluatedLayer<Raster>) -> RenderPass {
-        if *evaluated.paint.raster_opacity.uniform() > 0.0 { RenderPass::Translucent } else { RenderPass::None }
+    fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
+        let evaluated = &*cx.evaluated;
+        if *evaluated.paint.raster_opacity.uniform() > 0.0 { Evaluation::TRANSLUCENT } else { Evaluation::NONE }
     }
 
     /// Makes the frame's draws of the layer, one of each of its tiles, which
