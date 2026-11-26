@@ -8,7 +8,6 @@ use mln_gfx::gpu::{
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::{BUFFER_IDS, PROJECTION_ID};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::StencilOpType;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMode, DrawModeType, StencilMode};
@@ -19,6 +18,7 @@ use crate::draw::Entries;
 use crate::gfx::buffer::Buffer;
 use crate::gfx::context::Context;
 use crate::gfx::owned::Owned;
+use crate::gfx::segment::SegmentBase;
 use crate::gfx::vertex_attribute::Uniforms;
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
 use crate::paint_parameters::DrawTarget;
@@ -288,10 +288,9 @@ impl ClipMasks {
             id
         };
 
-        let depth = DepthMode::disabled().range;
         let full = Scissor { x: 0, y: 0, width: size.width, height: size.height };
         let dynamic = DynamicState {
-            depth_range: (depth.min, depth.max),
+            depth_range: DepthMode::disabled().range,
             scissor: scissor.unwrap_or(full),
             stencil_reference: 0,
             blend_constant: ColorMode::disabled().blend_color,

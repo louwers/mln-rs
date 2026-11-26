@@ -5,7 +5,6 @@
 use std::sync::Arc;
 
 use geometry::Point;
-use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::MapMode;
 use mln_style::expression::Value;
 use mln_style::feature::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
@@ -19,6 +18,7 @@ use mln_vec_map::VecMap;
 use crate::bucket::{Bucket, BucketBase, UploadNeeds};
 use crate::bucket_geometry::{GeometryUpload, GeometryVec};
 use crate::gfx::mesh::{Indexed, add_point_quads};
+use crate::gfx::segment::SegmentBase;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::paint_property_binder::PaintPropertyBinder;

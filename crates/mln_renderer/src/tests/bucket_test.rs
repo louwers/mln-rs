@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
-use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::MapMode;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::conversion::{Convertible, Error as ConversionError};
@@ -38,6 +37,7 @@ use crate::buckets::symbol_bucket::{SymbolBucket, SymbolBucketStyle, SymbolLayou
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::line_mesh::LineLayoutVertex;
+use crate::gfx::segment::SegmentBase;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::layout::symbol_instance::SymbolInstancePools;

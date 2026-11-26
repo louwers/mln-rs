@@ -6,13 +6,13 @@
 use ash::vk;
 use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator, AllocatorCreateDesc};
 use gpu_allocator::{AllocationSizes, AllocatorDebugSettings, MemoryLocation};
-use mln_util::error::Error;
+use mln_gfx::Error;
 
 use crate::device::Device;
 
 /// An allocator of `device`'s memory.
 ///
-/// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when
+/// Fails with [`ErrorKind::Native`](mln_gfx::ErrorKind) when
 /// gpu-allocator can't make one.
 pub(crate) fn allocator(device: &Device) -> Result<Allocator, Error> {
     const MB: u64 = 1024 * 1024;

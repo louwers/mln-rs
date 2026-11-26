@@ -5,7 +5,6 @@
 use std::sync::Arc;
 
 use geometry::Point;
-use mln_gfx::shaders::segment::SegmentBase;
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::image::PremultipliedImage;
@@ -14,6 +13,7 @@ use crate::bucket::BucketBase;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{Indexes, SharedIndexes};
 use crate::gfx::mesh::Indexed;
+use crate::gfx::segment::SegmentBase;
 use crate::gfx::vertices::SharedVertices;
 use crate::tile_mask::TileMask;
 

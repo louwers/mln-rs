@@ -11,7 +11,7 @@ use std::ffi::c_void;
 use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
 use std::sync::OnceLock;
 
-use mln_util::error::Error;
+use mln_gfx::Error;
 use parking_lot::Mutex;
 use windows::Win32::Foundation::{HMODULE, LUID};
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL};
@@ -98,9 +98,9 @@ impl TextureDevice {
     /// `VkPhysicalDeviceIDProperties.deviceLUID` reports it, once it has
     /// shared a texture through an NT handle.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) without
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) without
     /// D3D11, an adapter of `luid`, or textures that it shares, and with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) when D3D11 can't make the
+    /// [`ErrorKind::Native`](mln_gfx::ErrorKind) when D3D11 can't make the
     /// device.
     pub(crate) fn new(luid: [u8; 8]) -> Result<TextureDevice, Error> {
         let functions = functions()?;
@@ -148,7 +148,7 @@ impl TextureDevice {
     /// a shader resource and a render target, and its NT handle, once the
     /// work that made it has finished.
     ///
-    /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when D3D11
+    /// Fails with [`ErrorKind::Native`](mln_gfx::ErrorKind) when D3D11
     /// can't make or share the texture.
     pub(crate) fn texture(&self, width: u32, height: u32) -> Result<SharedTexture, Error> {
         let description = D3D11_TEXTURE2D_DESC {

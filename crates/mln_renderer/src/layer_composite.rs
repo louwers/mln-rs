@@ -28,11 +28,9 @@ use mln_gfx::shaders::bindings::{BUFFER_IDS, PROJECTION_ID};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::ColorBlendFactorType;
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMode, DrawModeType, StencilMode};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMode, DrawModeType, Rgba, Size, StencilMode};
 use mln_style::types::LayerBlendType;
-use mln_util::Color;
 use mln_util::identity::SimpleIdentity;
-use mln_util::size::Size;
 
 use crate::draw::Entries;
 use crate::gfx::buffer::Buffer;
@@ -362,7 +360,7 @@ impl LayerComposite {
             label: "layer composite backdrop",
             color: Some(ColorAttachment {
                 texture: frame.backdrop.id(),
-                load: LoadOp::Clear(Color::new(0.0, 0.0, 0.0, 0.0)),
+                load: LoadOp::Clear(Rgba::new(0.0, 0.0, 0.0, 0.0)),
             }),
             depth_stencil: None,
             size: target.size,
@@ -405,7 +403,7 @@ impl LayerComposite {
             label: "layer composite",
             color: Some(ColorAttachment {
                 texture: target.color.id(),
-                load: LoadOp::Clear(Color::new(0.0, 0.0, 0.0, 0.0)),
+                load: LoadOp::Clear(Rgba::new(0.0, 0.0, 0.0, 0.0)),
             }),
             depth_stencil,
             size: target.size,
@@ -559,10 +557,10 @@ impl LayerComposite {
             instance_count: 1,
             global_index: 0,
             dynamic: DynamicState {
-                depth_range: (depth.range.min, depth.range.max),
+                depth_range: depth.range,
                 scissor: scissor.unwrap_or(full),
                 stencil_reference: 0,
-                blend_constant: Color::default(),
+                blend_constant: Rgba::default(),
                 line_width: 1.0,
             },
         })?;

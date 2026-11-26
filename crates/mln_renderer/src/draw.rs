@@ -22,13 +22,13 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::shaders::bindings::{BUFFER_IDS, MAX_TEXTURES};
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_util::logging::{Event, Log};
 
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
 use crate::gfx::owned::{Held, Owned};
+use crate::gfx::segment::SegmentBase;
 use crate::gfx::store::SharedTexture;
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::upload::{self, AttributeBindingArray, AttributeSlots};
@@ -408,7 +408,7 @@ impl DrawObjects {
 
         let full = Scissor { x: 0, y: 0, width: size.width, height: size.height };
         let dynamic = DynamicState {
-            depth_range: (depth_mode.range.min, depth_mode.range.max),
+            depth_range: depth_mode.range,
             scissor: scissor.unwrap_or(full),
             stencil_reference: stencil_mode.ref_ as u32,
             blend_constant: self.color_mode.blend_color,

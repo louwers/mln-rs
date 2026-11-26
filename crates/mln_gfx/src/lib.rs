@@ -24,6 +24,7 @@ pub mod color_mode;
 pub mod cull_face_mode;
 pub mod depth_mode;
 pub mod draw_mode;
+pub mod error;
 pub mod export;
 pub mod frame;
 pub mod gfx_types;
@@ -35,29 +36,32 @@ pub mod rendering_stats;
 pub mod ring;
 pub mod scissor_rect;
 pub mod shaders;
+mod size;
 pub mod stencil_mode;
 pub mod texture2d;
 pub mod types;
 pub mod util_hash;
 pub mod window;
 
+pub use color_mode::{ColorMode, Rgba};
 /// The `log` targets of this crate's records (see the crate docs).
 mod log_target {
     pub(crate) const RENDER: &str = "mln_gfx::render";
 }
 
-pub use color_mode::ColorMode;
 pub use cull_face_mode::CullFaceMode;
 pub use depth_mode::DepthMode;
 pub use draw_mode::DrawMode;
+pub use error::{Error, ErrorKind};
 pub use export::{
     DepthStencilFormat, DepthStencilFormats, DmaBufFormat, DmaBufPlane, ExportKind, ExportKinds, ExportedFrame,
     ExportedImage, ExportedRing, FrameDepth, NativeTexture,
 };
-pub use frame::{ConsumerSync, FrameImage, FrameTarget, GpuSync, Handoff, SyncKind, SyncKinds};
+pub use frame::{ConsumerSync, FrameImage, FramePixels, FrameTarget, GpuSync, Handoff, SyncKind, SyncKinds};
 pub use gfx_types::{AttributeDataType, DrawModeType, PrimitiveType};
 pub use renderer_backend::RendererBackend;
 pub use scissor_rect::ScissorRect;
+pub use size::Size;
 pub use stencil_mode::StencilMode;
 pub use types::DepthMaskType;
 pub use window::Window;

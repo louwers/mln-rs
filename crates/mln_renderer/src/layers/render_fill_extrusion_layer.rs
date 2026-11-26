@@ -37,7 +37,6 @@ use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_map_types::View;
 use mln_style::layer::LayerStyle;
@@ -49,7 +48,6 @@ use mln_util::clip_depth::ClipDepthRange;
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
-use mln_util::size::Size;
 
 use super::cast_matrix;
 use crate::bucket::Bucket;
@@ -66,6 +64,7 @@ use crate::geometry::feature_index::QueryRegion;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{Indexes, SharedIndexes};
+use crate::gfx::segment::SegmentBase;
 use crate::gfx::texture2d::Texture2D;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
@@ -873,7 +872,7 @@ impl RenderFillExtrusionLayer {
         let height_factor = (-num_tiles / TILE_SIZE_D / 8.0) as f32;
 
         let texture = draw.objects.texture(IMAGE_SLOT).and_then(|texture| parameters.context.texture(texture));
-        let texture_size = texture.map_or(Size::new(0, 0), Texture2D::size);
+        let texture_size = texture.map(Texture2D::size).unwrap_or_default();
         let pattern = evaluated.fill_extrusion_pattern.faded();
         let tlbr = |id: &str| tile_bucket.pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
 
@@ -946,10 +945,10 @@ impl RenderFillExtrusionLayer {
 #[cfg(test)]
 mod tests {
     use geometry::Point;
-    use mln_gfx::shaders::segment::MAX_SEGMENT_VERTICES;
 
     use super::*;
     use crate::buckets::fill_extrusion_bucket::wall_quad_vertices;
+    use crate::gfx::segment::MAX_SEGMENT_VERTICES;
 
     // A wall's quad is the static quad's corners, each with the wall's
     // vertex, and the next four are the next vertex's. Its paint values are

@@ -6,9 +6,7 @@
 use ash::vk;
 use mln_gfx::gpu::{GpuError, TargetFormats, TextureFormat, TextureId, TextureUsage};
 use mln_gfx::ring::{self, RingBackend, RingTextures};
-use mln_gfx::{ConsumerSync, GpuSync, SyncKind};
-use mln_util::error::Error;
-use mln_util::size::Size;
+use mln_gfx::{ConsumerSync, Error, GpuSync, Size, SyncKind};
 
 use crate::device::Device;
 use crate::gpu::{ImportedImage, VulkanGpu};
@@ -66,11 +64,11 @@ pub struct BorrowedDepth {
 impl BorrowedImages {
     /// Checks what the images need of `device`.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for
     /// images that go to the foreign queue family on a device without
     /// `VK_EXT_queue_family_foreign`, or depth images of a format that the
     /// device draws no depth into, and with
-    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a size
+    /// [`ErrorKind::InvalidArgument`](mln_gfx::ErrorKind) for a size
     /// that is zero or larger than the device's largest image, or for depth
     /// images that aren't one for each image.
     pub fn check(&self, device: &Device) -> Result<(), Error> {
@@ -166,7 +164,7 @@ impl Waiting {
 /// timeline semaphore, which the caller destroys. The handle stays the
 /// host's.
 ///
-/// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when Vulkan can't
+/// Fails with [`ErrorKind::Native`](mln_gfx::ErrorKind) when Vulkan can't
 /// import it.
 #[cfg(windows)]
 fn import_fence(device: &Device, handle: u64) -> Result<vk::Semaphore, Error> {
@@ -373,9 +371,9 @@ impl RingBackend for VulkanRing {
     type Handed = Handed;
 
     /// Fails as [`BorrowedImages::check`] does, with
-    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a producer kind
+    /// [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for a producer kind
     /// that isn't one of [`Device::sync_kinds`](crate::Device::sync_kinds)'s,
-    /// and with [`ErrorKind::Native`](mln_util::ErrorKind) when a Vulkan
+    /// and with [`ErrorKind::Native`](mln_gfx::ErrorKind) when a Vulkan
     /// call fails.
     fn new(backend: &mut RendererBackend, images: &BorrowedImages, producer: SyncKind) -> Result<Self, Error> {
         let device = backend.device().clone();
@@ -396,7 +394,7 @@ impl RingBackend for VulkanRing {
         Ok(ring)
     }
 
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for
     /// another format, final layout or owner, or depth images of another
     /// format or final layout or where the ring has none, and as
     /// [`BorrowedImages::check`] does.
@@ -411,7 +409,7 @@ impl RingBackend for VulkanRing {
         next.check(&self.device)
     }
 
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for a
     /// format that `VulkanGpu` has no texture of.
     fn targets(gpu: &VulkanGpu, images: &BorrowedImages) -> Result<TargetFormats, Error> {
         let color = gpu
@@ -447,9 +445,9 @@ impl RingBackend for VulkanRing {
         })
     }
 
-    /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when the target
+    /// Fails with [`ErrorKind::Native`](mln_gfx::ErrorKind) when the target
     /// can't wait for `consumer`, such as for a sync file Vulkan can't
-    /// import, and with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for
+    /// import, and with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for
     /// another kind than [`Device::sync_kinds`](crate::Device::sync_kinds)'s
     /// consumer kinds. The host's GPU may then still read the image.
     fn wait_for(&mut self, gpu: &mut VulkanGpu, consumer: ConsumerSync) -> Result<Option<ConsumerWait>, Error> {

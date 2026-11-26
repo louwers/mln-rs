@@ -14,6 +14,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use ash::vk;
+use mln_gfx::Size;
 use mln_gfx::gpu::{
     BufferDesc, BufferId, BufferUsage, Gpu as _, GpuError, ResourceId, SamplerId, TextureDesc, TextureFormat,
     TextureId, TextureRegion, TextureUsage, destroy_unused,
@@ -22,7 +23,6 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
-use mln_util::size::Size;
 use mln_vulkan::{Overlay, OverlayTarget, ShaderStage, VulkanGpu, compile_glsl};
 
 use crate::overlay::Paint;

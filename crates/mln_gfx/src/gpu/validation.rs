@@ -11,14 +11,13 @@
 //! `write_buffer`. [`Dependents`] keeps what pipelines, bindings
 //! and geometry are made of, which `destroy` checks.
 
-use mln_util::hash::HashMap;
-use mln_util::size::Size;
-
 use super::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferId, BufferUsage, Draw, GeometryDesc, GeometryId, GpuError,
     PassDesc, PipelineId, ResourceId, SamplerId, ShaderId, TargetFormats, TextureDesc, TextureFormat, TextureId,
     TextureRegion, TextureUsage, VertexBufferLayout, VertexStep,
 };
+use crate::size::Size;
+use crate::util_hash::HashMap;
 
 /// What the checks read of a buffer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -628,7 +627,7 @@ mod tests {
                 depth_range: (0.0, 1.0),
                 scissor: crate::gpu::Scissor { x: 0, y: 0, width: 1, height: 1 },
                 stencil_reference: 0,
-                blend_constant: mln_util::Color::black(),
+                blend_constant: crate::color_mode::Rgba::new(0.0, 0.0, 0.0, 1.0),
                 line_width: 1.0,
             },
         };

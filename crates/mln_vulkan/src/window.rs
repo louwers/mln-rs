@@ -4,9 +4,8 @@ use std::ffi::CStr;
 use std::sync::Arc;
 
 use ash::vk;
-use mln_gfx::Window;
 use mln_gfx::window::raw_window_handle::{RawDisplayHandle, RawWindowHandle};
-use mln_util::error::Error;
+use mln_gfx::{Error, Window};
 
 use crate::renderer_backend::SurfaceProvider;
 
@@ -30,9 +29,9 @@ pub(crate) struct WindowSurface {
 }
 
 impl WindowSurface {
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for a
     /// window of a kind Vulkan has no surface for, and with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) for a window without
+    /// [`ErrorKind::Native`](mln_gfx::ErrorKind) for a window without
     /// handles.
     pub(crate) fn new(window: Arc<dyn Window>) -> Result<WindowSurface, Error> {
         let display = window.display_handle().map_err(|e| Error::native(format!("The window has no display: {e}")))?;

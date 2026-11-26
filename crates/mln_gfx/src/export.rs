@@ -2,7 +2,7 @@
 //! ways a texture's memory crosses to another API or process, how a ring
 //! picks one of those that the host imports, and what each frame hands over.
 
-use mln_util::size::Size;
+use crate::size::Size;
 
 /// A way to share a texture's memory with another API or process.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

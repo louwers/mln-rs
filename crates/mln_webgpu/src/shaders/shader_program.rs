@@ -14,8 +14,7 @@ use mln_gfx::types::{
     ColorBlendEquationType, ColorBlendFactorType, CullFaceSideType, CullFaceWindingType, DepthFunctionType,
     StencilFunctionType, StencilOpType,
 };
-use mln_util::hash::HashMap;
-use mln_vec_map::VecMap;
+use mln_gfx::util_hash::HashMap;
 
 use crate::shaders::declaration::Declaration;
 use crate::shaders::prelude::PRELUDE;
@@ -524,17 +523,23 @@ impl BindGroups {
         index_group: Option<u32>,
         index_layout: &wgpu::BindGroupLayout,
     ) -> BindGroups {
-        let mut grouped: VecMap<u32, Vec<BindingInfo>> = VecMap::new();
+        let mut binding_infos = binding_infos;
+        binding_infos.sort_by_key(|info| (info.group, info.binding));
+        let mut grouped: Vec<(u32, Vec<BindingInfo>)> = Vec::new();
         for info in binding_infos {
-            grouped.entry(info.group).or_default().push(info);
+            match grouped.last_mut() {
+                Some((group, infos)) if *group == info.group => infos.push(info),
+                _ => grouped.push((info.group, vec![info])),
+            }
         }
-        if let Some(group) = index_group {
-            grouped.entry(group).or_default();
+        if let Some(group) = index_group
+            && let Err(at) = grouped.binary_search_by_key(&group, |&(group, _)| group)
+        {
+            grouped.insert(at, (group, Vec::new()));
         }
 
         let mut groups = BindGroups { layouts: Vec::new(), order: Vec::new(), bindings: Vec::new() };
-        for (group, mut infos) in grouped {
-            infos.sort_by_key(|info| info.binding);
+        for (group, infos) in grouped {
             let layout = if Some(group) == index_group {
                 index_layout.clone()
             } else {

@@ -22,8 +22,7 @@ use mln_gfx::gpu::{
     Gpu as _, ReadbackId, ResourceId, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion,
     TextureUsage, destroy_unused,
 };
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
+use mln_gfx::{FramePixels, Size};
 
 use crate::device::Device;
 use crate::gpu::{ImportedImage, VulkanGpu};
@@ -716,7 +715,7 @@ impl SurfaceResource {
     }
 
     /// The last frame read back, once its readback has finished, if any.
-    pub(crate) fn read_image(&mut self, gpu: &mut VulkanGpu) -> Option<PremultipliedImage> {
+    pub(crate) fn read_image(&mut self, gpu: &mut VulkanGpu) -> Option<FramePixels> {
         let (readback, size) = self.readback.take()?;
         let data = match gpu.take_readback(readback, true) {
             Ok(data) => data?,
@@ -725,7 +724,7 @@ impl SurfaceResource {
                 return None;
             }
         };
-        let mut image = PremultipliedImage::from_vec(size, data);
+        let mut image = FramePixels { size, data };
         // Swizzled to RGBA.
         if self.get_color_format() == vk::Format::B8G8R8A8_UNORM {
             for pixel in image.data.as_chunks_mut::<4>().0 {

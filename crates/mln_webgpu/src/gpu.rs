@@ -16,8 +16,7 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_util::Color;
-use mln_util::size::Size;
+use mln_gfx::{Rgba, Size};
 
 use crate::index_table::IndexTable;
 use crate::mipmaps::Mipmapper;
@@ -407,7 +406,7 @@ impl WebGpu {
         // driver on Android ends the wait shortly before the fence value
         // that wgpu reads afterwards shows the submission finished. Waiting
         // again returns at once then, so this asks until the value caught up.
-        let start = mln_util::time::Instant::now();
+        let start = web_time::Instant::now();
         let mut waited = wait();
         while matches!(waited, Err(wgpu::PollError::Timeout)) && start.elapsed() < WAIT_AGAIN_LIMIT {
             waited = wait();
@@ -500,7 +499,7 @@ fn texture_info(texture: &wgpu::Texture) -> TextureInfo {
     }
 }
 
-fn wgpu_color(color: Color) -> wgpu::Color {
+fn wgpu_color(color: Rgba) -> wgpu::Color {
     wgpu::Color { r: f64::from(color.r), g: f64::from(color.g), b: f64::from(color.b), a: f64::from(color.a) }
 }
 
@@ -1003,7 +1002,7 @@ impl Gpu for WebGpu {
                 depth_range: (0.0, 1.0),
                 scissor: Scissor { x: 0, y: 0, width: target.size.width, height: target.size.height },
                 stencil_reference: 0,
-                blend_constant: Color::new_unchecked(0.0, 0.0, 0.0, 0.0),
+                blend_constant: Rgba::new(0.0, 0.0, 0.0, 0.0),
                 line_width: 1.0,
             }),
         });

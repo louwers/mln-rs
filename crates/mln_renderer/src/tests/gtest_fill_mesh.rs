@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use geometry::Point;
-use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use mln_style::feature::{GeometryCollection, GeometryCoordinate, GeometryCoordinates};
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants::EXTENT;
@@ -9,6 +8,7 @@ use mln_util::constants::EXTENT;
 use crate::buckets::fill_bucket::FillLayoutVertex;
 use crate::gfx::fill_mesh::FillBuffers;
 use crate::gfx::mesh::Indexed;
+use crate::gfx::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use crate::util::subdivision::{SubdividedPolygon, TILE_BORDER_STRIP_WIDTH, add_tile_border_strips, subdivide_polygon};
 use crate::util::tessellator::Tessellator;
 

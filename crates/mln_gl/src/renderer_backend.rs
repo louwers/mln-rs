@@ -143,11 +143,11 @@ pub struct RendererBackend {
 impl RendererBackend {
     /// A backend on a context of `device`'s share group.
     ///
-    /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when EGL makes
-    /// no context, and with [`ErrorKind::Unsupported`](mln_util::ErrorKind)
+    /// Fails with [`ErrorKind::Native`](mln_gfx::ErrorKind) when EGL makes
+    /// no context, and with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind)
     /// on the host's device.
     #[cfg(not(target_family = "wasm"))]
-    pub fn new(device: &crate::device::Device) -> Result<Self, mln_util::error::Error> {
+    pub fn new(device: &crate::device::Device) -> Result<Self, mln_gfx::Error> {
         let (gl, platform) = device.create_context()?;
         Ok(Self::from_parts(gl, platform))
     }

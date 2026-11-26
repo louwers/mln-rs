@@ -1,11 +1,9 @@
 // Backends on a device they share: with other backends, with the host that
 // made it, and on an adapter picked by index.
 
-use mln_gfx::RendererBackend as _;
 use mln_gfx::frame::FrameTarget as _;
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu as _, LoadOp, PassDesc};
-use mln_util::Color;
-use mln_util::size::Size;
+use mln_gfx::{RendererBackend as _, Rgba, Size};
 
 use crate::{Device, OffscreenTarget, RendererBackend};
 
@@ -17,7 +15,7 @@ fn headless(device: &Device) -> (RendererBackend, OffscreenTarget) {
 }
 
 /// Clears the target to `color` and reads it back.
-fn clear_and_read((backend, target): &mut (RendererBackend, OffscreenTarget), color: Color) -> Vec<[u8; 4]> {
+fn clear_and_read((backend, target): &mut (RendererBackend, OffscreenTarget), color: Rgba) -> Vec<[u8; 4]> {
     let gpu = backend.gpu();
     let image = target.begin_frame(gpu).expect("a frame");
     let pass = PassDesc {
@@ -43,8 +41,8 @@ fn assert_all(pixels: &[[u8; 4]], expected: [u8; 4]) {
     assert!(pixels.iter().all(|px| *px == expected), "expected every pixel {expected:?}, got {:?}", pixels[0]);
 }
 
-const RED: Color = Color::red();
-const BLUE: Color = Color::blue();
+const RED: Rgba = Rgba::new(1.0, 0.0, 0.0, 1.0);
+const BLUE: Rgba = Rgba::new(0.0, 0.0, 1.0, 1.0);
 
 #[test]
 fn backends_on_one_device_render_in_turn() {
@@ -119,7 +117,7 @@ fn the_first_named_adapter_renders() {
     let device = match Device::new(Some(0)) {
         Ok(device) => device,
         Err(error)
-            if matches!(error.kind, mln_util::ErrorKind::Unsupported | mln_util::ErrorKind::NotFound)
+            if matches!(error.kind, mln_gfx::ErrorKind::Unsupported | mln_gfx::ErrorKind::NotFound)
                 && !super::webgpu_requested() =>
         {
             eprintln!("skipped: {error}");
@@ -134,6 +132,6 @@ fn the_first_named_adapter_renders() {
 #[test]
 fn requesting_a_missing_adapter_fails() {
     let error = Device::new(Some(usize::MAX)).expect_err("no such adapter");
-    assert_eq!(error.kind, mln_util::ErrorKind::NotFound, "{error}");
+    assert_eq!(error.kind, mln_gfx::ErrorKind::NotFound, "{error}");
     assert!(error.message.contains("past the"), "{error}");
 }

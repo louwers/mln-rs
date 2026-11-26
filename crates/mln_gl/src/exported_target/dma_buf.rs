@@ -11,9 +11,7 @@ use khronos_egl as egl;
 #[cfg(target_os = "linux")]
 use mln_gfx::export::DRM_FORMAT_MOD_LINEAR;
 use mln_gfx::export::{DMA_BUF_MAX_PLANES, DRM_FORMAT_ABGR8888, DmaBufChoice};
-use mln_gfx::{DmaBufFormat, DmaBufPlane, ExportKind, ExportedImage, ExportedRing};
-use mln_util::error::Error;
-use mln_util::size::Size;
+use mln_gfx::{DmaBufFormat, DmaBufPlane, Error, ExportKind, ExportedImage, ExportedRing, Size};
 
 use super::Images;
 use crate::egl::Egl;

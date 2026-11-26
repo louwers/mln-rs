@@ -12,9 +12,7 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::window::Window;
 use mln_gfx::window::raw_window_handle::RawWindowHandle;
-use mln_util::error::Error;
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
+use mln_gfx::{Error, FramePixels, Size};
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::ProtocolObject;
 use objc2::{MainThreadMarker, Message};
@@ -89,10 +87,10 @@ impl Layer {
     /// view's bounds and scale, which the target that presents to it takes
     /// out of the view when it drops.
     ///
-    /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when the window
-    /// has no handle, with [`ErrorKind::Unsupported`](mln_util::ErrorKind)
+    /// Fails with [`ErrorKind::Native`](mln_gfx::ErrorKind) when the window
+    /// has no handle, with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind)
     /// for a window of neither view, and with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) off the main thread,
+    /// [`ErrorKind::InvalidState`](mln_gfx::ErrorKind) off the main thread,
     /// the only one where `AppKit` and `UIKit` take a view's layers.
     pub fn of_window(window: &dyn Window) -> Result<Layer, Error> {
         let handle = window.window_handle().map_err(|e| Error::native(format!("the window has no handle: {e}")))?;
@@ -144,7 +142,7 @@ pub struct SurfaceTarget {
     /// made for.
     depth_stencil: Option<(Size, TextureId)>,
     readback_requested: bool,
-    readback: Option<PremultipliedImage>,
+    readback: Option<FramePixels>,
     overlay: Option<Overlay>,
 }
 
@@ -219,7 +217,7 @@ impl SurfaceTarget {
     }
 
     /// The frame copied after `request_readback`, once presented.
-    pub fn take_readback(&mut self) -> Option<PremultipliedImage> {
+    pub fn take_readback(&mut self) -> Option<FramePixels> {
         self.readback.take()
     }
 }
@@ -319,7 +317,7 @@ impl SurfaceTarget {
                     for pixel in bgra.as_chunks_mut::<4>().0 {
                         pixel.swap(0, 2);
                     }
-                    self.readback = Some(PremultipliedImage::from_vec(size, bgra));
+                    self.readback = Some(FramePixels { size, data: bgra });
                 }
                 Ok(None) => {}
                 Err(error) => log::error!(target: log_target::RENDER, "Reading the frame back failed: {error}"),

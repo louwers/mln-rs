@@ -18,8 +18,7 @@ use mln_gfx::shaders::program::Program;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{DepthFunctionType, TextureFilterType};
-use mln_util::Color;
-use mln_util::size::Size;
+use mln_gfx::{Rgba, Size};
 
 use super::{EXTENT, SIZE, buffer, draw, dynamic, fixed, location, position_layout, quad, slot, tile_matrix, whole};
 use crate::conformance::programs::VERTEX_TEXEL;
@@ -37,7 +36,7 @@ use crate::layers::raster::programs::RASTER;
 use crate::layers::raster::ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use crate::shaders::programs::CLIPPING_MASK;
 
-const BLACK: Color = Color::black();
+const BLACK: Rgba = Rgba::new(0.0, 0.0, 0.0, 1.0);
 const RGBA8: TargetFormats = TargetFormats { color: Some(TextureFormat::Rgba8Unorm), depth_stencil: None };
 
 /// A color target of [`SIZE`], and what the background shader reads to
@@ -536,7 +535,7 @@ pub fn drawn_vertex_texels(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let red = solid_at(gpu, TextureFormat::Rgba8Unorm, [1.0, 0.0, 0.0, 1.0], tile_matrix(0.0))?;
     gpu.begin_pass(&PassDesc {
         label: "drawn",
-        color: Some(ColorAttachment { texture, load: LoadOp::Clear(Color::new_unchecked(0.0, 0.0, 1.0, 1.0)) }),
+        color: Some(ColorAttachment { texture, load: LoadOp::Clear(Rgba::new(0.0, 0.0, 1.0, 1.0)) }),
         depth_stencil: None,
     })?;
     let scissor = Scissor { x: 0, y: 0, width: size.width, height: size.height };
@@ -700,7 +699,7 @@ fn columns(gpu: &mut impl Gpu, mipmapped: bool, format: TextureFormat) -> Result
     let pipeline = gpu.create_pipeline(&background(red.shader, TargetFormats { color: Some(format), ..RGBA8 }))?;
     gpu.begin_pass(&PassDesc {
         label: "columns",
-        color: Some(ColorAttachment { texture, load: LoadOp::Clear(Color::new_unchecked(0.0, 0.0, 1.0, 1.0)) }),
+        color: Some(ColorAttachment { texture, load: LoadOp::Clear(Rgba::new(0.0, 0.0, 1.0, 1.0)) }),
         depth_stencil: None,
     })?;
     let scissor = Scissor { x: 0, y: 0, width: 1, height: size.height };

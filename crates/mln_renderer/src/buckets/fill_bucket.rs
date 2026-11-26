@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use mln_gfx::shaders::segment::SegmentBase;
 use mln_style::expression::{Image, Value};
 use mln_style::feature::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
 use mln_style::layers::Fill;
@@ -18,6 +17,7 @@ use crate::bucket::{Bucket, BucketBase, UploadNeeds};
 use crate::bucket_geometry::{GeometryUpload, GeometryVec};
 use crate::gfx::fill_mesh::FillBuffers;
 use crate::gfx::mesh::Indexed;
+use crate::gfx::segment::SegmentBase;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};

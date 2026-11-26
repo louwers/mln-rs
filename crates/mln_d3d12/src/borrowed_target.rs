@@ -8,10 +8,8 @@ use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
 
 use mln_gfx::gpu::{GpuError, TargetFormats, TextureFormat, TextureId};
 use mln_gfx::ring::{self, RingBackend, RingTextures};
-use mln_gfx::{ConsumerSync, DepthStencilFormat, DepthStencilFormats, GpuSync, SyncKind, SyncKinds};
-use mln_util::error::Error;
-use mln_util::hash::HashMap;
-use mln_util::size::Size;
+use mln_gfx::util_hash::HashMap;
+use mln_gfx::{ConsumerSync, DepthStencilFormat, DepthStencilFormats, Error, GpuSync, Size, SyncKind, SyncKinds};
 use windows::Win32::Foundation::{GENERIC_ALL, HANDLE};
 use windows::Win32::Graphics::Direct3D12::{
     D3D12_FENCE_FLAG_SHARED, D3D12_RESOURCE_DIMENSION_TEXTURE2D, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL,
@@ -80,11 +78,11 @@ impl BorrowedTextures {
 
     /// Checks the textures against their ring and `device`.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_gfx::ErrorKind) for a
     /// texture of another size than the ring's, of another device or format
     /// than the first, or that isn't 2D with one mip level, layer and sample
     /// and allowing render targets, and with
-    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a format that the
+    /// [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for a format that the
     /// backend doesn't draw.
     pub fn check(&self, device: &Device) -> Result<(), Error> {
         let Some(first) = self.textures.first() else {
@@ -260,9 +258,9 @@ impl RingBackend for D3d12Ring {
     type Handed = Infallible;
 
     /// Fails as [`BorrowedTextures::check`] does, with
-    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for another producer
+    /// [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for another producer
     /// kind than [`BorrowedTextures::sync_kinds`]'s, and with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) when the device makes no
+    /// [`ErrorKind::Native`](mln_gfx::ErrorKind) when the device makes no
     /// shared fence.
     fn new(backend: &mut RendererBackend, textures: &BorrowedTextures, producer: SyncKind) -> Result<Self, Error> {
         let device = backend.device().clone();
@@ -277,7 +275,7 @@ impl RingBackend for D3d12Ring {
         Ok(D3d12Ring { device, fence, fence_value: 0, host_fences: HashMap::default() })
     }
 
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for
     /// another format, or depth textures of another format or where the
     /// ring has none, and as [`BorrowedTextures::check`] does.
     fn check_replacement(&self, current: &BorrowedTextures, next: &BorrowedTextures) -> Result<(), Error> {
@@ -309,9 +307,9 @@ impl RingBackend for D3d12Ring {
         gpu.import_texture(resource, state)
     }
 
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_gfx::ErrorKind) for a
     /// fence's handle that the device can't open, which stays the host's,
-    /// and with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for another
+    /// and with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for another
     /// kind than [`BorrowedTextures::sync_kinds`]'s consumer kinds.
     fn wait_for(&mut self, _gpu: &mut D3d12Gpu, consumer: ConsumerSync) -> Result<Option<Self::Wait>, Error> {
         let sync = consumer.sync;

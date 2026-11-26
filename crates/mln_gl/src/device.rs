@@ -37,7 +37,7 @@ use std::sync::{Arc, OnceLock};
 use std::thread::ThreadId;
 
 use khronos_egl as egl;
-use mln_util::error::Error;
+use mln_gfx::Error;
 use parking_lot::{Condvar, Mutex};
 
 use crate::borrowed_target::SurfaceHandle;
@@ -502,10 +502,10 @@ impl Device {
     /// `options.api`, or one such context. On Windows, a share group of WGL's
     /// desktop OpenGL contexts. It logs the platform it is on.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when there
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) when there
     /// is no EGL, or no display or config of the API for it, and on Windows
     /// for OpenGL ES, a single context, or a driver without OpenGL 3.3 core
-    /// contexts. Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when
+    /// contexts. Fails with [`ErrorKind::Native`](mln_gfx::ErrorKind) when
     /// EGL makes no context.
     pub fn with_options(options: DeviceOptions) -> Result<Device, Error> {
         let DeviceOptions { api, single_context } = options;
@@ -560,10 +560,10 @@ impl Device {
     /// `display`: each renderer's context shares its objects with it, and
     /// renders with its API.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) without
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) without
     /// EGL, or for a context of an API that the renderers don't draw with:
     /// OpenGL ES 3 or later, or desktop OpenGL where the platform's EGL
-    /// renders it. Fails with [`ErrorKind::Native`](mln_util::ErrorKind)
+    /// renders it. Fails with [`ErrorKind::Native`](mln_gfx::ErrorKind)
     /// when EGL can't answer for the context.
     ///
     /// # Safety
@@ -617,7 +617,7 @@ impl Device {
     /// `wglGetProcAddress` or null, gives: each renderer's context shares
     /// its objects with it.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_gfx::ErrorKind) for a
     /// device context without a pixel format.
     ///
     /// # Safety
@@ -716,7 +716,7 @@ impl Device {
     }
 
     /// The GL functions of `context`, made current to look them up. Fails
-    /// with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a desktop
+    /// with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for a desktop
     /// context older than OpenGL 3.3.
     fn functions(mut context: Box<dyn PlatformContext>) -> Result<(Gl, Box<dyn PlatformContext>), Error> {
         let egl = library().map_err(Error::unsupported)?;

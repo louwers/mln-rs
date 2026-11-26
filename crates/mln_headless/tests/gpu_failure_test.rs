@@ -237,7 +237,7 @@ fn webgpu_device() -> Option<mln_webgpu::Device> {
     let requested = std::env::var("MLN_RENDER_BACKEND").is_ok_and(|backend| backend.eq_ignore_ascii_case("webgpu"));
     match mln_webgpu::Device::new(None) {
         Ok(device) => Some(device),
-        Err(error) if error.kind == ErrorKind::Unsupported && !requested => {
+        Err(error) if error.kind == mln_gfx::ErrorKind::Unsupported && !requested => {
             eprintln!("skipped: {error}");
             None
         }
@@ -277,7 +277,7 @@ impl FailingMap {
         map.load_style_json(style);
         let camera = mln_map::style_camera(map.style());
         map.jump_to(&camera);
-        let target = OffscreenTarget::new(size);
+        let target = OffscreenTarget::new(mln_gfx::Size::new(size.width, size.height));
         Some(FailingMap { map, backend, target, renderer, drawn: 0, fail, failing: 0, shown: None, _pool: pool })
     }
 
@@ -328,7 +328,9 @@ impl FailingMap {
         for _ in 0..2_000 {
             self.map.process_events();
             if let Some(ended) = self.map.take_still_image() {
-                return Some(ended.and_then(|()| Ok(self.target.read_image(self.backend.gpu())?.data)));
+                return Some(
+                    ended.map(|()| self.target.read_image(self.backend.gpu()).expect("the frame's pixels").data),
+                );
             }
             if !self.draw() {
                 std::thread::sleep(Duration::from_millis(1));

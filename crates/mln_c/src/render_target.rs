@@ -168,10 +168,16 @@ enum PendingRing {
     Ready(BorrowedRing),
     /// Metal textures, which the ring retains.
     #[cfg(target_vendor = "apple")]
-    Metal { textures: Vec<NonNull<c_void>>, depth: Vec<NonNull<c_void>>, physical: Size },
+    Metal { textures: Vec<NonNull<c_void>>, depth: Vec<NonNull<c_void>>, physical: mln_gfx::Size },
     /// D3D12 resources, which the ring references, and their states.
     #[cfg(backend_d3d12)]
-    D3d12 { textures: Vec<NonNull<c_void>>, depth: Vec<NonNull<c_void>>, physical: Size, state: u32, depth_state: u32 },
+    D3d12 {
+        textures: Vec<NonNull<c_void>>,
+        depth: Vec<NonNull<c_void>>,
+        physical: mln_gfx::Size,
+        state: u32,
+        depth_state: u32,
+    },
 }
 
 impl PendingRing {
@@ -372,7 +378,7 @@ fn vulkan_ring(
         };
         let images = mln_vulkan::BorrowedImages {
             images: borrowed(textures),
-            size: Size::new(target.physical_width, target.physical_height),
+            size: mln_gfx::Size::new(target.physical_width, target.physical_height),
             format: vk::Format::from_raw(target.format as i32),
             final_layout: vk::ImageLayout::from_raw(target.final_layout as i32),
             owner: match owner {
@@ -751,7 +757,7 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                     let ring = PendingRing::Metal {
                         textures: pointers(textures),
                         depth: pointers(depth),
-                        physical: Size::new(ring.physical_width, ring.physical_height),
+                        physical: mln_gfx::Size::new(ring.physical_width, ring.physical_height),
                     };
                     Target::Borrowed { size, ring }
                 }
@@ -783,7 +789,7 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                 {
                     let textures = mln_gl::BorrowedTextures {
                         textures: textures.iter().map(|texture| texture.texture).collect(),
-                        size: Size::new(ring.physical_width, ring.physical_height),
+                        size: mln_gfx::Size::new(ring.physical_width, ring.physical_height),
                         depth_textures: depth.iter().map(|texture| texture.texture).collect(),
                     };
                     Target::Borrowed { size, ring: PendingRing::Ready(BorrowedRing::gl(textures)) }
@@ -836,7 +842,7 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                     let ring = PendingRing::D3d12 {
                         textures: pointers(textures),
                         depth: pointers(depth),
-                        physical: Size::new(ring.physical_width, ring.physical_height),
+                        physical: mln_gfx::Size::new(ring.physical_width, ring.physical_height),
                         state: ring.state,
                         depth_state: ring.depth_state,
                     };

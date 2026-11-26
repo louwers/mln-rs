@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
 use geometry::Point;
-use mln_gfx::shaders::segment::SegmentBase;
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants::EXTENT;
 use mln_util::subdivision_granularity::{SubdivisionGranularityExpression, SubdivisionGranularitySetting};
@@ -10,6 +9,7 @@ use mln_util::subdivision_granularity::{SubdivisionGranularityExpression, Subdiv
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::gfx::mesh::Indexed;
+use crate::gfx::segment::SegmentBase;
 use crate::gfx::vertices::SharedVertices;
 use crate::tile_mask::TileMask;
 use crate::util::subdivision::{NORTH_POLE_Y, SOUTH_POLE_Y};

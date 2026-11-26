@@ -6,8 +6,7 @@
 // to activate or swap.
 
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
-use mln_util::error::Error;
-use mln_util::size::Size;
+use mln_gfx::{Error, Size};
 use wasm_bindgen::JsCast;
 use web_sys::{HtmlCanvasElement, OffscreenCanvas, WebGl2RenderingContext, WebGlContextAttributes};
 
@@ -85,9 +84,9 @@ impl CanvasTarget {
     /// and its colors are premultiplied by their alpha, as the map draws
     /// them.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) when the
     /// browser makes no WebGL2 context, and with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) when it throws.
+    /// [`ErrorKind::Native`](mln_gfx::ErrorKind) when it throws.
     pub fn with_backend(canvas: impl Into<WebCanvas>, size: Size) -> Result<(RendererBackend, CanvasTarget), Error> {
         let canvas = canvas.into();
         canvas.set_size(size);

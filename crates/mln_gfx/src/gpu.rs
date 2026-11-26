@@ -24,20 +24,19 @@ pub mod validation;
 use std::any::Any;
 use std::sync::Arc;
 
-use mln_util::Color;
 pub use mln_util::clip_depth::ClipDepthRange;
-use mln_util::size::Size;
 
 pub use self::ids::{
     BindingsId, BufferId, GeometryId, Id, IdData, PipelineId, ReadbackId, ResourceId, SamplerId, ShaderId, SlotMap,
     TextureId,
 };
-use crate::color_mode::{BlendFunction, Mask};
+use crate::color_mode::{BlendFunction, Mask, Rgba};
 use crate::cull_face_mode::CullFaceMode;
 use crate::depth_mode::DepthMode;
 use crate::gfx_types::{AttributeDataType, DrawModeType};
 use crate::log_target;
 use crate::shaders::program::Program;
+use crate::size::Size;
 use crate::stencil_mode::{StencilMode, Test};
 use crate::texture2d::SamplerState;
 use crate::types::{DepthFunctionType, DepthMaskType, StencilOpType};
@@ -489,7 +488,7 @@ pub enum LoadOp<T> {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ColorAttachment {
     pub texture: TextureId,
-    pub load: LoadOp<Color>,
+    pub load: LoadOp<Rgba>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -528,7 +527,7 @@ pub struct DynamicState {
     pub scissor: Scissor,
     pub stencil_reference: u32,
     /// The constant the pipeline's `Constant*` blend factors read.
-    pub blend_constant: Color,
+    pub blend_constant: Rgba,
     /// The width in pixels of the lines that a pipeline of line primitives
     /// draws, up to [`Caps::max_line_width`].
     pub line_width: f32,

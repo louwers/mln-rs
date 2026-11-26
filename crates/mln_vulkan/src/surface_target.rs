@@ -25,10 +25,7 @@ use std::sync::Arc;
 
 use ash::vk;
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
-use mln_gfx::{RendererBackend as _, Window};
-use mln_util::error::Error;
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
+use mln_gfx::{Error, FramePixels, RendererBackend as _, Size, Window};
 
 use crate::device::Device;
 use crate::gpu::VulkanGpu;
@@ -152,11 +149,11 @@ impl SurfaceTarget {
     /// A target on `backend`, a presenting backend, that presents to
     /// `window`.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) when the
     /// backend can't present to the window, or Vulkan has no surface for it,
-    /// with [`ErrorKind::InvalidState`](mln_util::ErrorKind) when the
+    /// with [`ErrorKind::InvalidState`](mln_gfx::ErrorKind) when the
     /// window's surface has an empty extent, as a minimized window's has,
-    /// and with [`ErrorKind::Native`](mln_util::ErrorKind) when the window
+    /// and with [`ErrorKind::Native`](mln_gfx::ErrorKind) when the window
     /// gets no surface or swapchain.
     pub fn new(
         backend: &mut RendererBackend,
@@ -190,10 +187,10 @@ impl SurfaceTarget {
     /// swapchain it makes, but not the surface, and can't make the surface
     /// again when it is lost.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) when the
     /// device's queue can't present to the surface, with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) when the surface has
-    /// an empty extent, and with [`ErrorKind::Native`](mln_util::ErrorKind)
+    /// [`ErrorKind::InvalidState`](mln_gfx::ErrorKind) when the surface has
+    /// an empty extent, and with [`ErrorKind::Native`](mln_gfx::ErrorKind)
     /// when the surface gets no swapchain.
     pub fn on_host_surface(
         backend: &mut RendererBackend,
@@ -292,7 +289,7 @@ impl SurfaceTarget {
 
     /// The frame copied after `request_readback`, once
     /// presented, with what the overlay drew over it.
-    pub fn take_readback(&mut self, gpu: &mut VulkanGpu) -> Option<PremultipliedImage> {
+    pub fn take_readback(&mut self, gpu: &mut VulkanGpu) -> Option<FramePixels> {
         if !self.readback_requested || self.resource.is_read_requested() {
             return None;
         }

@@ -1,10 +1,7 @@
-use mln_vec_map::VecMap;
-
 #[derive(Clone, Debug)]
 pub struct ProgramParameters {
-    // The order is that of the defines in the shaders' keys, which a VecMap
-    // keeps deterministic.
-    defines: VecMap<String, String>,
+    // The order is that of the defines in the shaders' keys.
+    defines: Vec<(String, String)>,
 }
 
 /// The define value: the shortest digits, with a trailing ".0" for a whole
@@ -17,13 +14,14 @@ fn to_string_decimal(value: f32) -> String {
 impl ProgramParameters {
     #[must_use]
     pub fn new(pixel_ratio: f32) -> Self {
-        let mut defines = VecMap::new();
-        defines.insert("DEVICE_PIXEL_RATIO".to_owned(), to_string_decimal(pixel_ratio));
+        let defines = vec![("DEVICE_PIXEL_RATIO".to_owned(), to_string_decimal(pixel_ratio))];
         ProgramParameters { defines }
     }
 
+    /// Each define's name and value (empty for a bare name), in the shaders'
+    /// keys' order.
     #[must_use]
-    pub fn defines(&self) -> &VecMap<String, String> {
+    pub fn defines(&self) -> &[(String, String)] {
         &self.defines
     }
 }
@@ -34,9 +32,10 @@ mod tests {
 
     #[test]
     fn defines() {
+        let define = |name: &str, value: &str| (name.to_owned(), value.to_owned());
         let p = ProgramParameters::new(1.0);
-        assert_eq!(p.defines().get("DEVICE_PIXEL_RATIO").map(String::as_str), Some("1.0"));
+        assert_eq!(p.defines(), [define("DEVICE_PIXEL_RATIO", "1.0")]);
         let p = ProgramParameters::new(2.5);
-        assert_eq!(p.defines().get("DEVICE_PIXEL_RATIO").map(String::as_str), Some("2.5"));
+        assert_eq!(p.defines(), [define("DEVICE_PIXEL_RATIO", "2.5")]);
     }
 }

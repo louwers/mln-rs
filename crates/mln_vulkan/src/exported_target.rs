@@ -27,11 +27,9 @@ use mln_gfx::export::{
 };
 use mln_gfx::ring::{self, Exporter};
 use mln_gfx::{
-    DmaBufFormat, ExportKind, ExportKinds, ExportedFrame, ExportedImage, ExportedRing, FrameDepth, NativeTexture,
-    SyncKind, SyncKinds,
+    DmaBufFormat, Error, ExportKind, ExportKinds, ExportedFrame, ExportedImage, ExportedRing, FrameDepth,
+    NativeTexture, Size, SyncKind, SyncKinds,
 };
-use mln_util::error::Error;
-use mln_util::size::Size;
 
 use crate::borrowed_target::{BorrowedDepth, BorrowedImage, BorrowedImages, ImageOwner, VulkanRing};
 use crate::device::{Device, depth_vk_format};
@@ -819,7 +817,7 @@ fn memory_type(bits: u32, types: &vk::PhysicalDeviceMemoryProperties, linear: bo
 /// for a dmabuf one of the host's formats, and for a hardware buffer one
 /// that Android allocates with the host's usage bits.
 ///
-/// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
+/// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) when the
 /// device exports none of them.
 pub fn plan(device: &Device, ring: &ExportedRing) -> Result<ExportKind, Error> {
     let exported = device.export_kinds().intersection(ring.kinds);
@@ -887,7 +885,7 @@ impl Exporter for VulkanExporter {
     /// The kind `kind` is one that [`plan`] picked, and `producer` one of
     /// [`sync_kinds`]'s.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) when the
     /// device can't export `kind` or `producer`, or keep the ring's depth.
     fn new(
         backend: &mut RendererBackend,
@@ -927,7 +925,7 @@ impl Exporter for VulkanExporter {
         Ok(VulkanExporter { layout, depth: ring.depth, depth_format })
     }
 
-    /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when Vulkan
+    /// Fails with [`ErrorKind::Native`](mln_gfx::ErrorKind) when Vulkan
     /// can't make the images.
     fn allocate(&self, backend: &mut RendererBackend, size: Size) -> Result<(ExportedImages, BorrowedImages), Error> {
         let device = backend.device();

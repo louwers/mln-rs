@@ -24,7 +24,7 @@ fn vulkan_requested() -> bool {
 fn device() -> Option<crate::Device> {
     match crate::Device::new(None) {
         Ok(device) => Some(device),
-        Err(error) if error.kind == mln_util::error::ErrorKind::Unsupported && !vulkan_requested() => {
+        Err(error) if error.kind == mln_gfx::ErrorKind::Unsupported && !vulkan_requested() => {
             eprintln!("skipped: {error}");
             None
         }

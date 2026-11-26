@@ -5,8 +5,7 @@
 use std::ffi::CStr;
 
 use ash::vk;
-use mln_gfx::renderer_backend;
-use mln_util::error::Error;
+use mln_gfx::{Error, renderer_backend};
 
 use crate::device::Device;
 use crate::gpu::VulkanGpu;
@@ -33,7 +32,7 @@ impl RendererBackend {
     /// A backend on `device` for offscreen and borrowed targets, with one
     /// frame in flight.
     ///
-    /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when a Vulkan
+    /// Fails with [`ErrorKind::Native`](mln_gfx::ErrorKind) when a Vulkan
     /// call fails.
     pub fn new(device: &Device) -> Result<Self, Error> {
         Self::with_frames(device, 1)
@@ -43,7 +42,7 @@ impl RendererBackend {
     /// flight.
     ///
     /// Fails as [`new`](Self::new) does, and with
-    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the device can't
+    /// [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) when the device can't
     /// present.
     pub fn presenting(device: &Device) -> Result<Self, Error> {
         if !device.presents() {

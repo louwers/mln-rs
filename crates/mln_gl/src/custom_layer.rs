@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use mln_util::size::Size;
+use mln_gfx::Size;
 
 use crate::state::State;
 use crate::types::{FramebufferID, Gl};

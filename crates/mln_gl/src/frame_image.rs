@@ -1,9 +1,9 @@
 //! The textures that the GL targets' frames draw into, imported into the
 //! backend's `GlGpu` for a frame.
 
+use mln_gfx::Size;
 use mln_gfx::frame::FrameImage;
 use mln_gfx::gpu::{ResourceId, TargetFormats, TextureFormat, destroy_unused};
-use mln_util::size::Size;
 
 use crate::gpu::GlGpu;
 

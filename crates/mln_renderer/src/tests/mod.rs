@@ -376,7 +376,7 @@ pub(super) fn webgpu_device() -> Option<mln_webgpu::Device> {
     let requested = std::env::var("MLN_RENDER_BACKEND").is_ok_and(|backend| backend.eq_ignore_ascii_case("webgpu"));
     match mln_webgpu::Device::new(None) {
         Ok(device) => Some(device),
-        Err(error) if error.kind == mln_util::error::ErrorKind::Unsupported && !requested => {
+        Err(error) if error.kind == mln_gfx::ErrorKind::Unsupported && !requested => {
             eprintln!("skipped: {error}");
             None
         }

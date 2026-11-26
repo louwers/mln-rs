@@ -23,7 +23,6 @@ use std::rc::Rc;
 
 use ash::vk;
 use bytemuck::Zeroable as _;
-use mln_gfx::RendererBackend as _;
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::frame::FrameTarget as _;
@@ -40,12 +39,9 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthFunctionType;
+use mln_gfx::{Error, FramePixels, RendererBackend as _, Rgba, Size};
 use mln_renderer::layers::background::programs::BACKGROUND;
 use mln_renderer::layers::background::ubo::{BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPropsUBO};
-use mln_util::Color;
-use mln_util::error::Error;
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
 
 use crate::renderer_backend::SurfaceProvider;
 use crate::surface_target::{FrameRateMode, Overlay, OverlayTarget, present_mode};
@@ -124,7 +120,7 @@ impl Window {
         self.target.request_readback();
     }
 
-    fn take_readback(&mut self) -> Option<PremultipliedImage> {
+    fn take_readback(&mut self) -> Option<FramePixels> {
         self.target.take_readback(self.backend.gpu())
     }
 
@@ -246,7 +242,7 @@ impl Scene {
 
     /// Writes the background's color into its buffer, which the frames
     /// before used.
-    fn set_color(&self, gpu: &mut VulkanGpu, color: Color) {
+    fn set_color(&self, gpu: &mut VulkanGpu, color: Rgba) {
         let props = BackgroundPropsUBO {
             color: [color.r, color.g, color.b, color.a],
             opacity: 1.0,
@@ -299,7 +295,7 @@ impl Scene {
                 depth_range: (0.5, 0.5),
                 scissor: Scissor { x: 0, y: 0, width: size.width, height: size.height },
                 stencil_reference: 0,
-                blend_constant: Color::black(),
+                blend_constant: Rgba::new(0.0, 0.0, 0.0, 1.0),
                 line_width: 1.0,
             },
         }
@@ -310,7 +306,7 @@ impl Scene {
 /// as the frame before had them.
 #[derive(Clone, Copy, Default)]
 struct Change {
-    color: Option<Color>,
+    color: Option<Rgba>,
     right: Option<bool>,
 }
 
@@ -322,9 +318,9 @@ fn render_frame(
     backend: &mut Window,
     scene: Option<&Scene>,
     change: Change,
-    clear: Color,
+    clear: Rgba,
     read: bool,
-) -> Option<PremultipliedImage> {
+) -> Option<FramePixels> {
     assert!(backend.acquire_next_texture());
     if read {
         backend.request_readback();
@@ -367,12 +363,12 @@ fn render_frame(
     image
 }
 
-fn pixel(image: &PremultipliedImage, x: u32, y: u32) -> [u8; 4] {
+fn pixel(image: &FramePixels, x: u32, y: u32) -> [u8; 4] {
     let i = ((y * image.size.width + x) * 4) as usize;
     image.data[i..i + 4].try_into().unwrap()
 }
 
-fn rgba(color: Color) -> [u8; 4] {
+fn rgba(color: Rgba) -> [u8; 4] {
     [color.r, color.g, color.b, color.a].map(|c| (c * 255.0).round() as u8)
 }
 
@@ -386,7 +382,7 @@ fn assert_near(actual: [u8; 4], expected: [u8; 4], what: &str) {
 }
 
 /// Checks the image's size, and `left` and `right` in its halves.
-fn check_halves(image: &PremultipliedImage, size: Size, left: Color, right: Color, what: &str) {
+fn check_halves(image: &FramePixels, size: Size, left: Rgba, right: Rgba, what: &str) {
     assert_eq!(image.size, size, "{what}");
     let (w, h) = (size.width, size.height);
     for y in [0, h / 2, h - 1] {
@@ -399,12 +395,12 @@ fn check_halves(image: &PremultipliedImage, size: Size, left: Color, right: Colo
     }
 }
 
-fn color(r: f32, g: f32, b: f32) -> Color {
-    Color::new(r, g, b, 1.0)
+fn color(r: f32, g: f32, b: f32) -> Rgba {
+    Rgba::new(r, g, b, 1.0)
 }
 
 /// A color no other frame of a test has.
-fn frame_color(frame: u32, offset: u32) -> Color {
+fn frame_color(frame: u32, offset: u32) -> Rgba {
     let step = |n: u32| (n % 6) as f32 * 0.2;
     color(step(frame + offset), step(frame * 2 + offset + 1), step(frame * 3 + offset + 2))
 }
@@ -459,7 +455,7 @@ fn uniforms_follow_each_frame_in_flight() {
     let scene = Scene::new(&mut backend);
     let clear = color(0.0, 0.0, 0.0);
     let (red, green, blue) = (color(1.0, 0.0, 0.0), color(0.0, 1.0, 0.0), color(0.0, 0.0, 1.0));
-    let set = |color: Color, right: bool| Change { color: Some(color), right: Some(right) };
+    let set = |color: Rgba, right: bool| Change { color: Some(color), right: Some(right) };
     let keep = Change::default();
 
     // (what the frame changes, whether it is read back, the background's
@@ -538,7 +534,7 @@ fn empty_framebuffer_draws_nothing() {
     };
     let scene = Scene::new(&mut backend);
     let (clear, red, green) = (color(0.2, 0.4, 0.6), color(1.0, 0.0, 0.0), color(0.0, 1.0, 0.0));
-    let set = |color: Color| Change { color: Some(color), right: Some(true) };
+    let set = |color: Rgba| Change { color: Some(color), right: Some(true) };
     let image = render_frame(&mut backend, Some(&scene), set(red), clear, true).unwrap();
     check_halves(&image, size, clear, red, "before");
 
@@ -638,7 +634,7 @@ fn quarter_overlay(calls: Rc<Cell<u32>>, sizes: Rc<RefCell<Vec<Size>>>) -> Quart
 
 /// Checks a frame the quarter overlay drew over: the overlay's color in the
 /// top left quarter, and the frame's own colors in the rest of its halves.
-fn check_overlaid(image: &PremultipliedImage, size: Size, left: Color, right: Color, what: &str) {
+fn check_overlaid(image: &FramePixels, size: Size, left: Rgba, right: Rgba, what: &str) {
     assert_eq!(image.size, size, "{what}");
     let (w, h) = (size.width, size.height);
     let overlay = OVERLAY_COLOR.map(|c| (c * 255.0).round() as u8);
@@ -662,7 +658,7 @@ fn overlay_draws_over_the_frame_and_is_read_back() {
     let scene = Scene::new(&mut backend);
     let (calls, sizes) = (Rc::new(Cell::new(0)), Rc::new(RefCell::new(Vec::new())));
     let (clear, blue, green) = (color(0.2, 0.2, 0.2), color(0.0, 0.0, 1.0), color(0.0, 1.0, 0.0));
-    let set = |color: Color| Change { color: Some(color), right: Some(false) };
+    let set = |color: Rgba| Change { color: Some(color), right: Some(false) };
 
     // Without an overlay, the frame is the scene's.
     let image = render_frame(&mut backend, Some(&scene), set(blue), clear, true).unwrap();
@@ -712,7 +708,7 @@ fn overlay_draws_over_the_frame_and_is_read_back() {
 fn dropped_with_frames_in_flight_then_made_again() {
     let size = Size::new(48, 24);
     let (clear, red, green) = (color(0.0, 0.0, 0.4), color(1.0, 0.0, 0.0), color(0.0, 1.0, 0.0));
-    let set = |color: Color| Change { color: Some(color), right: Some(false) };
+    let set = |color: Rgba| Change { color: Some(color), right: Some(false) };
     let destroyed;
     {
         let Some(mut backend) = surface_backend(size, false) else {
@@ -762,7 +758,7 @@ fn a_new_target_on_the_backend_presents() {
     };
     let scene = Scene::new(&mut window);
     let (clear, red, green) = (color(0.4, 0.4, 0.4), color(1.0, 0.0, 0.0), color(0.0, 1.0, 0.0));
-    let set = |color: Color| Change { color: Some(color), right: Some(true) };
+    let set = |color: Rgba| Change { color: Some(color), right: Some(true) };
     assert_eq!(provider.made.get(), 1);
 
     // Replaced with a frame in flight: the scene and its uniforms are as

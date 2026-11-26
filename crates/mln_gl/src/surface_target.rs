@@ -10,13 +10,10 @@ use std::ffi::{c_int, c_ulong, c_void};
 use std::sync::Arc;
 
 use khronos_egl as egl;
-use mln_gfx::Window;
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_gfx::gpu::{TextureRegion, read_texels};
 use mln_gfx::window::raw_window_handle::{RawDisplayHandle, RawWindowHandle};
-use mln_util::error::Error;
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
+use mln_gfx::{Error, FramePixels, Size, Window};
 use parking_lot::Mutex;
 
 use crate::egl::{Egl, library};
@@ -516,7 +513,7 @@ impl PlatformContext for WindowContext {
 pub struct SurfaceTarget {
     overlay: Option<Overlay>,
     readback_requested: bool,
-    readback: Option<PremultipliedImage>,
+    readback: Option<FramePixels>,
     size: Size,
     /// The frame's default framebuffer, imported into the backend's `GlGpu`.
     image: FrameImports,
@@ -535,7 +532,7 @@ impl SurfaceTarget {
     /// `cap_frame_rate`, presenting to an X11 or Android window waits for the
     /// display.
     ///
-    /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when EGL has no
+    /// Fails with [`ErrorKind::Native`](mln_gfx::ErrorKind) when EGL has no
     /// OpenGL ES 3.0 context for the window.
     pub fn with_backend(
         window: Arc<dyn Window>,
@@ -589,7 +586,7 @@ impl SurfaceTarget {
     }
 
     /// The frame copied after `request_readback`, once presented.
-    pub fn take_readback(&mut self) -> Option<PremultipliedImage> {
+    pub fn take_readback(&mut self) -> Option<FramePixels> {
         self.readback.take()
     }
 }
@@ -646,7 +643,7 @@ impl FrameTarget for SurfaceTarget {
         }
         if std::mem::take(&mut self.readback_requested) {
             match read_texels(gpu, image.color, TextureRegion::whole(image.size)) {
-                Ok(texels) => self.readback = Some(PremultipliedImage::from_vec(image.size, texels)),
+                Ok(texels) => self.readback = Some(FramePixels { size: image.size, data: texels }),
                 Err(error) => log::error!(target: log_target::RENDER, "Reading a window's frame back failed: {error}"),
             }
         }

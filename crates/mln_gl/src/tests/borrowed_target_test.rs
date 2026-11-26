@@ -1,9 +1,7 @@
 use glow::HasContext as _;
 use mln_gfx::frame::{FrameTarget as _, Handoff};
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu as _, LoadOp, PassDesc, TextureId};
-use mln_gfx::{ConsumerSync, GpuSync, RendererBackend as _, SyncKind};
-use mln_util::Color;
-use mln_util::size::Size;
+use mln_gfx::{ConsumerSync, GpuSync, RendererBackend as _, Rgba, Size, SyncKind};
 
 use super::gpu_test::with_device;
 use crate::borrowed_target::{BorrowedTarget, BorrowedTextures};
@@ -35,7 +33,7 @@ fn draw(backend: &mut RendererBackend, target: &mut BorrowedTarget, slot: usize)
     let image = target.begin_frame(&mut gpu).expect("a frame");
     gpu.begin_pass(&PassDesc {
         label: "ring",
-        color: Some(ColorAttachment { texture: image.color, load: LoadOp::Clear(Color::red()) }),
+        color: Some(ColorAttachment { texture: image.color, load: LoadOp::Clear(Rgba::new(1.0, 0.0, 0.0, 1.0)) }),
         depth_stencil: image.depth_stencil.map(|texture| DepthStencilAttachment {
             texture,
             depth: LoadOp::Clear(1.0),

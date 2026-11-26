@@ -203,7 +203,7 @@ impl DrapedMap {
         });
         Some(DrapedMap {
             backend,
-            target: OffscreenTarget::new(Size::new(SIDE, SIDE)),
+            target: OffscreenTarget::new(mln_gfx::Size::new(SIDE, SIDE)),
             renderer,
             events,
             tiles: Arc::new(tiles),

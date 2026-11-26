@@ -14,6 +14,7 @@ use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthFunctionType;
+use mln_gfx::{Rgba, Size};
 use mln_renderer::conformance::{
     clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids, imported_textures,
     instanced_walls, invalid_calls, mipmapped_targets, pulled_walls, readbacks, resources_in_use, terrain_heights,
@@ -21,8 +22,6 @@ use mln_renderer::conformance::{
 };
 use mln_renderer::layers::background::programs::BACKGROUND;
 use mln_renderer::layers::background::ubo::{BackgroundDrawableUnionUBO, BackgroundPropsUBO};
-use mln_util::Color;
-use mln_util::size::Size;
 
 use crate::gpu::GlGpu;
 use crate::{Api, Device, DeviceOptions};
@@ -46,7 +45,7 @@ fn gpu() -> Option<GlGpu> {
 
 /// What `make` makes on a device of its own, or none where there is no EGL
 /// to make a context of [`api`] with, as for [`gpu`].
-pub(super) fn with_device<T>(make: impl FnOnce(&Device) -> Result<T, mln_util::error::Error>) -> Option<T> {
+pub(super) fn with_device<T>(make: impl FnOnce(&Device) -> Result<T, mln_gfx::Error>) -> Option<T> {
     let made =
         Device::with_options(DeviceOptions { api: api(), ..DeviceOptions::default() }).and_then(|device| make(&device));
     match made {
@@ -254,7 +253,7 @@ impl Background {
                 depth_range: (0.0, 1.0),
                 scissor: Scissor { x: 0, y: 0, width: size.width, height: size.height },
                 stencil_reference: 0,
-                blend_constant: Color::black(),
+                blend_constant: Rgba::new(0.0, 0.0, 0.0, 1.0),
                 line_width: 1.0,
             },
         }
@@ -327,7 +326,7 @@ fn draws_read_only_what_is_bound() {
 
     let pass = PassDesc {
         label: "frame",
-        color: Some(ColorAttachment { texture: color, load: LoadOp::Clear(Color::black()) }),
+        color: Some(ColorAttachment { texture: color, load: LoadOp::Clear(Rgba::new(0.0, 0.0, 0.0, 1.0)) }),
         depth_stencil: None,
     };
     let frame = |gpu: &mut GlGpu, draw: Draw| -> Result<(), GpuError> {
@@ -413,7 +412,7 @@ fn imported_framebuffers_draw_as_they_are() {
         Some(TextureFormat::Depth24PlusStencil8),
     );
     let (color_id, depth_id) = (imported.color.unwrap(), imported.depth_stencil.unwrap());
-    let red = Color::red();
+    let red = Rgba::new(1.0, 0.0, 0.0, 1.0);
     let pass = |color: Option<TextureId>, depth_stencil: Option<TextureId>| PassDesc {
         label: "imported",
         color: color.map(|texture| ColorAttachment { texture, load: LoadOp::Clear(red) }),

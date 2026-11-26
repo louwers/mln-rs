@@ -19,12 +19,11 @@ doctest = false
 
 [dependencies]
 bytemuck.workspace = true
+foldhash.workspace = true
 log.workspace = true
 mln_util.workspace = true
-mln_vec_map.workspace = true
 # The windows of window targets (`Window`).
 raw-window-handle.workspace = true
-mln_wire.workspace = true
 slotmap.workspace = true
 thiserror.workspace = true
 

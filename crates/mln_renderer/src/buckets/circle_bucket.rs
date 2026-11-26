@@ -3,7 +3,6 @@
 
 use std::sync::Arc;
 
-use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::MapMode;
 use mln_style::layers::Circle;
 use mln_style::layers::circle_layer_properties::CirclePaintProperties;
@@ -13,6 +12,7 @@ use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketBase, UploadNeeds};
 use crate::bucket_geometry::{GeometryUpload, GeometryVec};
+use crate::gfx::segment::SegmentBase;
 use crate::layer_type::EvaluatedLayer;
 use crate::paint_property_binder::PaintPropertyBinder;
 use crate::terrain::point_center;

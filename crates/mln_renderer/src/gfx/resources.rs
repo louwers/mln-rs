@@ -4,10 +4,10 @@
 
 use std::rc::Rc;
 
+use mln_gfx::Size;
 use mln_gfx::gpu::{BufferDesc, BufferUsage, Gpu, GpuError, TextureDesc, TextureFormat, TextureId, TextureUsage};
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_util::logging::{Event, Log};
-use mln_util::size::Size;
 
 use crate::gfx::buffer::{self, Buffer};
 use crate::gfx::release::{Release, ReleaseQueue};

@@ -6,7 +6,7 @@ use std::ffi::{c_int, c_void};
 use std::ptr::NonNull;
 use std::sync::OnceLock;
 
-use mln_util::error::Error;
+use mln_gfx::Error;
 
 /// `AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM`.
 const FORMAT_R8G8B8A8_UNORM: u32 = 1;
@@ -76,8 +76,8 @@ impl HardwareBuffer {
     /// A buffer of `width` by `height` RGBA8888 pixels that the GPU renders
     /// into and samples, with the extra `usage` bits.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) before API
-    /// level 26, and with [`ErrorKind::Native`](mln_util::ErrorKind) when
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) before API
+    /// level 26, and with [`ErrorKind::Native`](mln_gfx::ErrorKind) when
     /// Android allocates no such buffer.
     pub(crate) fn allocate(width: u32, height: u32, usage: u64) -> Result<HardwareBuffer, Error> {
         let functions =

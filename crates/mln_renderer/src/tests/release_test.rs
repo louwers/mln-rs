@@ -6,8 +6,7 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_util::Color;
-use mln_util::size::Size;
+use mln_gfx::{Rgba, Size};
 
 use super::with_context;
 use crate::gfx::indexes::{DrawIndexes, Indexes};
@@ -111,7 +110,7 @@ fn released_shaders_and_pipelines_go() {
             depth_range: (0.0, 1.0),
             scissor: Scissor { x: 0, y: 0, width: 1, height: 1 },
             stencil_reference: 0,
-            blend_constant: Color::black(),
+            blend_constant: Rgba::new(0.0, 0.0, 0.0, 1.0),
             line_width: 1.0,
         };
         let draw = Draw {

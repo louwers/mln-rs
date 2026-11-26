@@ -4,10 +4,9 @@
 use std::ffi::c_void;
 use std::sync::{Arc, OnceLock};
 
-use mln_gfx::ExportKinds;
 use mln_gfx::gpu::{FixedState, GpuError, ShaderKey, TargetFormats, VertexBufferLayout};
-use mln_util::error::Error;
-use mln_util::hash::HashMap;
+use mln_gfx::util_hash::HashMap;
+use mln_gfx::{Error, ExportKinds};
 use parking_lot::Mutex;
 use windows::Win32::Foundation::LUID;
 use windows::Win32::Graphics::Direct3D::D3D_FEATURE_LEVEL_11_0;
@@ -102,11 +101,11 @@ impl Device {
     /// where WARP follows the hardware ones, or with `None` on the first
     /// adapter that makes one.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) where
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) where
     /// there is no D3D12 device of feature level 11.0 and shader model 6.0,
     /// or no DXC (`dxcompiler.dll`) to compile its shaders, with
-    /// [`ErrorKind::NotFound`](mln_util::ErrorKind) when there is no adapter
-    /// at `adapter_index`, and with [`ErrorKind::Native`](mln_util::ErrorKind)
+    /// [`ErrorKind::NotFound`](mln_gfx::ErrorKind) when there is no adapter
+    /// at `adapter_index`, and with [`ErrorKind::Native`](mln_gfx::ErrorKind)
     /// when a D3D12 call fails.
     pub fn new(adapter_index: Option<usize>) -> Result<Device, Error> {
         Self::create(Selector::Index(adapter_index))
@@ -200,10 +199,10 @@ impl Device {
     /// The host's `device` and direct `queue` on it, which the device keeps
     /// references to. The debug layer is the host's to turn on.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for a
     /// device that runs no shader model 6.0, a queue that isn't a direct
     /// queue of the device, or without DXC (`dxcompiler.dll`), and with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) when a D3D12 or DXGI call
+    /// [`ErrorKind::Native`](mln_gfx::ErrorKind) when a D3D12 or DXGI call
     /// fails.
     pub fn wrap(device: ID3D12Device, queue: ID3D12CommandQueue) -> Result<Device, Error> {
         ShaderCompiler::new().map_err(|error| Error::unsupported(error.to_string()))?;

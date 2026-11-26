@@ -6,6 +6,7 @@ use std::ptr::NonNull;
 use std::sync::Arc;
 
 use block2::RcBlock;
+use mln_gfx::Size;
 use mln_gfx::color_mode::{BlendFunction, Mask};
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
@@ -28,8 +29,7 @@ use mln_gfx::types::{
     ColorBlendEquationType, ColorBlendFactorType, CullFaceSideType, CullFaceWindingType, DepthFunctionType,
     StencilFunctionType, StencilOpType, TextureFilterType, TextureWrapType,
 };
-use mln_util::hash::HashMap;
-use mln_util::size::Size;
+use mln_gfx::util_hash::HashMap;
 use objc2::Message;
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::{NSObject, ProtocolObject};

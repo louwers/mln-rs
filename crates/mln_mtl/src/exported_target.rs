@@ -5,10 +5,9 @@
 
 use mln_gfx::ring::{self, Exporter};
 use mln_gfx::{
-    ExportKind, ExportKinds, ExportedFrame, ExportedImage, ExportedRing, FrameDepth, NativeTexture, SyncKind, SyncKinds,
+    Error, ExportKind, ExportKinds, ExportedFrame, ExportedImage, ExportedRing, FrameDepth, NativeTexture, Size,
+    SyncKind, SyncKinds,
 };
-use mln_util::error::Error;
-use mln_util::size::Size;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_core_foundation::{CFDictionary, CFNumber, CFRetained, CFString};
@@ -50,7 +49,7 @@ pub(crate) fn probe(device: &Device) -> ExportKinds {
 
 /// The kind of `ring` that a session on `device` shares its images in.
 ///
-/// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the host
+/// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) when the host
 /// takes no IOSurface.
 pub fn plan(device: &Device, ring: &ExportedRing) -> Result<ExportKind, Error> {
     export_kinds(device)
@@ -135,7 +134,7 @@ impl Exporter for MetalExporter {
     /// A generation's surfaces, under the textures that frames draw into.
     type Images = Vec<CFRetained<IOSurfaceRef>>;
 
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for
     /// another kind than IOSurfaces, or another producer kind than
     /// [`sync_kinds`]'s.
     fn new(
@@ -153,7 +152,7 @@ impl Exporter for MetalExporter {
         Ok(MetalExporter { depth: ring.depth, keep_depth: ring.keep_depth })
     }
 
-    /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when a surface
+    /// Fails with [`ErrorKind::Native`](mln_gfx::ErrorKind) when a surface
     /// or a texture can't be made.
     fn allocate(
         &self,

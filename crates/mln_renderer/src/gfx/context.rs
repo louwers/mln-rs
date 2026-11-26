@@ -10,6 +10,7 @@
 
 use std::rc::Rc;
 
+use mln_gfx::Size;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::{
     BufferId, BufferUsage, Caps, Gpu, GpuError, PipelineId, PipelineKey, ResourceId, SamplerId, ShaderId, ShaderKey,
@@ -23,7 +24,6 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::TextureChannelDataType;
 use mln_util::hash::HashMap;
 use mln_util::logging::{Event, Log};
-use mln_util::size::Size;
 
 use crate::gfx::buffer::{self, Buffer};
 use crate::gfx::indexes::{Indexes, SharedIndexes};

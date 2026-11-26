@@ -180,7 +180,7 @@ fn a_uniform_buffer_in_reused_memory_starts_zeroed() {
     gpu.write_buffer(first, 0, &[0xAB; 256]).expect("the write");
     gpu.flush(true).expect("the flush");
     // A pass in the next batch brings its other window up to date.
-    let size = mln_util::size::Size::new(4, 4);
+    let size = mln_gfx::Size::new(4, 4);
     let usage = TextureUsage { render_target: true, ..TextureUsage::default() };
     let target = gpu
         .create_texture(&TextureDesc {
@@ -211,8 +211,8 @@ fn a_uniform_buffer_in_reused_memory_starts_zeroed() {
 // write to, from an offset of 512 bytes.
 #[test]
 fn small_readbacks_waiting_at_once_read_their_rows() {
+    use mln_gfx::Size;
     use mln_gfx::gpu::{TextureDesc, TextureFormat, TextureRegion, TextureUsage};
-    use mln_util::size::Size;
 
     let mut gpu = gpu();
     let size = Size::new(4, 4);
@@ -241,8 +241,8 @@ fn small_readbacks_waiting_at_once_read_their_rows() {
 // holds back nothing.
 #[test]
 fn a_textures_wait_holds_back_only_its_passes() {
+    use mln_gfx::Size;
     use mln_gfx::gpu::{ColorAttachment, LoadOp, PassDesc, TextureDesc, TextureFormat, TextureUsage};
-    use mln_util::size::Size;
     use windows::Win32::Graphics::Direct3D12::{D3D12_FENCE_FLAG_NONE, ID3D12Fence};
 
     let mut gpu = gpu();
@@ -262,7 +262,7 @@ fn a_textures_wait_holds_back_only_its_passes() {
     let host: ID3D12Fence = unsafe { gpu.device().device().CreateFence(0, D3D12_FENCE_FLAG_NONE) }.unwrap();
     gpu.wait_before_using(held, host.clone(), 1);
     let clear = |gpu: &mut D3d12Gpu, texture| {
-        let color = Some(ColorAttachment { texture, load: LoadOp::Clear(mln_util::Color::new(1.0, 0.0, 0.0, 1.0)) });
+        let color = Some(ColorAttachment { texture, load: LoadOp::Clear(mln_gfx::Rgba::new(1.0, 0.0, 0.0, 1.0)) });
         gpu.begin_pass(&PassDesc { label: "clear", color, depth_stencil: None }).unwrap();
         gpu.end_pass().unwrap();
         gpu.flush(false).unwrap();

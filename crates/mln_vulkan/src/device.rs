@@ -16,9 +16,8 @@ use std::io::Write as _;
 use std::sync::{Arc, LazyLock, OnceLock, Weak};
 
 use ash::vk;
-use mln_gfx::{DepthStencilFormat, DepthStencilFormats, ExportKinds, SyncKind, SyncKinds};
-use mln_util::error::Error;
-use mln_util::hash::HashMap;
+use mln_gfx::util_hash::HashMap;
+use mln_gfx::{DepthStencilFormat, DepthStencilFormats, Error, ExportKinds, SyncKind, SyncKinds};
 use parking_lot::Mutex;
 
 use crate::log_target;
@@ -557,11 +556,11 @@ impl Device {
     /// `vkEnumeratePhysicalDevices` order, or the first that can render when
     /// `None`, discrete GPUs first. It logs the GPU it is on.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) without a
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) without a
     /// Vulkan library or a GPU that can render, or without what
     /// `MLN_VULKAN_VALIDATION=abort` needs of the instance, with
-    /// [`ErrorKind::NotFound`](mln_util::ErrorKind) when there is no GPU at
-    /// `adapter_index`, and with [`ErrorKind::Native`](mln_util::ErrorKind)
+    /// [`ErrorKind::NotFound`](mln_gfx::ErrorKind) when there is no GPU at
+    /// `adapter_index`, and with [`ErrorKind::Native`](mln_gfx::ErrorKind)
     /// when a Vulkan call fails.
     pub fn new(adapter_index: Option<usize>) -> Result<Device, Error> {
         Self::create(Selector::Index(adapter_index))
@@ -571,7 +570,7 @@ impl Device {
     /// `VkPhysicalDeviceIDProperties` reports.
     ///
     /// Fails as [`new`](Self::new) does, and with
-    /// [`ErrorKind::NotFound`](mln_util::ErrorKind) when no GPU has `id`.
+    /// [`ErrorKind::NotFound`](mln_gfx::ErrorKind) when no GPU has `id`.
     pub fn with_adapter_id(id: AdapterId) -> Result<Device, Error> {
         Self::create(Selector::Id(id))
     }
@@ -834,11 +833,11 @@ impl Device {
     /// `VK_ANDROID_external_memory_android_hardware_buffer` with
     /// `VK_EXT_queue_family_foreign` for Android hardware buffers.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) without a
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) without a
     /// Vulkan library to look the functions up in, with
-    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a queue family
+    /// [`ErrorKind::InvalidArgument`](mln_gfx::ErrorKind) for a queue family
     /// that the GPU lacks or that has no graphics queue, and with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) when the device's core
+    /// [`ErrorKind::Native`](mln_gfx::ErrorKind) when the device's core
     /// functions can't be looked up.
     ///
     /// # Safety
@@ -1044,7 +1043,7 @@ impl Device {
     /// The library's device `self`, which nothing else holds yet, with the
     /// host's lock on its queue, for a host that submits to the queue too.
     ///
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidState`](mln_gfx::ErrorKind) for a
     /// device that renderers or clones hold already.
     pub fn with_queue_lock(mut self, lock: Arc<dyn QueueLock>) -> Result<Device, Error> {
         if Arc::get_mut(&mut self.shared).is_none() {
@@ -1339,7 +1338,7 @@ impl Shared {
     /// The D3D11 device on the DXGI adapter of the GPU, made when first
     /// asked.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a GPU
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for a GPU
     /// without a LUID, and as [`TextureDevice::new`](crate::win32::TextureDevice)
     /// does.
     #[cfg(windows)]

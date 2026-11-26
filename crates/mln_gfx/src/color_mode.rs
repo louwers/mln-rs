@@ -1,6 +1,21 @@
-use mln_util::Color;
-
 use crate::types::{ColorBlendEquationType, ColorBlendFactorType};
+
+/// A color of four floats, each 0 to 1 in a draw's color space: a clear's
+/// color or a blend's constant.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Rgba {
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+    pub a: f32,
+}
+
+impl Rgba {
+    #[must_use]
+    pub const fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
+        Rgba { r, g, b, a }
+    }
+}
 
 /// The factors of a linear blend. The equation is the `BlendFunction`
 /// variant that holds them.
@@ -70,7 +85,7 @@ pub struct Mask {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ColorMode {
     pub blend_function: BlendFunction,
-    pub blend_color: Color,
+    pub blend_color: Rgba,
     pub mask: Mask,
 }
 
@@ -81,14 +96,14 @@ impl ColorMode {
     pub fn disabled() -> ColorMode {
         ColorMode {
             blend_function: BlendFunction::Replace,
-            blend_color: Color::default(),
+            blend_color: Rgba::default(),
             mask: Mask { r: false, g: false, b: false, a: false },
         }
     }
 
     #[must_use]
     pub fn unblended() -> ColorMode {
-        ColorMode { blend_function: BlendFunction::Replace, blend_color: Color::default(), mask: Self::ALL }
+        ColorMode { blend_function: BlendFunction::Replace, blend_color: Rgba::default(), mask: Self::ALL }
     }
 
     #[must_use]
@@ -98,7 +113,7 @@ impl ColorMode {
                 src_factor: ColorBlendFactorType::One,
                 dst_factor: ColorBlendFactorType::OneMinusSrcAlpha,
             }),
-            blend_color: Color::default(),
+            blend_color: Rgba::default(),
             mask: Self::ALL,
         }
     }
@@ -110,7 +125,7 @@ impl ColorMode {
                 src_factor: ColorBlendFactorType::One,
                 dst_factor: ColorBlendFactorType::One,
             }),
-            blend_color: Color::default(),
+            blend_color: Rgba::default(),
             mask: Self::ALL,
         }
     }

@@ -11,14 +11,13 @@
 //! the ring has again keeps across a replacement, and the older generations
 //! that a resize leaves to the frames the host holds.
 
-use mln_util::error::Error;
-use mln_util::size::Size;
-
+use crate::error::Error;
 use crate::export::{ExportKind, ExportedFrame, ExportedRing, Generations};
 use crate::frame::{ConsumerSync, FrameImage, FrameTarget, GpuSync, Handoff, SyncKind};
 use crate::gpu::{Gpu, GpuError, ResourceId, TargetFormats, TextureDesc, TextureId, TextureUsage, destroy_unused};
 use crate::log_target;
 use crate::renderer_backend::RendererBackend;
+use crate::size::Size;
 
 /// The host's textures of a ring: one color texture for each slot, and
 /// either one depth and stencil texture for each slot or none, in which
@@ -148,7 +147,7 @@ impl Imports {
     /// of the target's own where the host gave none.
     ///
     /// Fails as [`RingBackend::targets`] does, and with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) when `gpu` can't import a
+    /// [`ErrorKind::Native`](crate::ErrorKind) when `gpu` can't import a
     /// texture or make the depth and stencil texture. What it imported is
     /// then destroyed.
     pub fn new<B: RingBackend>(gpu: &mut B::Gpu, textures: &B::Textures) -> Result<Imports, Error> {
@@ -307,7 +306,7 @@ impl<B: RingBackend> BorrowedTarget<B> {
     /// it waits for `consumer`, and the target lets go of what the slot's
     /// last frame handed over.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidArgument`](crate::ErrorKind) for a
     /// slot the ring doesn't have, and as [`RingBackend::wait_for`] does,
     /// after which the next frame drawn into the slot waits for nothing.
     pub fn release(&mut self, gpu: &mut B::Gpu, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
@@ -335,9 +334,9 @@ impl<B: RingBackend> BorrowedTarget<B> {
     /// the ring let go of, as [`release_textures`](Self::release_textures)
     /// does.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for
+    /// Fails with [`ErrorKind::InvalidArgument`](crate::ErrorKind) for
     /// another number of textures, with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) once the target let
+    /// [`ErrorKind::InvalidState`](crate::ErrorKind) once the target let
     /// go of its textures, as the check and [`Imports::new`] do, and as
     /// [`release_textures`](Self::release_textures) does. The target then
     /// keeps its textures.
@@ -390,9 +389,9 @@ impl<B: RingBackend> BorrowedTarget<B> {
     /// until its next release or replacement of textures, or until it goes,
     /// and draws no frame until then.
     ///
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) once the
+    /// Fails with [`ErrorKind::InvalidState`](crate::ErrorKind) once the
     /// target let go of its textures, and with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) when it can't submit the
+    /// [`ErrorKind::Native`](crate::ErrorKind) when it can't submit the
     /// work or make the sync. It keeps its textures then.
     pub fn release_textures(&mut self, gpu: &mut B::Gpu) -> Result<GpuSync, Error> {
         if self.textures.is_none() {
@@ -547,7 +546,7 @@ pub trait Exporter: Sized {
     /// What allocates the images of `ring`, which the backend shares in
     /// `kind` and hands over with sync of the kind `producer`.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
+    /// Fails with [`ErrorKind::Unsupported`](crate::ErrorKind) when the
     /// backend can't export `kind` or hand frames over with `producer`.
     fn new(
         backend: &mut <Self::Ring as RingBackend>::Renderer,
@@ -731,8 +730,6 @@ mod tests {
     use std::any::Any;
     use std::cell::RefCell;
 
-    use mln_util::hash::HashMap;
-
     use super::*;
     use crate::export::{ExportedImage, NativeTexture};
     use crate::gpu::{
@@ -740,6 +737,7 @@ mod tests {
         PipelineDesc, PipelineId, ReadbackId, SamplerId, ShaderId, ShaderKey, SlotMap, TextureFormat, TextureRegion,
     };
     use crate::texture2d::SamplerState;
+    use crate::util_hash::HashMap;
 
     /// A `Gpu` of textures alone, which records what its submits wait for.
     #[derive(Default)]

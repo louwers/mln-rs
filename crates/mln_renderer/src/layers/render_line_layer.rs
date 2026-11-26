@@ -5,7 +5,6 @@ use std::sync::Arc;
 use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
@@ -30,7 +29,9 @@ use crate::geometry::feature_index::QueryRegion;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::line_mesh::LineLayoutVertex;
+use crate::gfx::segment::SegmentBase;
 use crate::gfx::store::SharedTexture;
+use crate::gfx::texture_size;
 use crate::gfx::texture2d::Texture2D;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::layer_composite::Composite;
@@ -175,7 +176,7 @@ fn dash_atlas_texture(gpu: &mut dyn Gpu, context: &mut Context, binders: &LineBi
             ..Default::default()
         });
     });
-    if let Err(error) = context.upload_texture_data(gpu, &texture, &image.data, image.size) {
+    if let Err(error) = context.upload_texture_data(gpu, &texture, &image.data, texture_size(image.size)) {
         context.fail(format!("Uploading the dash patterns failed: {error}"));
         return None;
     }
@@ -733,7 +734,7 @@ impl RenderLineLayer {
             LineType::Pattern => {
                 let texture =
                     cached.objects.texture(IMAGE_SLOT).and_then(|texture| parameters.context.texture(texture));
-                let texture_size = texture.map_or(Size::new(0, 0), Texture2D::size);
+                let texture_size = texture.map(Texture2D::size).unwrap_or_default();
                 uniforms.draw_ubo.set(&LinePatternDrawableUBO {
                     matrix,
                     ratio,

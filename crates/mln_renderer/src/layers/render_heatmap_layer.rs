@@ -11,7 +11,6 @@ use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
@@ -33,6 +32,7 @@ use crate::buckets::heatmap_bucket::{HeatmapBinders, HeatmapBucket, HeatmapLayou
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
+use crate::gfx::segment::SegmentBase;
 use crate::gfx::store::SharedTexture;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
@@ -289,7 +289,7 @@ impl TypedLayer for RenderHeatmapLayer {
         let state = paint_parameters.view;
 
         let viewport_size = state.size();
-        let size = Size::new(viewport_size.width / 2, viewport_size.height / 2);
+        let size = mln_gfx::Size::new(viewport_size.width / 2, viewport_size.height / 2);
         let render_target = self.render_target.get_or_insert_with(|| {
             RenderTarget::new(paint_parameters.context, size, TextureChannelDataType::HalfFloat)
         });

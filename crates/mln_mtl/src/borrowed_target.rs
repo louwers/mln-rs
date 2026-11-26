@@ -10,9 +10,7 @@ use std::ptr::NonNull;
 
 use mln_gfx::gpu::{GpuError, TargetFormats, TextureFormat, TextureId};
 use mln_gfx::ring::{self, RingBackend, RingTextures};
-use mln_gfx::{ConsumerSync, DepthStencilFormat, DepthStencilFormats, GpuSync, SyncKind, SyncKinds};
-use mln_util::error::Error;
-use mln_util::size::Size;
+use mln_gfx::{ConsumerSync, DepthStencilFormat, DepthStencilFormats, Error, GpuSync, Size, SyncKind, SyncKinds};
 use objc2::Message;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
@@ -89,7 +87,7 @@ impl BorrowedTextures {
 
     /// Checks the textures against their ring and `device`.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_gfx::ErrorKind) for a
     /// texture of another size than the ring's, of another device or pixel
     /// format than the first, or that isn't 2D with one sample and
     /// render-target usage.
@@ -206,9 +204,9 @@ impl RingBackend for MetalRing {
     type Handed = Infallible;
 
     /// Fails as [`BorrowedTextures::check`] does, with
-    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a producer kind
+    /// [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for a producer kind
     /// that isn't one of [`BorrowedTextures::sync_kinds`]'s, and with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) when the device makes no
+    /// [`ErrorKind::Native`](mln_gfx::ErrorKind) when the device makes no
     /// shared event.
     fn new(backend: &mut RendererBackend, textures: &BorrowedTextures, producer: SyncKind) -> Result<Self, Error> {
         let device = backend.device().clone();
@@ -228,7 +226,7 @@ impl RingBackend for MetalRing {
         Ok(MetalRing { device, event, event_value: 0 })
     }
 
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for
     /// another pixel format, or depth textures of another pixel format or
     /// where the ring has none, and as [`BorrowedTextures::check`] does.
     fn check_replacement(&self, current: &BorrowedTextures, next: &BorrowedTextures) -> Result<(), Error> {
@@ -241,7 +239,7 @@ impl RingBackend for MetalRing {
         next.check(&self.device)
     }
 
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for a
     /// pixel format that `MetalGpu` has no texture of.
     fn targets(_gpu: &MetalGpu, textures: &BorrowedTextures) -> Result<TargetFormats, Error> {
         let pixel_format = textures.pixel_format();
@@ -264,9 +262,9 @@ impl RingBackend for MetalRing {
         gpu.import_texture(texture, format)
     }
 
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_gfx::ErrorKind) for a
     /// shared event that names no object, and with
-    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for another kind than
+    /// [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for another kind than
     /// [`BorrowedTextures::sync_kinds`]'s consumer kinds.
     fn wait_for(&mut self, _gpu: &mut MetalGpu, consumer: ConsumerSync) -> Result<Option<Self::Wait>, Error> {
         let sync = consumer.sync;

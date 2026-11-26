@@ -12,7 +12,7 @@ use std::any::Any;
 use std::ffi::{CString, c_void};
 use std::sync::OnceLock;
 
-use mln_util::error::Error;
+use mln_gfx::Error;
 use windows_sys::Win32::Foundation::{GetLastError, HWND};
 use windows_sys::Win32::Graphics::Gdi::{GetDC, HDC, ReleaseDC};
 use windows_sys::Win32::Graphics::OpenGL::{
@@ -288,9 +288,9 @@ impl Group {
     /// The library's group: a root of the core profile of OpenGL 3.3 or
     /// later, of the library's pixel format.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) when the
     /// driver makes no such context, and with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) when Windows makes no
+    /// [`ErrorKind::Native`](mln_gfx::ErrorKind) when Windows makes no
     /// window for it.
     pub(crate) fn library() -> Result<Group, Error> {
         let (window, format) = HiddenWindow::new(0).map_err(Error::native)?;
@@ -301,7 +301,7 @@ impl Group {
     /// The host's group, whose root is `context`, of the pixel format of
     /// `dc`, and whose functions `loader` gives.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_gfx::ErrorKind) for a
     /// device context without a pixel format.
     ///
     /// # Safety
@@ -443,7 +443,7 @@ pub(crate) fn proc_address(loader: Option<Loader>, name: &str) -> Option<*const 
 /// The GL functions of the context current on this thread, from `loader` or
 /// WGL.
 ///
-/// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a context
+/// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for a context
 /// older than OpenGL 3.3.
 pub(crate) fn functions(loader: Option<Loader>) -> Result<Gl, Error> {
     // SAFETY: a context is current (the caller's), and WGL gives its

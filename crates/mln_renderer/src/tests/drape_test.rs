@@ -105,7 +105,7 @@ fn a_drape_clears_its_stencil_over_its_whole_target() {
         let frame = Frame::new(&view, false);
         let static_data = RenderStaticData::default();
         let (mut clip_masks, mut layer_composite) = (ClipMasks::default(), LayerComposite::default());
-        let size = Size::new(512, 512);
+        let size = mln_gfx::Size::new(512, 512);
         let scissor = ScissorRect { x: 0, y: 0, width: size.width, height: size.height };
         let mut parameters = PaintParameters::new(
             context,
@@ -125,7 +125,7 @@ fn a_drape_clears_its_stencil_over_its_whole_target() {
         let transform = TransformParameters::for_drape(&view, &drape);
         let (mut drape_masks, mut drape_composite) = (ClipMasks::default(), LayerComposite::default());
         let drape_parameters =
-            parameters.drape(&transform, &mut drape_masks, &mut drape_composite, Size::new(1024, 1024), drape);
+            parameters.drape(&transform, &mut drape_masks, &mut drape_composite, mln_gfx::Size::new(1024, 1024), drape);
         let [clear] = drape_parameters.stencil_clear_tiles(&[drape])[..] else {
             panic!("one tile that clears the stencil");
         };
@@ -308,7 +308,7 @@ fn textured_drapes(style: &str) -> Option<BTreeSet<(OverscaledTileID, usize)>> {
     let size = Size::new(256, 256);
     let device = super::webgpu_device()?;
     let mut backend = mln_webgpu::RendererBackend::new(&device);
-    let mut target = OffscreenTarget::<mln_webgpu::WebGpu>::new(size);
+    let mut target = OffscreenTarget::<mln_webgpu::WebGpu>::new(mln_gfx::Size::new(size.width, size.height));
     let pool = crate::tests::pool();
     let mut renderer =
         Renderer::new(backend.gpu(), 1.0, mln_text::local_fonts::LocalGlyphs::default(), Arc::new(|| {}), &pool);

@@ -18,6 +18,8 @@ use mln_util::size::Size;
 use crate::support::{eventually, serve_level_dem, wait};
 
 const SIZE: Size = Size { width: 64, height: 48 };
+/// The size of the host\'s textures, which the backends take as gfx\'s.
+const TEXTURE_SIZE: mln_gfx::Size = mln_gfx::Size::new(SIZE.width, SIZE.height);
 /// The longitude of the extrusion's east wall: it covers the map west of it.
 const WALL: f64 = -74.0;
 /// The extrusion's height, in meters.
@@ -434,7 +436,7 @@ mod vulkan {
             (0..2).map(|_| host.image(format, vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT, depth_aspects)).collect();
         let ring = BorrowedRing::vulkan(mln_vulkan::BorrowedImages {
             images: colors,
-            size: SIZE,
+            size: TEXTURE_SIZE,
             format: COLOR,
             final_layout: vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
             owner: mln_vulkan::ImageOwner::GraphicsQueue,
@@ -575,7 +577,7 @@ fn webgpu_ring_depth(terrain: bool) {
         vec![texture(wgpu::TextureFormat::Depth32FloatStencil8), texture(wgpu::TextureFormat::Depth32FloatStencil8)];
     let ring = mln_runtime::BorrowedRing::webgpu(mln_webgpu::BorrowedTextures {
         textures,
-        size: SIZE,
+        size: TEXTURE_SIZE,
         depth_textures: depths.clone(),
     });
     let runtime = runtime();
@@ -834,7 +836,7 @@ mod gl {
         let depths = [host.texture(glow::DEPTH32F_STENCIL8), host.texture(glow::DEPTH32F_STENCIL8)];
         let ring = mln_runtime::BorrowedRing::gl(mln_gl::BorrowedTextures {
             textures: colors.iter().map(|texture| texture.0.get()).collect(),
-            size: SIZE,
+            size: TEXTURE_SIZE,
             depth_textures: depths.iter().map(|texture| texture.0.get()).collect(),
         });
         let runtime = runtime();

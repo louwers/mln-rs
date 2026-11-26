@@ -2,7 +2,8 @@
 //! most [`MAX_SEGMENT_VERTICES`] vertices from its first.
 
 use geometry::Point;
-use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
+
+use crate::gfx::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 
 /// Adds the quads that circles and heatmap points are drawn as, one for
 /// each of `points`, and indexes their triangles. `vertex` makes each

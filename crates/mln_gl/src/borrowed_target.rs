@@ -5,9 +5,7 @@
 use glow::HasContext;
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_gfx::gpu::{Gpu as _, ResourceId, TargetFormats, TextureDesc, TextureId, TextureUsage, destroy_unused};
-use mln_gfx::{ConsumerSync, DepthStencilFormat, DepthStencilFormats, GpuSync, SyncKind, SyncKinds};
-use mln_util::error::Error;
-use mln_util::size::Size;
+use mln_gfx::{ConsumerSync, DepthStencilFormat, DepthStencilFormats, Error, GpuSync, Size, SyncKind, SyncKinds};
 
 use crate::device::SurfaceSwap;
 use crate::frame_image::{COLOR, DEPTH_STENCIL, FrameImports, default_framebuffer};
@@ -46,7 +44,7 @@ impl BorrowedTextures {
 
     /// Checks the textures against their ring.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_gfx::ErrorKind) for
     /// depth textures that aren't one for each texture.
     pub(crate) fn check(&self) -> Result<(), Error> {
         if !self.depth_textures.is_empty() && self.depth_textures.len() != self.textures.len() {
@@ -95,7 +93,7 @@ impl BorrowedTarget {
     /// draws into `textures` and hands each frame to the host with sync of
     /// the kind `producer`, one of [`BorrowedTextures::sync_kinds`]'s.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for a
     /// producer kind the target can't hand over.
     pub fn new(textures: BorrowedTextures, producer: SyncKind) -> Result<Self, Error> {
         if !BorrowedTextures::sync_kinds().0.contains(producer) {
@@ -182,11 +180,11 @@ impl BorrowedTarget {
     /// host may use the old textures, as
     /// [`release_textures`](Self::release_textures) does.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_gfx::ErrorKind) for
     /// another number of textures, with
-    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for depth textures
+    /// [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for depth textures
     /// where the ring had none, or none where it had them, with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) once the target let
+    /// [`ErrorKind::InvalidState`](mln_gfx::ErrorKind) once the target let
     /// go of its textures, and as [`release_textures`](Self::release_textures)
     /// does. The target then keeps its textures.
     pub fn replace(&mut self, gpu: &mut GlGpu, textures: BorrowedTextures) -> Result<GpuSync, Error> {
@@ -210,9 +208,9 @@ impl BorrowedTarget {
     /// that the sync names until its next release or replacement of
     /// textures, or until it goes, and draws no frame until then.
     ///
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) once the
+    /// Fails with [`ErrorKind::InvalidState`](mln_gfx::ErrorKind) once the
     /// target let go of its textures, and with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) when it can't make the
+    /// [`ErrorKind::Native`](mln_gfx::ErrorKind) when it can't make the
     /// fence, or finish its work for [`SyncKind::CpuComplete`]. It keeps
     /// its textures then.
     pub fn release_textures(&mut self, gpu: &mut GlGpu) -> Result<GpuSync, Error> {
@@ -372,9 +370,9 @@ impl HostSurfaceTarget {
     /// on the host's `surface`, and a target that presents to it at `size`
     /// pixels.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) on a
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) on a
     /// device of the library's, and with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) when EGL makes no context.
+    /// [`ErrorKind::Native`](mln_gfx::ErrorKind) when EGL makes no context.
     pub fn with_backend(
         device: &crate::device::Device,
         surface: HostSurface,

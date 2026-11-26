@@ -14,9 +14,7 @@ use std::sync::OnceLock;
 
 use glow::HasContext;
 use khronos_egl as egl;
-use mln_gfx::{ExportKind, ExportedImage, ExportedRing};
-use mln_util::error::Error;
-use mln_util::size::Size;
+use mln_gfx::{Error, ExportKind, ExportedImage, ExportedRing, Size};
 
 use super::Images;
 use crate::egl::Egl;
@@ -95,8 +93,8 @@ impl Memory {
     /// A buffer of `width` by `height` RGBA8888 pixels that the GPU renders
     /// into and samples, with the extra `usage` bits.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) before API
-    /// level 26, and with [`ErrorKind::Native`](mln_util::ErrorKind) when
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) before API
+    /// level 26, and with [`ErrorKind::Native`](mln_gfx::ErrorKind) when
     /// Android allocates no such buffer.
     fn allocate(width: u32, height: u32, usage: u64) -> Result<Memory, Error> {
         let functions =

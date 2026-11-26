@@ -16,10 +16,9 @@ use khronos_egl as egl;
 use mln_gfx::export::Generations;
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_gfx::{
-    ConsumerSync, ExportKind, ExportKinds, ExportedFrame, ExportedRing, FrameDepth, NativeTexture, SyncKind, SyncKinds,
+    ConsumerSync, Error, ExportKind, ExportKinds, ExportedFrame, ExportedRing, FrameDepth, NativeTexture, Size,
+    SyncKind, SyncKinds,
 };
-use mln_util::error::Error;
-use mln_util::size::Size;
 
 use crate::borrowed_target::{BorrowedTarget, BorrowedTextures};
 use crate::device::Device;
@@ -154,7 +153,7 @@ pub fn export_kinds(device: &Device) -> ExportKinds {
 
 /// The kind of `ring` that a session on `device` shares its images in.
 ///
-/// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
+/// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) when the
 /// host takes no image of the kind the device exports, or for a dmabuf none
 /// of its formats that the device renders, or for a hardware buffer none
 /// that Android allocates with the host's usage.
@@ -484,9 +483,9 @@ impl ExportedTarget {
     /// `ring.depth` buffers of `size` pixels, and hands each frame over with
     /// sync of the kind `producer`, one of [`sync_kinds`]'s.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) when the
     /// device can't export `kind`, a ring's layout or `producer`, and with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) when a buffer can't be
+    /// [`ErrorKind::Native`](mln_gfx::ErrorKind) when a buffer can't be
     /// made.
     pub fn new(
         backend: &mut RendererBackend,
@@ -534,8 +533,8 @@ impl ExportedTarget {
     /// `consumer`: a finished frame, or on Android a sync file, which the
     /// context's later commands wait for.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for
-    /// another kind of sync, and with [`ErrorKind::Native`](mln_util::ErrorKind)
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for
+    /// another kind of sync, and with [`ErrorKind::Native`](mln_gfx::ErrorKind)
     /// when the context can't wait for the sync file.
     pub fn release(&mut self, gpu: &mut GlGpu, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
         let kind = consumer.sync.kind;
@@ -573,7 +572,7 @@ impl ExportedTarget {
     /// host holds, at `held` slots, keep their buffers. Returns whether the
     /// ring has new buffers, which it doesn't when they have `size` already.
     ///
-    /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when a buffer
+    /// Fails with [`ErrorKind::Native`](mln_gfx::ErrorKind) when a buffer
     /// can't be made, and the target then keeps its own.
     pub fn resize(&mut self, gpu: &mut GlGpu, size: Size, held: &[usize]) -> Result<bool, Error> {
         if self.size() == size {

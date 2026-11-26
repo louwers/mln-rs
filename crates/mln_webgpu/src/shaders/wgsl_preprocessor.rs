@@ -1,7 +1,7 @@
 //! The `#ifdef`, `#ifndef`, `#else` and `#endif` blocks of the WGSL
 //! sources, kept or dropped by the shader's defines.
 
-use mln_util::hash::HashMap;
+use mln_gfx::util_hash::HashMap;
 
 /// Whether `b` is ASCII white space, vertical tab included.
 pub(crate) fn is_space(b: u8) -> bool {

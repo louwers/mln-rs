@@ -14,8 +14,8 @@ use mln_gfx::gpu::ShaderKey;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::source::GlslEsSource;
+use mln_gfx::util_hash::HashSet;
 use mln_renderer::shaders::{PROGRAMS, STANDING, projection_variants};
-use mln_util::hash::HashSet;
 
 use crate::shaders::declarations::Stage;
 use crate::shaders::shader_source::{UniformBlockInfo, compose, uniform_block};

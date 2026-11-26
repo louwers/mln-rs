@@ -9,10 +9,9 @@ use std::cell::RefCell;
 use std::future::Future;
 use std::rc::Rc;
 
-use mln_gfx::RendererBackend as _;
 use mln_gfx::gpu::{Gpu as _, ReadbackId, ResourceId, destroy_unused};
+use mln_gfx::{Error, RendererBackend as _};
 use mln_renderer::conformance;
-use mln_util::error::Error;
 use wasm_bindgen::{JsCast as _, JsValue};
 
 /// Where the check is.
@@ -128,7 +127,7 @@ fn backend() -> impl Future<Output = Result<Backend, Error>> {
 
 #[cfg(not(feature = "webgpu"))]
 fn webgl_backend() -> Result<Backend, Error> {
-    use mln_util::size::Size;
+    use mln_gfx::Size;
     let canvas = web_sys::OffscreenCanvas::new(1, 1).map_err(|error| Error::native(format!("{error:?}")))?;
     let (backend, _target) = mln_gl::CanvasTarget::with_backend(canvas, Size::new(1, 1))?;
     Ok(backend)

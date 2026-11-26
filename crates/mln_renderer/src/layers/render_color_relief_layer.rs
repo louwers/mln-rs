@@ -12,7 +12,6 @@ use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
@@ -39,6 +38,7 @@ use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::buckets::raster_bucket::RasterLayoutVertex;
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
+use crate::gfx::segment::SegmentBase;
 use crate::gfx::store::SharedTexture;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::SharedVertices;
@@ -396,7 +396,8 @@ impl TypedLayer for RenderColorReliefLayer {
                 });
             });
             let data = bytemuck::cast_slice(elevation_stops_data.as_slice());
-            if let Err(error) = context.upload_texture_data(gpu, &elevation_stops, data, Size::new(*color_ramp_size, 1))
+            if let Err(error) =
+                context.upload_texture_data(gpu, &elevation_stops, data, mln_gfx::Size::new(*color_ramp_size, 1))
             {
                 context.fail(format!("Uploading the elevation stops failed: {error}"));
             }

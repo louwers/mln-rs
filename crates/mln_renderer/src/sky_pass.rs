@@ -5,18 +5,17 @@ use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_map_types::View;
 use mln_style::types::LightAnchorType;
 use mln_util::Color;
 use mln_util::geo::WrapMode;
 use mln_util::identity::SimpleIdentity;
-use mln_util::size::Size;
 
 use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
+use crate::gfx::segment::SegmentBase;
 use crate::gfx::vertex_attribute::Uniforms;
 use crate::layer_drawing::{DrawDepth, FrameDraw, SingleDraw};
 use crate::render_light::EvaluatedLight;
@@ -95,7 +94,7 @@ impl SkyPass {
         gpu: &mut dyn Gpu,
         context: &mut Context,
         state: &View,
-        viewport_size: Size,
+        viewport_size: mln_gfx::Size,
         pixel_ratio: f32,
         evaluated: Option<&EvaluatedSky>,
         light: &EvaluatedLight,
@@ -195,7 +194,7 @@ mod tests {
 
     fn camera(latitude: f64, longitude: f64, bearing: f64) -> TransformState {
         let mut state = TransformState::default();
-        state.set_size(Size::new(512, 512));
+        state.set_size(mln_util::size::Size::new(512, 512));
         state.set_lat_lng_zoom(&LatLng::new(latitude, longitude).unwrap(), 1.0);
         state.set_angle(bearing);
         state

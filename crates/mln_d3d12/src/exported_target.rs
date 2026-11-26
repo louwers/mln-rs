@@ -10,10 +10,9 @@ use std::os::windows::io::{AsRawHandle as _, OwnedHandle};
 
 use mln_gfx::ring::{self, Exporter};
 use mln_gfx::{
-    ExportKind, ExportKinds, ExportedFrame, ExportedImage, ExportedRing, FrameDepth, NativeTexture, SyncKind, SyncKinds,
+    Error, ExportKind, ExportKinds, ExportedFrame, ExportedImage, ExportedRing, FrameDepth, NativeTexture, Size,
+    SyncKind, SyncKinds,
 };
-use mln_util::error::Error;
-use mln_util::size::Size;
 use windows::Win32::Graphics::Direct3D12::{
     D3D12_HEAP_FLAG_NONE, D3D12_HEAP_FLAG_SHARED, D3D12_HEAP_FLAGS, D3D12_HEAP_PROPERTIES, D3D12_HEAP_TYPE_DEFAULT,
     D3D12_RESOURCE_DESC, D3D12_RESOURCE_DIMENSION_TEXTURE2D, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL,
@@ -61,7 +60,7 @@ pub(crate) fn probe(device: &ID3D12Device) -> ExportKinds {
 
 /// The kind of `ring` that a session on `device` shares its textures in.
 ///
-/// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the host
+/// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) when the host
 /// takes no DXGI shared handle.
 pub fn plan(device: &Device, ring: &ExportedRing) -> Result<ExportKind, Error> {
     export_kinds(device)
@@ -156,7 +155,7 @@ impl Exporter for D3d12Exporter {
     type Ring = D3d12Ring;
     type Images = SharedTextures;
 
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for
     /// another kind than DXGI shared handles, or another producer kind than
     /// [`sync_kinds`]'s.
     fn new(
@@ -174,7 +173,7 @@ impl Exporter for D3d12Exporter {
         Ok(D3d12Exporter { depth: ring.depth, keep_depth: ring.keep_depth })
     }
 
-    /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when a texture
+    /// Fails with [`ErrorKind::Native`](mln_gfx::ErrorKind) when a texture
     /// can't be made or shared.
     fn allocate(&self, backend: &mut RendererBackend, size: Size) -> Result<(SharedTextures, BorrowedTextures), Error> {
         let device = backend.device().device();

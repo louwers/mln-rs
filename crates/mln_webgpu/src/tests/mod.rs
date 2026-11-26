@@ -17,7 +17,7 @@ pub(crate) fn webgpu_requested() -> bool {
 pub(crate) fn device() -> Option<crate::Device> {
     match crate::Device::new(None) {
         Ok(device) => Some(device),
-        Err(error) if error.kind == mln_util::ErrorKind::Unsupported && !webgpu_requested() => {
+        Err(error) if error.kind == mln_gfx::ErrorKind::Unsupported && !webgpu_requested() => {
             eprintln!("skipped: {error}");
             None
         }

@@ -9,11 +9,9 @@
 
 use std::sync::Arc;
 
-use mln_gfx::Window;
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_gfx::window::raw_window_handle::RawWindowHandle;
-use mln_util::error::Error;
-use mln_util::size::Size;
+use mln_gfx::{Error, Size, Window};
 use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::Graphics::Gdi::HDC;
 use windows_sys::Win32::Graphics::OpenGL::HGLRC;
@@ -112,9 +110,9 @@ impl SurfaceTarget {
     /// [`with_backend`](Self::with_backend) can give `window` the library's
     /// pixel format: that it has none yet, or that one. Sets none.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_gfx::ErrorKind) for a
     /// window that isn't a Win32 window or that has a pixel format of its
-    /// own, and with [`ErrorKind::Native`](mln_util::ErrorKind) when the
+    /// own, and with [`ErrorKind::Native`](mln_gfx::ErrorKind) when the
     /// query fails.
     pub fn check_window(window: &dyn Window) -> Result<(), Error> {
         let hwnd = hwnd(window)?;
@@ -131,11 +129,11 @@ impl SurfaceTarget {
     /// It gives the window the library's pixel format. With
     /// `cap_frame_rate`, presenting waits for the display.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_gfx::ErrorKind) for a
     /// window with a pixel format of its own, with
-    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the driver makes
+    /// [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) when the driver makes
     /// no OpenGL 3.3 core context, and with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) when WGL fails otherwise.
+    /// [`ErrorKind::Native`](mln_gfx::ErrorKind) when WGL fails otherwise.
     pub fn with_backend(
         window: Arc<dyn Window>,
         framebuffer_size: Size,
@@ -219,15 +217,13 @@ mod tests {
     use std::sync::Arc;
 
     use glow::HasContext as _;
-    use mln_gfx::RendererBackend as _;
     use mln_gfx::frame::{FrameTarget as _, Handoff};
     use mln_gfx::gpu::{ColorAttachment, Gpu as _, LoadOp, PassDesc};
     use mln_gfx::window::raw_window_handle::{
         DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle,
         Win32WindowHandle, WindowHandle, WindowsDisplayHandle,
     };
-    use mln_util::Color;
-    use mln_util::size::Size;
+    use mln_gfx::{RendererBackend as _, Rgba, Size};
 
     use super::SurfaceTarget;
     use crate::wgl::HiddenWindow;
@@ -253,7 +249,7 @@ mod tests {
     fn red_frame(backend: &mut crate::RendererBackend, target: &mut SurfaceTarget) -> Handoff {
         let mut gpu = backend.gpu();
         let image = target.begin_frame(&mut gpu).unwrap();
-        let clear = LoadOp::Clear(Color::new(1.0, 0.0, 0.0, 1.0));
+        let clear = LoadOp::Clear(Rgba::new(1.0, 0.0, 0.0, 1.0));
         let pass = PassDesc {
             label: "frame",
             color: Some(ColorAttachment { texture: image.color, load: clear }),

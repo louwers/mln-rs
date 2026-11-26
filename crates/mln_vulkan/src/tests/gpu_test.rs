@@ -7,14 +7,13 @@ use mln_gfx::gpu::{
     read_texels,
 };
 use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_gfx::{Rgba, Size};
 use mln_renderer::conformance::{
     clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids, imported_textures,
     instanced_walls, invalid_calls, mipmapped_targets, pulled_walls, readbacks, resources_in_use, terrain_heights,
     topologies, transparent_replace, vertex_layouts, wall_quads, written_vertex_texels,
 };
 use mln_renderer::shaders::{PROGRAMS, projection_variants};
-use mln_util::Color;
-use mln_util::size::Size;
 
 use crate::{ImportedImage, VulkanGpu};
 
@@ -248,7 +247,7 @@ fn imported_images_go_to_their_queue_family_and_signal() {
     let sampled = ImportedImage { usage: TextureUsage { sampled: true, ..imported.usage }, ..external };
     assert!(matches!(gpu.import_image(&sampled), Err(GpuError::Invalid(_))), "no draw acquires it");
     let external = gpu.import_image(&external).unwrap();
-    let passes = |gpu: &mut VulkanGpu, loads: &[LoadOp<Color>]| {
+    let passes = |gpu: &mut VulkanGpu, loads: &[LoadOp<Rgba>]| {
         for &load in loads {
             let color = Some(ColorAttachment { texture: external, load });
             gpu.begin_pass(&PassDesc { label: "external", color, depth_stencil: None })?;
@@ -256,7 +255,7 @@ fn imported_images_go_to_their_queue_family_and_signal() {
         }
         gpu.flush(false)
     };
-    let red = Color::red();
+    let red = Rgba::new(1.0, 0.0, 0.0, 1.0);
     passes(&mut gpu, &[LoadOp::Clear(red)]).unwrap();
     passes(&mut gpu, &[LoadOp::Load, LoadOp::Load]).unwrap();
     assert_eq!(read_texels(&mut gpu, external, TextureRegion::whole(size)).unwrap()[..4], [255, 0, 0, 255]);

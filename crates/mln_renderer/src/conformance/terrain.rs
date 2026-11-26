@@ -13,9 +13,8 @@ use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::SamplerState;
-use mln_util::Color;
+use mln_gfx::{Rgba, Size};
 use mln_util::dem::{self, DemCoords, DemUnpack};
-use mln_util::size::Size;
 use mln_util::tileset::RasterEncoding;
 
 use super::{EXTENT, buffer, draw, dynamic, fixed, location, slot, whole};
@@ -291,7 +290,7 @@ fn probe(
     })?;
     gpu.begin_pass(&PassDesc {
         label: "terrain probes",
-        color: Some(ColorAttachment { texture: target, load: LoadOp::Clear(Color::black()) }),
+        color: Some(ColorAttachment { texture: target, load: LoadOp::Clear(Rgba::new(0.0, 0.0, 0.0, 1.0)) }),
         depth_stencil: None,
     })?;
     let scissor = Scissor { x: 0, y: 0, width: size.width, height: size.height };

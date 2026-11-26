@@ -22,6 +22,11 @@ pub use mln_gfx::{
 use mln_util::error::Error;
 use mln_util::size::Size;
 
+// The browser's one device of a backend crate is WebGPU's, which
+// `request_web_gpu` makes.
+#[cfg(not(target_family = "wasm"))]
+use super::gfx_error;
+
 /// A callback that tells the host about something it should act on, such as
 /// frame results to drain. It runs on a library thread and must not block.
 pub type Wake = Arc<dyn Fn() + Send + Sync>;
@@ -141,7 +146,7 @@ pub(crate) enum RingKind {
 /// pixels.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FrameTexture {
-    pub size: Size,
+    pub size: mln_gfx::Size,
     pub kind: FrameTextureKind,
     /// An exported ring's image as the API of the session's device names it,
     /// for a host on the device, or `None` for a borrowed ring's texture.
@@ -295,7 +300,7 @@ impl BorrowedRing {
 
     /// The textures' size in pixels.
     #[must_use]
-    pub fn physical_size(&self) -> Size {
+    pub fn physical_size(&self) -> mln_gfx::Size {
         match &self.kind {
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
             RingKind::Vulkan(images) => images.size,
@@ -307,7 +312,7 @@ impl BorrowedRing {
             RingKind::WebGpu(textures) => textures.size,
             #[cfg(all(feature = "d3d12", windows))]
             RingKind::D3d12(textures) => textures.size,
-            _ => Size::default(),
+            _ => mln_gfx::Size::default(),
         }
     }
 
@@ -744,7 +749,7 @@ impl Surface {
                 device.backend() == BackendType::OpenGL
             })
         {
-            mln_gl::SurfaceTarget::check_window(&**window)?;
+            mln_gl::SurfaceTarget::check_window(&**window).map_err(gfx_error)?;
         }
         #[cfg(not(all(feature = "gl", windows)))]
         let _ = (self, device);
@@ -1158,23 +1163,25 @@ impl Device {
         };
         match backend {
             #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
-            BackendType::WebGPU => mln_webgpu::Device::new(index(adapter)?).map(Device::WebGpu),
+            BackendType::WebGPU => mln_webgpu::Device::new(index(adapter)?).map(Device::WebGpu).map_err(gfx_error),
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
-            BackendType::Metal => mln_mtl::Device::new(index(adapter)?).map(Device::Metal),
+            BackendType::Metal => mln_mtl::Device::new(index(adapter)?).map(Device::Metal).map_err(gfx_error),
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
             BackendType::Vulkan => match adapter {
                 Some(Adapter::Uuid(uuid)) => mln_vulkan::Device::with_adapter_id(mln_vulkan::AdapterId::Uuid(uuid)),
                 Some(Adapter::Luid(luid)) => mln_vulkan::Device::with_adapter_id(mln_vulkan::AdapterId::Luid(luid)),
                 _ => mln_vulkan::Device::new(index(adapter)?),
             }
-            .map(Device::Vulkan),
+            .map(Device::Vulkan)
+            .map_err(gfx_error),
             #[cfg(all(feature = "d3d12", windows))]
             BackendType::D3D12 => match adapter {
                 Some(Adapter::Luid(luid)) => mln_d3d12::Device::with_luid(luid),
-                Some(Adapter::Uuid(_)) => Err(Error::unsupported("D3D12 names no GPU by UUID")),
+                Some(Adapter::Uuid(_)) => Err(mln_gfx::Error::unsupported("D3D12 names no GPU by UUID")),
                 _ => mln_d3d12::Device::new(index(adapter)?),
             }
-            .map(Device::D3d12),
+            .map(Device::D3d12)
+            .map_err(gfx_error),
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
             BackendType::OpenGL => {
                 // An OpenGL device renders on the one GPU of its display, so
@@ -1190,7 +1197,7 @@ impl Device {
                     GlApi::Gl => mln_gl::Api::Gl,
                 };
                 let options = mln_gl::DeviceOptions { api, single_context: gl_single_context };
-                mln_gl::Device::with_options(options).map(Device::Gl)
+                mln_gl::Device::with_options(options).map(Device::Gl).map_err(gfx_error)
             }
             #[cfg(all(feature = "gl", target_family = "wasm"))]
             BackendType::OpenGL if adapter.is_none() => Ok(Device::WebGl),
@@ -1212,12 +1219,12 @@ impl Device {
         match (self, &ring.kind) {
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
             (Device::Vulkan(device), RingKind::Vulkan(images)) => {
-                images.check(device)?;
+                images.check(device).map_err(gfx_error)?;
                 Ok(device.sync_kinds())
             }
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
             (Device::Metal(device), RingKind::Metal(textures)) => {
-                textures.check(device)?;
+                textures.check(device).map_err(gfx_error)?;
                 Ok(mln_mtl::BorrowedTextures::sync_kinds(device))
             }
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
@@ -1231,12 +1238,12 @@ impl Device {
             }
             #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
             (Device::WebGpu(_), RingKind::WebGpu(textures)) => {
-                textures.check()?;
+                textures.check().map_err(gfx_error)?;
                 Ok(mln_webgpu::BorrowedTextures::sync_kinds())
             }
             #[cfg(all(feature = "d3d12", windows))]
             (Device::D3d12(device), RingKind::D3d12(textures)) => {
-                textures.check(device)?;
+                textures.check(device).map_err(gfx_error)?;
                 Ok(mln_d3d12::BorrowedTextures::sync_kinds())
             }
             _ => Err(Error::unsupported(format!(
@@ -1308,25 +1315,25 @@ impl Device {
         match self {
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
             Device::Vulkan(device) => {
-                let kind = mln_vulkan::exported_target::plan(device, ring)?;
+                let kind = mln_vulkan::exported_target::plan(device, ring).map_err(gfx_error)?;
                 let (producer, consumer) = mln_vulkan::exported_target::sync_kinds(device);
                 Ok((kind, producer, consumer))
             }
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
             Device::Metal(device) => {
-                let kind = mln_mtl::exported_target::plan(device, ring)?;
+                let kind = mln_mtl::exported_target::plan(device, ring).map_err(gfx_error)?;
                 let (producer, consumer) = mln_mtl::exported_target::sync_kinds(device);
                 Ok((kind, producer, consumer))
             }
             #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
             Device::Gl(device) => {
-                let kind = mln_gl::exported_target::plan(device, ring)?;
+                let kind = mln_gl::exported_target::plan(device, ring).map_err(gfx_error)?;
                 let (producer, consumer) = mln_gl::exported_target::sync_kinds(device);
                 Ok((kind, producer, consumer))
             }
             #[cfg(all(feature = "d3d12", windows))]
             Device::D3d12(device) => {
-                let kind = mln_d3d12::exported_target::plan(device, ring)?;
+                let kind = mln_d3d12::exported_target::plan(device, ring).map_err(gfx_error)?;
                 let (producer, consumer) = mln_d3d12::exported_target::sync_kinds();
                 Ok((kind, producer, consumer))
             }
@@ -1485,6 +1492,6 @@ impl Device {
     /// Fails as [`mln_webgpu::Device::request`] does.
     #[cfg(all(feature = "webgpu", target_family = "wasm"))]
     pub async fn request_web_gpu() -> Result<Device, Error> {
-        mln_webgpu::Device::request().await.map(Device::WebGpu)
+        mln_webgpu::Device::request().await.map(Device::WebGpu).map_err(super::gfx_error)
     }
 }

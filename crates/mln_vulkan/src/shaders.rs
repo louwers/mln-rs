@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
+use mln_gfx::util_hash::HashMap;
 use mln_glsl::{Module, ResourceUse, Stage};
-use mln_util::hash::HashMap;
 use naga::back::spv;
 use parking_lot::Mutex;
 

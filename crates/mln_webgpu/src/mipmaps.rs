@@ -4,7 +4,7 @@
 //! device that [`computes`]; a render pass for each level draws the others,
 //! which costs the pass's bookkeeping, and the driver's, for every level.
 
-use mln_util::hash::HashMap;
+use mln_gfx::util_hash::HashMap;
 
 /// A triangle over the target, and each texel of it sampled at its center
 /// in the level before, between the four texels it covers there, which the

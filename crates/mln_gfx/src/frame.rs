@@ -3,9 +3,8 @@
 //! and the target ends the frame, which hands the image off. Each step
 //! takes the backend's `Gpu`, which the caller lends to all three.
 
-use mln_util::size::Size;
-
 use crate::gpu::{Gpu, TargetFormats, TextureId};
+use crate::size::Size;
 
 /// The textures of the backend's `Gpu` that a frame draws into.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -16,6 +15,15 @@ pub struct FrameImage {
     pub depth_stencil: Option<TextureId>,
     /// Their formats, as the frame's pipelines name them.
     pub targets: TargetFormats,
+}
+
+/// A frame read back: premultiplied RGBA, in rows from the top.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FramePixels {
+    /// In physical pixels.
+    pub size: Size,
+    /// Four bytes for each pixel, `size.width * 4` bytes for each row.
+    pub data: Vec<u8>,
 }
 
 /// How one side of a shared texture waits for the other's GPU work on it.

@@ -74,6 +74,19 @@ impl From<mln_util::Error> for Error {
     }
 }
 
+impl From<mln_gfx::Error> for Error {
+    fn from(error: mln_gfx::Error) -> Self {
+        let kind = match error.kind {
+            mln_gfx::ErrorKind::InvalidArgument => ErrorKind::InvalidArgument,
+            mln_gfx::ErrorKind::InvalidState => ErrorKind::InvalidState,
+            mln_gfx::ErrorKind::Unsupported => ErrorKind::Unsupported,
+            mln_gfx::ErrorKind::Native => ErrorKind::Native,
+            mln_gfx::ErrorKind::NotFound => ErrorKind::NotFound,
+        };
+        Self::new(kind, error.message)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,5 +114,7 @@ mod tests {
     fn a_core_error_keeps_its_kind_and_message() {
         let error = Error::from(mln_util::Error::not_found("no layer"));
         assert_eq!((error.status(), error.message()), (MLN_STATUS_NOT_FOUND, "no layer"));
+        let error = Error::from(mln_gfx::Error::unsupported("no Vulkan"));
+        assert_eq!((error.status(), error.message()), (MLN_STATUS_UNSUPPORTED, "no Vulkan"));
     }
 }

@@ -103,7 +103,7 @@ mod tests {
         let mut textures = DemTextures::default();
         let mut bucket = bucket();
         let first = textures.texture(&mut context, &bucket);
-        assert_eq!(context.texture(&first).unwrap().size(), Size::new(6, 6), "with its border");
+        assert_eq!(context.texture(&first).unwrap().size(), mln_gfx::Size::new(6, 6), "with its border");
         assert_eq!(textures.texture(&mut context, &bucket), first);
 
         bucket.reset_render_target_prepared();

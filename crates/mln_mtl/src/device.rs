@@ -3,8 +3,7 @@
 use std::ffi::c_void;
 use std::sync::{Arc, OnceLock};
 
-use mln_gfx::ExportKinds;
-use mln_util::error::Error;
+use mln_gfx::{Error, ExportKinds};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_metal::{MTLCommandQueue, MTLCreateSystemDefaultDevice, MTLDevice};
@@ -28,10 +27,10 @@ impl Device {
     /// `MTLCopyAllDevices` order on macOS, or the system's default GPU when
     /// `None`, with a command queue of its own. It logs the GPU it is on.
     ///
-    /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) when there is
+    /// Fails with [`ErrorKind::NotFound`](mln_gfx::ErrorKind) when there is
     /// no GPU at `adapter_index`, with
-    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) when there is no
-    /// Metal device, and with [`ErrorKind::Native`](mln_util::ErrorKind)
+    /// [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) when there is no
+    /// Metal device, and with [`ErrorKind::Native`](mln_gfx::ErrorKind)
     /// when the device makes no command queue.
     pub fn new(adapter_index: Option<usize>) -> Result<Device, Error> {
         let device = match adapter_index {
@@ -56,8 +55,8 @@ impl Device {
     /// The host's device and command queue, or a queue of the device's own
     /// when `queue` is null.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
-    /// null device, and with [`ErrorKind::Native`](mln_util::ErrorKind) when
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_gfx::ErrorKind) for a
+    /// null device, and with [`ErrorKind::Native`](mln_gfx::ErrorKind) when
     /// the device makes no command queue.
     ///
     /// # Safety

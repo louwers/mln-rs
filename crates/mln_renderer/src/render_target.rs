@@ -2,8 +2,7 @@ use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, GpuError, LoadO
 use mln_gfx::scissor_rect::ScissorRect;
 use mln_gfx::texture2d::{SamplerState, texture_format};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
-use mln_util::Color;
-use mln_util::size::Size;
+use mln_gfx::{Rgba, Size};
 
 use crate::gfx::context::Context;
 use crate::gfx::resources::GpuTexture;
@@ -80,7 +79,7 @@ impl RenderTarget {
         }
         Ok(OpenPass {
             label: "render target",
-            color: Some(ColorAttachment { texture: color, load: LoadOp::Clear(Color::new(0.0, 0.0, 0.0, 1.0)) }),
+            color: Some(ColorAttachment { texture: color, load: LoadOp::Clear(Rgba::new(0.0, 0.0, 0.0, 1.0)) }),
             depth_stencil: self.depth.as_ref().map(|depth| DepthStencilAttachment {
                 texture: depth.id(),
                 depth: LoadOp::Clear(1.0),

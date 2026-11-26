@@ -48,8 +48,7 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::stencil_mode::{StencilMode, Test};
 use mln_gfx::types::StencilOpType;
-use mln_util::Color;
-use mln_util::size::Size;
+use mln_gfx::{Rgba, Size};
 
 pub use self::cases::*;
 pub use self::terrain::terrain_heights;
@@ -105,7 +104,7 @@ fn dynamic() -> DynamicState {
         depth_range: (0.0, 1.0),
         scissor: Scissor { x: 0, y: 0, width: SIZE.width, height: SIZE.height },
         stencil_reference: 0,
-        blend_constant: Color::new_unchecked(0.0, 0.0, 0.0, 0.0),
+        blend_constant: Rgba::new(0.0, 0.0, 0.0, 0.0),
         line_width: 1.0,
     }
 }
@@ -189,7 +188,7 @@ pub fn clip_mask_and_background(gpu: &mut impl Gpu) -> Result<(), GpuError> {
 fn frame_pass(color: TextureId, depth_stencil: TextureId) -> PassDesc<'static> {
     PassDesc {
         label: "frame",
-        color: Some(ColorAttachment { texture: color, load: LoadOp::Clear(Color::black()) }),
+        color: Some(ColorAttachment { texture: color, load: LoadOp::Clear(Rgba::new(0.0, 0.0, 0.0, 1.0)) }),
         depth_stencil: Some(DepthStencilAttachment {
             texture: depth_stencil,
             depth: LoadOp::Clear(1.0),

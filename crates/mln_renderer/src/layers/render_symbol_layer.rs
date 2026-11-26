@@ -12,7 +12,6 @@ use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::{Projection, ProjectionData};
 use mln_style::layer::{ErasedLayerStyle as _, LayerStyle};
@@ -38,6 +37,7 @@ use crate::draw::{DrawGeometry, DrawObjects, copy_shared_attributes};
 use crate::geometry::feature_index::FeatureIndex;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
+use crate::gfx::segment::SegmentBase;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::vertices::{SharedVertices, TypedVertices};
 use crate::layer_drawing::{

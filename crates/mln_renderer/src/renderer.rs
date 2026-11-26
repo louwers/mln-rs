@@ -4,7 +4,7 @@ use std::time::Duration;
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, LoadOp, TargetFormats};
 use mln_gfx::rendering_stats::{RenderingStats, TerrainStats};
 use mln_gfx::shaders::bindings::PAINT_PARAMS_ID;
-use mln_gfx::{FrameImage, Handoff, ScissorRect};
+use mln_gfx::{FrameImage, Handoff, Rgba, ScissorRect};
 use mln_text::GlyphCache;
 use mln_text::local_fonts::LocalGlyphs;
 use mln_util::Color;
@@ -796,7 +796,8 @@ fn draw(
 
     // The frame's pass, cleared to the backdrop, which shows where there are
     // no tiles.
-    let color = frame.background_color;
+    let Color { r, g, b, a, .. } = frame.background_color;
+    let color = Rgba::new(r, g, b, a);
     let pass = OpenPass {
         label: "main buffer",
         color: Some(ColorAttachment {
@@ -858,7 +859,7 @@ fn draw(
     // into the target.
     let present = OpenPass {
         label: "main buffer",
-        color: Some(ColorAttachment { texture: image.color, load: LoadOp::Clear(Color::new(0.0, 0.0, 0.0, 0.0)) }),
+        color: Some(ColorAttachment { texture: image.color, load: LoadOp::Clear(Rgba::new(0.0, 0.0, 0.0, 0.0)) }),
         depth_stencil: None,
         size: image.size,
         targets: TargetFormats { color: image.targets.color, depth_stencil: None },

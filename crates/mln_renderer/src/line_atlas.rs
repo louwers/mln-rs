@@ -10,6 +10,7 @@ use mln_util::size::Size;
 
 use crate::gfx::context::Context;
 use crate::gfx::store::SharedTexture;
+use crate::gfx::texture_size;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct LinePatternPos {
@@ -273,7 +274,7 @@ impl DashPatternTexture {
                 ..Default::default()
             });
         });
-        if let Err(error) = context.upload_texture_data(gpu, &texture, &image.data, image.size) {
+        if let Err(error) = context.upload_texture_data(gpu, &texture, &image.data, texture_size(image.size)) {
             context.fail(format!("Uploading a dash pattern failed: {error}"));
         }
         self.texture = Some(texture);

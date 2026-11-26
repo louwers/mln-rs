@@ -99,7 +99,7 @@ const BACKENDS: [BackendType; 5] =
 fn exported_image(frame: &AcquiredFrame) -> (Size, ExportedImage) {
     let texture = frame.texture().expect("an exported frame has its image");
     match &texture.kind {
-        FrameTextureKind::Exported(image) => (texture.size, image.clone()),
+        FrameTextureKind::Exported(image) => (Size::new(texture.size.width, texture.size.height), image.clone()),
         other => panic!("an exported frame has no {other:?}"),
     }
 }

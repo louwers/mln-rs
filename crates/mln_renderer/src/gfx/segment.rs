@@ -1,22 +1,27 @@
 #[derive(Clone, Debug, PartialEq, mln_wire::Wire)]
-pub struct SegmentBase {
-    pub vertex_offset: usize,
-    pub index_offset: usize,
-    pub vertex_length: usize,
-    pub index_length: usize,
-    pub base_instance: usize,
-    pub instance_count: usize,
-    pub sort_key: f32,
+pub(crate) struct SegmentBase {
+    pub(crate) vertex_offset: usize,
+    pub(crate) index_offset: usize,
+    pub(crate) vertex_length: usize,
+    pub(crate) index_length: usize,
+    pub(crate) base_instance: usize,
+    pub(crate) instance_count: usize,
+    pub(crate) sort_key: f32,
 }
 
 impl SegmentBase {
     #[must_use]
-    pub fn new(vertex_offset: usize, index_offset: usize) -> Self {
+    pub(crate) fn new(vertex_offset: usize, index_offset: usize) -> Self {
         Self::with_lengths(vertex_offset, index_offset, 0, 0)
     }
 
     #[must_use]
-    pub fn with_lengths(vertex_offset: usize, index_offset: usize, vertex_length: usize, index_length: usize) -> Self {
+    pub(crate) fn with_lengths(
+        vertex_offset: usize,
+        index_offset: usize,
+        vertex_length: usize,
+        index_length: usize,
+    ) -> Self {
         SegmentBase {
             vertex_offset,
             index_offset,
@@ -31,7 +36,7 @@ impl SegmentBase {
     /// The field-by-field copy the C++ code spells out (there is no copy
     /// constructor).
     #[must_use]
-    pub fn copy(&self) -> Self {
+    pub(crate) fn copy(&self) -> Self {
         SegmentBase {
             vertex_offset: self.vertex_offset,
             index_offset: self.index_offset,
@@ -46,4 +51,4 @@ impl SegmentBase {
 
 /// The most vertices a segment holds, since they are addressed by 16-bit
 /// indices.
-pub const MAX_SEGMENT_VERTICES: usize = u16::MAX as usize;
+pub(crate) const MAX_SEGMENT_VERTICES: usize = u16::MAX as usize;

@@ -5,6 +5,7 @@ use std::ops::{Deref, DerefMut, RangeInclusive};
 use std::sync::{Arc, Once};
 
 use glow::HasContext;
+use mln_gfx::Size;
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gpu::validation::{
@@ -20,9 +21,7 @@ use mln_gfx::gpu::{
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::{MAX_ACTIVE_TEXTURE_UNITS, SamplerState};
 use mln_gfx::types::{DepthMaskType, TextureFilterType};
-use mln_util::hash::HashMap;
-use mln_util::range::Range;
-use mln_util::size::Size;
+use mln_gfx::util_hash::HashMap;
 
 use crate::bytes::Bytes;
 use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass, lend_context};
@@ -480,7 +479,7 @@ pub struct GlGpu {
 impl GlGpu {
     /// A backend on a context of its own in `device`'s share group.
     #[cfg(all(test, not(target_family = "wasm")))]
-    pub(crate) fn new(device: &crate::device::Device) -> Result<GlGpu, mln_util::error::Error> {
+    pub(crate) fn new(device: &crate::device::Device) -> Result<GlGpu, mln_gfx::Error> {
         let (gl, platform) = device.create_context()?;
         Ok(GlGpu::on(GlContext::new(gl, platform)))
     }
@@ -1014,9 +1013,8 @@ fn set_state(
     // out bound, which the draw leaves alone.
     if differs(|a, b| a.depth_range == b.depth_range) {
         let depth = if depth_stencil { fixed.depth } else { DepthState::from(&DepthMode::disabled()) };
-        let (min, max) = dynamic.depth_range;
         let mask = if depth.write { DepthMaskType::ReadWrite } else { DepthMaskType::ReadOnly };
-        state.set_depth_mode(gl, &DepthMode { func: depth.compare, mask, range: Range { min, max } });
+        state.set_depth_mode(gl, &DepthMode { func: depth.compare, mask, range: dynamic.depth_range });
     }
     if differs(|a, b| a.stencil_reference == b.stencil_reference) {
         let stencil = if depth_stencil { fixed.stencil } else { StencilState::from(&StencilMode::disabled()) };

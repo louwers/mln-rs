@@ -3,16 +3,14 @@
 
 use std::marker::PhantomData;
 
-use mln_util::error::Error;
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
-
-use crate::frame::{FrameImage, FrameTarget, Handoff};
+use crate::error::Error;
+use crate::frame::{FrameImage, FramePixels, FrameTarget, Handoff};
 use crate::gpu::{
     Gpu, GpuError, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, destroy_unused,
     read_texels,
 };
 use crate::log_target;
+use crate::size::Size;
 
 /// The format of an offscreen frame's color, which
 /// [`read_image`](OffscreenTarget::read_image) reads as it is.
@@ -44,18 +42,18 @@ impl<G: Gpu + ?Sized> OffscreenTarget<G> {
         OffscreenTarget { size, image: None, gpu: PhantomData }
     }
 
-    /// The last frame's pixels: premultiplied RGBA, in rows from the top.
+    /// The last frame's pixels.
     ///
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) before
+    /// Fails with [`ErrorKind::InvalidState`](crate::ErrorKind) before
     /// the first frame of the size, and with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) where the backend reads
+    /// [`ErrorKind::Native`](crate::ErrorKind) where the backend reads
     /// nothing back.
-    pub fn read_image(&self, gpu: &mut G) -> Result<PremultipliedImage, Error> {
+    pub fn read_image(&self, gpu: &mut G) -> Result<FramePixels, Error> {
         let image =
             self.image.ok_or_else(|| Error::invalid_state("the target has no frame since it was made or resized"))?;
-        let texels = read_texels(gpu, image.color, TextureRegion::whole(image.size))
+        let data = read_texels(gpu, image.color, TextureRegion::whole(image.size))
             .map_err(|error| Error::native(format!("reading the frame back failed: {error}")))?;
-        Ok(PremultipliedImage::from_vec(image.size, texels))
+        Ok(FramePixels { size: image.size, data })
     }
 
     fn make_image(gpu: &mut G, size: Size) -> Result<Image, GpuError> {

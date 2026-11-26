@@ -1,12 +1,12 @@
 use std::cell::Cell;
 
-use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use mln_util::constants;
 
 use crate::buckets::fill_extrusion_bucket::FillExtrusionStaticVertex;
 use crate::buckets::raster_bucket::RasterLayoutVertex;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{Indexes, SharedIndexes};
+use crate::gfx::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use crate::gfx::store::{IndexesKey, WeakShared};
 
 /// The most walls whose quads a segment draws: as many as its 16-bit

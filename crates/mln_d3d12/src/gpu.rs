@@ -6,6 +6,7 @@ use std::mem::ManuallyDrop;
 use std::sync::Arc;
 
 use gpu_allocator::MemoryLocation;
+use mln_gfx::Size;
 use mln_gfx::gpu::validation::{
     self, BindingsTags, BufferInfo, GeometryTags, LayoutTags, Lookup, PassTarget, PipelineTags, ShaderBinding,
     TextureInfo,
@@ -19,9 +20,8 @@ use mln_gfx::gpu::{
 use mln_gfx::shaders::bindings::{FIRST_UNIFORM_ID, VERTEX_DRAW_ID};
 use mln_gfx::shaders::program::Program;
 use mln_gfx::texture2d::SamplerState;
+use mln_gfx::util_hash::{HashMap, HashSet};
 use mln_glsl::layout::{DescriptorSetType, IMAGE_SAMPLER_START, LAYER_STORAGE_COUNT};
-use mln_util::hash::{HashMap, HashSet};
-use mln_util::size::Size;
 use windows::Win32::Foundation::{HANDLE, RECT};
 use windows::Win32::Graphics::Direct3D::{D3D_PRIMITIVE_TOPOLOGY, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST};
 use windows::Win32::Graphics::Direct3D12::{
@@ -377,7 +377,7 @@ fn rest_state(format: Option<TextureFormat>, usage: TextureUsage) -> D3D12_RESOU
     }
 }
 
-fn color(color: mln_util::Color) -> [f32; 4] {
+fn color(color: mln_gfx::Rgba) -> [f32; 4] {
     [color.r, color.g, color.b, color.a]
 }
 

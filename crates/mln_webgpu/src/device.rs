@@ -12,7 +12,7 @@
 
 use std::sync::{Arc, OnceLock};
 
-use mln_util::error::Error;
+use mln_gfx::Error;
 #[cfg(not(target_family = "wasm"))]
 use parking_lot::Mutex;
 
@@ -116,10 +116,10 @@ impl Device {
     /// high-performance adapter when `None`. It logs the adapter it is on,
     /// and its uncaptured errors.
     ///
-    /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) when there is
+    /// Fails with [`ErrorKind::NotFound`](mln_gfx::ErrorKind) when there is
     /// no adapter at `adapter_index`, with
-    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) when there is no
-    /// adapter at all, and with [`ErrorKind::Native`](mln_util::ErrorKind)
+    /// [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) when there is no
+    /// adapter at all, and with [`ErrorKind::Native`](mln_gfx::ErrorKind)
     /// when the adapter can't create the device.
     #[cfg(not(target_family = "wasm"))]
     pub fn new(adapter_index: Option<usize>) -> Result<Device, Error> {
@@ -157,9 +157,9 @@ impl Device {
     /// high-performance adapter, which arrive asynchronously. Its uncaptured
     /// errors are logged.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) when the
     /// browser has no WebGPU adapter, and with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) when the adapter can't
+    /// [`ErrorKind::Native`](mln_gfx::ErrorKind) when the adapter can't
     /// create the device.
     #[cfg(target_family = "wasm")]
     pub async fn request() -> Result<Device, Error> {

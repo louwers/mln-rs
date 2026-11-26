@@ -6,7 +6,6 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
-use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_style::PropertyEvaluationParameters;
 use mln_style::layer::LayerStyle;
@@ -17,7 +16,6 @@ use mln_util::Color;
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
-use mln_util::size::Size;
 
 use super::{cast_matrix, refresh_paint_attributes};
 use crate::bucket::Bucket;
@@ -28,6 +26,7 @@ use crate::geometry::feature_index::QueryRegion;
 use crate::gfx::atlas_binding::AtlasBinding;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
+use crate::gfx::segment::SegmentBase;
 use crate::gfx::texture2d::Texture2D;
 use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::layer_composite::Composite;
@@ -570,7 +569,7 @@ impl RenderFillLayer {
         let faded = evaluated.fill_pattern.faded();
         let tlbr = |id: &str| tile_bucket.pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
         let texture = draw.objects.texture(IMAGE_SLOT).and_then(|texture| parameters.context.texture(texture));
-        let texture_size = texture.map_or(Size::new(0, 0), Texture2D::size);
+        let texture_size = texture.map(Texture2D::size).unwrap_or_default();
         // A pattern has nothing to sample before its tile has an atlas, and
         // the shaders divide by the atlas size.
         if texture_size.width == 0 || texture_size.height == 0 {

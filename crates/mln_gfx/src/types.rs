@@ -100,7 +100,7 @@ pub enum CullFaceWindingType {
 }
 
 /// Texture pixel type
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, mln_wire::Wire)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum TexturePixelType {
     RGBA,

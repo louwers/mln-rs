@@ -11,8 +11,8 @@ use std::sync::Arc;
 use mln_gfx::gpu::{GpuError, ShaderKey};
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::source::GlslSource;
+use mln_gfx::util_hash::HashMap;
 use mln_glsl::{Module, ResourceUse, Stage};
-use mln_util::hash::HashMap;
 use parking_lot::Mutex;
 
 use self::dxc::Dxc;

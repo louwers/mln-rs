@@ -18,6 +18,7 @@ use mln_util::size::Size;
 
 use crate::gfx::context::Context;
 use crate::gfx::store::SharedTexture;
+use crate::gfx::texture_size;
 
 /// Identifies a bin within a dynamic texture.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -246,7 +247,7 @@ impl DynamicTexture {
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         if self.texture.is_none() {
             let texture = context.add_texture_with(|texture| {
-                texture.set_size(self.size);
+                texture.set_size(texture_size(self.size));
                 texture.set_format(texture_format(self.pixel_format, TextureChannelDataType::UnsignedByte));
                 texture.set_sampler(SamplerState {
                     filter: TextureFilterType::Linear,
@@ -277,7 +278,7 @@ impl DynamicTexture {
                 }
             };
             let size = Size::new(u32::from(rect.w), u32::from(rect.h));
-            if let Err(error) = context.upload_texture_region(gpu, texture, data, size, rect.x, rect.y) {
+            if let Err(error) = context.upload_texture_region(gpu, texture, data, texture_size(size), rect.x, rect.y) {
                 context.fail(format!("Uploading to an atlas texture failed: {error}"));
             }
         }

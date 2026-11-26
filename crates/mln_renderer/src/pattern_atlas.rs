@@ -9,6 +9,7 @@ use mln_util::size::Size;
 
 use crate::gfx::context::Context;
 use crate::gfx::store::SharedTexture;
+use crate::gfx::texture_size;
 
 /// When copied into the atlas texture, image data is padded by one pixel on
 /// each side. Pattern images are padded with a copy of the image data
@@ -156,7 +157,7 @@ impl PatternAtlas {
             Some(_) => return,
         };
         let image = &self.atlas_image;
-        if let Err(error) = context.upload_texture_data(gpu, texture, &image.data, image.size) {
+        if let Err(error) = context.upload_texture_data(gpu, texture, &image.data, texture_size(image.size)) {
             context.fail(format!("Uploading the pattern atlas failed: {error}"));
         }
         self.dirty = false;

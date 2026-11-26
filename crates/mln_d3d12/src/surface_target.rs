@@ -18,15 +18,13 @@ use std::ffi::c_void;
 use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
 use std::sync::Arc;
 
-use mln_gfx::Window;
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_gfx::gpu::{
     ColorAttachment, Gpu as _, LoadOp, PassDesc, ResourceId, TargetFormats, TextureDesc, TextureFormat, TextureId,
     TextureUsage, destroy_unused,
 };
 use mln_gfx::window::raw_window_handle::RawWindowHandle;
-use mln_util::error::Error;
-use mln_util::size::Size;
+use mln_gfx::{Error, Size, Window};
 use windows::Win32::Foundation::{DXGI_STATUS_OCCLUDED, HANDLE, HWND, WAIT_OBJECT_0};
 use windows::Win32::Graphics::Direct3D12::{D3D12_RESOURCE_STATE_PRESENT, ID3D12Resource};
 use windows::Win32::Graphics::DirectComposition::IDCompositionVisual;
@@ -96,7 +94,7 @@ const SWAP_CHAIN_PANEL_NATIVE: GUID = GUID::from_u128(0x63aa_d0b8_7c24_40ff_85a8
 impl Composition {
     /// The host's `IDCompositionVisual`, which the target references.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_gfx::ErrorKind) for
     /// a null pointer.
     ///
     /// # Safety
@@ -112,7 +110,7 @@ impl Composition {
 
     /// The host's `ISwapChainPanelNative`, which the target references.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_gfx::ErrorKind) for
     /// an object that isn't one.
     ///
     /// # Safety
@@ -227,11 +225,11 @@ impl SurfaceTarget {
     /// A target on `backend` that presents to `window`, a Win32 window,
     /// through a swap chain of `size` pixels.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for a
     /// window that isn't a Win32 window, with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) for one that is
+    /// [`ErrorKind::InvalidState`](mln_gfx::ErrorKind) for one that is
     /// minimized or has no client area, and with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) when DXGI makes no swap
+    /// [`ErrorKind::Native`](mln_gfx::ErrorKind) when DXGI makes no swap
     /// chain for it.
     pub fn new(backend: &RendererBackend, window: Arc<dyn Window>, size: Size) -> Result<SurfaceTarget, Error> {
         let handle = window.window_handle().map_err(|e| Error::native(format!("The window has no handle: {e}")))?;
@@ -261,7 +259,7 @@ impl SurfaceTarget {
     /// visual shows it once the host commits its device. Make the target of a
     /// `SwapChainPanel` on the panel's UI thread.
     ///
-    /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when DXGI makes
+    /// Fails with [`ErrorKind::Native`](mln_gfx::ErrorKind) when DXGI makes
     /// no swap chain, or `composition` takes none.
     pub fn for_composition(
         backend: &RendererBackend,

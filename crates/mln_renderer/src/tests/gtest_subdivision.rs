@@ -3,7 +3,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
-use mln_gfx::shaders::segment::MAX_SEGMENT_VERTICES;
 use mln_style::feature::{GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileFeature};
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionLayoutProperties;
 use mln_text::atlas::ImagePositions;
@@ -16,6 +15,7 @@ use mln_vec_map::VecMap;
 use super::with_context;
 use crate::bucket::Bucket;
 use crate::buckets::fill_extrusion_bucket::FillExtrusionBucket;
+use crate::gfx::segment::MAX_SEGMENT_VERTICES;
 use crate::globe_tile_mesh::{GlobeTileMeshCache, globe_mesh_data};
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::tile_mask::TileMask;

@@ -5,7 +5,6 @@
 use std::sync::Arc;
 
 use geometry::Point;
-use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::TileCoordinate;
 use mln_map_types::tile_coordinate::TileCoordinatePoint;
 use mln_style::Source;
@@ -22,6 +21,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use crate::bucket::UploadNeeds;
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::gfx::context::Context;
+use crate::gfx::segment::SegmentBase;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::render_source::{RenderSource, RenderSourceBase, RenderTileParameters};
 use crate::tile::store::TileStore;

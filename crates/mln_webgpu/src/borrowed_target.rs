@@ -5,9 +5,7 @@
 
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_gfx::gpu::{Gpu as _, ResourceId, TargetFormats, destroy_unused};
-use mln_gfx::{ConsumerSync, DepthStencilFormat, DepthStencilFormats, GpuSync, SyncKind, SyncKinds};
-use mln_util::error::Error;
-use mln_util::size::Size;
+use mln_gfx::{ConsumerSync, DepthStencilFormat, DepthStencilFormats, Error, GpuSync, Size, SyncKind, SyncKinds};
 
 use crate::gpu::{WebGpu, from_wgpu_format};
 use crate::log_target;
@@ -48,11 +46,11 @@ impl BorrowedTextures {
 
     /// Checks the textures against their ring.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_gfx::ErrorKind) for a
     /// texture of another size than the ring's, of another format than the
     /// first, or that a frame can't render into, for depth textures that
     /// aren't one for each texture, and with
-    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for depth textures of
+    /// [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for depth textures of
     /// no depth and stencil format.
     pub fn check(&self) -> Result<(), Error> {
         let Some(first) = self.textures.first() else {
@@ -132,7 +130,7 @@ impl BorrowedTarget {
     /// `producer`, one of [`BorrowedTextures::sync_kinds`]'s.
     ///
     /// Fails as [`BorrowedTextures::check`] does, and with
-    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a producer kind
+    /// [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for a producer kind
     /// the target can't hand over.
     pub fn new(backend: &RendererBackend, textures: BorrowedTextures, producer: SyncKind) -> Result<Self, Error> {
         textures.check()?;
@@ -182,10 +180,10 @@ impl BorrowedTarget {
     /// ring's format. Returns the sync after which the host may use the old
     /// textures, as [`release_textures`](Self::release_textures) does.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_gfx::ErrorKind) for
     /// another number of textures, with
-    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for another format,
-    /// with [`ErrorKind::InvalidState`](mln_util::ErrorKind) once the target
+    /// [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) for another format,
+    /// with [`ErrorKind::InvalidState`](mln_gfx::ErrorKind) once the target
     /// let go of its textures, as [`BorrowedTextures::check`] does, and as
     /// [`release_textures`](Self::release_textures) does. The target then
     /// keeps its textures.
@@ -209,9 +207,9 @@ impl BorrowedTarget {
     /// may use them, of the producer's kind. The target draws no frame
     /// after.
     ///
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) once the
+    /// Fails with [`ErrorKind::InvalidState`](mln_gfx::ErrorKind) once the
     /// target let go of its textures, and with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) when it can't submit its
+    /// [`ErrorKind::Native`](mln_gfx::ErrorKind) when it can't submit its
     /// work, or wait for it for [`SyncKind::CpuComplete`]. It keeps its
     /// textures then.
     pub fn release_textures(&mut self, gpu: &mut WebGpu) -> Result<GpuSync, Error> {

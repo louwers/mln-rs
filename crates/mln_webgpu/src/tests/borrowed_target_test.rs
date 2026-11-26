@@ -1,6 +1,5 @@
 use mln_gfx::frame::FrameTarget as _;
-use mln_gfx::{RendererBackend as _, SyncKind};
-use mln_util::size::Size;
+use mln_gfx::{RendererBackend as _, Size, SyncKind};
 
 use crate::{BorrowedTarget, BorrowedTextures, Device, RendererBackend};
 

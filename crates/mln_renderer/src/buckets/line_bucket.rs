@@ -1,7 +1,6 @@
 use std::sync::{Arc, Once};
 
 use geometry::Point;
-use mln_gfx::shaders::segment::SegmentBase;
 use mln_style::expression::{EvaluationContext, Image, Value};
 use mln_style::feature::{GeometryCollection, GeometryTileFeature};
 use mln_style::layers::Line;
@@ -19,6 +18,7 @@ use crate::bucket::{Bucket, BucketBase, UploadNeeds};
 use crate::bucket_geometry::{GeometryUpload, GeometryVec};
 use crate::gfx::line_mesh::{LineLayoutVertex, LineOptions, add_line};
 use crate::gfx::mesh::Indexed;
+use crate::gfx::segment::SegmentBase;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, DashArrayBinder, PaintPropertyBinder};

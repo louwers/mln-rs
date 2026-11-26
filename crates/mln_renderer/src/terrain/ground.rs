@@ -6,13 +6,11 @@
 use std::mem::size_of;
 use std::sync::{Arc, Weak};
 
-use mln_gfx::AttributeDataType;
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, LoadOp, TargetFormats, TextureFormat};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
+use mln_gfx::{AttributeDataType, Rgba, Size};
 use mln_tile_id::UnwrappedTileID;
-use mln_util::Color;
-use mln_util::size::Size;
 
 use super::{TerrainElevation, TileGround};
 use crate::draw::DrawObjects;
@@ -218,7 +216,7 @@ impl GroundDepth {
         };
         Some(OpenPass {
             label: "ground depth",
-            color: Some(ColorAttachment { texture: color, load: LoadOp::Clear(Color::new(0.0, 0.0, 0.0, 0.0)) }),
+            color: Some(ColorAttachment { texture: color, load: LoadOp::Clear(Rgba::new(0.0, 0.0, 0.0, 0.0)) }),
             depth_stencil: self.depth.as_ref().map(|depth| DepthStencilAttachment {
                 texture: depth.id(),
                 depth: LoadOp::Clear(1.0),

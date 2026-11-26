@@ -2,6 +2,7 @@
 // so that a call that sets it again reaches GL only when the value changes.
 
 use glow::HasContext;
+use mln_gfx::Rgba;
 use mln_gfx::color_mode::{ColorMode, Mask};
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
@@ -12,7 +13,6 @@ use mln_gfx::types::{
     ColorBlendEquationType, ColorBlendFactorType, CullFaceSideType, CullFaceWindingType, DepthFunctionType,
     DepthMaskType, StencilFunctionType, StencilOpType,
 };
-use mln_util::Color;
 
 use crate::enums;
 use crate::types::{BufferID, FramebufferID, Gl, ProgramID, SamplerID, TextureID, VertexArrayID};
@@ -63,7 +63,7 @@ pub(crate) struct State {
     blend: Cached<bool>,
     blend_equation: Cached<ColorBlendEquationType>,
     blend_func: Cached<(ColorBlendFactorType, ColorBlendFactorType)>,
-    blend_color: Cached<Color>,
+    blend_color: Cached<Rgba>,
     color_mask: Cached<Mask>,
 
     cull_face: Cached<bool>,
@@ -74,7 +74,7 @@ pub(crate) struct State {
     scissor: Cached<Option<Rect>>,
     viewport: Cached<Rect>,
 
-    clear_color: Cached<Color>,
+    clear_color: Cached<Rgba>,
     clear_depth: Cached<f32>,
     clear_stencil: Cached<i32>,
 
@@ -233,11 +233,12 @@ impl State {
             unsafe { gl.depth_func(enums::depth_function(depth.func)) };
         }
         self.set_depth_mask(gl, depth.mask == DepthMaskType::ReadWrite);
-        if changed(&mut self.depth_range, (depth.range.min, depth.range.max)) {
+        if changed(&mut self.depth_range, depth.range) {
             // `glDepthRange` on desktop OpenGL, which has `glDepthRangef`
             // only from 4.1, and `glDepthRangef` on OpenGL ES.
+            let (near, far) = depth.range;
             // SAFETY: GL clamps the range.
-            unsafe { gl.depth_range(f64::from(depth.range.min), f64::from(depth.range.max)) };
+            unsafe { gl.depth_range(f64::from(near), f64::from(far)) };
         }
     }
 
@@ -378,7 +379,7 @@ impl State {
 
     /// Clears the buffers given a value, all of each: the scissor test and
     /// the buffers' write masks would restrict it.
-    pub(crate) fn clear(&mut self, gl: &Gl, color: Option<Color>, depth: Option<f32>, stencil: Option<i32>) {
+    pub(crate) fn clear(&mut self, gl: &Gl, color: Option<Rgba>, depth: Option<f32>, stencil: Option<i32>) {
         let mut mask = 0;
         if let Some(color) = color {
             mask |= glow::COLOR_BUFFER_BIT;

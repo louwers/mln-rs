@@ -1,9 +1,7 @@
 use ash::vk;
 use mln_gfx::frame::FrameTarget as _;
 use mln_gfx::ring::Imports;
-use mln_gfx::{RendererBackend as _, SyncKind};
-use mln_util::error::ErrorKind;
-use mln_util::size::Size;
+use mln_gfx::{ErrorKind, RendererBackend as _, Size, SyncKind};
 
 use crate::{BorrowedImage, BorrowedImages, BorrowedTarget, Device, ImageOwner, RendererBackend, VulkanRing};
 
@@ -209,7 +207,10 @@ fn draw_without_ending(target: &mut BorrowedTarget, gpu: &mut crate::VulkanGpu) 
     let image = target.begin_frame(gpu).expect("a frame");
     let desc = PassDesc {
         label: "Unended",
-        color: Some(ColorAttachment { texture: image.color, load: LoadOp::Clear(mln_util::Color::red()) }),
+        color: Some(ColorAttachment {
+            texture: image.color,
+            load: LoadOp::Clear(mln_gfx::Rgba::new(1.0, 0.0, 0.0, 1.0)),
+        }),
         depth_stencil: image.depth_stencil.map(|texture| DepthStencilAttachment {
             texture,
             depth: LoadOp::Clear(1.0),

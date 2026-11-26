@@ -50,11 +50,10 @@ use mln_gfx::shaders::bindings::PAINT_PARAMS_ID;
 use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
+use mln_gfx::{Rgba, Size};
 use mln_map_types::View;
 use mln_style::layer::ErasedLayerStyle;
 use mln_tile_id::OverscaledTileID;
-use mln_util::Color;
-use mln_util::size::Size;
 use smallvec::SmallVec;
 
 use super::TerrainCover;
@@ -334,7 +333,7 @@ impl Drapes {
     /// changed, which may draw something. A drape updates where its key
     /// differs from the one it was drawn from, or it has a texture of another
     /// side than its tile's.
-    pub(crate) fn choose(&mut self, parameters: &mut PaintParameters<'_>, pattern_atlas_size: Size) {
+    pub(crate) fn choose(&mut self, parameters: &mut PaintParameters<'_>, pattern_atlas_size: mln_util::size::Size) {
         let mut held = Vec::with_capacity(self.drapes.len());
         for Drape { tile, transform, stacks, .. } in &mut self.drapes {
             let (clip_masks, composite) = (&mut ClipMasks::default(), &mut LayerComposite::default());
@@ -621,7 +620,7 @@ impl Drapes {
                         continue;
                     }
                 };
-                let clear = LoadOp::Clear(Color::new(0.0, 0.0, 0.0, 0.0));
+                let clear = LoadOp::Clear(Rgba::new(0.0, 0.0, 0.0, 0.0));
                 let frame_texture = layer_composite.frame_texture_for(&groups.composited);
                 let pass = OpenPass {
                     label: "drape",
@@ -711,7 +710,7 @@ mod tests {
     /// A view of the globe at `zoom` over 512 by 512 pixels.
     fn globe(center: LatLng, zoom: f64) -> View {
         let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
-        transform.resize(Size::new(512, 512)).unwrap();
+        transform.resize(mln_util::size::Size::new(512, 512)).unwrap();
         transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
         transform.jump_to(&CameraOptions { center: Some(center), zoom: Some(zoom), ..Default::default() });
         assert!(transform.view().is_globe());

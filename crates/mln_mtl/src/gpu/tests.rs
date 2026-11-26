@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use mln_gfx::Rgba;
 use mln_gfx::gpu::{BufferUsage, ColorAttachment};
 use mln_renderer::conformance::{
     clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids, imported_textures,
@@ -8,7 +9,6 @@ use mln_renderer::conformance::{
     topologies, transparent_replace, vertex_layouts, written_vertex_texels,
 };
 use mln_renderer::layers::fill_extrusion::programs::FILL_EXTRUSION_INSTANCED;
-use mln_util::Color;
 use objc2::runtime::NSObjectProtocol as _;
 use objc2::{msg_send, sel};
 use objc2_metal::MTLSharedEvent as _;
@@ -171,7 +171,7 @@ fn a_destroyed_buffer_stays_for_the_flushes_before() {
         .unwrap();
     let pass = PassDesc {
         label: "clear",
-        color: Some(ColorAttachment { texture: target, load: LoadOp::Clear(Color::black()) }),
+        color: Some(ColorAttachment { texture: target, load: LoadOp::Clear(Rgba::new(0.0, 0.0, 0.0, 1.0)) }),
         depth_stencil: None,
     };
     let texel = TextureRegion { x: 0, y: 0, size: Size { width: 1, height: 1 } };
@@ -274,7 +274,7 @@ fn flushes_wait_for_and_signal_events() {
         .unwrap();
     let pass = PassDesc {
         label: "clear",
-        color: Some(ColorAttachment { texture: target, load: LoadOp::Clear(Color::black()) }),
+        color: Some(ColorAttachment { texture: target, load: LoadOp::Clear(Rgba::new(0.0, 0.0, 0.0, 1.0)) }),
         depth_stencil: None,
     };
     gpu.wait_before_using(target, event, 1).unwrap();

@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
+use mln_gfx::Size;
 use mln_gfx::stencil_mode::StencilMode;
-use mln_util::size::Size;
 
 use crate::renderer_backend::GlContext;
 use crate::types::Gl;

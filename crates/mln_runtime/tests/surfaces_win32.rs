@@ -32,6 +32,8 @@ use windows::core::w;
 use crate::support::{TIMEOUT, eventually, runtime, wait};
 
 const SIZE: Size = Size { width: 64, height: 64 };
+/// The size of the windows' surfaces, which the backends take as gfx's.
+const TEXTURE_SIZE: mln_gfx::Size = mln_gfx::Size::new(SIZE.width, SIZE.height);
 
 const STYLE: &str =
     r##"{"version":8,"sources":{},"layers":[{"id":"bg","type":"background","paint":{"background-color":"#00ff00"}}]}"##;
@@ -187,8 +189,8 @@ fn surface(window: &Arc<TestWindow>) -> Surface {
 /// Non-interactive Windows sessions (such as CI runners in Session 0) have no
 /// desktop compositor, so DXGI refuses flip-model HWND swap chains with
 /// `DXGI_ERROR_NOT_CURRENTLY_AVAILABLE` (`0x887A0022`).
-fn is_headless_session(error: &mln_runtime::Error) -> bool {
-    let message = error.message.to_ascii_lowercase();
+fn is_headless_session(message: &str) -> bool {
+    let message = message.to_ascii_lowercase();
     message.contains("0x887a0022") || message.contains("dxgi_error_not_currently_available")
 }
 
@@ -210,7 +212,7 @@ fn a_minimized_window_takes_no_session_and_no_frames_on_each_backend() {
         let target = RenderTarget::Surface { size: SIZE, surface: surface(&shown), device: Some(device) };
         let (session, attached) = map.attach(target, AttachOptions::default()).unwrap();
         if let Err(error) = attached.wait() {
-            if error.kind == ErrorKind::Unsupported || is_headless_session(&error) {
+            if error.kind == ErrorKind::Unsupported || is_headless_session(&error.message) {
                 eprintln!("skipped: {backend:?} cannot present to a Win32 HWND in this session: {error}");
                 continue;
             }
@@ -244,7 +246,7 @@ fn clear_frame<B: mln_gfx::RendererBackend>(
         label: "frame",
         color: Some(ColorAttachment {
             texture: image.color,
-            load: LoadOp::Clear(mln_util::Color::new(1.0, 0.0, 0.0, 1.0)),
+            load: LoadOp::Clear(mln_gfx::Rgba::new(1.0, 0.0, 0.0, 1.0)),
         }),
         depth_stencil: image.depth_stencil.map(|texture| DepthStencilAttachment {
             texture,
@@ -274,12 +276,14 @@ fn a_vulkan_target_takes_no_frame_once_its_window_is_minimized() {
     let Some(Device::Vulkan(device)) = device_of(BackendType::Vulkan) else { return };
     let window = TestWindow::new();
     let (mut backend, mut target) =
-        mln_vulkan::SurfaceTarget::with_backend(&device, Arc::<TestWindow>::clone(&window), SIZE, true).unwrap();
+        mln_vulkan::SurfaceTarget::with_backend(&device, Arc::<TestWindow>::clone(&window), TEXTURE_SIZE, true)
+            .unwrap();
     assert_eq!(Some(Handoff::Presented), clear_frame(&mut backend, &mut target));
     window.set_minimized(true);
-    let refused =
-        mln_vulkan::SurfaceTarget::new(&mut backend, Arc::<TestWindow>::clone(&window), SIZE, true).err().unwrap();
-    assert_eq!(ErrorKind::InvalidState, refused.kind, "{refused:?}");
+    let refused = mln_vulkan::SurfaceTarget::new(&mut backend, Arc::<TestWindow>::clone(&window), TEXTURE_SIZE, true)
+        .err()
+        .unwrap();
+    assert_eq!(mln_gfx::ErrorKind::InvalidState, refused.kind, "{refused:?}");
     let frames: Vec<_> = (0..12).map(|_| clear_frame(&mut backend, &mut target)).collect();
     let presented = frames.iter().take_while(|frame| **frame == Some(Handoff::Presented)).count();
     let rest = &frames[presented..];
@@ -306,9 +310,9 @@ fn a_d3d12_target_takes_no_frame_while_its_window_is_minimized() {
     let Some(Device::D3d12(device)) = device_of(BackendType::D3D12) else { return };
     let mut backend = mln_d3d12::RendererBackend::new(&device).unwrap();
     let window = TestWindow::new();
-    let mut target = match mln_d3d12::SurfaceTarget::new(&backend, Arc::<TestWindow>::clone(&window), SIZE) {
+    let mut target = match mln_d3d12::SurfaceTarget::new(&backend, Arc::<TestWindow>::clone(&window), TEXTURE_SIZE) {
         Ok(target) => target,
-        Err(error) if is_headless_session(&error) => {
+        Err(error) if is_headless_session(&error.message) => {
             eprintln!("skipped: no interactive Windows desktop for D3D12 HWND swap chains: {error}");
             return;
         }
@@ -316,12 +320,13 @@ fn a_d3d12_target_takes_no_frame_while_its_window_is_minimized() {
     };
     assert_eq!(Some(Handoff::Presented), clear_frame(&mut backend, &mut target));
     // A resize takes buffers of the new size before the next frame.
-    target.resize(backend.gpu(), Size::new(32, 48));
+    target.resize(backend.gpu(), mln_gfx::Size::new(32, 48));
     assert_eq!(Some(Handoff::Presented), clear_frame(&mut backend, &mut target));
-    target.resize(backend.gpu(), SIZE);
+    target.resize(backend.gpu(), TEXTURE_SIZE);
     window.set_minimized(true);
-    let refused = mln_d3d12::SurfaceTarget::new(&backend, Arc::<TestWindow>::clone(&window), SIZE).err().unwrap();
-    assert_eq!(ErrorKind::InvalidState, refused.kind, "{refused:?}");
+    let refused =
+        mln_d3d12::SurfaceTarget::new(&backend, Arc::<TestWindow>::clone(&window), TEXTURE_SIZE).err().unwrap();
+    assert_eq!(mln_gfx::ErrorKind::InvalidState, refused.kind, "{refused:?}");
     assert_eq!(None, clear_frame(&mut backend, &mut target));
     window.set_minimized(false);
     assert_eq!(Some(Handoff::Presented), clear_frame(&mut backend, &mut target));

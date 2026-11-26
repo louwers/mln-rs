@@ -7,13 +7,11 @@ use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, GpuError, LoadO
 use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::{CullFaceWindingType, DepthFunctionType, StencilOpType};
-use mln_gfx::{DepthMaskType, DepthMode, ScissorRect, StencilMode};
+use mln_gfx::{DepthMaskType, DepthMode, ScissorRect, Size, StencilMode};
 use mln_map_types::{ProjectionData, View, ViewportMode};
 use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
 use mln_util::constants::EXTENT;
 use mln_util::identity::SimpleIdentity;
-use mln_util::range::Range;
-use mln_util::size::Size;
 use mln_vec_map::VecMap;
 use smallvec::SmallVec;
 
@@ -368,7 +366,7 @@ impl<'a> PaintParameters<'a> {
     /// atlas of `pattern_atlas_size`: the target's size and the pixels'
     /// scale, the camera and the frame's values.
     #[must_use]
-    pub(crate) fn global_paint_params(&self, pattern_atlas_size: Size) -> GlobalPaintParamsUBO {
+    pub(crate) fn global_paint_params(&self, pattern_atlas_size: mln_util::size::Size) -> GlobalPaintParamsUBO {
         GlobalPaintParamsUBO {
             pattern_atlas_texsize: [pattern_atlas_size.width as f32, pattern_atlas_size.height as f32],
             units_to_pixels: [1.0 / self.pixels_to_gl_units[0], 1.0 / self.pixels_to_gl_units[1]],
@@ -540,7 +538,7 @@ impl<'a> PaintParameters<'a> {
         let steps =
             (1u32.wrapping_add(self.current_layer)).wrapping_mul(Self::NUM_SUBLAYERS as u32).wrapping_add(u32::from(n));
         let depth = self.depth_range_size + steps as f32 * Self::DEPTH_EPSILON;
-        DepthMode { func: DepthFunctionType::LessEqual, mask, range: Range::new(depth, depth) }
+        DepthMode { func: DepthFunctionType::LessEqual, mask, range: (depth, depth) }
     }
 
     /// The depth of `depth_mode_for_sublayer(0, ..)` where 2D layers write
@@ -553,7 +551,7 @@ impl<'a> PaintParameters<'a> {
 
     #[must_use]
     pub(crate) fn depth_mode_for_3d(&self, mask: DepthMaskType) -> DepthMode {
-        DepthMode { func: DepthFunctionType::LessEqual, mask, range: Range::new(0.0, self.depth_range_size) }
+        DepthMode { func: DepthFunctionType::LessEqual, mask, range: (0.0, self.depth_range_size) }
     }
 
     pub(crate) fn clear_stencil(&mut self, gpu: &mut dyn Gpu) {

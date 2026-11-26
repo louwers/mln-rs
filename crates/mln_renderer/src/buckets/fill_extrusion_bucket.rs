@@ -5,7 +5,6 @@ use std::f64::consts::PI;
 use std::sync::Arc;
 
 use geometry::Point;
-use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use mln_map_types::View;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::expression::{Image, Value};
@@ -25,6 +24,7 @@ use mln_vec_map::VecMap;
 use crate::bucket::{Bucket, BucketBase, UploadNeeds};
 use crate::bucket_geometry::{GeometryUpload, GeometryVec};
 use crate::gfx::mesh::Indexed;
+use crate::gfx::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::{PatternLayerMap, PatternLayoutSpec};
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};

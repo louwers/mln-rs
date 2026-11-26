@@ -4,9 +4,7 @@
 
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_gfx::gpu::{Gpu as _, ReadbackId, ResourceId, TargetFormats, TextureId, TextureRegion, destroy_unused};
-use mln_util::error::Error;
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
+use mln_gfx::{Error, FramePixels, Size};
 
 use crate::device::Device;
 use crate::gpu::{WebGpu, from_wgpu_format};
@@ -95,7 +93,7 @@ struct State {
     /// The readback of the frame that `request_readback` asked for, and its
     /// size, until it has the texels.
     pending_readback: Option<(ReadbackId, Size)>,
-    readback: Option<PremultipliedImage>,
+    readback: Option<FramePixels>,
     device: Device,
 }
 
@@ -107,10 +105,10 @@ impl SurfaceTarget {
     /// the surface supports: in the browser the one the canvas prefers, and
     /// elsewhere the first of BGRA8 and RGBA8.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
+    /// Fails with [`ErrorKind::Unsupported`](mln_gfx::ErrorKind) when the
     /// device's adapter can't present to the surface or the surface supports
     /// none of those formats, and with
-    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) when the device
+    /// [`ErrorKind::InvalidArgument`](mln_gfx::ErrorKind) when the device
     /// has neither an adapter to ask nor a surface format.
     pub fn new(
         backend: &RendererBackend,
@@ -216,7 +214,7 @@ impl SurfaceTarget {
     /// once it is presented and mapped: natively at once, and in the browser
     /// on a later turn of the event loop.
     #[must_use]
-    pub fn take_readback(&mut self, gpu: &mut WebGpu) -> Option<PremultipliedImage> {
+    pub fn take_readback(&mut self, gpu: &mut WebGpu) -> Option<FramePixels> {
         self.state.finish_readback(gpu, false);
         self.state.readback.take()
     }
@@ -337,7 +335,7 @@ impl State {
                 texel.swap(0, 2);
             }
         }
-        self.readback = Some(PremultipliedImage::from_vec(size, texels));
+        self.readback = Some(FramePixels { size, data: texels });
     }
 }
 

@@ -161,7 +161,7 @@ pub(crate) fn prepare(shared: &Arc<SessionShared>) -> impl Future<Output = ()> +
             return;
         }
         #[cfg(feature = "webgpu")]
-        let made = mln_webgpu::Device::request().await.map(Device::WebGpu);
+        let made = Device::request_web_gpu().await;
         #[cfg(not(feature = "webgpu"))]
         let made: Result<Device, Error> = Err(Error::unsupported("this build has no WebGPU"));
         let mut state = shared.state.lock();

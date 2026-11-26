@@ -4,13 +4,14 @@
 
 use std::rc::Rc;
 
+use mln_gfx::Size;
 use mln_gfx::gpu::{Gpu, GpuError, SamplerId, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage};
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::texture2d::SamplerState;
 use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
 
 use crate::gfx::resources::{Device, SharedGpuTexture};
+use crate::gfx::texture_size;
 
 /// A texture of the renderer: its size, format and sampler state, the image
 /// it waits to upload, and once made, a texture of the backend's
@@ -159,7 +160,7 @@ impl Texture2D {
     /// Writes the image [`TextureMut::set_image`] set, if any.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, device: &mut Device) -> Result<(), GpuError> {
         match self.image.take() {
-            Some(image) if image.valid() => self.upload_data(gpu, device, &image.data, image.size),
+            Some(image) if image.valid() => self.upload_data(gpu, device, &image.data, texture_size(image.size)),
             _ => Ok(()),
         }
     }
@@ -237,7 +238,7 @@ impl<'a> TextureMut<'a> {
     /// the image's.
     pub(crate) fn set_image(&mut self, image: Option<Rc<PremultipliedImage>>) {
         if let Some(image) = &image {
-            self.set_size(image.size);
+            self.set_size(texture_size(image.size));
             self.set_format(TextureFormat::Rgba8Unorm);
         }
         self.texture.image = image;

@@ -9,6 +9,7 @@ use std::mem::ManuallyDrop;
 use ash::vk;
 use gpu_allocator::MemoryLocation;
 use gpu_allocator::vulkan::Allocator;
+use mln_gfx::Size;
 use mln_gfx::color_mode::BlendFunction;
 use mln_gfx::gfx_types::DrawModeType;
 use mln_gfx::gpu::validation::{
@@ -25,13 +26,12 @@ use mln_gfx::shaders::bindings::{FIRST_UNIFORM_ID, VERTEX_DRAW_ID};
 use mln_gfx::shaders::program::Program;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{DepthFunctionType, TextureFilterType, TextureWrapType};
+use mln_gfx::util_hash::HashMap;
 use mln_glsl::layout::{
     DescriptorSetType, IMAGE_SAMPLER_START, IMAGE_TEXTURE_COUNT, LAYER_STORAGE_COUNT, UBO_INDEX_PUSH_CONSTANT_SIZE,
     image_sampler_binding, image_texture_binding,
 };
 use mln_glsl::{ResourceUse, Stage};
-use mln_util::hash::HashMap;
-use mln_util::size::Size;
 
 use crate::allocation::{BufferAllocation, ImageAllocation, transition_image};
 use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass};
@@ -460,7 +460,7 @@ fn levels(aspect: vk::ImageAspectFlags, base_mip_level: u32, level_count: u32) -
     vk::ImageSubresourceRange { aspect_mask: aspect, base_mip_level, level_count, base_array_layer: 0, layer_count: 1 }
 }
 
-fn clear_color(color: mln_util::Color) -> vk::ClearValue {
+fn clear_color(color: mln_gfx::Rgba) -> vk::ClearValue {
     vk::ClearValue { color: vk::ClearColorValue { float32: [color.r, color.g, color.b, color.a] } }
 }
 

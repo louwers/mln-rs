@@ -7,7 +7,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use glam::Vec2;
-use mln_gfx::shaders::segment::SegmentBase;
 use mln_style::expression::EvaluationContext;
 use mln_style::feature::{GeometryCoordinate, GeometryCoordinates, GeometryTileFeature};
 use mln_style::layers::Symbol;
@@ -25,6 +24,7 @@ use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketBase, FeatureStates, UploadNeeds};
 use crate::bucket_geometry::{GeometryUpload, GeometryVec};
+use crate::gfx::segment::SegmentBase;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools, WritingMode};
 use crate::paint_property_binder::PaintPropertyBinder;
@@ -757,9 +757,8 @@ impl Bucket for SymbolBucket {
 
 #[cfg(test)]
 mod tests {
-    use mln_gfx::shaders::segment::SegmentBase;
-
     use super::*;
+    use crate::gfx::segment::SegmentBase;
 
     // gtest: SymbolRendering.KeepFadingSymbolsVisible
     #[test]
