@@ -16,7 +16,6 @@ use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_style::StyleValue as _;
 use mln_style::color::Color;
 use mln_style::constants::EXTENT;
-use mln_style::error::Error;
 use mln_style::hash::HashMap;
 use mln_style::layer::{ErasedLayerStyle as _, LayerStyle};
 use mln_style::layers::Symbol;
@@ -32,14 +31,13 @@ use crate::draw::objects::{DrawGeometry, DrawObjects, copy_shared_attributes};
 use crate::draw::segment::SegmentBase;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::{SharedVertices, TypedVertices};
-use crate::layer::bucket::Bucket;
 use crate::layer::bucket_geometry::{BucketGeometry, bucket_vertices, copied_indexes, paint_vertices};
 use crate::layer::layer_drawing::{
     BucketChanges, DrawGroup, DrawList, DrawObjectsMut, DrawOrder, FrameDraw, LayerDrawing, LayerDraws, TileMap,
     UniformWriter,
 };
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
-use crate::layer::layout::{LayoutParameters, SourceLayer};
+use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
     BucketKey, BucketPlacementData, EvaluateCx, Evaluation, LayerBucket, LayerUpdateParameters, LayerValues, OnTerrain,
     Parts, PartsMut, PlacedTile, RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer,
@@ -536,21 +534,7 @@ impl SegmentGroup {
 
 impl LayerType for Symbol {
     type Layout = SymbolLayout;
-    type Bucket = SymbolBucket;
     type TileBucket<'a> = LayerBucket<'a, Symbol>;
-
-    /// A symbol layout always waits for its glyphs and images.
-    fn layout_can_need_dependencies(_group: &[Arc<EvaluatedLayer<Symbol>>]) -> bool {
-        true
-    }
-
-    fn create_layout(
-        group: &[Arc<EvaluatedLayer<Symbol>>],
-        parameters: &mut LayoutParameters<'_>,
-        source_layer: SourceLayer,
-    ) -> Result<Option<SymbolLayout>, Error> {
-        SymbolLayout::new(parameters.bucket_parameters, group, source_layer, parameters).map(Some)
-    }
 
     fn render_layer(style: Arc<LayerStyle<Symbol>>) -> Box<dyn RenderLayer> {
         Box::new(RenderSymbolLayer::new(style))
@@ -1031,7 +1015,7 @@ impl TypedLayer for RenderSymbolLayer {
                 continue;
             };
             let render_data = tile.bucket_for_pass(passes);
-            let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
+            let Some(render_data) = render_data else {
                 *entry.value = None;
                 continue;
             };
@@ -1039,7 +1023,7 @@ impl TypedLayer for RenderSymbolLayer {
             let layer_id = render_data.layer.style.base().id.as_str();
 
             // Draws built from another bucket go.
-            entry.set_bucket(bucket.base.bucket_id);
+            entry.set_bucket(render_data.id);
             // What changed since the draws were built or last refreshed.
             let refresh = entry.take_changes();
 

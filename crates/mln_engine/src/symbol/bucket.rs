@@ -21,14 +21,12 @@ use mln_vec_map::VecMap;
 use mln_wire::payload::pod;
 
 use crate::draw::segment::SegmentBase;
-use crate::layer::bucket::{Bucket, BucketBase, FeatureStates, UploadNeeds};
-use crate::layer::bucket_geometry::{GeometryUpload, GeometryVec};
+use crate::layer::bucket::{Bucket, Upload};
+use crate::layer::bucket_geometry::GeometryVec;
 use crate::layer::layer_type::EvaluatedLayer;
-use crate::layer::paint_property_binder::PaintPropertyBinder;
+use crate::layer::paint_property_binder::{PaintBinders as _, PaintPropertyBinder};
 use crate::symbol::instance::{SymbolInstance, SymbolInstancePools, WritingMode};
 use crate::symbol::quads::SymbolQuad;
-use crate::text::atlas::ImagePositions;
-use crate::tile::TileLayer;
 use crate::util::pool::PoolRange;
 
 crate::paint_property_binders!(
@@ -465,7 +463,6 @@ pub(crate) struct SymbolLayoutFlags {
 
 #[derive(Clone, mln_wire::Wire)]
 pub(crate) struct SymbolBucket {
-    pub(crate) base: BucketBase,
     pub(crate) layout: Arc<SymbolLayoutProperties::PossiblyEvaluated>,
     pub(crate) bucket_leader_id: Arc<str>,
 
@@ -525,7 +522,6 @@ impl SymbolBucket {
         }
         let max_height_offset = max_height_offset(&symbol_instances);
         SymbolBucket {
-            base: BucketBase::default(),
             layout,
             bucket_leader_id: leader_id,
             icons_need_linear: flags.icons_need_linear || icon_size_data_driven_or_zoom,
@@ -547,6 +543,12 @@ impl SymbolBucket {
                 ..Default::default()
             },
         }
+    }
+
+    /// Whether the bucket has any text or icons to draw.
+    #[must_use]
+    pub(crate) fn has_data(&self) -> bool {
+        self.has_text_data() || self.has_icon_data() || self.has_sdf_icon_data()
     }
 
     pub(crate) fn has_text_data(&self) -> bool {
@@ -592,8 +594,6 @@ impl SymbolBucket {
         if state.text.segments.len() > 1 || (state.icon.segments.len() > 1 || state.sdf_icon.segments.len() > 1) {
             return false;
         }
-
-        self.base.uploaded = false;
 
         state.text.triangles.clear();
         state.icon.triangles.clear();
@@ -715,50 +715,19 @@ pub(crate) fn symbols_by_viewport_y(symbol_instances: &[SymbolInstance], angle: 
 }
 
 impl Bucket for SymbolBucket {
-    fn base(&self) -> &BucketBase {
-        &self.base
-    }
-
-    fn max_content_elevation(&self) -> f32 {
-        self.max_height_offset
-    }
-
-    fn upload(&mut self, geometry: &mut GeometryUpload<'_>, _needs: UploadNeeds) {
+    fn upload(&mut self, up: &mut Upload<'_>) {
         let state = &mut self.state;
         for buffer in [&mut state.text, &mut state.icon, &mut state.sdf_icon] {
-            geometry.move_vertices(&mut buffer.attribute_data);
+            up.vec(&mut buffer.attribute_data);
         }
-        for paint in self.paint_properties.values_mut() {
-            let depends_on_feature_state = paint.icon_binders.depends_on_feature_state();
-            geometry.move_paint(&mut paint.icon_binders.interleaved_vertex_buffer, depends_on_feature_state);
-            let depends_on_feature_state = paint.text_binders.depends_on_feature_state();
-            geometry.move_paint(&mut paint.text_binders.interleaved_vertex_buffer, depends_on_feature_state);
+        for (layer_id, paint) in &mut self.paint_properties {
+            up.paint(layer_id, &mut paint.icon_binders);
+            up.paint(layer_id, &mut paint.text_binders);
         }
-        self.base.uploaded = true;
     }
 
-    fn has_data(&self) -> bool {
-        self.has_text_data() || self.has_icon_data() || self.has_sdf_icon_data()
-    }
-
-    fn write_wire(&self, w: &mut mln_wire::Writer) {
-        mln_wire::Wire::write(self, w);
-    }
-
-    fn update(
-        &mut self,
-        states: &FeatureStates,
-        layer: &TileLayer<'_>,
-        layer_id: &str,
-        image_positions: &ImagePositions,
-    ) -> bool {
-        let Some(binders) = self.paint_properties.get_mut(layer_id) else {
-            return false;
-        };
-        binders.icon_binders.update_vertex_vectors(states, layer, image_positions);
-        binders.text_binders.update_vertex_vectors(states, layer, image_positions);
-        self.base.uploaded = false;
-        true
+    fn max_elevation(&self) -> f32 {
+        self.max_height_offset
     }
 }
 

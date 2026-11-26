@@ -32,14 +32,13 @@ use mln_vec_map::VecMap;
 
 use crate::draw::mesh::Indexed;
 use crate::image::image_store::ImageType;
-use crate::layer::bucket_parameters::BucketParameters;
 use crate::layer::layer_type::EvaluatedLayer;
-use crate::layer::layout::{BuildParams, Layout, LayoutParameters, SourceLayer, layers_by_id};
-use crate::layer::tile_layout::Resolved;
+use crate::layer::layout::{BuildCx, Layout, LayoutCx, layers_by_id};
+use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::map::MapMode;
 use crate::placement::collision_feature::{AlongLine, BoxLayout, CollisionBox, CollisionFeature};
 use crate::placement::collision_index::OverlapMode;
-use crate::query::feature_index::{FeatureIndexBuilder, IndexedSubfeature};
+use crate::query::feature_index::IndexedSubfeature;
 use crate::symbol::anchor::Anchor;
 use crate::symbol::bucket::{
     Buffer, PaintProperties, PlacedSymbol, QuadCorner, SortKeyRange, SymbolBucket, SymbolBucketState,
@@ -434,10 +433,7 @@ pub(crate) struct SymbolLayout {
 
     compare_text: VecMap<String, Vec<Anchor>>,
 
-    // Stores the layer so that we can hold on to GeometryTileFeature
-    // instances in SymbolFeature, which may reference data from this object.
-    source_layer: SourceLayer,
-    /// `source_layer`'s name, shared like `bucket_leader_id`.
+    /// The source layer's name, shared like `bucket_leader_id`.
     source_layer_name: Arc<str>,
     overscaling: f32,
     zoom: f32,
@@ -468,24 +464,24 @@ pub(crate) struct SymbolLayout {
 }
 
 impl SymbolLayout {
-    pub(crate) fn new(
-        parameters: &BucketParameters,
-        layers: &[Arc<EvaluatedLayer<Symbol>>],
-        source_layer: SourceLayer,
-        layout_parameters: &mut LayoutParameters<'_>,
-    ) -> Result<Self, Error> {
+    /// Selects the features of `cx`'s group, evaluates their text and
+    /// icons, and asks for their glyphs and images.
+    fn lay_out(cx: &mut LayoutCx<'_, Symbol>) -> Result<Self, Error> {
         fn capture<T>(property_value: &mut PropertyValue<T>, global_state: Option<&Arc<GlobalStateMap>>) {
             if let Some(expression) = property_value.as_expression_mut() {
                 expression.capture_global_state(global_state.cloned());
             }
         }
 
+        let layers = cx.layers();
+        let tile_id = cx.tile();
+        let global_state = cx.global_state();
         let leader = &*layers[0].style;
-        let overscaling = parameters.tile_id.overscale_factor() as f32;
-        let zoom = f32::from(parameters.tile_id.overscaled_z);
+        let overscaling = tile_id.overscale_factor() as f32;
+        let zoom = f32::from(tile_id.overscaled_z);
         let tile_size = (TILE_SIZE_D * f64::from(overscaling)) as u32;
         let tile_pixel_ratio = EXTENT as f32 / tile_size as f32;
-        let layout = Arc::new(create_layout(&leader.layout, zoom, parameters.global_state.clone()));
+        let layout = Arc::new(create_layout(&leader.layout, zoom, global_state.cloned()));
 
         let mut this = SymbolLayout {
             layer_paint_properties: VecMap::new(),
@@ -494,13 +490,12 @@ impl SymbolLayout {
             symbol_instance_pools: SymbolInstancePools::default(),
             sort_key_ranges: Vec::new(),
             compare_text: VecMap::new(),
-            source_layer_name: Arc::from(source_layer.name.as_str()),
-            source_layer,
+            source_layer_name: Arc::from(cx.source_layer.name.as_str()),
             overscaling,
             zoom,
-            canonical_id: parameters.tile_id.canonical,
-            mode: parameters.mode,
-            pixel_ratio: parameters.pixel_ratio,
+            canonical_id: tile_id.canonical,
+            mode: cx.mode(),
+            pixel_ratio: cx.pixel_ratio(),
             tile_pixel_ratio,
             icons_need_linear: false,
             sort_features_by_y: false,
@@ -520,10 +515,10 @@ impl SymbolLayout {
         // These property values are retained unevaluated; capture the
         // global state so that later evaluations can resolve "global-state"
         // expressions.
-        capture(&mut this.text_size, parameters.global_state.as_ref());
-        capture(&mut this.icon_size, parameters.global_state.as_ref());
-        capture(&mut this.text_radial_offset, parameters.global_state.as_ref());
-        capture(&mut this.text_variable_anchor_offset, parameters.global_state.as_ref());
+        capture(&mut this.text_size, global_state);
+        capture(&mut this.icon_size, global_state);
+        capture(&mut this.text_radial_offset, global_state);
+        capture(&mut this.text_variable_anchor_offset, global_state);
 
         let layout = Arc::clone(&this.layout);
         let has_text = has_text_field(&layout) && has_text_font(&layout);
@@ -563,32 +558,20 @@ impl SymbolLayout {
         this.layer_paint_properties = layers_by_id(layers);
 
         // Determine glyph dependencies
-        let source_layer = this.source_layer.clone();
-        let geometry_layer = source_layer.layer()?;
-        let feature_count = geometry_layer.len();
+        let geometry_layer = cx.source_layer()?;
         let canonical_id = this.canonical_id;
-        let context = EvaluationContext::new(this.zoom)
-            .with_canonical_tile_id(Some(&parameters.tile_id.canonical))
-            .with_global_state(parameters.global_state.as_deref())
-            .with_font_faces(layout_parameters.font_faces.as_deref());
-        let passes = |feature: &dyn GeometryTileFeature| {
-            leader.filter.evaluate(&EvaluationContext { feature: Some(feature), ..context })
-        };
-        let selected = layout_parameters.filter_groups.select(
-            &source_layer.name,
-            &geometry_layer,
-            &leader.filter,
-            &context,
-            passes,
-        );
-        let mut glyph_type_tables =
-            GlyphTypeTables::new(layout_parameters.font_faces.clone(), layout_parameters.glyph_pbfs);
-        for i in 0..feature_count {
-            if selected.as_ref().is_some_and(|selected| !selected[i]) {
+        let font_faces = cx.font_faces();
+        let available_images = cx.available_images();
+        let unavailable_images = cx.unavailable_images();
+        let context = cx.filter_context().with_font_faces(font_faces.map(|faces| &**faces));
+        let selection = cx.select(&geometry_layer, context);
+        let mut glyph_type_tables = GlyphTypeTables::new(font_faces.cloned(), cx.has_glyphs());
+        for i in 0..geometry_layer.len() {
+            if !selection.may_select(i) {
                 continue;
             }
             let feature = geometry_layer.feature(i)?;
-            if selected.is_none() && !passes(&feature) {
+            if !selection.selects(&feature) {
                 continue;
             }
 
@@ -599,10 +582,10 @@ impl SymbolLayout {
             if has_text {
                 let formatted = layout.text_field.evaluate(
                     &EvaluationContext::with_zoom_feature(zoom, Some(&ft))
-                        .with_available_images(Some(layout_parameters.available_images))
-                        .with_unavailable_images(Some(layout_parameters.unavailable_images))
+                        .with_available_images(Some(available_images))
+                        .with_unavailable_images(Some(unavailable_images))
                         .with_canonical_tile_id(Some(&canonical_id))
-                        .with_font_faces(layout_parameters.font_faces.as_deref()),
+                        .with_font_faces(font_faces.map(|faces| &**faces)),
                 );
                 let text_transform = layout.text_transform.evaluate(
                     &EvaluationContext::with_zoom_feature(zoom, Some(&ft)).with_canonical_tile_id(Some(&canonical_id)),
@@ -632,10 +615,7 @@ impl SymbolLayout {
                         // An empty image name means no image, so it is not an image
                         // dependency.
                         if !image.empty() {
-                            layout_parameters
-                                .image_dependencies
-                                .entry(image.id().to_owned())
-                                .or_insert(ImageType::Icon);
+                            cx.need_image(image.id(), ImageType::Icon);
                         }
                         formatted_text.add_image_section(image.id(), section.vertical_align.unwrap_or_default());
                         continue;
@@ -687,8 +667,7 @@ impl SymbolLayout {
                             formatted_text.add_text_section(sub_string, options);
                             section_table.insert(formatted_text.sections().len() - 1, section_index);
                             if sub_string_type != GlyphIDType::FontPBF {
-                                layout_parameters
-                                    .glyph_dependencies
+                                cx.glyphs()
                                     .shapes
                                     .entry(section_font_stack.clone())
                                     .or_default()
@@ -729,7 +708,7 @@ impl SymbolLayout {
                     let section_font_stack =
                         section_table.get(&section_index).and_then(|&i| formatted.sections[i].font_stack.clone());
                     let font_stack = section_font_stack.unwrap_or_else(|| base_font_stack.clone());
-                    let dependencies = layout_parameters.glyph_dependencies.glyphs.entry(font_stack).or_default();
+                    let dependencies = cx.glyphs().glyphs.entry(font_stack).or_default();
                     if section.type_ == GlyphIDType::FontPBF {
                         // Glyph PBFs have no glyphs beyond the BMP.
                         let c = formatted_text.text()[j];
@@ -752,14 +731,14 @@ impl SymbolLayout {
             if has_icon {
                 let icon = layout.icon_image.evaluate(
                     &EvaluationContext::with_zoom_feature(zoom, Some(&ft))
-                        .with_available_images(Some(layout_parameters.available_images))
-                        .with_unavailable_images(Some(layout_parameters.unavailable_images))
+                        .with_available_images(Some(available_images))
+                        .with_unavailable_images(Some(unavailable_images))
                         .with_canonical_tile_id(Some(&canonical_id)),
                 );
                 // An empty icon name means no icon, so it is not an image
                 // dependency.
                 if !icon.empty() {
-                    layout_parameters.image_dependencies.entry(icon.id().to_owned()).or_insert(ImageType::Icon);
+                    cx.need_image(icon.id(), ImageType::Icon);
                     ft.icon = Some(icon);
                 }
             }
@@ -1156,7 +1135,7 @@ impl BucketWriter<'_> {
             icon.vertical_run = quads.vertical_icon.as_deref().map(|run_quads| add(run_quads, WritingMode::Vertical));
             let length = buffer.attribute_data.len();
             for binders in self.paint_properties.values_mut() {
-                binders.icon_binders.populate_vertex_vectors(
+                binders.icon_binders.populate(
                     feature,
                     length,
                     symbol.data_feature_index,
@@ -1183,7 +1162,7 @@ impl BucketWriter<'_> {
             let mut populate_section = |section: usize, length: usize| {
                 let section = section_options_to_value(&formatted_text.sections()[section]);
                 for binders in paint_properties.values_mut() {
-                    binders.text_binders.populate_vertex_vectors(
+                    binders.text_binders.populate(
                         feature,
                         length,
                         feature.index,
@@ -1290,19 +1269,21 @@ fn add_quad(buffer: &mut Buffer, run: &RunInfo, quad: &SymbolQuad) -> usize {
 }
 
 impl Layout<Symbol> for SymbolLayout {
-    fn has_dependencies(&self) -> bool {
-        !self.features.is_empty()
+    type Bucket = SymbolBucket;
+
+    /// A symbol layout always waits for its glyphs and images.
+    fn needs_resources(_group: &[Arc<EvaluatedLayer<Symbol>>]) -> bool {
+        true
+    }
+
+    fn new(cx: &mut LayoutCx<'_, Symbol>) -> Result<Self, Error> {
+        SymbolLayout::lay_out(cx)
     }
 
     /// With `resolved`, applies the shaping of the text that font faces
     /// draw and prepares the symbols, and has no bucket without symbols.
-    fn create_bucket(
-        &mut self,
-        resolved: Option<&Resolved>,
-        _feature_index: &mut FeatureIndexBuilder,
-        build: &BuildParams,
-    ) -> Result<Option<SymbolBucket>, Error> {
-        if let Some(resolved) = resolved {
+    fn build(mut self, cx: &mut BuildCx<'_, Symbol>) -> Result<Option<SymbolBucket>, Error> {
+        if let Some(resolved) = cx.resolved() {
             if self.has_font_text {
                 self.finalize_symbols(&resolved.shaping);
             }
@@ -1311,11 +1292,8 @@ impl Layout<Symbol> for SymbolLayout {
                 return Ok(None);
             }
         }
-        Ok(Some(self.build_bucket(build.first_load, &build.canonical)))
-    }
-
-    fn layers(&self) -> &VecMap<String, Arc<EvaluatedLayer<Symbol>>> {
-        &self.layer_paint_properties
+        let bucket = self.build_bucket(cx.first_load(), cx.canonical());
+        Ok(bucket.has_data().then_some(bucket))
     }
 }
 
