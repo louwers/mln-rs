@@ -23,6 +23,11 @@ mod renderer_backend;
 mod shaders;
 pub mod surface_target;
 
+/// The `log` targets of this crate's records (`mln_gfx`'s crate docs).
+mod log_target {
+    pub(crate) const RENDER: &str = "mln_mtl::render";
+}
+
 pub use borrowed_target::{BorrowedTarget, BorrowedTextures, MetalRing};
 pub use custom_layer::{AttachmentFormats, CustomLayerEncoder, CustomLayerPass};
 pub use device::Device;

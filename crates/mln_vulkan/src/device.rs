@@ -19,8 +19,9 @@ use ash::vk;
 use mln_gfx::{DepthStencilFormat, DepthStencilFormats, ExportKinds, SyncKind, SyncKinds};
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
-use mln_util::logging::{Event, EventSeverity, Log};
 use parking_lot::Mutex;
+
+use crate::log_target;
 
 const VALIDATION_LAYER: &CStr = c"VK_LAYER_KHRONOS_validation";
 
@@ -158,16 +159,16 @@ unsafe extern "system" fn debug_utils_callback(
         let _ = writeln!(std::io::stderr(), "Vulkan validation error: {message}\n{backtrace}");
         std::process::abort();
     }
-    let severity = if is_error {
-        EventSeverity::Error
+    let level = if is_error {
+        log::Level::Error
     } else if severity.contains(vk::DebugUtilsMessageSeverityFlagsEXT::WARNING) {
-        EventSeverity::Warning
+        log::Level::Warn
     } else if severity.contains(vk::DebugUtilsMessageSeverityFlagsEXT::INFO) {
-        EventSeverity::Info
+        log::Level::Info
     } else {
-        EventSeverity::Debug
+        log::Level::Debug
     };
-    Log::record(severity, Event::Render, -1, &message);
+    log::log!(target: log_target::RENDER, level, "{message}");
     vk::FALSE
 }
 
@@ -286,7 +287,7 @@ impl LibraryInstance {
                     return Err(Error::unsupported("Vulkan layers not found"));
                 }
                 if validation_required {
-                    Log::error(Event::Render, "Vulkan layers not found");
+                    log::error!(target: log_target::RENDER, "Vulkan layers not found");
                 }
                 validation = Validation::Off;
             }
@@ -341,7 +342,7 @@ impl LibraryInstance {
             // program, and reads its user data only as a flag.
             match unsafe { loader.create_debug_utils_messenger(&create_info, None) } {
                 Ok(handle) => messenger = Some(handle),
-                Err(_) => Log::error(Event::Render, "Failed to register Vulkan debug utils callback"),
+                Err(_) => log::error!(target: log_target::RENDER, "Failed to register Vulkan debug utils callback"),
             }
         }
         Ok(LibraryInstance { entry, instance, extensions, api_version, messenger })
@@ -608,7 +609,7 @@ impl Device {
             (device.get_device_queue(queue_family_index, 0), instance.get_physical_device_properties(physical_device))
         };
         let name = properties.device_name_as_c_str().map(CStr::to_string_lossy).unwrap_or_default();
-        Log::info(Event::Render, format!("graphics device uses Vulkan physical device {name}"));
+        log::info!(target: log_target::RENDER, "graphics device uses Vulkan physical device {name}");
         let get_instance_proc_addr = entry.static_fn().get_instance_proc_addr;
         let get_device_proc_addr = instance.fp_v1_0().get_device_proc_addr;
         Ok(Device {
@@ -769,13 +770,13 @@ impl Device {
             if supported.wide_lines == vk::TRUE {
                 enabled.wide_lines = vk::TRUE;
             } else {
-                Log::error(Event::Render, "Feature not available: wideLines");
+                log::error!(target: log_target::RENDER, "Feature not available: wideLines");
             }
         }
         if supported.sampler_anisotropy == vk::TRUE {
             enabled.sampler_anisotropy = vk::TRUE;
         } else {
-            Log::error(Event::Render, "Feature not available: samplerAnisotropy");
+            log::error!(target: log_target::RENDER, "Feature not available: samplerAnisotropy");
         }
 
         let queue_priority = [1.0f32];
@@ -1104,7 +1105,7 @@ impl Device {
             })
         };
         if !waited {
-            Log::error(Event::Render, format!("Vulkan device lost during {what}"));
+            log::error!(target: log_target::RENDER, "Vulkan device lost during {what}");
         }
     }
 

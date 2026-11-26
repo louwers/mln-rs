@@ -13,7 +13,6 @@ use std::ffi::{CString, c_void};
 use std::sync::OnceLock;
 
 use mln_util::error::Error;
-use mln_util::logging::{Event, Log};
 use windows_sys::Win32::Foundation::{GetLastError, HWND};
 use windows_sys::Win32::Graphics::Gdi::{GetDC, HDC, ReleaseDC};
 use windows_sys::Win32::Graphics::OpenGL::{
@@ -29,6 +28,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     CS_OWNDC, CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassExW, WNDCLASSEXW, WS_POPUP,
 };
 
+use crate::log_target;
 use crate::renderer_backend::PlatformContext;
 use crate::types::Gl;
 
@@ -380,14 +380,14 @@ impl PlatformContext for GroupContext {
     fn make_current(&mut self) {
         self.previous = current().filter(|(_, context)| *context != self.context);
         if let Err(e) = make_current(self.dc, self.context) {
-            Log::error(Event::GraphicsBackend, format!("Switching OpenGL context failed: {e}"));
+            log::error!(target: log_target::GRAPHICS_BACKEND, "Switching OpenGL context failed: {e}");
         }
     }
 
     fn done_current(&mut self) {
         let (dc, context) = self.previous.take().unwrap_or((std::ptr::null_mut(), std::ptr::null_mut()));
         if let Err(e) = make_current(dc, context) {
-            Log::error(Event::GraphicsBackend, format!("Removing OpenGL context failed: {e}"));
+            log::error!(target: log_target::GRAPHICS_BACKEND, "Removing OpenGL context failed: {e}");
         }
     }
 }

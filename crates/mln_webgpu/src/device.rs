@@ -13,9 +13,10 @@
 use std::sync::{Arc, OnceLock};
 
 use mln_util::error::Error;
-use mln_util::logging::{Event, Log};
 #[cfg(not(target_family = "wasm"))]
 use parking_lot::Mutex;
+
+use crate::log_target;
 
 /// A WebGPU device that renderers on any thread share: the library's, or the
 /// host's. Clones share it.
@@ -143,9 +144,11 @@ impl Device {
         let (device, queue) = pollster::block_on(adapter.request_device(&device_descriptor(&adapter)))
             .map_err(|e| Error::native(format!("Failed to create device: {e}")))?;
         let info = adapter.get_info();
-        Log::info(
-            Event::Render,
-            format!("graphics device uses WebGPU adapter {} on {}", info.name, backend_type_to_string(info.backend)),
+        log::info!(
+            target: log_target::RENDER,
+            "graphics device uses WebGPU adapter {} on {}",
+            info.name,
+            backend_type_to_string(info.backend)
         );
         Ok(Device::library(instance, adapter, device, queue))
     }
@@ -182,7 +185,7 @@ impl Device {
     /// default handler panics.
     fn library(instance: wgpu::Instance, adapter: wgpu::Adapter, device: wgpu::Device, queue: wgpu::Queue) -> Device {
         device.on_uncaptured_error(Arc::new(|error: wgpu::Error| {
-            Log::error(Event::Render, format!("WebGPU validation error: {error}"));
+            log::error!(target: log_target::RENDER, "WebGPU validation error: {error}");
         }));
         let lost = watch_for_loss(&device);
         Device { instance: Some(instance), adapter: Some(adapter), device, queue, surface_format: None, lost }

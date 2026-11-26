@@ -14,7 +14,6 @@ use mln_gfx::window::Window;
 use mln_gfx::window::raw_window_handle::RawWindowHandle;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::ProtocolObject;
@@ -23,9 +22,9 @@ use objc2_core_foundation::CGSize;
 use objc2_metal::{MTLCommandBuffer, MTLDevice, MTLPixelFormat, MTLTexture};
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer, CATransaction};
 
-use crate::Id;
 use crate::gpu::MetalGpu;
 use crate::renderer_backend::RendererBackend;
+use crate::{Id, log_target};
 
 /// The format of the layer's drawables.
 const COLOR_FORMAT: MTLPixelFormat = MTLPixelFormat::BGRA8Unorm;
@@ -235,7 +234,7 @@ impl SurfaceTarget {
             let color = match gpu.import_texture(&drawable.texture(), COLOR) {
                 Ok(color) => color,
                 Err(error) => {
-                    Log::error(Event::Render, format!("Importing the layer's drawable failed: {error}"));
+                    log::error!(target: log_target::RENDER, "Importing the layer's drawable failed: {error}");
                     return None;
                 }
             };
@@ -261,7 +260,7 @@ impl SurfaceTarget {
                 match gpu.create_texture(&desc) {
                     Ok(depth_stencil) => self.depth_stencil.insert((size, depth_stencil)).1,
                     Err(error) => {
-                        Log::error(Event::Render, format!("Making the depth and stencil texture failed: {error}"));
+                        log::error!(target: log_target::RENDER, "Making the depth and stencil texture failed: {error}");
                         return None;
                     }
                 }
@@ -291,7 +290,7 @@ impl SurfaceTarget {
                 overlay(&OverlayTarget { device, command_buffer, texture: &texture, size });
             });
             if let Err(error) = submitted {
-                Log::error(Event::Render, format!("Submitting the overlay failed: {error}"));
+                log::error!(target: log_target::RENDER, "Submitting the overlay failed: {error}");
             }
         }
 
@@ -302,7 +301,7 @@ impl SurfaceTarget {
             self.readback_requested = false;
             match gpu.read_texture(color, TextureRegion::whole(size)) {
                 Ok(id) => readback = Some(id),
-                Err(error) => Log::error(Event::Render, format!("Reading the frame back failed: {error}")),
+                Err(error) => log::error!(target: log_target::RENDER, "Reading the frame back failed: {error}"),
             }
             self.layer.setFramebufferOnly(true);
         }
@@ -310,7 +309,7 @@ impl SurfaceTarget {
         gpu.take_waits_into_next_submit(color);
         gpu.present_after_next_submit(ProtocolObject::from_ref(&*drawable));
         if let Err(error) = gpu.flush(false) {
-            Log::error(Event::Render, format!("Presenting the frame failed: {error}"));
+            log::error!(target: log_target::RENDER, "Presenting the frame failed: {error}");
         }
         destroy_unused(gpu, [ResourceId::Texture(color)]);
 
@@ -323,7 +322,7 @@ impl SurfaceTarget {
                     self.readback = Some(PremultipliedImage::from_vec(size, bgra));
                 }
                 Ok(None) => {}
-                Err(error) => Log::error(Event::Render, format!("Reading the frame back failed: {error}")),
+                Err(error) => log::error!(target: log_target::RENDER, "Reading the frame back failed: {error}"),
             }
         }
         true

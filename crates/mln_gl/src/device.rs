@@ -38,11 +38,11 @@ use std::thread::ThreadId;
 
 use khronos_egl as egl;
 use mln_util::error::Error;
-use mln_util::logging::{Event, Log};
 use parking_lot::{Condvar, Mutex};
 
 use crate::borrowed_target::SurfaceHandle;
 use crate::egl::{Egl, library};
+use crate::log_target;
 use crate::renderer_backend::PlatformContext;
 use crate::types::Gl;
 
@@ -142,7 +142,7 @@ fn with_api<T>(egl: &Egl, api: Api, f: impl FnOnce() -> Result<T, String>) -> Re
     if previous != api.egl()
         && let Err(e) = egl.bind_api(previous)
     {
-        Log::error(Event::GraphicsBackend, format!("Error setting the EGL rendering API back: {e}"));
+        log::error!(target: log_target::GRAPHICS_BACKEND, "Error setting the EGL rendering API back: {e}");
     }
     result
 }
@@ -330,7 +330,7 @@ impl Drop for ShareGroup {
     fn drop(&mut self) {
         let EglDisplay { egl, display, .. } = self.display;
         if let Err(e) = egl.destroy_context(*display, self.root) {
-            Log::error(Event::GraphicsBackend, format!("Failed to destroy EGL context: {e}"));
+            log::error!(target: log_target::GRAPHICS_BACKEND, "Failed to destroy EGL context: {e}");
         }
     }
 }
@@ -392,13 +392,13 @@ impl SingleContext {
             if previous != self.api.egl()
                 && let Err(e) = egl.bind_api(self.api.egl())
             {
-                Log::error(Event::GraphicsBackend, format!("Error setting the EGL rendering API: {e}"));
+                log::error!(target: log_target::GRAPHICS_BACKEND, "Error setting the EGL rendering API: {e}");
             }
             turn.previous_api = Some(previous);
             if let Err(e) =
                 egl.make_current(self.display.display, Some(self.surface), Some(self.surface), Some(self.context))
             {
-                Log::error(Event::GraphicsBackend, format!("Switching OpenGL context failed: {e}"));
+                log::error!(target: log_target::GRAPHICS_BACKEND, "Switching OpenGL context failed: {e}");
             }
             turn.holder = Some(thread);
         }
@@ -425,13 +425,13 @@ impl SingleContext {
         }
         let egl = self.display.egl;
         if let Err(e) = restore(egl, self.display.display, turn.previous.take()) {
-            Log::error(Event::GraphicsBackend, format!("Removing OpenGL context failed: {e}"));
+            log::error!(target: log_target::GRAPHICS_BACKEND, "Removing OpenGL context failed: {e}");
         }
         if let Some(previous) = turn.previous_api.take()
             && previous != self.api.egl()
             && let Err(e) = egl.bind_api(previous)
         {
-            Log::error(Event::GraphicsBackend, format!("Error setting the EGL rendering API back: {e}"));
+            log::error!(target: log_target::GRAPHICS_BACKEND, "Error setting the EGL rendering API back: {e}");
         }
         turn.holder = None;
         drop(turn);
@@ -444,10 +444,10 @@ impl Drop for SingleContext {
         // Each renderer holds the context, so none has the turn any more.
         let EglDisplay { egl, display, .. } = self.display;
         if let Err(e) = egl.destroy_surface(*display, self.surface) {
-            Log::error(Event::GraphicsBackend, format!("Failed to destroy EGL surface: {e}"));
+            log::error!(target: log_target::GRAPHICS_BACKEND, "Failed to destroy EGL surface: {e}");
         }
         if let Err(e) = egl.destroy_context(*display, self.context) {
-            Log::error(Event::GraphicsBackend, format!("Failed to destroy EGL context: {e}"));
+            log::error!(target: log_target::GRAPHICS_BACKEND, "Failed to destroy EGL context: {e}");
         }
     }
 }
@@ -518,7 +518,7 @@ impl Device {
                 return Err(Error::unsupported("the sessions of a WGL device have a context each"));
             }
             let group = crate::wgl::Group::library()?;
-            Log::info(Event::Render, "graphics device uses WGL");
+            log::info!(target: log_target::RENDER, "graphics device uses WGL");
             Ok(Device::of(Kind::Wgl(group)))
         }
         #[cfg(not(windows))]
@@ -552,7 +552,7 @@ impl Device {
         } else {
             Kind::Library(ShareGroup { display, config, api, root: context })
         };
-        Log::info(Event::Render, format!("graphics device uses the EGL {} platform", platform.name()));
+        log::info!(target: log_target::RENDER, "graphics device uses the EGL {} platform", platform.name());
         Ok(Device::of(kind))
     }
 
@@ -759,7 +759,7 @@ impl SurfaceSwap {
             SurfaceSwap::Egl { egl, display, surface } => match egl.swap_buffers(*display, *surface) {
                 Ok(()) => true,
                 Err(e) => {
-                    Log::error(Event::GraphicsBackend, format!("eglSwapBuffers() failed: {e}"));
+                    log::error!(target: log_target::GRAPHICS_BACKEND, "eglSwapBuffers() failed: {e}");
                     false
                 }
             },
@@ -767,7 +767,7 @@ impl SurfaceSwap {
             SurfaceSwap::Wgl(dc) => match crate::wgl::swap_buffers(*dc) {
                 Ok(()) => true,
                 Err(e) => {
-                    Log::error(Event::GraphicsBackend, e);
+                    log::error!(target: log_target::GRAPHICS_BACKEND, "{e}");
                     false
                 }
             },
@@ -914,24 +914,24 @@ impl PlatformContext for EglContext {
         if previous_api != self.api.egl()
             && let Err(e) = egl.bind_api(self.api.egl())
         {
-            Log::error(Event::GraphicsBackend, format!("Error setting the EGL rendering API: {e}"));
+            log::error!(target: log_target::GRAPHICS_BACKEND, "Error setting the EGL rendering API: {e}");
         }
         self.previous_api = Some(previous_api);
         if let Err(e) = egl.make_current(self.display, self.surface, self.surface, Some(self.context)) {
-            Log::error(Event::GraphicsBackend, format!("Switching OpenGL context failed: {e}"));
+            log::error!(target: log_target::GRAPHICS_BACKEND, "Switching OpenGL context failed: {e}");
         }
     }
 
     fn done_current(&mut self) {
         let egl = self.egl;
         if let Err(e) = restore(egl, self.display, self.previous.take()) {
-            Log::error(Event::GraphicsBackend, format!("Removing OpenGL context failed: {e}"));
+            log::error!(target: log_target::GRAPHICS_BACKEND, "Removing OpenGL context failed: {e}");
         }
         if let Some(previous) = self.previous_api.take()
             && previous != self.api.egl()
             && let Err(e) = egl.bind_api(previous)
         {
-            Log::error(Event::GraphicsBackend, format!("Error setting the EGL rendering API back: {e}"));
+            log::error!(target: log_target::GRAPHICS_BACKEND, "Error setting the EGL rendering API back: {e}");
         }
     }
 }
@@ -940,12 +940,12 @@ impl Drop for EglContext {
     fn drop(&mut self) {
         let egl = self.egl;
         if let Err(e) = egl.destroy_context(self.display, self.context) {
-            Log::error(Event::GraphicsBackend, format!("Failed to destroy EGL context: {e}"));
+            log::error!(target: log_target::GRAPHICS_BACKEND, "Failed to destroy EGL context: {e}");
         }
         if let Some(surface) = self.surface.filter(|_| self.owns_surface)
             && let Err(e) = egl.destroy_surface(self.display, surface)
         {
-            Log::error(Event::GraphicsBackend, format!("Failed to destroy EGL surface: {e}"));
+            log::error!(target: log_target::GRAPHICS_BACKEND, "Failed to destroy EGL surface: {e}");
         }
     }
 }

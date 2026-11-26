@@ -46,6 +46,9 @@ fn start() {
     // The Web Worker's script reads a panic's message from `mlnPanic`.
     mln_web_host::set_panic_hook();
     Log::set_observer(Box::new(ConsoleLog));
+    if log::set_logger(&ConsoleLog).is_ok() {
+        log::set_max_level(log::LevelFilter::Info);
+    }
 }
 
 /// The registrations of the map's runtime and of the tile workers, which
@@ -71,19 +74,43 @@ pub fn panic_for_check(message: &str) {
     panic!("{message}");
 }
 
-/// The port's log records go to the console.
+/// The port's log records go to the console, and so do the `log` records of
+/// the graphics backends and wgpu.
 struct ConsoleLog;
 
-impl Observer for ConsoleLog {
-    fn on_record(&self, severity: EventSeverity, event: Event, _code: i64, msg: &str) -> bool {
-        let line = JsValue::from_str(&format!("[{}] {msg}", event.as_str()));
+impl ConsoleLog {
+    fn write(severity: EventSeverity, tag: &str, msg: &dyn std::fmt::Display) {
+        let line = JsValue::from_str(&format!("[{tag}] {msg}"));
         match severity {
             EventSeverity::Error => web_sys::console::error_1(&line),
             EventSeverity::Warning => web_sys::console::warn_1(&line),
             _ => web_sys::console::log_1(&line),
         }
+    }
+}
+
+impl Observer for ConsoleLog {
+    fn on_record(&self, severity: EventSeverity, event: Event, _code: i64, msg: &str) -> bool {
+        Self::write(severity, event.as_str(), &msg);
         true
     }
+}
+
+impl log::Log for ConsoleLog {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata.level() <= log::Level::Info
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        let severity = match record.level() {
+            log::Level::Error => EventSeverity::Error,
+            log::Level::Warn => EventSeverity::Warning,
+            _ => EventSeverity::Info,
+        };
+        Self::write(severity, record.target(), record.args());
+    }
+
+    fn flush(&self) {}
 }
 
 fn js_error(message: impl std::fmt::Display) -> JsValue {

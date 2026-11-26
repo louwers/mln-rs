@@ -60,6 +60,13 @@ mod wgl;
 #[cfg(windows)]
 pub mod wgl_surface_target;
 
+/// The `log` targets of this crate's records (`mln_gfx`'s crate docs).
+mod log_target {
+    #[cfg_attr(target_arch = "wasm32", expect(dead_code, reason = "the browser build logs no frames"))]
+    pub(crate) const RENDER: &str = "mln_gl::render";
+    pub(crate) const GRAPHICS_BACKEND: &str = "mln_gl::graphics_backend";
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub use borrowed_target::{BorrowedTarget, BorrowedTextures, HostSurface, HostSurfaceTarget};
 #[cfg(target_arch = "wasm32")]

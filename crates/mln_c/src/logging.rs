@@ -4,8 +4,14 @@
 //! that forwards records to the host's handler: on the thread that logged
 //! them, or, for the severities of the async mask, on a log thread of its own,
 //! in the order they were logged.
+//!
+//! gfx and the backends, and wgpu and naga, log through the `log` crate
+//! instead. This module installs the process's `log` logger, which hands their
+//! records to the core's log, so that they reach the handler, or the
+//! platform's log, as the core's do.
 
 use core::cell::Cell;
+use std::borrow::Cow;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Once, mpsc};
 
@@ -148,6 +154,68 @@ impl Observer for Forwarder {
     }
 }
 
+/// The process's `log` logger: it hands records to the core's log.
+///
+/// It forwards the library's own records at every severity, as the core's
+/// are, and other crates' warnings and errors: what wgpu and naga log below
+/// that is detail about the graphics API that C hosts haven't asked for.
+struct Bridge;
+
+impl log::Log for Bridge {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata.level() <= log::Level::Warn || library_crate(metadata.target()).is_some()
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        let severity = match record.level() {
+            log::Level::Error => EventSeverity::Error,
+            log::Level::Warn => EventSeverity::Warning,
+            log::Level::Info => EventSeverity::Info,
+            log::Level::Debug | log::Level::Trace => EventSeverity::Debug,
+        };
+        let message = record.args().as_str().map_or_else(|| Cow::Owned(record.args().to_string()), Cow::Borrowed);
+        Log::record(severity, event(record.target()), -1, &message);
+    }
+
+    fn flush(&self) {}
+}
+
+/// The rest of `target` after its crate's name, if the crate is one of the
+/// library's.
+fn library_crate(target: &str) -> Option<&str> {
+    let (krate, rest) = target.split_once("::").unwrap_or((target, ""));
+    krate.starts_with("mln_").then_some(rest)
+}
+
+/// The event a `log` record reports, by its target. The library's crates
+/// name the event in the target (`mln_gfx`'s crate docs); other crates'
+/// records are about the graphics API, from wgpu and naga, or general.
+fn event(target: &str) -> Event {
+    match library_crate(target) {
+        Some("render") => Event::Render,
+        Some("graphics_backend") => Event::GraphicsBackend,
+        None if target.starts_with("wgpu") || target.starts_with("naga") => Event::GraphicsBackend,
+        Some(_) | None => Event::General,
+    }
+}
+
+/// Makes [`Bridge`] the process's `log` logger, once, before the library
+/// first logs through `log`: when it creates a runtime or a device, and when
+/// it installs the log callback. A Rust program that links the library and
+/// installed a logger of its own keeps it, and reads these records there.
+pub(crate) fn install_logger() {
+    static LOGGER: Once = Once::new();
+    LOGGER.call_once(|| {
+        if log::set_logger(&Bridge).is_ok() {
+            // The core's log drops debug records in release builds.
+            log::set_max_level(if cfg!(debug_assertions) { log::LevelFilter::Debug } else { log::LevelFilter::Info });
+        }
+    });
+}
+
 /// Replaces the handler, and releases the one it replaces as a log callback's
 /// release runs: unable to call the library.
 fn replace(handler: Option<Handler>) {
@@ -182,6 +250,7 @@ pub(crate) unsafe extern "C" fn mln_log_set_callback(
         // Before the log thread can call the host.
         crate::process_exit::watch();
         INSTALL.call_once(|| Log::set_observer(Box::new(Forwarder)));
+        install_logger();
         replace(Some(Handler { callback, registration, platform_severities: handler.platform_severities }));
         Ok(())
     })
@@ -231,9 +300,9 @@ mod tests {
     use crate::delivery::{mln_delivery_queue_dispatch, mln_delivery_queue_release};
     use crate::diagnostic::tests::{diagnostic, message};
     use crate::generated::types::{
-        MLN_LOG_EVENT_GENERAL, MLN_LOG_EVENT_RENDER, MLN_LOG_EVENT_TIMING, MLN_LOG_SEVERITY_FLAG_ERROR,
-        MLN_LOG_SEVERITY_FLAG_INFO, MLN_LOG_SEVERITY_FLAG_WARNING, MLN_STATUS_INVALID_ARGUMENT,
-        MLN_STATUS_INVALID_STATE, MLN_STATUS_OK, mln_delivery_queue,
+        MLN_LOG_EVENT_GENERAL, MLN_LOG_EVENT_GRAPHICS_BACKEND, MLN_LOG_EVENT_RENDER, MLN_LOG_EVENT_TIMING,
+        MLN_LOG_SEVERITY_FLAG_ERROR, MLN_LOG_SEVERITY_FLAG_INFO, MLN_LOG_SEVERITY_FLAG_WARNING,
+        MLN_STATUS_INVALID_ARGUMENT, MLN_STATUS_INVALID_STATE, MLN_STATUS_OK, mln_delivery_queue,
     };
     use crate::gpu_device::{mln_gpu_device_create, mln_gpu_device_release};
 
@@ -537,6 +606,37 @@ mod tests {
         assert_eq!(probe.records().len(), 3);
         assert_eq!(clear(), MLN_STATUS_OK);
         assert!(!handled(EventSeverity::Warning));
+    }
+
+    #[test]
+    fn log_records_arrive_under_the_event_their_target_names() {
+        let _state = LogState::take();
+        assert_eq!(set_async(0), MLN_STATUS_OK);
+        let probe = Probe::new("bridge", false);
+        assert_eq!(set(&handler(&probe, 0)), MLN_STATUS_OK);
+        log::info!(target: "mln_gl::render", "bridge: render");
+        log::error!(target: "mln_gl::graphics_backend", "bridge: {}", "backend");
+        log::info!(target: "mln_gl::gpu", "bridge: general");
+        log::warn!(target: "wgpu_hal::vulkan::instance", "bridge: wgpu");
+        log::info!(target: "wgpu_core::device", "bridge: wgpu info");
+        log::error!(target: "other", "bridge: other");
+        let here = std::thread::current().id();
+        let records: Vec<_> = probe
+            .records()
+            .into_iter()
+            .filter(|seen| seen.thread == here)
+            .map(|seen| (seen.severity, seen.event, seen.code, seen.message))
+            .collect();
+        assert_eq!(
+            records,
+            [
+                (MLN_LOG_SEVERITY_INFO, MLN_LOG_EVENT_RENDER, -1, "bridge: render".to_owned()),
+                (MLN_LOG_SEVERITY_ERROR, MLN_LOG_EVENT_GRAPHICS_BACKEND, -1, "bridge: backend".to_owned()),
+                (MLN_LOG_SEVERITY_INFO, MLN_LOG_EVENT_GENERAL, -1, "bridge: general".to_owned()),
+                (MLN_LOG_SEVERITY_WARNING, MLN_LOG_EVENT_GRAPHICS_BACKEND, -1, "bridge: wgpu".to_owned()),
+                (MLN_LOG_SEVERITY_ERROR, MLN_LOG_EVENT_GENERAL, -1, "bridge: other".to_owned()),
+            ]
+        );
     }
 
     #[test]

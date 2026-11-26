@@ -13,7 +13,6 @@ use mln_gfx::{
     ExportKind, ExportKinds, ExportedFrame, ExportedImage, ExportedRing, FrameDepth, NativeTexture, SyncKind, SyncKinds,
 };
 use mln_util::error::Error;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use windows::Win32::Graphics::Direct3D12::{
     D3D12_HEAP_FLAG_NONE, D3D12_HEAP_FLAG_SHARED, D3D12_HEAP_FLAGS, D3D12_HEAP_PROPERTIES, D3D12_HEAP_TYPE_DEFAULT,
@@ -29,6 +28,7 @@ use windows::core::Interface as _;
 
 use crate::borrowed_target::{BorrowedTextures, D3d12Ring, share};
 use crate::device::Device;
+use crate::log_target;
 use crate::renderer_backend::RendererBackend;
 
 /// The format of the ring's textures, which D3D11 and Vulkan open as well.
@@ -53,7 +53,7 @@ pub(crate) fn probe(device: &ID3D12Device) -> ExportKinds {
     match SharedTexture::new(device, Size::new(1, 1)) {
         Ok(_) => ExportKinds::of(&[ExportKind::DxgiSharedHandle]),
         Err(error) => {
-            Log::info(Event::Render, format!("The D3D12 device shares no textures: {}", error.message));
+            log::info!(target: log_target::RENDER, "The D3D12 device shares no textures: {}", error.message);
             ExportKinds::NONE
         }
     }

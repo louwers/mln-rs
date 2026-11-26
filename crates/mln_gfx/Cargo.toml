@@ -19,6 +19,7 @@ doctest = false
 
 [dependencies]
 bytemuck.workspace = true
+log.workspace = true
 mln_util.workspace = true
 mln_vec_map.workspace = true
 # The windows of window targets (`Window`).

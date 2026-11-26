@@ -6,11 +6,11 @@ use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_gfx::gpu::{Gpu as _, ReadbackId, ResourceId, TargetFormats, TextureId, TextureRegion, destroy_unused};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::device::Device;
 use crate::gpu::{WebGpu, from_wgpu_format};
+use crate::log_target;
 use crate::renderer_backend::RendererBackend;
 
 /// How a surface's frames composite with what is behind them. A browser's
@@ -299,7 +299,7 @@ impl State {
     /// Starts reading `texture`, the surface's, back.
     fn read_back(&mut self, gpu: &mut WebGpu, texture: &wgpu::Texture) {
         if !self.usage.contains(wgpu::TextureUsages::COPY_SRC) {
-            Log::warning(Event::Render, "WebGPU: the surface does not support readback (no COPY_SRC)");
+            log::warn!(target: log_target::RENDER, "WebGPU: the surface does not support readback (no COPY_SRC)");
             return;
         }
         let size = Size::new(texture.width(), texture.height());
@@ -312,7 +312,7 @@ impl State {
                     destroy_unused(gpu, [ResourceId::Readback(stale)]);
                 }
             }
-            Err(error) => Log::error(Event::Render, format!("WebGPU: reading the frame back failed: {error}")),
+            Err(error) => log::error!(target: log_target::RENDER, "WebGPU: reading the frame back failed: {error}"),
         }
     }
 
@@ -329,7 +329,7 @@ impl State {
                 return;
             }
             Err(error) => {
-                return Log::error(Event::Render, format!("WebGPU: reading the frame back failed: {error}"));
+                return log::error!(target: log_target::RENDER, "WebGPU: reading the frame back failed: {error}");
             }
         };
         if matches!(self.format, wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb) {

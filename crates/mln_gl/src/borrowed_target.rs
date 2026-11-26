@@ -7,12 +7,12 @@ use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_gfx::gpu::{Gpu as _, ResourceId, TargetFormats, TextureDesc, TextureId, TextureUsage, destroy_unused};
 use mln_gfx::{ConsumerSync, DepthStencilFormat, DepthStencilFormats, GpuSync, SyncKind, SyncKinds};
 use mln_util::error::Error;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::device::SurfaceSwap;
 use crate::frame_image::{COLOR, DEPTH_STENCIL, FrameImports, default_framebuffer};
 use crate::gpu::GlGpu;
+use crate::log_target;
 use crate::renderer_backend::RendererBackend;
 
 /// A ring of the host's `GL_TEXTURE_2D` textures, in the share group of the
@@ -320,7 +320,7 @@ impl FrameTarget for BorrowedTarget {
         self.begun = None;
         let image = self
             .slot_image(gpu, slot)
-            .inspect_err(|error| Log::error(Event::GraphicsBackend, error.message.clone()))
+            .inspect_err(|error| log::error!(target: log_target::GRAPHICS_BACKEND, "{}", error.message))
             .ok()?;
         self.begun = Some(slot);
         Some(image)
@@ -340,7 +340,7 @@ impl FrameTarget for BorrowedTarget {
             GpuSync { kind: SyncKind::OpenGlFence, handle: fence.0 as usize as u64, value: 0 }
         } else {
             if let Err(error) = gpu.flush(true) {
-                Log::error(Event::GraphicsBackend, format!("Finishing a borrowed frame failed: {error}"));
+                log::error!(target: log_target::GRAPHICS_BACKEND, "Finishing a borrowed frame failed: {error}");
             }
             GpuSync::of(SyncKind::CpuComplete)
         };

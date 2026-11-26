@@ -21,6 +21,7 @@ doctest = false
 bench = []
 
 [dependencies]
+log.workspace = true
 mln_gfx = { workspace = true, features = ["wgsl"] }
 mln_util.workspace = true
 mln_vec_map.workspace = true

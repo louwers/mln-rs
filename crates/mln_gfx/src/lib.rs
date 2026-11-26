@@ -11,6 +11,13 @@
 //! generic over each backend's part, in [`ring`]. What each program reads, and
 //! the text it compiles from, is in `shaders::program`; the renderer
 //! declares the programs.
+//!
+//! gfx and the backends log through the `log` crate, for the program's own
+//! `log` backend to read. A record's target names the part of the library
+//! that logged it: `<crate>::render` for devices, frames and presenting, and
+//! `<crate>::graphics_backend` for the calls of a graphics API's platform
+//! layer, such as EGL's or WGL's. `mln_c` reports a record to C hosts under
+//! the event its target names.
 
 pub mod backend;
 pub mod color_mode;
@@ -33,6 +40,11 @@ pub mod texture2d;
 pub mod types;
 pub mod util_hash;
 pub mod window;
+
+/// The `log` targets of this crate's records (see the crate docs).
+mod log_target {
+    pub(crate) const RENDER: &str = "mln_gfx::render";
+}
 
 pub use color_mode::ColorMode;
 pub use cull_face_mode::CullFaceMode;

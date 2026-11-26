@@ -9,7 +9,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use mln_util::logging::{Event, Log};
 use parking_lot::Mutex;
 use windows::Win32::Graphics::Direct3D12::{
     D3D12_HEAP_FLAG_NONE, D3D12_HEAP_PROPERTIES, D3D12_HEAP_TYPE_READBACK, D3D12_QUERY_HEAP_DESC,
@@ -19,6 +18,7 @@ use windows::Win32::Graphics::Direct3D12::{
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_SAMPLE_DESC;
 
+use crate::log_target;
 use crate::memory::NO_RANGE;
 
 /// The passes one submission times at most; a pass past them goes untimed.
@@ -86,7 +86,7 @@ impl Timer {
         if std::env::var("MLN_D3D12_STABLE_POWER").as_deref() == Ok("1") {
             // SAFETY: a plain call.
             if let Err(error) = unsafe { device.SetStablePowerState(true) } {
-                Log::error(Event::Render, format!("D3D12 can't hold the GPU's clocks steady: {error}"));
+                log::error!(target: log_target::RENDER, "D3D12 can't hold the GPU's clocks steady: {error}");
             }
         }
         // SAFETY: a plain query.

@@ -8,7 +8,6 @@ use mln_gfx::ExportKinds;
 use mln_gfx::gpu::{FixedState, GpuError, ShaderKey, TargetFormats, VertexBufferLayout};
 use mln_util::error::Error;
 use mln_util::hash::HashMap;
-use mln_util::logging::{Event, EventSeverity, Log};
 use parking_lot::Mutex;
 use windows::Win32::Foundation::LUID;
 use windows::Win32::Graphics::Direct3D::D3D_FEATURE_LEVEL_11_0;
@@ -27,8 +26,8 @@ use windows::Win32::Graphics::Dxgi::{
 };
 use windows::core::{Interface, PCSTR};
 
-use crate::root_signature;
 use crate::shaders::ShaderCompiler;
+use crate::{log_target, root_signature};
 
 /// What `MLN_D3D12_VALIDATION` asks for: D3D12's debug layer with
 /// GPU-based validation and DRED, whose messages go to the log, and with
@@ -142,7 +141,7 @@ impl Device {
                         dred.SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
                     }
                 } else {
-                    Log::error(Event::Render, "D3D12's debug layer isn't installed");
+                    log::error!(target: log_target::RENDER, "D3D12's debug layer isn't installed");
                     validation = Validation::Off;
                 }
             }
@@ -239,7 +238,7 @@ impl Device {
         let name_len = desc.Description.iter().position(|&c| c == 0).unwrap_or(desc.Description.len());
         let name = String::from_utf16_lossy(&desc.Description[..name_len]);
         let software = desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0;
-        Log::info(Event::Render, format!("graphics device uses D3D12 adapter {name}"));
+        log::info!(target: log_target::RENDER, "graphics device uses D3D12 adapter {name}");
         let root_signature = root_signature::create(&device).map_err(|error| Error::native(error.to_string()))?;
         Ok(Device {
             shared: Arc::new(Shared {
@@ -375,12 +374,12 @@ fn log_messages(device: &ID3D12Device, abort: bool) {
         // SAFETY: the debug layer passes a string, valid during the call.
         let text = unsafe { description.to_string() }.unwrap_or_default();
         let error = matches!(severity, D3D12_MESSAGE_SEVERITY_CORRUPTION | D3D12_MESSAGE_SEVERITY_ERROR);
-        let severity = match severity {
-            D3D12_MESSAGE_SEVERITY_CORRUPTION | D3D12_MESSAGE_SEVERITY_ERROR => EventSeverity::Error,
-            D3D12_MESSAGE_SEVERITY_WARNING => EventSeverity::Warning,
-            _ => EventSeverity::Info,
+        let level = match severity {
+            D3D12_MESSAGE_SEVERITY_CORRUPTION | D3D12_MESSAGE_SEVERITY_ERROR => log::Level::Error,
+            D3D12_MESSAGE_SEVERITY_WARNING => log::Level::Warn,
+            _ => log::Level::Info,
         };
-        Log::record(severity, Event::Render, -1, &format!("D3D12: {text}"));
+        log::log!(target: log_target::RENDER, level, "D3D12: {text}");
         if error && !abort.is_null() {
             std::process::abort();
         }

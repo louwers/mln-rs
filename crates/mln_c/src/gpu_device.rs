@@ -319,6 +319,7 @@ pub(crate) unsafe extern "C" fn mln_gpu_device_create(
         let request = unsafe { request(options) }?;
         // SAFETY: the caller's contract.
         let out_device = unsafe { handles::out_handle(out_device, "out_device") }?;
+        crate::logging::install_logger();
         let (device, lock) = create(request)?;
         *out_device = DEVICES.insert(device.into())?;
         if let Some(lock) = lock {

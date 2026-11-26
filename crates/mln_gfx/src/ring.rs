@@ -12,12 +12,12 @@
 //! that a resize leaves to the frames the host holds.
 
 use mln_util::error::Error;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::export::{ExportKind, ExportedFrame, ExportedRing, Generations};
 use crate::frame::{ConsumerSync, FrameImage, FrameTarget, GpuSync, Handoff, SyncKind};
 use crate::gpu::{Gpu, GpuError, ResourceId, TargetFormats, TextureDesc, TextureId, TextureUsage, destroy_unused};
+use crate::log_target;
 use crate::renderer_backend::RendererBackend;
 
 /// The host's textures of a ring: one color texture for each slot, and
@@ -432,7 +432,7 @@ impl<B: RingBackend> BorrowedTarget<B> {
             SyncKind::CpuComplete => match gpu.flush(true) {
                 Ok(()) => Some((GpuSync::of(SyncKind::CpuComplete), None)),
                 Err(error) => {
-                    Log::error(Event::Render, format!("Waiting for a borrowed texture's frame failed: {error}"));
+                    log::error!(target: log_target::RENDER, "Waiting for a borrowed texture's frame failed: {error}");
                     None
                 }
             },
@@ -454,7 +454,7 @@ impl<B: RingBackend> FrameTarget for BorrowedTarget<B> {
             && let Some(wait) = &state.wait
         {
             if let Err(error) = B::wait_before_using(gpu, image.color, wait) {
-                Log::error(Event::Render, format!("Waiting for the host's reads failed: {error}"));
+                log::error!(target: log_target::RENDER, "Waiting for the host's reads failed: {error}");
             }
             state.attached = Some(image.color);
         }
@@ -480,7 +480,7 @@ impl<B: RingBackend> FrameTarget for BorrowedTarget<B> {
             B::waited(gpu, wait);
         }
         if let Err(error) = submitted {
-            Log::error(Event::Render, format!("Submitting a borrowed texture's frame failed: {error}"));
+            log::error!(target: log_target::RENDER, "Submitting a borrowed texture's frame failed: {error}");
             return Handoff::Dropped;
         }
         let Some((sync, handed)) = self.producer_sync(gpu) else {
@@ -502,9 +502,9 @@ impl<B: RingBackend> FrameTarget for BorrowedTarget<B> {
             slot.forget(gpu);
         }
         if let Err(error) = gpu.flush(false) {
-            Log::error(
-                Event::Render,
-                format!("Submitting the frames before a borrowed target's deletion failed: {error}"),
+            log::error!(
+                target: log_target::RENDER,
+                "Submitting the frames before a borrowed target's deletion failed: {error}"
             );
         }
         self.imports.tear_down(gpu);

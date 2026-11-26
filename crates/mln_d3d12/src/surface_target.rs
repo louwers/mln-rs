@@ -26,7 +26,6 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::window::raw_window_handle::RawWindowHandle;
 use mln_util::error::Error;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use windows::Win32::Foundation::{DXGI_STATUS_OCCLUDED, HANDLE, HWND, WAIT_OBJECT_0};
 use windows::Win32::Graphics::Direct3D12::{D3D12_RESOURCE_STATE_PRESENT, ID3D12Resource};
@@ -46,6 +45,7 @@ use windows::core::{GUID, HRESULT, IUnknown, Interface};
 use crate::custom_layer::CustomLayerPass;
 use crate::device::Device;
 use crate::gpu::D3d12Gpu;
+use crate::log_target;
 use crate::renderer_backend::RendererBackend;
 
 /// The swap chain's buffers: one that the display shows, one that waits to
@@ -409,7 +409,7 @@ impl SurfaceTarget {
             lent.and(ended)
         });
         if let Err(error) = drawn {
-            Log::error(Event::Render, format!("Drawing the overlay failed: {error}"));
+            log::error!(target: log_target::RENDER, "Drawing the overlay failed: {error}");
         }
     }
 }
@@ -459,7 +459,7 @@ impl FrameTarget for SurfaceTarget {
             return None;
         }
         if let Err(error) = self.buffers(gpu) {
-            Log::error(Event::Render, format!("Making the swap chain's buffers failed: {}", error.message));
+            log::error!(target: log_target::RENDER, "Making the swap chain's buffers failed: {}", error.message);
             return None;
         }
         if !self.wait_turn() {
@@ -485,7 +485,7 @@ impl FrameTarget for SurfaceTarget {
         };
         self.draw_overlay(gpu, image.color, image.size);
         if let Err(error) = gpu.flush(false) {
-            Log::error(Event::Render, format!("Submitting the frame failed: {error}"));
+            log::error!(target: log_target::RENDER, "Submitting the frame failed: {error}");
             return Handoff::Dropped;
         }
         // SAFETY: the frame's work went to the queue that the swap chain
@@ -497,12 +497,10 @@ impl FrameTarget for SurfaceTarget {
             result if result.is_ok() => Handoff::Presented,
             result => {
                 let reason = self.device.removed_reason();
-                Log::error(
-                    Event::Render,
-                    format!(
-                        "Presenting failed: {}",
-                        reason.unwrap_or_else(|| windows::core::Error::from_hresult(result).to_string())
-                    ),
+                log::error!(
+                    target: log_target::RENDER,
+                    "Presenting failed: {}",
+                    reason.unwrap_or_else(|| windows::core::Error::from_hresult(result).to_string())
                 );
                 Handoff::Dropped
             }

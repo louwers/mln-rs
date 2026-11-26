@@ -24,6 +24,7 @@ bench = ["objc2-metal/MTLCounters"]
 [target.'cfg(target_vendor = "apple")'.dependencies]
 block2.workspace = true
 bytemuck.workspace = true
+log.workspace = true
 mln_gfx = { workspace = true, features = ["msl"] }
 mln_tile_id.workspace = true
 mln_util.workspace = true

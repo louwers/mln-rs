@@ -23,11 +23,11 @@ use mln_gfx::gpu::{
     TextureUsage, destroy_unused,
 };
 use mln_util::image::PremultipliedImage;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::device::Device;
 use crate::gpu::{ImportedImage, VulkanGpu};
+use crate::log_target;
 use crate::renderer_backend::SurfaceProvider;
 use crate::surface_target::{Overlay, OverlayTarget};
 
@@ -215,9 +215,10 @@ impl SurfaceResource {
 
         // Every surface has FIFO.
         if state.present_mode != vk::PresentModeKHR::FIFO && !present_modes.contains(&state.present_mode) {
-            Log::error(
-                Event::Render,
-                format!("Requested PresentModeKHR not available ({})", state.present_mode.as_raw()),
+            log::error!(
+                target: log_target::RENDER,
+                "Requested PresentModeKHR not available ({})",
+                state.present_mode.as_raw()
             );
             state.present_mode = vk::PresentModeKHR::FIFO;
         }
@@ -295,7 +296,7 @@ impl SurfaceResource {
         {
             Ok(()) => true,
             Err(error) => {
-                Log::error(Event::Render, error);
+                log::error!(target: log_target::RENDER, "{error}");
                 self.destroy_images(Some(gpu));
                 false
             }
@@ -447,7 +448,7 @@ impl SurfaceResource {
             match provider.create_surface(self.device.shared.entry(), self.device.shared.instance()) {
                 Ok(surface) => self.state.surface = surface,
                 Err(error) => {
-                    Log::error(Event::Render, error.message);
+                    log::error!(target: log_target::RENDER, "{}", error.message);
                     return false;
                 }
             }
@@ -526,7 +527,7 @@ impl SurfaceResource {
         let acquired = match self.acquire(gpu) {
             Ok(acquired) => acquired,
             Err(error) => {
-                Log::error(Event::Render, format!("Acquiring a swapchain image failed: {error}"));
+                log::error!(target: log_target::RENDER, "Acquiring a swapchain image failed: {error}");
                 return None;
             }
         };
@@ -535,7 +536,7 @@ impl SurfaceResource {
         let semaphore = self.state.acquire_semaphores.get(acquired.slot)?.0;
         let stages = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
         if let Err(error) = gpu.wait_before_using(image.color, semaphore, None, stages) {
-            Log::error(Event::Render, format!("Waiting for the acquired image failed: {error}"));
+            log::error!(target: log_target::RENDER, "Waiting for the acquired image failed: {error}");
         }
         Some(image)
     }
@@ -613,7 +614,7 @@ impl SurfaceResource {
         let ((render_pass, framebuffer, extent), command_buffer) = match begun {
             Ok(begun) => begun,
             Err(error) => {
-                Log::error(Event::Render, format!("Beginning the overlay failed: {error}"));
+                log::error!(target: log_target::RENDER, "Beginning the overlay failed: {error}");
                 return;
             }
         };
@@ -639,7 +640,7 @@ impl SurfaceResource {
         self.device.end_debug_label(command_buffer);
         gpu.take_waits_into_next_submit(texture);
         if let Err(error) = gpu.submit_recording(command_buffer) {
-            Log::error(Event::Render, format!("Submitting the overlay failed: {error}"));
+            log::error!(target: log_target::RENDER, "Submitting the overlay failed: {error}");
         }
     }
 
@@ -667,10 +668,10 @@ impl SurfaceResource {
                             destroy_unused(gpu, [ResourceId::Readback(previous)]);
                         }
                     }
-                    Err(error) => Log::error(Event::Render, format!("Reading the frame back failed: {error}")),
+                    Err(error) => log::error!(target: log_target::RENDER, "Reading the frame back failed: {error}"),
                 }
             } else {
-                Log::warning(Event::Render, "The surface's images can't be read");
+                log::warn!(target: log_target::RENDER, "The surface's images can't be read");
             }
         }
         gpu.take_waits_into_next_submit(texture);
@@ -683,7 +684,7 @@ impl SurfaceResource {
         if let Err(error) = submitted {
             // The image can't be presented without the semaphore: a new
             // swapchain takes it back.
-            Log::error(Event::Render, format!("Submitting the frame failed: {error}"));
+            log::error!(target: log_target::RENDER, "Submitting the frame failed: {error}");
             self.request_surface_update(false);
             return false;
         }
@@ -709,7 +710,7 @@ impl SurfaceResource {
                 self.state.lost = true;
                 self.request_surface_update(false);
             }
-            Err(error) => Log::error(Event::Render, format!("queuePresentKHR result: {error}")),
+            Err(error) => log::error!(target: log_target::RENDER, "queuePresentKHR result: {error}"),
         }
         true
     }
@@ -720,7 +721,7 @@ impl SurfaceResource {
         let data = match gpu.take_readback(readback, true) {
             Ok(data) => data?,
             Err(error) => {
-                Log::error(Event::Render, format!("Reading the frame back failed: {error}"));
+                log::error!(target: log_target::RENDER, "Reading the frame back failed: {error}");
                 return None;
             }
         };

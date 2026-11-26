@@ -26,7 +26,6 @@ use std::sync::Arc;
 
 use mln_util::Color;
 pub use mln_util::clip_depth::ClipDepthRange;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 pub use self::ids::{
@@ -37,6 +36,7 @@ use crate::color_mode::{BlendFunction, Mask};
 use crate::cull_face_mode::CullFaceMode;
 use crate::depth_mode::DepthMode;
 use crate::gfx_types::{AttributeDataType, DrawModeType};
+use crate::log_target;
 use crate::shaders::program::Program;
 use crate::stencil_mode::{StencilMode, Test};
 use crate::texture2d::SamplerState;
@@ -721,7 +721,7 @@ pub fn read_texels(
 pub fn destroy_unused(gpu: &mut (impl Gpu + ?Sized), resources: impl IntoIterator<Item = ResourceId>) {
     for resource in resources {
         if let Err(error) = gpu.destroy(resource) {
-            Log::error(Event::Render, format!("Destroying {resource:?} failed: {error}"));
+            log::error!(target: log_target::RENDER, "Destroying {resource:?} failed: {error}");
         }
     }
 }

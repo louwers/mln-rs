@@ -19,12 +19,12 @@ use mln_gfx::{
     ConsumerSync, ExportKind, ExportKinds, ExportedFrame, ExportedRing, FrameDepth, NativeTexture, SyncKind, SyncKinds,
 };
 use mln_util::error::Error;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::borrowed_target::{BorrowedTarget, BorrowedTextures};
 use crate::device::Device;
 use crate::gpu::GlGpu;
+use crate::log_target;
 use crate::renderer_backend::RendererBackend;
 use crate::state::State;
 use crate::types::{FramebufferID, Gl, TextureID};
@@ -104,9 +104,11 @@ impl Exporter {
                 Some(exporter)
             }
             Err(error) => {
-                Log::info(
-                    Event::GraphicsBackend,
-                    format!("The EGL display imports no {:?}: {}", platform::KIND, error.message),
+                log::info!(
+                    target: log_target::GRAPHICS_BACKEND,
+                    "The EGL display imports no {:?}: {}",
+                    platform::KIND,
+                    error.message
                 );
                 None
             }
@@ -632,7 +634,7 @@ impl ExportedTarget {
                 Handoff::Queued { slot, sync: mln_gfx::GpuSync { kind: SyncKind::SyncFd, handle, value: 0 } }
             }
             Err(error) => {
-                Log::error(Event::Render, format!("Handing an exported frame over failed: {}", error.message));
+                log::error!(target: log_target::RENDER, "Handing an exported frame over failed: {}", error.message);
                 Handoff::Dropped
             }
         }

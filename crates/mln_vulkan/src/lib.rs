@@ -39,6 +39,11 @@ mod vk_state;
 mod win32;
 mod window;
 
+/// The `log` targets of this crate's records (`mln_gfx`'s crate docs).
+mod log_target {
+    pub(crate) const RENDER: &str = "mln_vulkan::render";
+}
+
 pub use ash;
 pub use borrowed_target::{
     BorrowedDepth, BorrowedImage, BorrowedImages, BorrowedTarget, ConsumerWait, ImageOwner, VulkanRing,

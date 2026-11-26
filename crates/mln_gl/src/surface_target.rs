@@ -16,16 +16,15 @@ use mln_gfx::gpu::{TextureRegion, read_texels};
 use mln_gfx::window::raw_window_handle::{RawDisplayHandle, RawWindowHandle};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use parking_lot::Mutex;
 
 use crate::egl::{Egl, library};
 use crate::frame_image::{FrameImports, default_framebuffer};
 use crate::gpu::GlGpu;
-use crate::overlay;
 pub use crate::overlay::{Overlay, OverlayTarget};
 use crate::renderer_backend::{PlatformContext, RendererBackend};
+use crate::{log_target, overlay};
 
 /// The window to present to, as its windowing system names it.
 #[derive(Clone, Copy)]
@@ -109,7 +108,7 @@ fn set_ohos_buffer_geometry(window: *mut c_void, size: Size) {
         )
     };
     if status != 0 {
-        Log::error(Event::GraphicsBackend, format!("Setting the window's buffer geometry failed: {status}"));
+        log::error!(target: log_target::GRAPHICS_BACKEND, "Setting the window's buffer geometry failed: {status}");
     }
 }
 
@@ -192,7 +191,7 @@ impl Drop for DisplayUse {
         if shared[index].users == 0 {
             shared.remove(index);
             if let Err(e) = self.egl.terminate(self.display) {
-                Log::error(Event::GraphicsBackend, format!("eglTerminate() failed: {e}"));
+                log::error!(target: log_target::GRAPHICS_BACKEND, "eglTerminate() failed: {e}");
             }
         }
     }
@@ -386,7 +385,7 @@ impl EglWindow {
                 Some(surface)
             }
             Err(e) => {
-                Log::error(Event::GraphicsBackend, format!("Could not create a window surface: {e}"));
+                log::error!(target: log_target::GRAPHICS_BACKEND, "Could not create a window surface: {e}");
                 None
             }
         }
@@ -441,7 +440,7 @@ impl EglWindow {
         match self.egl.swap_buffers(self.display, surface) {
             Ok(()) => true,
             Err(e) => {
-                Log::error(Event::GraphicsBackend, format!("eglSwapBuffers() failed: {e}"));
+                log::error!(target: log_target::GRAPHICS_BACKEND, "eglSwapBuffers() failed: {e}");
                 false
             }
         }
@@ -460,7 +459,7 @@ impl EglWindow {
         self.context_state = ContextState::Idle;
         let left = if current { self.make_current() } else { self.clear_current() };
         if let Err(e) = left {
-            Log::error(Event::GraphicsBackend, format!("Leaving the window's surface failed: {e}"));
+            log::error!(target: log_target::GRAPHICS_BACKEND, "Leaving the window's surface failed: {e}");
         }
         if let Some(surface) = self.surface.take() {
             let _ = self.egl.destroy_surface(self.display, surface);
@@ -493,13 +492,13 @@ struct WindowContext(EglWindow);
 impl PlatformContext for WindowContext {
     fn make_current(&mut self) {
         if let Err(e) = self.0.make_current() {
-            Log::error(Event::GraphicsBackend, format!("Switching OpenGL context failed: {e}"));
+            log::error!(target: log_target::GRAPHICS_BACKEND, "Switching OpenGL context failed: {e}");
         }
     }
 
     fn done_current(&mut self) {
         if let Err(e) = self.0.clear_current() {
-            Log::error(Event::GraphicsBackend, format!("Removing OpenGL context failed: {e}"));
+            log::error!(target: log_target::GRAPHICS_BACKEND, "Removing OpenGL context failed: {e}");
         }
     }
 
@@ -620,7 +619,7 @@ impl FrameTarget for SurfaceTarget {
                 // on the window's.
                 window.context_state = ContextState::PresentingOnSurface;
                 if let Err(e) = window.make_current() {
-                    Log::error(Event::GraphicsBackend, format!("Switching OpenGL context failed: {e}"));
+                    log::error!(target: log_target::GRAPHICS_BACKEND, "Switching OpenGL context failed: {e}");
                 }
             }
             window.context_state.is_on_surface()
@@ -648,7 +647,7 @@ impl FrameTarget for SurfaceTarget {
         if std::mem::take(&mut self.readback_requested) {
             match read_texels(gpu, image.color, TextureRegion::whole(image.size)) {
                 Ok(texels) => self.readback = Some(PremultipliedImage::from_vec(image.size, texels)),
-                Err(error) => Log::error(Event::Render, format!("Reading a window's frame back failed: {error}")),
+                Err(error) => log::error!(target: log_target::RENDER, "Reading a window's frame back failed: {error}"),
             }
         }
         self.image.release(gpu);

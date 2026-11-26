@@ -20,6 +20,11 @@ mod shaders;
 mod surface_target;
 mod writes;
 
+/// The `log` targets of this crate's records (`mln_gfx`'s crate docs).
+mod log_target {
+    pub(crate) const RENDER: &str = "mln_webgpu::render";
+}
+
 pub use borrowed_target::{BorrowedTarget, BorrowedTextures, depth_stencil_format};
 pub use custom_layer::{CustomLayerEncoder, CustomLayerPass};
 pub use device::Device;

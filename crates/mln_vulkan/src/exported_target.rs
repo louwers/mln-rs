@@ -31,12 +31,12 @@ use mln_gfx::{
     SyncKind, SyncKinds,
 };
 use mln_util::error::Error;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::borrowed_target::{BorrowedDepth, BorrowedImage, BorrowedImages, ImageOwner, VulkanRing};
 use crate::device::{Device, depth_vk_format};
 use crate::gpu::VulkanGpu;
+use crate::log_target;
 use crate::renderer_backend::RendererBackend;
 
 const DMA_BUF_USAGE: vk::ImageUsageFlags = vk::ImageUsageFlags::from_raw(
@@ -242,7 +242,7 @@ pub(crate) fn probe(device: &Device) -> ExportKinds {
     {
         match ExportedMemory::new(device, extent, &Layout::OpaqueFd) {
             Ok(_) => kinds = kinds.with(ExportKind::OpaqueFd),
-            Err(error) => Log::info(Event::Render, format!("The Vulkan device exports no opaque memory: {error}")),
+            Err(error) => log::info!(target: log_target::RENDER, "The Vulkan device exports no opaque memory: {error}"),
         }
     }
     let modifiers = |fourcc| {
@@ -256,14 +256,16 @@ pub(crate) fn probe(device: &Device) -> ExportKinds {
     {
         match ExportedMemory::new(device, extent, &dma_buf_layout(device, choice)) {
             Ok(_) => kinds = kinds.with(ExportKind::DmaBuf),
-            Err(error) => Log::info(Event::Render, format!("The Vulkan device exports no dmabufs: {error}")),
+            Err(error) => log::info!(target: log_target::RENDER, "The Vulkan device exports no dmabufs: {error}"),
         }
     }
     #[cfg(target_os = "android")]
     if imports_hardware_buffers(device) {
         match ExportedMemory::new(device, extent, &Layout::AndroidHardwareBuffer { usage: 0 }) {
             Ok(_) => kinds = kinds.with(ExportKind::AndroidHardwareBuffer),
-            Err(error) => Log::info(Event::Render, format!("The Vulkan device exports no hardware buffers: {error}")),
+            Err(error) => {
+                log::info!(target: log_target::RENDER, "The Vulkan device exports no hardware buffers: {error}")
+            }
         }
     }
     let d3d11 = vk::ExternalMemoryHandleTypeFlags::D3D11_TEXTURE;
@@ -272,7 +274,7 @@ pub(crate) fn probe(device: &Device) -> ExportKinds {
     {
         match ExportedMemory::new(device, extent, &Layout::Dxgi) {
             Ok(_) => kinds = kinds.with(ExportKind::DxgiSharedHandle),
-            Err(error) => Log::info(Event::Render, format!("The Vulkan device shares no D3D11 textures: {error}")),
+            Err(error) => log::info!(target: log_target::RENDER, "The Vulkan device shares no D3D11 textures: {error}"),
         }
     }
     kinds
@@ -291,7 +293,7 @@ pub(crate) fn probe_depth(device: &Device) -> ExportKinds {
     match DepthMemory::new(device, vk::Extent2D { width: 1, height: 1 }, format, true) {
         Ok(_) => ExportKinds::of(&[ExportKind::OpaqueFd]),
         Err(error) => {
-            Log::info(Event::Render, format!("The Vulkan device exports no opaque depth memory: {error}"));
+            log::info!(target: log_target::RENDER, "The Vulkan device exports no opaque depth memory: {error}");
             ExportKinds::NONE
         }
     }

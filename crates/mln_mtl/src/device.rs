@@ -5,12 +5,11 @@ use std::sync::{Arc, OnceLock};
 
 use mln_gfx::ExportKinds;
 use mln_util::error::Error;
-use mln_util::logging::{Event, Log};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_metal::{MTLCommandQueue, MTLCreateSystemDefaultDevice, MTLDevice};
 
-use crate::Id;
+use crate::{Id, log_target};
 
 /// A Metal device and the command queue that renderers on any thread
 /// submit to: the library's, or the host's. Clones share them.
@@ -50,7 +49,7 @@ impl Device {
             }
         };
         let queue = device.newCommandQueue().ok_or_else(|| Error::native("Failed to create a Metal command queue"))?;
-        Log::info(Event::Render, format!("graphics device uses Metal device {}", device.name()));
+        log::info!(target: log_target::RENDER, "graphics device uses Metal device {}", device.name());
         Ok(Device { device, queue, host_queue: false, export_kinds: Arc::default() })
     }
 

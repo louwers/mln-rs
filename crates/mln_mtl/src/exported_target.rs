@@ -8,7 +8,6 @@ use mln_gfx::{
     ExportKind, ExportKinds, ExportedFrame, ExportedImage, ExportedRing, FrameDepth, NativeTexture, SyncKind, SyncKinds,
 };
 use mln_util::error::Error;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
@@ -19,11 +18,11 @@ use objc2_io_surface::{
 };
 use objc2_metal::{MTLDevice, MTLPixelFormat, MTLStorageMode, MTLTexture, MTLTextureUsage};
 
-use crate::Id;
 use crate::borrowed_target::{BorrowedTextures, MetalRing};
 use crate::device::Device;
 use crate::gpu::texture_descriptor;
 use crate::renderer_backend::RendererBackend;
+use crate::{Id, log_target};
 
 /// `kCVPixelFormatType_32BGRA`, the four characters 'BGRA', which Metal
 /// renders as `MTLPixelFormatBGRA8Unorm`.
@@ -43,7 +42,7 @@ pub(crate) fn probe(device: &Device) -> ExportKinds {
     match surface_texture(device.device(), Size::new(1, 1)) {
         Ok(_) => ExportKinds::of(&[ExportKind::IoSurface]),
         Err(error) => {
-            Log::info(Event::Render, format!("The Metal device renders into no IOSurface: {}", error.message));
+            log::info!(target: log_target::RENDER, "The Metal device renders into no IOSurface: {}", error.message);
             ExportKinds::NONE
         }
     }

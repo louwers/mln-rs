@@ -3,27 +3,60 @@
 // A library device logs the GPU it is on, as maplibre-native-ffi's graphics
 // devices do.
 
-use std::sync::mpsc::{Sender, channel};
+use std::cell::RefCell;
+use std::sync::Once;
 
 use mln_mtl::Device;
-use mln_util::logging::{Event, EventSeverity, Log, Observer};
 
-struct Recorder(Sender<(EventSeverity, Event, i64, String)>);
+/// A record that the test logger caught: its level, target and message.
+type Caught = (log::Level, String, String);
 
-impl Observer for Recorder {
-    fn on_record(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> bool {
-        let _ = self.0.send((severity, event, code, msg.to_owned()));
+thread_local! {
+    /// The records of `capture`'s crate that this thread logs during its
+    /// run, or `None` outside one.
+    static CAUGHT: RefCell<Option<(&'static str, Vec<Caught>)>> = const { RefCell::new(None) };
+}
+
+/// The test binary's logger. It keeps each thread's records apart, so tests
+/// that run on threads of one process don't see each other's.
+struct Catcher;
+
+impl log::Log for Catcher {
+    fn enabled(&self, _: &log::Metadata<'_>) -> bool {
         true
     }
+
+    fn log(&self, record: &log::Record<'_>) {
+        CAUGHT.with_borrow_mut(|caught| {
+            if let Some((krate, records)) = caught
+                && record.target().split("::").next() == Some(*krate)
+            {
+                records.push((record.level(), record.target().to_owned(), record.args().to_string()));
+            }
+        });
+    }
+
+    fn flush(&self) {}
+}
+
+/// Runs `f` and returns its result with the records of `krate` that it
+/// logged on this thread.
+fn capture<T>(krate: &'static str, f: impl FnOnce() -> T) -> (T, Vec<Caught>) {
+    static INSTALL: Once = Once::new();
+    INSTALL.call_once(|| {
+        log::set_logger(&Catcher).expect("the test binary has no other logger");
+        log::set_max_level(log::LevelFilter::Trace);
+    });
+    CAUGHT.set(Some((krate, Vec::new())));
+    let result = f();
+    let records = CAUGHT.take().map(|(_, records)| records).unwrap_or_default();
+    (result, records)
 }
 
 #[test]
 fn a_device_logs_its_gpu() {
-    let (sender, records) = channel();
-    let previous = Log::set_thread_observer(Some(Box::new(Recorder(sender))));
-    let device = Device::new(None).expect("Metal device");
-    drop(Log::set_thread_observer(previous));
+    let (device, records) = capture("mln_mtl", || Device::new(None).expect("Metal device"));
 
     let message = format!("graphics device uses Metal device {}", device.name());
-    assert_eq!(records.try_iter().collect::<Vec<_>>(), [(EventSeverity::Info, Event::Render, -1, message)]);
+    assert_eq!(records, [(log::Level::Info, "mln_mtl::render".to_owned(), message)]);
 }

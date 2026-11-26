@@ -21,13 +21,13 @@ use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::{MAX_ACTIVE_TEXTURE_UNITS, SamplerState};
 use mln_gfx::types::{DepthMaskType, TextureFilterType};
 use mln_util::hash::HashMap;
-use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 use mln_util::size::Size;
 
 use crate::bytes::Bytes;
 use crate::custom_layer::{CustomLayerEncoder, CustomLayerPass, lend_context};
 use crate::enums::{self, AttributeFormat};
+use crate::log_target;
 use crate::renderer_backend::GlContext;
 use crate::shaders::declarations::Stage;
 use crate::shaders::shader_source::{compose, uniform_block};
@@ -419,7 +419,7 @@ fn buffer_target(usage: BufferUsage) -> u32 {
 /// waits on the GPU.
 fn log_gpu_identifier(renderer: &str) {
     static LOGGED: Once = Once::new();
-    LOGGED.call_once(|| Log::info(Event::General, format!("GPU Identifier: {renderer}")));
+    LOGGED.call_once(|| log::info!("GPU Identifier: {renderer}"));
 }
 
 /// A [`Gpu`] on an OpenGL ES 3.0, WebGL2 or desktop OpenGL 3.3 context,
@@ -623,7 +623,7 @@ impl GlGpu {
                 // SAFETY: no preconditions.
                 let error = unsafe { gl.get_error() };
                 if error != glow::NO_ERROR {
-                    Log::error(Event::GraphicsBackend, format!("OpenGL error {error:#x} in this frame"));
+                    log::error!(target: log_target::GRAPHICS_BACKEND, "OpenGL error {error:#x} in this frame");
                 }
             }
         });

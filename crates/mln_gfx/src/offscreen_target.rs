@@ -5,7 +5,6 @@ use std::marker::PhantomData;
 
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::frame::{FrameImage, FrameTarget, Handoff};
@@ -13,6 +12,7 @@ use crate::gpu::{
     Gpu, GpuError, TargetFormats, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage, destroy_unused,
     read_texels,
 };
+use crate::log_target;
 
 /// The format of an offscreen frame's color, which
 /// [`read_image`](OffscreenTarget::read_image) reads as it is.
@@ -94,7 +94,7 @@ impl<G: Gpu + ?Sized> FrameTarget for OffscreenTarget<G> {
             None => match Self::make_image(gpu, size) {
                 Ok(image) => *self.image.insert(image),
                 Err(error) => {
-                    Log::error(Event::Render, format!("Making an offscreen frame's textures failed: {error}"));
+                    log::error!(target: log_target::RENDER, "Making an offscreen frame's textures failed: {error}");
                     return None;
                 }
             },

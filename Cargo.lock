@@ -2572,6 +2572,7 @@ dependencies = [
  "glam",
  "js-sys",
  "libc",
+ "log",
  "mln-rs-d3d12",
  "mln-rs-feature",
  "mln-rs-frame-pacer",
@@ -2627,6 +2628,7 @@ name = "mln-rs-d3d12"
 version = "0.0.15"
 dependencies = [
  "gpu-allocator",
+ "log",
  "mln-rs-gfx",
  "mln-rs-glsl",
  "mln-rs-renderer",
@@ -2646,6 +2648,7 @@ dependencies = [
  "egui-winit",
  "egui_extras",
  "egui_glow",
+ "log",
  "mln-rs-bench-workload",
  "mln-rs-d3d12",
  "mln-rs-frame-pacer",
@@ -2751,6 +2754,7 @@ name = "mln-rs-gfx"
 version = "0.0.15"
 dependencies = [
  "bytemuck",
+ "log",
  "mln-rs-util",
  "mln-rs-vec-map",
  "mln-rs-wire",
@@ -2769,6 +2773,7 @@ dependencies = [
  "khronos-egl",
  "libc",
  "libloading",
+ "log",
  "mln-rs-gfx",
  "mln-rs-renderer",
  "mln-rs-tile-id",
@@ -2887,6 +2892,7 @@ version = "0.0.15"
 dependencies = [
  "block2 0.6.2",
  "bytemuck",
+ "log",
  "mln-rs-gfx",
  "mln-rs-renderer",
  "mln-rs-tile-id",
@@ -3271,6 +3277,7 @@ dependencies = [
  "bytemuck",
  "gpu-allocator",
  "libc",
+ "log",
  "mln-rs-gfx",
  "mln-rs-glsl",
  "mln-rs-renderer",
@@ -3294,6 +3301,7 @@ name = "mln-rs-web"
 version = "0.0.15"
 dependencies = [
  "js-sys",
+ "log",
  "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-gl",
@@ -3339,6 +3347,7 @@ dependencies = [
 name = "mln-rs-webgpu"
 version = "0.0.15"
 dependencies = [
+ "log",
  "mln-rs-gfx",
  "mln-rs-renderer",
  "mln-rs-util",

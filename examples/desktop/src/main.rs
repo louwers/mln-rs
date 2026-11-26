@@ -189,7 +189,29 @@ fn parse_args() -> Result<Args, String> {
     Ok(args)
 }
 
+/// Prints the `log` records of the library's graphics backends, and other
+/// crates' warnings and errors, to stderr, as the library prints its own log.
+struct StderrLog;
+
+impl log::Log for StderrLog {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata.level() <= log::Level::Warn
+            || (metadata.level() <= log::Level::Info && metadata.target().starts_with("mln_"))
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        if self.enabled(record.metadata()) {
+            eprintln!("[{}] [{}] {}", record.level(), record.target(), record.args());
+        }
+    }
+
+    fn flush(&self) {}
+}
+
 fn main() {
+    if log::set_logger(&StderrLog).is_ok() {
+        log::set_max_level(log::LevelFilter::Info);
+    }
     let args = match parse_args() {
         Ok(args) => args,
         Err(e) => {

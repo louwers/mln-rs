@@ -13,7 +13,6 @@ use mln_gfx::Window;
 use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_gfx::window::raw_window_handle::RawWindowHandle;
 use mln_util::error::Error;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::Graphics::Gdi::HDC;
@@ -24,7 +23,7 @@ use crate::frame_image::{FrameImports, default_framebuffer};
 use crate::gpu::GlGpu;
 use crate::overlay::{self, Overlay};
 use crate::renderer_backend::{PlatformContext, RendererBackend};
-use crate::wgl;
+use crate::{log_target, wgl};
 
 /// The window's context, current on the window's device context, which the
 /// backend's platform context owns.
@@ -80,13 +79,13 @@ struct WindowContext(WglWindow);
 impl PlatformContext for WindowContext {
     fn make_current(&mut self) {
         if let Err(e) = self.0.make_current() {
-            Log::error(Event::GraphicsBackend, format!("Switching OpenGL context failed: {e}"));
+            log::error!(target: log_target::GRAPHICS_BACKEND, "Switching OpenGL context failed: {e}");
         }
     }
 
     fn done_current(&mut self) {
         if let Err(e) = wgl::make_current(std::ptr::null_mut(), std::ptr::null_mut()) {
-            Log::error(Event::GraphicsBackend, format!("Removing OpenGL context failed: {e}"));
+            log::error!(target: log_target::GRAPHICS_BACKEND, "Removing OpenGL context failed: {e}");
         }
     }
 }
@@ -199,7 +198,7 @@ impl FrameTarget for SurfaceTarget {
         }
         self.image.release(gpu);
         if let Err(e) = wgl::swap_buffers(self.dc) {
-            Log::error(Event::GraphicsBackend, e);
+            log::error!(target: log_target::GRAPHICS_BACKEND, "{e}");
         }
         Handoff::Presented
     }

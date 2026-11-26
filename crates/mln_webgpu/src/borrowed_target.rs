@@ -7,10 +7,10 @@ use mln_gfx::frame::{FrameImage, FrameTarget, Handoff};
 use mln_gfx::gpu::{Gpu as _, ResourceId, TargetFormats, destroy_unused};
 use mln_gfx::{ConsumerSync, DepthStencilFormat, DepthStencilFormats, GpuSync, SyncKind, SyncKinds};
 use mln_util::error::Error;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::gpu::{WebGpu, from_wgpu_format};
+use crate::log_target;
 use crate::renderer_backend::RendererBackend;
 
 /// A ring of the host's 2D textures, of `size` pixels and one format, with
@@ -310,7 +310,10 @@ impl FrameTarget for BorrowedTarget {
             GpuSync::of(SyncKind::QueueOrder)
         } else {
             if let Err(error) = gpu.flush(true) {
-                Log::error(Event::Render, format!("WebGPU: waiting for a borrowed texture's frame failed: {error}"));
+                log::error!(
+                    target: log_target::RENDER,
+                    "WebGPU: waiting for a borrowed texture's frame failed: {error}"
+                );
                 return Handoff::Dropped;
             }
             GpuSync::of(SyncKind::CpuComplete)

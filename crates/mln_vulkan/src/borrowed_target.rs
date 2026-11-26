@@ -8,12 +8,12 @@ use mln_gfx::gpu::{GpuError, TargetFormats, TextureFormat, TextureId, TextureUsa
 use mln_gfx::ring::{self, RingBackend, RingTextures};
 use mln_gfx::{ConsumerSync, GpuSync, SyncKind};
 use mln_util::error::Error;
-#[cfg(unix)]
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::device::Device;
 use crate::gpu::{ImportedImage, VulkanGpu};
+#[cfg(unix)]
+use crate::log_target;
 use crate::renderer_backend::RendererBackend;
 
 /// The queue family that a borrowed image goes to after each frame.
@@ -324,7 +324,7 @@ impl VulkanRing {
         let fd = match unsafe { loader.get_semaphore_fd(&info) } {
             Ok(fd) => fd,
             Err(error) => {
-                Log::error(Event::Render, format!("Exporting a frame's sync file failed: {error}"));
+                log::error!(target: log_target::RENDER, "Exporting a frame's sync file failed: {error}");
                 return None;
             }
         };

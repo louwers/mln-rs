@@ -232,10 +232,7 @@ impl Writes {
         if let Err(error) =
             queue.write_buffer_with_f64_and_u8_array_and_u32_and_u32(buffer, offset as f64, &array, 0, len as u32)
         {
-            mln_util::logging::Log::error(
-                mln_util::logging::Event::Render,
-                format!("writing a buffer from a JS array: {error:?}"),
-            );
+            log::error!(target: crate::log_target::RENDER, "writing a buffer from a JS array: {error:?}");
         }
     }
 

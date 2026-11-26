@@ -11,7 +11,6 @@ use gpu_allocator::d3d12::{
 };
 use gpu_allocator::{AllocationSizes, AllocatorDebugSettings, MemoryLocation};
 use mln_gfx::gpu::GpuError;
-use mln_util::logging::{Event, Log};
 use windows::Win32::Graphics::Direct3D12::{
     D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT, D3D12_RANGE, D3D12_RESOURCE_DESC, D3D12_RESOURCE_DIMENSION_BUFFER,
     D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET, D3D12_RESOURCE_FLAG_NONE,
@@ -20,6 +19,8 @@ use windows::Win32::Graphics::Direct3D12::{
     ID3D12Resource,
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC};
+
+use crate::log_target;
 
 /// The range of a mapping that the CPU reads none of.
 pub(crate) static NO_RANGE: D3D12_RANGE = D3D12_RANGE { Begin: 0, End: 0 };
@@ -204,7 +205,7 @@ impl Memory {
             Ok(mapped) => Ok((resource, mapped)),
             Err(error) => {
                 if let Err(free) = self.allocator.free_resource(resource) {
-                    Log::error(Event::Render, format!("freeing GPU memory failed: {free}"));
+                    log::error!(target: log_target::RENDER, "freeing GPU memory failed: {free}");
                 }
                 Err(error)
             }
@@ -305,7 +306,7 @@ impl Memory {
             Owner::Slab { location, size, page, offset } => self.slabs[location].free[size].push((page, offset)),
             Owner::Resource(resource) => {
                 if let Err(error) = self.allocator.free_resource(resource) {
-                    Log::error(Event::Render, format!("freeing GPU memory failed: {error}"));
+                    log::error!(target: log_target::RENDER, "freeing GPU memory failed: {error}");
                 }
             }
         }
