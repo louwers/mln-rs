@@ -17,7 +17,7 @@ use crate::layer::bucket_parameters::BucketParameters;
 use crate::layer::filter_groups::FilterGroups;
 use crate::layer::group_by_layout::group_layers;
 use crate::layer::layer_type::{ErasedEvaluatedLayer, ErasedLayout};
-use crate::layer::layout::{BuildParams, LayoutParameters, SourceLayer};
+use crate::layer::layout::{LayoutParameters, SourceLayer};
 use crate::map::MapMode;
 use crate::query::feature_index::FeatureIndexBuilder;
 use crate::text::atlas::ImagePositions;
@@ -151,8 +151,8 @@ pub(crate) struct Built {
 }
 
 /// Groups the layers, builds the layouts of the groups that can need glyphs
-/// or images (symbol layers, and fill, line and fill-extrusion layers with a
-/// pattern), and records what they need. It builds no bucket.
+/// or images ([`Layout::needs_resources`](crate::layer::layout::Layout::needs_resources)),
+/// and records what they need. It builds no bucket.
 pub(crate) fn discover(input: &LayoutInput<'_>) -> Result<Discovered, Error> {
     let mut discovered = Discovered {
         groups: Vec::new(),
@@ -171,12 +171,12 @@ pub(crate) fn discover(input: &LayoutInput<'_>) -> Result<Discovered, Error> {
             continue;
         }
         let layer_type = layers[0].entry();
-        let layout = if layer_type.layout_can_need_dependencies(&layers) {
-            layer_type.create_layout(
+        let layout = if layer_type.needs_resources(&layers) {
+            let layout = layer_type.create_layout(
                 &layers,
-                &mut LayoutParameters {
+                LayoutParameters {
                     bucket_parameters: &bucket_parameters,
-                    font_faces: input.font_faces.cloned(),
+                    font_faces: input.font_faces,
                     glyph_pbfs: input.glyph_pbfs,
                     glyph_dependencies: &mut discovered.dependencies.glyphs,
                     image_dependencies: &mut discovered.dependencies.images,
@@ -185,7 +185,8 @@ pub(crate) fn discover(input: &LayoutInput<'_>) -> Result<Discovered, Error> {
                     filter_groups: &mut discovered.filter_groups,
                 },
                 SourceLayer::new(data.clone(), source_layer.clone()),
-            )?
+            )?;
+            Some(layout)
         } else {
             None
         };
@@ -213,7 +214,6 @@ pub(crate) fn build(discovered: Discovered, input: &LayoutInput<'_>, resolved: &
     // Room for every layer of the groups, of which those with data keep it.
     built.buckets = LayoutBuckets::with_capacity(groups.iter().map(|group| group.layers.len()).sum());
     let LayoutParams { first_load, .. } = input.params;
-    let build = BuildParams { first_load, canonical: input.id.canonical };
     let bucket_parameters = input.bucket_parameters();
 
     let mut waiting = Vec::new();
@@ -223,13 +223,13 @@ pub(crate) fn build(discovered: Discovered, input: &LayoutInput<'_>, resolved: &
         built.feature_index.set_bucket_layer_ids(&leader.base().id, &layer_ids);
 
         let layout = match layout {
-            Some(layout) => Some(layout),
+            Some(layout) => layout,
             // Layouts of groups that need no glyphs or images record nothing.
             None => layers[0].entry().create_layout(
                 &layers,
-                &mut LayoutParameters {
+                LayoutParameters {
                     bucket_parameters: &bucket_parameters,
-                    font_faces: input.font_faces.cloned(),
+                    font_faces: input.font_faces,
                     glyph_pbfs: input.glyph_pbfs,
                     glyph_dependencies: &mut GlyphDependencies::default(),
                     image_dependencies: &mut ImageDependencies::default(),
@@ -240,15 +240,15 @@ pub(crate) fn build(discovered: Discovered, input: &LayoutInput<'_>, resolved: &
                 SourceLayer::new(data.clone(), leader.base().source_layer.clone()),
             )?,
         };
-        match layout {
-            Some(layout) if layout.has_dependencies() => waiting.push(layout),
-            Some(mut layout) => layout.create_bucket(None, &mut built, &build)?,
-            None => {}
+        if layout.needs_resources() {
+            waiting.push(layout);
+        } else {
+            layout.build(None, &mut built, &bucket_parameters, first_load)?;
         }
     }
 
-    for mut layout in waiting {
-        layout.create_bucket(Some(resolved), &mut built, &build)?;
+    for layout in waiting {
+        layout.build(Some(resolved), &mut built, &bucket_parameters, first_load)?;
     }
     built.buckets.shrink_to_fit();
     Ok(built)

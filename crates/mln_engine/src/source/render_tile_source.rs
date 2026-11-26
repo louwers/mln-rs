@@ -5,7 +5,6 @@ use mln_style::Source;
 use mln_style::error::Error;
 
 use crate::draw::context::Context;
-use crate::layer::bucket::UploadNeeds;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::query::FeatureExtensionValue;
 use crate::render::tile::RenderTile;
@@ -151,8 +150,8 @@ impl RenderSource for RenderTileSource {
         self.order_by_y = Vec::new();
     }
 
-    fn upload(&mut self, store: &mut TileStore, context: &mut Context, needs: UploadNeeds) {
-        store.upload(self.key, &self.render_tiles, context, needs);
+    fn upload(&mut self, store: &mut TileStore, context: &mut Context) {
+        store.upload(self.key, &self.render_tiles, context);
     }
 
     fn tiles(&self) -> Option<SourceKey> {

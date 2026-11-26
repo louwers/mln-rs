@@ -11,7 +11,7 @@ use mln_wire::shared::{self, ErasedTable, Role, Table};
 use mln_wire::{Context, Reader, Request, Wire, Writer};
 
 use crate::Registry;
-use crate::layer::bucket::Bucket;
+use crate::layer::bucket::ErasedBucket;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::query::feature_index::FeatureIndex;
 use crate::tile::cut::SharedAncestor;
@@ -163,7 +163,7 @@ impl Context for Tables {
 
 /// A bucket and the ids of the layers that render it with the properties
 /// they were laid out with.
-type RenderedBucket<'a> = (&'a dyn Bucket, Vec<(&'a String, &'a Arc<dyn ErasedEvaluatedLayer>)>);
+type RenderedBucket<'a> = (&'a dyn ErasedBucket, Vec<(&'a String, &'a Arc<dyn ErasedEvaluatedLayer>)>);
 
 impl LayoutResult {
     /// Each bucket with the layers that render it, in layer id order.

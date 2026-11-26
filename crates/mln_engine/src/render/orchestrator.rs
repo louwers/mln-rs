@@ -1269,10 +1269,9 @@ impl RenderOrchestrator {
 
     /// Readies the buckets of the frame's sources for the frame's draws.
     pub(crate) fn upload_sources(&mut self, context: &mut Context) {
-        let needs = crate::layers::upload_needs(context);
         for source in self.render_sources.values_mut() {
             if source.is_enabled() {
-                source.upload(&mut self.tile_store, context, needs);
+                source.upload(&mut self.tile_store, context);
             }
         }
     }

@@ -9,12 +9,13 @@ use mln_style::feature::{GeometryCollection, GeometryTileFeature};
 use mln_style::geometry::FeatureType;
 use mln_style::layer::{LayerStyle, convert_layer};
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionLayoutProperties;
-use mln_style::layers::fill_layer_properties::{FillLayoutProperties, FillPaintProperties};
+use mln_style::layers::fill_layer_properties::FillPaintProperties;
 use mln_style::layers::line_layer_properties::LineLayoutProperties;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::layers::{Fill, Line};
 use mln_style::property::evaluated::Evaluated;
 use mln_style::property::value::PropertyValue;
+use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
 use mln_vec_map::VecMap;
 
@@ -30,15 +31,16 @@ use crate::draw::identity::SimpleIdentity;
 use crate::draw::indexes::DrawIndexes;
 use crate::draw::segment::SegmentBase;
 use crate::gfx::line_mesh::LineLayoutVertex;
-use crate::layer::bucket::Bucket;
-use crate::layer::bucket_geometry::{BucketGeometry, GeometryUpload, bucket_indexes, bucket_vertices, paint_vertices};
+use crate::layer::bucket::{Bucket, ErasedBucket, Stored, Upload};
+use crate::layer::bucket_geometry::{BucketGeometry, bucket_indexes, bucket_vertices, paint_vertices};
 use crate::layer::layer_type::EvaluatedLayer;
+use crate::layer::paint_property_binder::{LayerBinders, PaintBinders as _};
 use crate::layout::pattern_layout::PatternLayerMap;
-use crate::map::MapMode;
 use crate::symbol::bucket::{SymbolBucket, SymbolBucketStyle, SymbolLayoutFlags};
 use crate::symbol::instance::SymbolInstancePools;
 use crate::tests::fixture_log::FixtureLog;
 use crate::text::atlas::ImagePositions;
+use crate::tile::OverscaledTileID;
 use crate::tile_store::raster::Masking;
 use crate::tile_store::tile_mask::TileMask;
 use crate::util::tessellator::Tessellator;
@@ -76,50 +78,125 @@ fn collection(rings: &[&[(i16, i16)]]) -> GeometryCollection {
 }
 
 /// Uploads `bucket`, keeping its geometry in `geometry`, through `context`.
-fn upload(bucket: &mut dyn Bucket, geometry: &mut BucketGeometry, context: &mut Context) {
-    let needs = crate::layers::upload_needs(context);
-    bucket.upload(&mut GeometryUpload::new(geometry, &[], context), needs);
+fn upload(bucket: &mut impl Bucket, geometry: &mut BucketGeometry, context: &mut Context) {
+    bucket.upload(&mut Upload::geometry(geometry, &[], context));
+}
+
+/// What a bucket's layout does with each of its features: adds its geometry
+/// and writes its paint values.
+trait AddFeature {
+    #[expect(clippy::too_many_arguments, reason = "the feature and what the layout lays it out with")]
+    fn add_feature(
+        &mut self,
+        feature: &dyn GeometryTileFeature,
+        geometry: &GeometryCollection,
+        positions: &ImagePositions,
+        patterns: &PatternLayerMap,
+        index: usize,
+        canonical: &CanonicalTileID,
+        tessellator: &mut Tessellator,
+    );
+}
+
+impl AddFeature for FillBucket {
+    fn add_feature(
+        &mut self,
+        feature: &dyn GeometryTileFeature,
+        geometry: &GeometryCollection,
+        positions: &ImagePositions,
+        patterns: &PatternLayerMap,
+        index: usize,
+        canonical: &CanonicalTileID,
+        tessellator: &mut Tessellator,
+    ) {
+        self.add_geometry(geometry, canonical, tessellator);
+        let length = self.vertices.len();
+        self.paint_property_binders.populate(
+            feature,
+            length,
+            index,
+            positions,
+            Some(patterns),
+            canonical,
+            &mln_style::expression::Value::Null,
+        );
+    }
+}
+
+impl AddFeature for FillExtrusionBucket {
+    fn add_feature(
+        &mut self,
+        feature: &dyn GeometryTileFeature,
+        geometry: &GeometryCollection,
+        positions: &ImagePositions,
+        patterns: &PatternLayerMap,
+        index: usize,
+        canonical: &CanonicalTileID,
+        tessellator: &mut Tessellator,
+    ) {
+        self.add_geometry(geometry, canonical, tessellator);
+        let length = self.vertices.len();
+        self.paint_property_binders.populate(
+            feature,
+            length,
+            index,
+            positions,
+            Some(patterns),
+            canonical,
+            &mln_style::expression::Value::Null,
+        );
+    }
+}
+
+impl AddFeature for LineBucket {
+    fn add_feature(
+        &mut self,
+        feature: &dyn GeometryTileFeature,
+        geometry: &GeometryCollection,
+        positions: &ImagePositions,
+        patterns: &PatternLayerMap,
+        index: usize,
+        canonical: &CanonicalTileID,
+        tessellator: &mut Tessellator,
+    ) {
+        for line in geometry.iter() {
+            self.add_geometry(line, feature, canonical, tessellator);
+        }
+        let length = self.vertices.len();
+        self.paint_property_binders.populate(
+            feature,
+            length,
+            index,
+            positions,
+            Some(patterns),
+            canonical,
+            &mln_style::expression::Value::Null,
+        );
+    }
+}
+
+/// A line bucket of a tile at zoom 10 for `layout`, of no layers.
+fn empty_line_bucket(layout: LineLayoutProperties::PossiblyEvaluated) -> LineBucket {
+    let tile = OverscaledTileID::new(10, 0, CanonicalTileID::new(10, 0, 0));
+    LineBucket::new(layout, LayerBinders::default(), tile, SubdivisionGranularitySetting::none())
 }
 
 // gtest: Buckets.CircleBucket
 #[test]
 fn circle_bucket() {
-    let mut bucket = CircleBucket::new(&VecMap::new(), MapMode::Static, 1.0);
-    assert!(!bucket.has_data());
-    assert!(!bucket.needs_upload());
-
-    // CircleBucket::addFeature() is a no-op.
-    let point = collection(&[&[(0, 0)]]);
-    bucket.add_feature(
-        &feature(FeatureType::Point, &point),
-        &point,
-        &ImagePositions::default(),
-        &PatternLayerMap::default(),
-        0,
-        &CanonicalTileID::new(0, 0, 0),
-        &mut Tessellator::default(),
-    );
-    assert!(!bucket.has_data());
-    assert!(!bucket.needs_upload());
-
-    bucket.segments.push(SegmentBase::new(0, 0));
-    assert!(bucket.has_data());
-    assert!(bucket.needs_upload());
+    // A bucket uploads once, until it changes.
+    let mut bucket = Stored::new(CircleBucket::default());
 
     with_context(|_, context| {
-        upload(&mut bucket, &mut BucketGeometry::default(), context);
-        assert!(bucket.has_data());
-        assert!(!bucket.needs_upload());
+        bucket.upload(&mut BucketGeometry::default(), &[], context);
     });
 }
 
 // gtest: Buckets.FillBucket
 #[test]
 fn fill_bucket() {
-    let layout = FillLayoutProperties::PossiblyEvaluated::default();
-    let mut bucket = FillBucket::new(&layout, &VecMap::new(), 5.0, 1);
+    let mut bucket = FillBucket::new(LayerBinders::default(), SubdivisionGranularitySetting::none());
     assert!(!bucket.has_data());
-    assert!(!bucket.needs_upload());
 
     let polygon = collection(&[&[(0, 0), (0, 1), (1, 1)]]);
     bucket.add_feature(
@@ -132,11 +209,9 @@ fn fill_bucket() {
         &mut Tessellator::default(),
     );
     assert!(bucket.has_data());
-    assert!(bucket.needs_upload());
 
     with_context(|_, context| {
         upload(&mut bucket, &mut BucketGeometry::default(), context);
-        assert!(!bucket.needs_upload());
     });
 }
 
@@ -146,7 +221,7 @@ fn fill_extrusion_vertex_count(polygon: &GeometryCollection, meters: f32, tile: 
     let layout = FillExtrusionLayoutProperties::PossiblyEvaluated {
         fill_extrusion_rounded_corner_distance: Evaluated::Constant(meters),
     };
-    let mut bucket = FillExtrusionBucket::new(layout, &VecMap::new(), f32::from(tile.z), 1);
+    let mut bucket = FillExtrusionBucket::new(layout, LayerBinders::default(), SubdivisionGranularitySetting::none());
     bucket.add_feature(
         &feature(FeatureType::Polygon, polygon),
         polygon,
@@ -182,7 +257,7 @@ fn fill_extrusion_walls_on_clip_lines_leave_the_pattern_where_it_was() {
     let layout = FillExtrusionLayoutProperties::PossiblyEvaluated {
         fill_extrusion_rounded_corner_distance: Evaluated::Constant(0.0),
     };
-    let mut bucket = FillExtrusionBucket::new(layout, &VecMap::new(), 16.0, 1);
+    let mut bucket = FillExtrusionBucket::new(layout, LayerBinders::default(), SubdivisionGranularitySetting::none());
     bucket.add_feature(
         &feature(FeatureType::Polygon, &square),
         &square,
@@ -203,7 +278,7 @@ fn fill_extrusion_bucket_skips_polygons_rounded_off_the_tile() {
     let layout = FillExtrusionLayoutProperties::PossiblyEvaluated {
         fill_extrusion_rounded_corner_distance: Evaluated::Constant(100.0),
     };
-    let mut bucket = FillExtrusionBucket::new(layout, &VecMap::new(), 16.0, 1);
+    let mut bucket = FillExtrusionBucket::new(layout, LayerBinders::default(), SubdivisionGranularitySetting::none());
     bucket.add_feature(
         &feature(FeatureType::Polygon, &triangle),
         &triangle,
@@ -250,12 +325,8 @@ fn data_driven_fill_bucket(fill_color: &serde_json::Value) -> FillBucket {
     };
     let properties =
         Arc::new(EvaluatedLayer::<Fill>::with_paint(LayerStyle::recover(layer.style()).unwrap(), evaluated));
-    let mut bucket = FillBucket::new(
-        &FillLayoutProperties::PossiblyEvaluated::default(),
-        &VecMap::from_iter([("fill".to_owned(), properties)]),
-        5.0,
-        1,
-    );
+    let binders = LayerBinders::new(&[properties], 5.0);
+    let mut bucket = FillBucket::new(binders, SubdivisionGranularitySetting::none());
 
     let polygon = collection(&[&[(0, 0), (0, 1), (1, 1)]]);
     let mut feature = feature(FeatureType::Polygon, &polygon);
@@ -337,8 +408,7 @@ fn world_copies_share_their_buckets_stored_geometry() {
         let mut copy_geometry = BucketGeometry::default();
         upload(&mut copy, &mut copy_geometry, context);
         let mut geometry = BucketGeometry::default();
-        let needs = crate::layers::upload_needs(context);
-        bucket.upload(&mut GeometryUpload::new(&mut geometry, &[&copy_geometry], context), needs);
+        bucket.upload(&mut Upload::geometry(&mut geometry, &[&copy_geometry], context));
 
         assert!(bucket.vertices.is_moved() && bucket.vertices.data().is_empty());
         assert!(bucket.triangles.is_moved() && bucket.triangles.data().is_empty());
@@ -380,9 +450,8 @@ fn fill_bucket_keeps_paint_data_that_feature_state_rewrites() {
 #[test]
 fn line_bucket() {
     let layout = LineLayoutProperties::PossiblyEvaluated::default();
-    let mut bucket = LineBucket::new(layout, &VecMap::new(), 10.0, 1);
+    let mut bucket = empty_line_bucket(layout);
     assert!(!bucket.has_data());
-    assert!(!bucket.needs_upload());
 
     // Ignore invalid feature type.
     let point = collection(&[&[(0, 0)]]);
@@ -408,18 +477,16 @@ fn line_bucket() {
         &mut Tessellator::default(),
     );
     assert!(bucket.has_data());
-    assert!(bucket.needs_upload());
 
     with_context(|_, context| {
         upload(&mut bucket, &mut BucketGeometry::default(), context);
-        assert!(!bucket.needs_upload());
     });
 }
 
 // gtest: Buckets.LineBucketDrawablesBuildFromFreedIndexes
 #[test]
 fn line_bucket_drawables_build_from_freed_indexes() {
-    let mut bucket = LineBucket::new(LineLayoutProperties::PossiblyEvaluated::default(), &VecMap::new(), 10.0, 1);
+    let mut bucket = empty_line_bucket(LineLayoutProperties::PossiblyEvaluated::default());
     let line = collection(&[&[(0, 0), (100, 100), (200, 0)]]);
     bucket.add_feature(
         &feature(FeatureType::LineString, &line),
@@ -475,30 +542,13 @@ fn symbol_bucket() {
     assert!(!bucket.has_sdf_icon_data());
     assert!(!bucket.has_text_data());
     assert!(!bucket.has_data());
-    assert!(!bucket.needs_upload());
-
-    // SymbolBucket::addFeature() is a no-op.
-    let point = collection(&[&[(0, 0)]]);
-    bucket.add_feature(
-        &feature(FeatureType::Point, &point),
-        &point,
-        &ImagePositions::default(),
-        &PatternLayerMap::default(),
-        0,
-        &CanonicalTileID::new(0, 0, 0),
-        &mut Tessellator::default(),
-    );
-    assert!(!bucket.has_data());
-    assert!(!bucket.needs_upload());
 
     bucket.state.text.segments.push(SegmentBase::new(0, 0));
     assert!(bucket.has_text_data());
     assert!(bucket.has_data());
-    assert!(bucket.needs_upload());
 
     with_context(|_, context| {
         upload(&mut bucket, &mut BucketGeometry::default(), context);
-        assert!(!bucket.needs_upload());
     });
 }
 
@@ -663,8 +713,7 @@ fn raster_bucket_mask_complex() {
 #[test]
 fn tracks_sdf_patterns_per_layer() {
     let log = FixtureLog::new();
-    let layout = FillLayoutProperties::PossiblyEvaluated::default();
-    let mut bucket = FillBucket::new(&layout, &VecMap::new(), 5.0, 1);
+    let mut bucket = FillBucket::new(LayerBinders::default(), SubdivisionGranularitySetting::none());
 
     bucket.record_sdf_pattern("sdf-layer", true);
     bucket.record_sdf_pattern("rgba-layer", false);
@@ -680,9 +729,8 @@ fn tracks_sdf_patterns_per_layer() {
 #[test]
 fn warns_once_for_mixed_pattern_types_per_bucket() {
     let log = FixtureLog::new();
-    let layout = FillLayoutProperties::PossiblyEvaluated::default();
-    let mut first_bucket = FillBucket::new(&layout, &VecMap::new(), 5.0, 1);
-    let mut second_bucket = FillBucket::new(&layout, &VecMap::new(), 5.0, 1);
+    let mut first_bucket = FillBucket::new(LayerBinders::default(), SubdivisionGranularitySetting::none());
+    let mut second_bucket = FillBucket::new(LayerBinders::default(), SubdivisionGranularitySetting::none());
 
     first_bucket.record_sdf_pattern("mixed-layer", true);
     first_bucket.record_sdf_pattern("mixed-layer", false);
@@ -714,7 +762,7 @@ fn line_bucket_vertices(
         .expect("line layer")
         .layout
         .evaluate(&PropertyEvaluationParameters::new(10.0));
-    let mut bucket = LineBucket::new(layout, &VecMap::new(), 10.0, 1);
+    let mut bucket = empty_line_bucket(layout);
     for (index, (properties, line)) in features.iter().enumerate() {
         let line = collection(&[line]);
         let mut feature = feature(FeatureType::LineString, &line);

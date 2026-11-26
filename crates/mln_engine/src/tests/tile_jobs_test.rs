@@ -931,8 +931,7 @@ fn a_tiles_upload_frees_the_data_its_world_copy_copied() {
     assert!(matches!(circles(source, &copy_id), Some((false, false, None))), "the copy holds a copy of the data");
 
     crate::tests::with_context(|_, context| {
-        let needs = crate::layers::upload_needs(context);
-        source.upload_at(&id, None, &ctx.atlas, context, needs);
+        source.upload_at(&id, None, &ctx.atlas, context);
         let (tile, copy) = (circles(source, &id), circles(source, &copy_id));
         assert!(matches!(&tile, Some((true, true, Some(_)))), "the tile's data moved");
         assert!(matches!(&copy, Some((true, true, Some(_)))), "the copy freed its data");

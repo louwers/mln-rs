@@ -322,7 +322,8 @@ fn every_geometry_layer_type_crosses() {
     for (layer_id, render_data) in result.layer_render_data.iter() {
         let sent = layers.iter().find(|layer| &layer.style().base().id == layer_id).unwrap();
         assert!(std::ptr::addr_eq(render_data.layer, &raw const **sent));
-        assert!(render_data.bucket.has_data());
+        // A bucket read from a worker is new to the side that reads it.
+        assert!(render_data.bucket.needs_upload());
     }
 }
 
@@ -392,7 +393,7 @@ fn pattern_layouts_cross() {
         .bucket
         .downcast_ref::<crate::buckets::fill_extrusion_bucket::FillExtrusionBucket>()
         .unwrap();
-    let binders = &extrusion.paint_property_binders["extrusion-pattern"];
+    let binders = extrusion.paint_property_binders.get("extrusion-pattern").unwrap();
     assert!(matches!(
         binders.fill_extrusion_pattern.kind,
         crate::layer::paint_property_binder::CrossFadedPaintPropertyBinderKind::Composite { .. }

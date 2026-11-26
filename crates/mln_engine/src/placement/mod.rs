@@ -670,18 +670,15 @@ impl Placement {
             if data.sort_key_range.is_some_and(|range| range.start != 0) {
                 continue;
             }
+            let Some(id) = buckets.id(&data.bucket) else {
+                continue;
+            };
             let Some(bucket) = buckets.get_mut(&data.bucket) else {
                 continue;
             };
             let sorted = update_opacities && self.update_bucket_opacities(bucket, view, data, &mut seen_cross_tile_ids);
             let dynamic = self.update_bucket_positions(bucket, view, data, None);
-            if update_opacities || dynamic {
-                bucket.base.uploaded = false;
-            }
-            changed.mark(
-                bucket.base.bucket_id,
-                BucketChanges { paint: false, opacity: update_opacities, dynamic, sort: sorted },
-            );
+            changed.mark(id, BucketChanges { paint: false, opacity: update_opacities, dynamic, sort: sorted });
             if update_opacities && let Some(retained) = self.retained_query_data.get_mut(&bucket.bucket_instance_id) {
                 retained.feature_sort_order.clone_from(&bucket.state.feature_sort_order);
             }
@@ -699,12 +696,14 @@ impl Placement {
         buckets: &mut impl SymbolBuckets,
     ) {
         for data in layer.follower_data() {
+            let Some(id) = buckets.id(&data.bucket) else {
+                continue;
+            };
             let Some(bucket) = buckets.get_mut(&data.bucket) else {
                 continue;
             };
             if self.update_bucket_positions(bucket, view, data, Some(layer.id())) {
-                bucket.base.uploaded = false;
-                changed.mark(bucket.base.bucket_id, BucketChanges { dynamic: true, ..BucketChanges::default() });
+                changed.mark(id, BucketChanges { dynamic: true, ..BucketChanges::default() });
             }
         }
     }
@@ -799,6 +798,10 @@ mod tests {
     struct NoBuckets;
 
     impl SymbolBuckets for NoBuckets {
+        fn id(&self, _: &BucketKey) -> Option<crate::draw::identity::SimpleIdentity> {
+            None
+        }
+
         fn get(&self, _: &BucketKey) -> Option<&SymbolBucket> {
             None
         }

@@ -21,8 +21,8 @@ use crate::draw::identity::SimpleIdentity;
 use crate::draw::tile_render_data::TileAtlasTextures;
 use crate::exec::pool::TaskGroup;
 use crate::image::image_store::ImageType;
-use crate::layer::bucket::{Bucket, LayerFeatureStates, UploadNeeds};
-use crate::layer::bucket_geometry::{BucketGeometry, GeometryUpload};
+use crate::layer::bucket::{ErasedBucket, LayerFeatureStates};
+use crate::layer::bucket_geometry::BucketGeometry;
 use crate::layer::layer_drawing::{BucketChanges, ChangedBuckets};
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::layer::render_layer::ErasedLayerBucket;
@@ -49,7 +49,7 @@ use crate::tile_store::tile_mask::TileMask;
 /// ([`find`](Self::find)), and then by where it is ([`laid`](Self::laid)).
 #[derive(Default)]
 pub(crate) struct LayoutBuckets {
-    buckets: Vec<Box<dyn Bucket>>,
+    buckets: Vec<Box<dyn ErasedBucket>>,
     laid: Vec<LaidLayer>,
     /// Where each layer is in `laid`, by its id.
     layers: HashMap<String, usize>,
@@ -73,7 +73,7 @@ impl LayoutBuckets {
     /// none yet. Drops it if they all have one.
     pub(crate) fn add(
         &mut self,
-        bucket: Box<dyn Bucket>,
+        bucket: Box<dyn ErasedBucket>,
         layers: impl IntoIterator<Item = (String, Arc<dyn ErasedEvaluatedLayer>)>,
     ) {
         let index = self.buckets.len();
@@ -128,7 +128,7 @@ impl LayoutBuckets {
 
     /// The bucket of the layer `layer_id`, out of the layout.
     #[cfg(test)]
-    pub(crate) fn into_bucket(mut self, layer_id: &str) -> Option<Box<dyn Bucket>> {
+    pub(crate) fn into_bucket(mut self, layer_id: &str) -> Option<Box<dyn ErasedBucket>> {
         let index = self.laid[self.find(layer_id)?].bucket;
         Some(self.buckets.swap_remove(index))
     }
@@ -160,21 +160,21 @@ impl LayoutBuckets {
     }
 
     /// The bucket at `index`, as [`ErasedLayerBucket::bucket_index`] gives it.
-    pub(crate) fn bucket_mut(&mut self, index: usize) -> Option<&mut dyn Bucket> {
+    pub(crate) fn bucket_mut(&mut self, index: usize) -> Option<&mut dyn ErasedBucket> {
         Some(&mut **self.buckets.get_mut(index)?)
     }
 
     /// The bucket at `index`, as [`ErasedLayerBucket::bucket_index`] gives it.
-    pub(crate) fn bucket(&self, index: usize) -> Option<&dyn Bucket> {
+    pub(crate) fn bucket(&self, index: usize) -> Option<&dyn ErasedBucket> {
         Some(&**self.buckets.get(index)?)
     }
 
     /// The buckets, each once.
-    pub(crate) fn buckets(&self) -> impl Iterator<Item = &dyn Bucket> + '_ {
+    pub(crate) fn buckets(&self) -> impl Iterator<Item = &dyn ErasedBucket> + '_ {
         self.buckets.iter().map(|bucket| &**bucket)
     }
 
-    pub(crate) fn buckets_mut(&mut self) -> impl Iterator<Item = &mut dyn Bucket> + '_ {
+    pub(crate) fn buckets_mut(&mut self) -> impl Iterator<Item = &mut dyn ErasedBucket> + '_ {
         self.buckets.iter_mut().map(|bucket| &mut **bucket)
     }
 
@@ -230,14 +230,9 @@ impl LayoutResult {
     }
 
     /// Brings the buckets' feature state to `states`, for the features of
-    /// the data they were built from; `pattern_positions` are where the
-    /// layout's patterns are in its atlas. Returns the ids of the buckets
-    /// whose vertex data changed.
-    pub(crate) fn set_feature_state(
-        &mut self,
-        states: &LayerFeatureStates,
-        pattern_positions: &ImagePositions,
-    ) -> Vec<SimpleIdentity> {
+    /// the data they were built from. Returns the ids of the buckets whose
+    /// vertex data changed.
+    pub(crate) fn set_feature_state(&mut self, states: &LayerFeatureStates) -> Vec<SimpleIdentity> {
         let mut changed = Vec::new();
         let Some(layers) = self.feature_index.data() else {
             return changed;
@@ -258,7 +253,7 @@ impl LayoutResult {
                     continue;
                 }
                 let bucket = &mut buckets[laid.bucket];
-                if bucket.has_data() && bucket.update(feature_states, &source_layer, layer_id, pattern_positions) {
+                if bucket.set_feature_state(feature_states, &source_layer, layer_id) {
                     changed.push(bucket.id());
                 }
             }
@@ -416,18 +411,17 @@ impl GeometryContents {
 
     /// Whether a bucket is new or changed since its last upload.
     pub(crate) fn needs_upload(&self) -> bool {
-        self.result.layer_render_data.buckets().any(Bucket::needs_upload)
+        self.result.layer_render_data.buckets().any(ErasedBucket::needs_upload)
     }
 
     /// Readies the buckets that are new or changed since their last upload
-    /// for the tile's draws ([`Bucket::upload`]), moving their geometry into
-    /// `context`'s stores, where `copies`, the geometry of the tile's other
+    /// for the tile's draws ([`ErasedBucket::upload`]), moving their geometry
+    /// into `context`'s stores, where `copies`, the geometry of the tile's other
     /// world copies, hasn't some of it.
-    pub(crate) fn upload(&mut self, copies: &[&BucketGeometry], context: &mut Context, needs: UploadNeeds) {
-        let mut upload = GeometryUpload::new(&mut self.bucket_geometry, copies, context);
+    pub(crate) fn upload(&mut self, copies: &[&BucketGeometry], context: &mut Context) {
         for bucket in self.result.layer_render_data.buckets_mut() {
             if bucket.needs_upload() {
-                bucket.upload(&mut upload, needs);
+                bucket.upload(&mut self.bucket_geometry, copies, context);
             }
         }
         self.bucket_geometry.shrink();
@@ -437,9 +431,7 @@ impl GeometryContents {
     /// the data they were built from, and adds the buckets whose vertex data
     /// that changed to `changed`.
     pub(crate) fn set_feature_state(&mut self, states: &LayerFeatureStates, changed: &mut ChangedBuckets) {
-        let no_patterns = ImagePositions::default();
-        let pattern_positions = self.answer.atlases.as_ref().map_or(&no_patterns, |atlases| &atlases.pattern_positions);
-        for id in self.result.set_feature_state(states, pattern_positions) {
+        for id in self.result.set_feature_state(states) {
             changed.mark(id, BucketChanges { paint: true, ..BucketChanges::default() });
         }
     }
@@ -451,10 +443,8 @@ impl GeometryContents {
             let Some(data) = self.result.layer_bucket(&*layer.base().style) else {
                 continue;
             };
-            if data.bucket.has_data() {
-                let evaluated = &layer.base().evaluated_properties;
-                query_padding = query_padding.max(evaluated.entry().query_radius(data.bucket, evaluated));
-            }
+            let evaluated = &layer.base().evaluated_properties;
+            query_padding = query_padding.max(evaluated.entry().query_radius(data.bucket, evaluated));
         }
         query_padding
     }
@@ -627,7 +617,7 @@ impl Contents {
     }
 
     /// The bucket of `layer_impl`'s layer in a geometry tile's layout.
-    pub(crate) fn bucket(&self, layer_impl: &dyn ErasedLayerStyle) -> Option<&dyn Bucket> {
+    pub(crate) fn bucket(&self, layer_impl: &dyn ErasedLayerStyle) -> Option<&dyn ErasedBucket> {
         Some(self.geometry()?.result.layer_bucket(layer_impl)?.bucket)
     }
 

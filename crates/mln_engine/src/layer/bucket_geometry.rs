@@ -300,6 +300,11 @@ impl<'a> GeometryUpload<'a> {
         GeometryUpload { geometry, copies, context }
     }
 
+    /// What the context's device allows.
+    pub(crate) fn caps(&self) -> &mln_gfx::gpu::Caps {
+        self.context.caps()
+    }
+
     /// Moves the data of `vec`, a bucket's, into the store, unless it moved
     /// before. Where a copy of it moved, this frees it and shares the
     /// copy's.

@@ -9,7 +9,6 @@ use mln_style::Source;
 use mln_style::error::Error;
 
 use crate::draw::context::Context;
-use crate::layer::bucket::UploadNeeds;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::registry::Registry;
 use crate::render::paint_parameters::TransformParameters;
@@ -72,7 +71,7 @@ pub(crate) trait RenderSource {
     /// Readies the buckets the frame draws, before its layers make their
     /// draws, which read what `needs` says, uploading their indexes through
     /// `context`.
-    fn upload(&mut self, store: &mut TileStore, context: &mut Context, needs: UploadNeeds);
+    fn upload(&mut self, store: &mut TileStore, context: &mut Context);
 
     /// Releases the render data from the last `update_render_tiles` while
     /// the source is disabled.

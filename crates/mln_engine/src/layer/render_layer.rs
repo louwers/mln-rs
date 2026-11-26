@@ -21,11 +21,13 @@ use smallvec::SmallVec;
 
 use crate::camera::{ProjectionData, View};
 use crate::draw::context::Context;
+use crate::draw::identity::SimpleIdentity;
 use crate::draw::tile_render_data::TileAtlasTextures;
-use crate::layer::bucket::Bucket;
+use crate::layer::bucket::ErasedBucket;
 use crate::layer::bucket_geometry::BucketGeometry;
 use crate::layer::layer_drawing::{ChangedBuckets, DrapeDrawing, DrawGroup, DrawOrder, LayerDrawing};
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
+use crate::layer::layout::BucketOf;
 use crate::layers::custom::EndedHosts;
 use crate::query::feature_index::{FeatureIndex, QueryRegion};
 use crate::render::paint_parameters::PaintParameters;
@@ -46,7 +48,7 @@ use crate::worker::job::SourceKey;
 /// layer's type.
 #[derive(Clone, Copy)]
 pub(crate) struct ErasedLayerBucket<'a> {
-    pub(crate) bucket: &'a dyn Bucket,
+    pub(crate) bucket: &'a dyn ErasedBucket,
     /// The index of the bucket among the layout's buckets.
     pub(crate) bucket_index: usize,
     /// The values of the layer that the bucket was laid out with.
@@ -57,7 +59,9 @@ pub(crate) struct ErasedLayerBucket<'a> {
 /// values it was laid out with and the rest of what the layout's contents
 /// hold for the tile's draws.
 pub(crate) struct LayerBucket<'a, T: LayerType> {
-    pub(crate) bucket: &'a T::Bucket,
+    pub(crate) bucket: &'a BucketOf<T>,
+    /// The bucket's identity, which tells apart what layers made of it.
+    pub(crate) id: SimpleIdentity,
     /// The index of the bucket among the layout's buckets.
     pub(crate) bucket_index: usize,
     /// The values of the layer that the bucket was laid out with.
@@ -80,7 +84,8 @@ impl<'a, T: LayerType> LayerBucket<'a, T> {
         let ErasedLayerBucket { bucket, bucket_index, layer } = contents.result.layer_render_data.laid(index)?;
         let layer: &dyn Any = layer;
         Some(LayerBucket {
-            bucket: crate::layer::layer_type::recover_bucket::<T>(bucket)?,
+            bucket: bucket.downcast_ref::<BucketOf<T>>()?,
+            id: bucket.id(),
             bucket_index,
             layer: layer.downcast_ref()?,
             contents,
@@ -189,6 +194,8 @@ pub(crate) struct BucketKey {
 
 /// The symbol buckets of the frame's tiles, by key.
 pub(crate) trait SymbolBuckets {
+    /// The identity of the bucket at `key`, which its draws' changes name.
+    fn id(&self, key: &BucketKey) -> Option<SimpleIdentity>;
     fn get(&self, key: &BucketKey) -> Option<&SymbolBucket>;
     fn get_mut(&mut self, key: &BucketKey) -> Option<&mut SymbolBucket>;
 }
@@ -236,28 +243,29 @@ impl PartialEq for BucketPlacementData {
 /// copies are the thread's, and the layer that places one frees it
 /// ([`HeldBuckets::release`]) when it drops.
 #[cfg(feature = "bench")]
-pub(crate) struct HeldBuckets(Vec<Option<SymbolBucket>>);
+pub(crate) struct HeldBuckets(Vec<Option<(SimpleIdentity, SymbolBucket)>>);
 
 #[cfg(feature = "bench")]
 thread_local! {
-    static HELD_BUCKETS: std::cell::Cell<Vec<Option<SymbolBucket>>> = const { std::cell::Cell::new(Vec::new()) };
+    static HELD_BUCKETS: std::cell::Cell<Vec<Option<(SimpleIdentity, SymbolBucket)>>> = const { std::cell::Cell::new(Vec::new()) };
 }
 
 /// A copy of the bucket `bucket` points to, if it is a symbol
 /// bucket, which `HeldBuckets` holds for a benchmark's layer to place, at
 /// the index this returns, until the layer drops.
 #[cfg(feature = "bench")]
-pub(crate) fn hold_symbol_bucket(bucket: &impl std::ops::Deref<Target = dyn Bucket>) -> Option<usize> {
-    let bucket = crate::layer::layer_type::recover_bucket::<mln_style::layers::Symbol>(&**bucket)?;
-    Some(HeldBuckets::hold(bucket.clone()))
+pub(crate) fn hold_symbol_bucket(bucket: &impl std::ops::Deref<Target = dyn ErasedBucket>) -> Option<usize> {
+    let id = bucket.id();
+    let bucket = bucket.downcast_ref::<SymbolBucket>()?;
+    Some(HeldBuckets::hold(id, bucket.clone()))
 }
 
 #[cfg(feature = "bench")]
 impl HeldBuckets {
-    /// Keeps `bucket`, and returns its index.
-    pub(crate) fn hold(bucket: SymbolBucket) -> usize {
+    /// Keeps `bucket`, whose identity is `id`, and returns its index.
+    pub(crate) fn hold(id: SimpleIdentity, bucket: SymbolBucket) -> usize {
         let mut buckets = Self::take();
-        buckets.0.push(Some(bucket));
+        buckets.0.push(Some((id, bucket)));
         let index = buckets.0.len() - 1;
         buckets.restore();
         index
@@ -288,12 +296,16 @@ impl HeldBuckets {
 
 #[cfg(feature = "bench")]
 impl SymbolBuckets for HeldBuckets {
+    fn id(&self, key: &BucketKey) -> Option<SimpleIdentity> {
+        Some(self.0.get(key.bucket)?.as_ref()?.0)
+    }
+
     fn get(&self, key: &BucketKey) -> Option<&SymbolBucket> {
-        self.0.get(key.bucket)?.as_ref()
+        Some(&self.0.get(key.bucket)?.as_ref()?.1)
     }
 
     fn get_mut(&mut self, key: &BucketKey) -> Option<&mut SymbolBucket> {
-        self.0.get_mut(key.bucket)?.as_mut()
+        Some(&mut self.0.get_mut(key.bucket)?.as_mut()?.1)
     }
 }
 

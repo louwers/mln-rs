@@ -18,11 +18,11 @@ use crate::buckets::circle_bucket::CircleBucket;
 use crate::buckets::fill_bucket::FillBucket;
 use crate::buckets::line_bucket::LineBucket;
 use crate::image::image_store::ImageDependencies;
-use crate::layer::bucket::Bucket;
+use crate::layer::bucket::ErasedBucket;
 use crate::layer::bucket_parameters::BucketParameters;
 use crate::layer::filter_groups::FilterGroups;
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
-use crate::layer::layout::{BuildParams, LayoutParameters, SourceLayer};
+use crate::layer::layout::{LayoutParameters, SourceLayer};
 use crate::layer::tile_layout::{Built, Resolved};
 use crate::map::MapMode;
 use crate::query::feature_index::FeatureIndexBuilder;
@@ -89,7 +89,7 @@ fn layer(mut json: serde_json::Value, sort_key_name: &str, type_: SortKeyType) -
 
 /// Lays out three features with ranks 2, 0, 1 at x = 100, 200, 300 and
 /// returns the layer's bucket.
-fn create_bucket(properties: &Arc<dyn ErasedEvaluatedLayer>, shape: Shape) -> Box<dyn Bucket> {
+fn create_bucket(properties: &Arc<dyn ErasedEvaluatedLayer>, shape: Shape) -> Box<dyn ErasedBucket> {
     let ranks = [2.0, 0.0, 1.0];
     let features = ranks
         .iter()
@@ -123,11 +123,11 @@ fn create_bucket(properties: &Arc<dyn ErasedEvaluatedLayer>, shape: Shape) -> Bo
     let mut image_dependencies = ImageDependencies::default();
     let available_images = VecSet::from_iter(["marker".to_owned()]);
     let layer_id = properties.style().base().id.clone();
-    let mut layout = properties
+    let layout = properties
         .entry()
         .create_layout(
             std::slice::from_ref(properties),
-            &mut LayoutParameters {
+            LayoutParameters {
                 bucket_parameters: &bucket_parameters,
                 font_faces: None,
                 glyph_pbfs: true,
@@ -139,7 +139,6 @@ fn create_bucket(properties: &Arc<dyn ErasedEvaluatedLayer>, shape: Shape) -> Bo
             },
             SourceLayer::new(data.clone(), ""),
         )
-        .unwrap()
         .unwrap();
 
     let marker = Arc::new(
@@ -162,8 +161,7 @@ fn create_bucket(properties: &Arc<dyn ErasedEvaluatedLayer>, shape: Shape) -> Bo
     )]);
     let resolved = Resolved { icons: image_positions.clone(), patterns: image_positions, ..Resolved::default() };
     let mut built = Built { buckets: LayoutBuckets::default(), feature_index: FeatureIndexBuilder::new(Some(data)) };
-    let build = BuildParams { first_load: true, canonical: bucket_parameters.tile_id.canonical };
-    layout.create_bucket(Some(&resolved), &mut built, &build).unwrap();
+    layout.build(Some(&resolved), &mut built, &bucket_parameters, true).unwrap();
     built.buckets.into_bucket(&layer_id).unwrap()
 }
 
@@ -276,5 +274,5 @@ fn symbol_height_offset_expression_raises_content_elevation() {
         "layout": { "icon-image": "marker", "icon-allow-overlap": true, "symbol-height-offset": ["get", "rank"] }
     });
     let bucket = create_bucket(&layer(json, "symbol-sort-key", SortKeyType::Undefined), Shape::Point);
-    assert_eq!(bucket.max_content_elevation(), 2.0);
+    assert_eq!(bucket.max_elevation(), 2.0);
 }

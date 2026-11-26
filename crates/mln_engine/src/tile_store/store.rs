@@ -14,15 +14,13 @@ use std::sync::Arc;
 use mln_style::error::Error;
 use mln_style::hash::{HashMap, HashSet};
 use mln_style::layer::SourceKind;
-use mln_style::layers::Symbol;
 use mln_style::tileset::RasterEncoding;
 
 use crate::draw::context::Context;
 use crate::draw::dynamic_texture_atlas::DynamicTextureAtlas;
+use crate::draw::identity::SimpleIdentity;
 use crate::exec::pool::TaskGroup;
 use crate::image::image_store::ImageStore;
-use crate::layer::bucket::UploadNeeds;
-use crate::layer::layer_type::{recover_bucket, recover_bucket_mut};
 use crate::layer::render_layer::{BucketKey, SymbolBuckets};
 use crate::layer::tile_layout::{LayoutParams, Resolved};
 use crate::render::events::RendererEvent;
@@ -330,20 +328,13 @@ impl TileStore {
     }
 
     /// Readies the buckets of the tiles of `render_tiles`, render tiles of
-    /// the source `key`, for the frame's draws, which read what `needs`
-    /// says (`SourceTiles::upload_at`).
-    pub(crate) fn upload(
-        &mut self,
-        key: SourceKey,
-        render_tiles: &[RenderTile],
-        context: &mut Context,
-        needs: UploadNeeds,
-    ) {
+    /// the source `key`, for the frame's draws (`SourceTiles::upload_at`).
+    pub(crate) fn upload(&mut self, key: SourceKey, render_tiles: &[RenderTile], context: &mut Context) {
         let Some(tiles) = self.sources.get_mut(&key) else {
             return;
         };
         for render_tile in render_tiles {
-            tiles.upload_at(render_tile.overscaled_tile_id(), render_tile.slot(), &self.ctx.atlas, context, needs);
+            tiles.upload_at(render_tile.overscaled_tile_id(), render_tile.slot(), &self.ctx.atlas, context);
         }
     }
 
@@ -533,13 +524,18 @@ impl TileStore {
 
 /// The symbol buckets of the tiles' layouts.
 impl SymbolBuckets for TileStore {
+    fn id(&self, key: &BucketKey) -> Option<SimpleIdentity> {
+        let contents = self.sources.get(&key.source)?.contents_at(&key.tile, key.slot)?.geometry()?;
+        Some(contents.result.layer_render_data.bucket(key.bucket)?.id())
+    }
+
     fn get(&self, key: &BucketKey) -> Option<&SymbolBucket> {
         let contents = self.sources.get(&key.source)?.contents_at(&key.tile, key.slot)?.geometry()?;
-        recover_bucket::<Symbol>(contents.result.layer_render_data.bucket(key.bucket)?)
+        contents.result.layer_render_data.bucket(key.bucket)?.downcast_ref()
     }
 
     fn get_mut(&mut self, key: &BucketKey) -> Option<&mut SymbolBucket> {
         let contents = self.sources.get_mut(&key.source)?.contents_at_mut(&key.tile, key.slot)?.geometry_mut()?;
-        recover_bucket_mut::<Symbol>(contents.result.layer_render_data.bucket_mut(key.bucket)?)
+        contents.result.layer_render_data.bucket_mut(key.bucket)?.downcast_mut()
     }
 }

@@ -20,7 +20,6 @@ use crate::camera::VerticalPerspectiveProjection;
 use crate::draw::context::Context;
 use crate::draw::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::geo::projection::Projection;
-use crate::layer::bucket::UploadNeeds;
 use crate::layer::bucket_geometry::BucketGeometry;
 use crate::layer::layer_drawing::ChangedBuckets;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
@@ -428,8 +427,7 @@ impl SourceTiles {
     }
 
     /// Readies the buckets of what tile `id` shows, see `contents_at_mut`,
-    /// for the frame's draws, which read what `needs` says, finding its
-    /// atlas pages' textures in `atlas`. A geometry tile's buckets share
+    /// for the frame's draws, finding its atlas pages' textures in `atlas`. A geometry tile's buckets share
     /// what those of its other world copies, copies of them or they of
     /// its, moved into `context`'s stores; and the copies laid out from the
     /// same data then take what it moved, freeing their own.
@@ -439,7 +437,6 @@ impl SourceTiles {
         slot: Option<usize>,
         atlas: &DynamicTextureAtlas,
         context: &mut Context,
-        needs: UploadNeeds,
     ) {
         let Some(index) = self.index_at(id, slot) else {
             return;
@@ -460,7 +457,7 @@ impl SourceTiles {
         let mut same: SmallVec<[usize; 4]> = self.same_place(&id);
         same.retain(|&mut at| at != index);
         let slots = self.tiles.values_mut().into_slice();
-        upload_sharing(slots, index, &same, context, needs);
+        upload_sharing(slots, index, &same, context);
         for &copy in &same {
             let laid_out_alike =
                 slots.get(copy).and_then(|slot| slot.tile.contents()?.geometry()).is_some_and(|geometry| {
@@ -469,7 +466,7 @@ impl SourceTiles {
             if laid_out_alike {
                 let others: SmallVec<[usize; 4]> =
                     same.iter().copied().chain([index]).filter(|&other| other != copy).collect();
-                upload_sharing(slots, copy, &others, context, needs);
+                upload_sharing(slots, copy, &others, context);
             }
         }
     }
@@ -962,7 +959,7 @@ impl SourceTiles {
             for contents in contents {
                 for layer in &expression_layers {
                     if let Some(bucket) = contents.bucket(*layer) {
-                        max = max.max(bucket.max_content_elevation());
+                        max = max.max(bucket.max_elevation());
                     }
                 }
             }
@@ -1585,7 +1582,7 @@ impl SourceTiles {
 /// Readies the buckets of the geometry tile at `at` of `slots` for the
 /// frame's draws, sharing what the buckets of the tiles at `copies`, its
 /// other world copies, moved into `context`'s stores.
-fn upload_sharing(slots: &mut [Slot], at: usize, copies: &[usize], context: &mut Context, needs: UploadNeeds) {
+fn upload_sharing(slots: &mut [Slot], at: usize, copies: &[usize], context: &mut Context) {
     let Some((before, rest)) = slots.split_at_mut_checked(at) else {
         return;
     };
@@ -1603,5 +1600,5 @@ fn upload_sharing(slots: &mut [Slot], at: usize, copies: &[usize], context: &mut
         })
         .filter_map(|slot| Some(&slot.tile.contents()?.geometry()?.bucket_geometry))
         .collect();
-    geometry.upload(&shared, context, needs);
+    geometry.upload(&shared, context);
 }

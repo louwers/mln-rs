@@ -16,7 +16,6 @@ use crate::camera::TileCoordinate;
 use crate::camera::tile_coordinate::TileCoordinatePoint;
 use crate::draw::context::Context;
 use crate::draw::segment::SegmentBase;
-use crate::layer::bucket::UploadNeeds;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::log_target;
 use crate::source::render_source::{RenderSource, RenderSourceBase, RenderTileParameters};
@@ -485,7 +484,7 @@ impl RenderSource for RenderImageSource {
 
     fn update_render_tiles(&mut self, _store: &mut TileStore, _parameters: &RenderTileParameters<'_>) {}
 
-    fn upload(&mut self, _store: &mut TileStore, context: &mut Context, _needs: UploadNeeds) {
+    fn upload(&mut self, _store: &mut TileStore, context: &mut Context) {
         if let Some(bucket) = &mut self.bucket {
             bucket.upload(context);
         }
