@@ -27,13 +27,9 @@ use crate::exec::pool::{Pool, TaskGroup};
 use crate::image::image_store::ImageStore;
 use crate::layer::layer_drawing::{ChangedBuckets, DrawGroup, DrawOrder, SingleDraw};
 use crate::layer::layer_type::ErasedEvaluatedLayer;
-use crate::layer::render_layer::{
-    Atlases, FrameSourceTiles, LayerParts, LayerSource, LayerUpdateParameters, RenderLayer,
-};
+use crate::layer::render_layer::{FrameSourceTiles, LayerParts, LayerSource, LayerUpdateParameters, RenderLayer};
 use crate::layers::custom::EndedHosts;
-use crate::line_atlas::LineAtlas;
 use crate::map::MapMode;
-use crate::pattern_atlas::PatternAtlas;
 use crate::placement::{Placement, PlacementInputs};
 use crate::render::events::RendererEvent;
 use crate::render::frame::{Frame, FrameLayer};
@@ -148,7 +144,6 @@ pub(crate) struct RenderOrchestrator {
     /// The sources' tiles, with the glyph and image stores their layouts
     /// resolve through and the atlas they pack them into.
     tile_store: TileStore,
-    atlases: Atlases,
     /// The tiles the frame's layers draw, as their updates found them, each
     /// layer's in a range of its own.
     found_tiles: Vec<FoundTile>,
@@ -233,7 +228,6 @@ impl RenderOrchestrator {
             tile_store,
             cross_tile_symbol_index: crate::symbol::cross_tile_index::CrossTileSymbolIndex::default(),
             placement_controller: crate::placement::PlacementController::new(),
-            atlases: Atlases::default(),
             found_tiles: Vec::new(),
             style: None,
             sources_by_id: Vec::new(),
@@ -271,11 +265,6 @@ impl RenderOrchestrator {
         std::mem::take(&mut self.events)
     }
 
-    /// The atlases the layers' draws share.
-    pub(crate) fn atlases(&self) -> &Atlases {
-        &self.atlases
-    }
-
     /// The first phase of a frame: brings the orchestrator to
     /// `update_parameters` and returns the frame for the encode, or `None`
     /// for a still image that hasn't loaded yet, which isn't drawn.
@@ -285,7 +274,7 @@ impl RenderOrchestrator {
     /// their feature state, chooses the layers the frame draws and gives
     /// them their tiles, places the symbols and brings the symbol buckets
     /// to the placement. The encode then changes none of this: it changes
-    /// only what draws it on the GPU, uploading the atlases and the tiles'
+    /// only what draws it on the GPU, uploading the tiles' atlas and
     /// buckets and making the layers' draws.
     pub(crate) fn update(&mut self, update_parameters: &Arc<UpdateParameters>) -> Option<Frame> {
         let mut frame = Frame::new(&update_parameters.view, update_parameters.camera_moving);
@@ -502,7 +491,6 @@ impl RenderOrchestrator {
                 source,
                 contents: source_contents,
                 images: self.tile_store.images(),
-                atlases: &mut self.atlases,
                 found: &mut self.found_tiles,
             });
             if render_layer.needs_placement() {
@@ -629,16 +617,13 @@ impl RenderOrchestrator {
 
     /// Adding or removing an image changes the layout of the tiles whose
     /// dependencies name it, and updating one does when its size or SDF
-    /// flag changes. An update of the same size patches its atlas bins. The
-    /// background layers' pattern atlas drops any image that changed or
-    /// went, which they pack again from the store as they need it.
+    /// flag changes. An update of the same size patches its atlas bins.
     fn apply_image_diff(&mut self, image_diff: &ItemChanges<Arc<ImageImpl>>, sprite_loaded: bool) {
         let images = self.tile_store.images_mut();
         images.begin_update();
         let mut relayout_images: HashSet<String> = HashSet::default();
         for id in image_diff.removed.keys() {
             images.remove_image(id);
-            self.atlases.pattern.remove_pattern(id);
             relayout_images.insert(id.clone());
         }
         for image in image_diff.added.values() {
@@ -647,7 +632,6 @@ impl RenderOrchestrator {
         }
         let mut patched = Vec::new();
         for image in image_diff.changed.values() {
-            self.atlases.pattern.remove_pattern(&image.id);
             if images.update_image(Arc::clone(image)) {
                 relayout_images.insert(image.id.clone());
             }
@@ -1132,12 +1116,6 @@ impl RenderOrchestrator {
         self.layer_indexes.clear();
 
         self.cross_tile_symbol_index.reset();
-        if !self.atlases.line.is_empty() {
-            self.atlases.line = LineAtlas::new();
-        }
-        if !self.atlases.pattern.is_empty() {
-            self.atlases.pattern = PatternAtlas::new();
-        }
 
         self.tile_store.images_mut().clear();
         self.tile_store.glyphs().evict(&VecSet::new());
@@ -1156,12 +1134,10 @@ impl RenderOrchestrator {
         self.terrain.release_shaders();
     }
 
-    /// Makes the GPU textures of the tiles' atlas and of the layers'
-    /// atlases, and uploads what they queued.
-    pub(crate) fn upload_atlases(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+    /// Makes the GPU textures of the tiles' atlas, and uploads what it
+    /// queued.
+    pub(crate) fn upload_atlas(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         self.tile_store.atlas().upload(gpu, context);
-        self.atlases.line.upload(gpu, context);
-        self.atlases.pattern.upload(gpu, context);
     }
 
     /// Takes in what arrived for the tiles, and starts the jobs that it
@@ -1346,7 +1322,7 @@ impl RenderOrchestrator {
                 surface = true;
                 continue;
             }
-            render_layer.update_draws(gpu, paint_parameters, &self.atlases, layer_source);
+            render_layer.update_draws(gpu, paint_parameters, layer_source);
             needs_depth = needs_depth || (render_layer.needs_globe_depth() && !surface);
         }
         self.stacks = if frame.terrain {
@@ -1380,7 +1356,7 @@ impl RenderOrchestrator {
                     drapes.key_layer(stack, &*self.layers[*index as usize], layer_source, lit);
                 }
             }
-            drapes.choose(paint_parameters, self.atlases.pattern.pixel_size());
+            drapes.choose(paint_parameters);
             for stack in 0..self.stacks.len() {
                 for index in self.stacks.layers(stack) {
                     let layer_source = layer_source(
@@ -1392,7 +1368,7 @@ impl RenderOrchestrator {
                     );
                     let render_layer = &mut *self.layers[*index as usize];
                     let lit = self.stacks.light(stack).is_some();
-                    drapes.update_layer(stack, gpu, paint_parameters, &self.atlases, render_layer, layer_source, lit);
+                    drapes.update_layer(stack, gpu, paint_parameters, render_layer, layer_source, lit);
                 }
             }
             drapes.finish_update(paint_parameters.context);

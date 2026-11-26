@@ -39,7 +39,7 @@ use crate::layer::layer_drawing::{
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::layout::NoLayout;
 use crate::layer::render_layer::{
-    Atlases, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+    LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
 use crate::layers::raster::programs;
 use crate::layers::raster::ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
@@ -475,7 +475,6 @@ impl TypedLayer for RenderRasterLayer {
         &mut self,
         gpu: &mut dyn Gpu,
         paint_parameters: &mut PaintParameters<'_>,
-        _atlases: &Atlases,
         render_tiles: &[FrameTile<'_, Raster>],
     ) {
         let sampler = self.sampler_state();
@@ -563,7 +562,6 @@ impl TypedLayer for RenderRasterLayer {
         &mut self,
         gpu: &mut dyn Gpu,
         paint_parameters: &mut PaintParameters<'_>,
-        _atlases: &Atlases,
         image: ImageSourceRenderData<'_>,
     ) {
         self.update_image(gpu, image, paint_parameters);

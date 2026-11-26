@@ -3,7 +3,6 @@ use crate::shaders::block::uniform_block;
 uniform_block! {
     /// The global paint parameters uniform block.
     pub struct GlobalPaintParamsUBO {
-        pub pattern_atlas_texsize: [f32; 2],
         pub units_to_pixels: [f32; 2],
         pub world_size: [f32; 2],
         pub camera_to_center_distance: f32,
@@ -12,6 +11,8 @@ uniform_block! {
         pub pixel_ratio: f32,
         pub map_zoom: f32,
         pub pad1: f32,
+        pub pad2: f32,
+        pub pad3: f32,
     }
 }
 

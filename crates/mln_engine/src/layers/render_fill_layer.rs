@@ -33,9 +33,7 @@ use crate::layer::layer_drawing::{
 };
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::layout::{LayoutParameters, SourceLayer};
-use crate::layer::render_layer::{
-    Atlases, LayerBucket, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
-};
+use crate::layer::render_layer::{LayerBucket, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::layers::fill::programs;
 use crate::layers::fill::ubo::{
     FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO,
@@ -665,7 +663,6 @@ impl TypedLayer for RenderFillLayer {
         &mut self,
         gpu: &mut dyn Gpu,
         paint_parameters: &mut PaintParameters<'_>,
-        _atlases: &Atlases,
         render_tiles: &[FrameTile<'_, Fill>],
     ) {
         let pattern = !self.values.unevaluated.fill_pattern.is_undefined();

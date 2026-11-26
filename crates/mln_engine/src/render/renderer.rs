@@ -598,9 +598,9 @@ impl Encoder {
         );
 
         // - UPLOAD --------------------------------------------------------
-        // The atlases first, whose textures the tiles bind, then the tiles'
-        // buckets.
-        orchestrator.upload_atlases(gpu, parameters.context);
+        // The tiles' atlas first, whose textures the tiles bind, then the
+        // tiles' buckets.
+        orchestrator.upload_atlas(gpu, parameters.context);
         orchestrator.upload_sources(parameters.context);
 
         // - DRAW UPDATE ---------------------------------------------------
@@ -633,7 +633,7 @@ impl Encoder {
             image.targets.color,
             &draw_groups.composited,
         );
-        let global_paint_params_ubo = parameters.global_paint_params(orchestrator.atlases().pattern.pixel_size());
+        let global_paint_params_ubo = parameters.global_paint_params();
         parameters.context.write_global_uniform_buffer(gpu, PAINT_PARAMS_ID, &global_paint_params_ubo);
         // What the uploads replaced goes before the passes make what
         // replaces it, such as a draw's geometry.

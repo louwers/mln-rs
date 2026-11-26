@@ -26,9 +26,7 @@ use crate::layer::bucket_geometry::{bucket_indexes, bucket_vertices, paint_verti
 use crate::layer::layer_drawing::{DrawList, FrameDraw, TileDraws, UniformWriter};
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::layout::{LayoutParameters, SourceLayer};
-use crate::layer::render_layer::{
-    Atlases, LayerBucket, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
-};
+use crate::layer::render_layer::{LayerBucket, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::layers::circle::programs;
 use crate::layers::circle::ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use crate::layout::circle_layout::CircleLayout;
@@ -266,7 +264,6 @@ impl TypedLayer for RenderCircleLayer {
         &mut self,
         gpu: &mut dyn Gpu,
         paint_parameters: &mut PaintParameters<'_>,
-        _atlases: &Atlases,
         render_tiles: &[FrameTile<'_, Circle>],
     ) {
         let layer_id = self.base.style.base().id.as_str();

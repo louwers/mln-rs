@@ -363,13 +363,11 @@ impl<'a> PaintParameters<'a> {
         }
     }
 
-    /// What every draw of the encode reads of its frame, with the pattern
-    /// atlas of `pattern_atlas_size`: the target's size and the pixels'
-    /// scale, the camera and the frame's values.
+    /// What every draw of the encode reads of its frame: the target's size
+    /// and the pixels' scale, the camera and the frame's values.
     #[must_use]
-    pub(crate) fn global_paint_params(&self, pattern_atlas_size: mln_style::size::Size) -> GlobalPaintParamsUBO {
+    pub(crate) fn global_paint_params(&self) -> GlobalPaintParamsUBO {
         GlobalPaintParamsUBO {
-            pattern_atlas_texsize: [pattern_atlas_size.width as f32, pattern_atlas_size.height as f32],
             units_to_pixels: [1.0 / self.pixels_to_gl_units[0], 1.0 / self.pixels_to_gl_units[1]],
             world_size: [self.renderable_size.width as f32, self.renderable_size.height as f32],
             camera_to_center_distance: self.view.camera_to_center_distance() as f32,
@@ -378,6 +376,8 @@ impl<'a> PaintParameters<'a> {
             pixel_ratio: self.pixel_ratio,
             map_zoom: self.view.zoom() as f32,
             pad1: 0.0,
+            pad2: 0.0,
+            pad3: 0.0,
         }
     }
 

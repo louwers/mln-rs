@@ -47,7 +47,7 @@ use crate::layer::layer_drawing::{DrawList, DrawObjectsMut, FrameDraw, KeptDraw,
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::layout::NoLayout;
 use crate::layer::render_layer::{
-    Atlases, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+    LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
 use crate::layers::hillshade::programs;
 use crate::layers::hillshade::ubo::{HillshadeDrawableUBO, HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO};
@@ -354,7 +354,6 @@ impl TypedLayer for RenderHillshadeLayer {
         &mut self,
         gpu: &mut dyn Gpu,
         paint_parameters: &mut PaintParameters<'_>,
-        _atlases: &Atlases,
         render_tiles: &[FrameTile<'_, Hillshade>],
     ) {
         let context = &mut *paint_parameters.context;

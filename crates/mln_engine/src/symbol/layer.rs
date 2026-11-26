@@ -41,8 +41,8 @@ use crate::layer::layer_drawing::{
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::layout::{LayoutParameters, SourceLayer};
 use crate::layer::render_layer::{
-    Atlases, BucketKey, BucketPlacementData, LayerBucket, LayerUpdateParameters, LayerValues, Parts, PartsMut,
-    PlacedTile, RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer,
+    BucketKey, BucketPlacementData, LayerBucket, LayerUpdateParameters, LayerValues, Parts, PartsMut, PlacedTile,
+    RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer,
 };
 use crate::layers::cast_matrix;
 use crate::query::feature_index::FeatureIndex;
@@ -998,7 +998,6 @@ impl TypedLayer for RenderSymbolLayer {
         &mut self,
         gpu: &mut dyn Gpu,
         paint_parameters: &mut PaintParameters<'_>,
-        _atlases: &Atlases,
         render_tiles: &[FrameTile<'_, Symbol>],
     ) {
         /// The atlases' textures given to one tile's draws.

@@ -61,7 +61,7 @@ use crate::draw::resources::{GpuTexture, attachment_bytes};
 use crate::draw::store::SharedTexture;
 use crate::layer::layer_drawing::{ChangedBuckets, DrapeDrawing, DrawGroups, DrawOrder};
 use crate::layer::layer_type::ErasedEvaluatedLayer;
-use crate::layer::render_layer::{Atlases, LayerSource, RenderLayer};
+use crate::layer::render_layer::{LayerSource, RenderLayer};
 use crate::render::clip_masks::ClipMasks;
 use crate::render::layer_composite::LayerComposite;
 use crate::render::paint_parameters::{OpenPass, PaintParameters, TransformParameters};
@@ -323,8 +323,7 @@ impl Drapes {
 
     /// Settles the side of each tile's drapes and chooses the drapes whose
     /// drawings the frame's layers update, once every draped layer gave its
-    /// key, with the frame's `parameters` and a pattern atlas of
-    /// `pattern_atlas_size`, which the key's global paint values hold.
+    /// key, with the frame's `parameters`.
     ///
     /// Each tile's drapes take the largest side, lowered where the drapes
     /// that hold a texture, and the depth and stencil of each side, would
@@ -333,12 +332,12 @@ impl Drapes {
     /// changed, which may draw something. A drape updates where its key
     /// differs from the one it was drawn from, or it has a texture of another
     /// side than its tile's.
-    pub(crate) fn choose(&mut self, parameters: &mut PaintParameters<'_>, pattern_atlas_size: mln_style::size::Size) {
+    pub(crate) fn choose(&mut self, parameters: &mut PaintParameters<'_>) {
         let mut held = Vec::with_capacity(self.drapes.len());
         for Drape { tile, transform, stacks, .. } in &mut self.drapes {
             let (clip_masks, composite) = (&mut ClipMasks::default(), &mut LayerComposite::default());
             let drape = parameters.drape(transform, clip_masks, composite, Size::new(0, 0), tile.to_unwrapped());
-            let paint = drape.global_paint_params(pattern_atlas_size);
+            let paint = drape.global_paint_params();
             let mut tile_held = 0;
             for drape in stacks.iter_mut() {
                 drape.key.paint = paint;
@@ -366,20 +365,17 @@ impl Drapes {
     /// drape's `parameters`, from its `source`, for the surface to shade if
     /// it `lit` the stack ([`PaintParameters::drape_lit`]). The stack's
     /// layers update in drawing order.
-    #[expect(clippy::too_many_arguments, reason = "the frame's GPU and parameters, and the layer and its stack")]
     pub(crate) fn update_layer(
         &mut self,
         stack: usize,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
-        atlases: &Atlases,
         layer: &mut dyn RenderLayer,
         source: Option<LayerSource<'_>>,
         lit: bool,
     ) {
         let globe = self.globe;
         let style = Arc::clone(&layer.base().style);
-        let pattern_atlas_size = atlases.pattern.pixel_size();
         // The draws' updates don't read what the layers composite with, which
         // the upload makes.
         let layer_composite = &mut LayerComposite::default();
@@ -399,8 +395,8 @@ impl Drapes {
             let (unwrapped, size) = (tile.to_unwrapped(), Size::new(*size, *size));
             let mut parameters = parameters.drape(transform, clip_masks, layer_composite, size, unwrapped);
             parameters.drape_lit = lit;
-            layer.update_drape_draws(gpu, &mut parameters, atlases, source, (*tile, globe), &mut kept.drawing);
-            let global = parameters.global_paint_params(pattern_atlas_size);
+            layer.update_drape_draws(gpu, &mut parameters, source, (*tile, globe), &mut kept.drawing);
+            let global = parameters.global_paint_params();
             kept.drawing.write_uniform(gpu, PAINT_PARAMS_ID, &global, parameters.context);
             layers.push(kept);
         }

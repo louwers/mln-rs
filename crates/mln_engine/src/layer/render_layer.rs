@@ -27,8 +27,6 @@ use crate::layer::bucket_geometry::BucketGeometry;
 use crate::layer::layer_drawing::{ChangedBuckets, DrapeDrawing, DrawGroup, DrawOrder, LayerDrawing};
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
 use crate::layers::custom::EndedHosts;
-use crate::line_atlas::LineAtlas;
-use crate::pattern_atlas::PatternAtlas;
 use crate::query::feature_index::{FeatureIndex, QueryRegion};
 use crate::render::paint_parameters::PaintParameters;
 use crate::render::pass::RenderPass;
@@ -410,16 +408,6 @@ impl<'a> FrameSourceTiles<'a> {
     }
 }
 
-/// The atlases that the layers' draws share: the line atlas of the dash
-/// patterns of `line-dasharray`s that don't differ by feature, and the
-/// pattern atlas of `background-pattern`s. A frame's update adds what its
-/// layers draw, and its encode uploads them and binds their textures.
-#[derive(Default)]
-pub(crate) struct Atlases {
-    pub(crate) line: LineAtlas,
-    pub(crate) pattern: PatternAtlas,
-}
-
 /// What a layer reads in the frame's update, besides its tiles.
 pub(crate) struct LayerUpdateParameters<'a> {
     /// The frame's camera.
@@ -433,8 +421,6 @@ pub(crate) struct LayerUpdateParameters<'a> {
     pub(crate) contents: &'a [Option<&'a Contents>],
     /// The images of the style.
     pub(crate) images: &'a crate::image::image_store::ImageStore,
-    /// The atlases, to add what the layer draws to.
-    pub(crate) atlases: &'a mut Atlases,
     /// The tiles of the frame's layers, as their updates find them, which
     /// the update adds the layer's to: those the encode draws.
     pub(crate) found: &'a mut Vec<FoundTile>,
@@ -631,7 +617,6 @@ pub(crate) trait TypedLayer {
         &mut self,
         _gpu: &mut dyn Gpu,
         _parameters: &mut PaintParameters<'_>,
-        _atlases: &Atlases,
         _tiles: &[FrameTile<'_, Self::Type>],
     ) {
     }
@@ -642,20 +627,13 @@ pub(crate) trait TypedLayer {
         &mut self,
         _gpu: &mut dyn Gpu,
         _parameters: &mut PaintParameters<'_>,
-        _atlases: &Atlases,
         _image: ImageSourceRenderData<'_>,
     ) {
     }
 
     /// [`update_draws`](Self::update_draws) of a layer of a type without a
     /// source.
-    fn update_draws_without_source(
-        &mut self,
-        _gpu: &mut dyn Gpu,
-        _parameters: &mut PaintParameters<'_>,
-        _atlases: &Atlases,
-    ) {
-    }
+    fn update_draws_without_source(&mut self, _gpu: &mut dyn Gpu, _parameters: &mut PaintParameters<'_>) {}
 
     /// Drops what the layer keeps for its draws besides their GPU objects
     /// and its tiles' entries, when it stops rendering.
@@ -732,7 +710,6 @@ pub(crate) trait LayerParts {
         &mut self,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
-        atlases: &Atlases,
         source: Option<LayerSource<'_>>,
     );
 
@@ -777,7 +754,6 @@ pub(crate) trait LayerParts {
         &mut self,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
-        atlases: &Atlases,
         source: Option<LayerSource<'_>>,
         drape: (OverscaledTileID, bool),
         drawing: &mut DrapeDrawing,
@@ -930,7 +906,6 @@ impl<L: TypedLayer> LayerParts for L {
         &mut self,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
-        atlases: &Atlases,
         source: Option<LayerSource<'_>>,
     ) {
         let stands = L::STANDS && parameters.ground.is_some();
@@ -940,7 +915,7 @@ impl<L: TypedLayer> LayerParts for L {
             if self.parts_mut().drawing.tiles().is_some_and(|tiles| tiles.is_empty()) {
                 self.remove_all_draws();
             } else if begin_frame(self) {
-                TypedLayer::update_draws_without_source(self, gpu, parameters, atlases);
+                TypedLayer::update_draws_without_source(self, gpu, parameters);
             }
             return;
         }
@@ -950,12 +925,12 @@ impl<L: TypedLayer> LayerParts for L {
             {
                 let tiles = source.at::<L::Type>(found, self.id());
                 if begin_frame(self) {
-                    TypedLayer::update_draws(self, gpu, parameters, atlases, &tiles);
+                    TypedLayer::update_draws(self, gpu, parameters, &tiles);
                 }
             }
             Some(LayerSource::Image(image)) => {
                 if begin_frame(self) {
-                    TypedLayer::update_image_draws(self, gpu, parameters, atlases, image);
+                    TypedLayer::update_image_draws(self, gpu, parameters, image);
                 }
             }
             _ => self.remove_all_draws(),
@@ -995,7 +970,6 @@ impl<L: TypedLayer> LayerParts for L {
         &mut self,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
-        atlases: &Atlases,
         source: Option<LayerSource<'_>>,
         drape: (OverscaledTileID, bool),
         drawing: &mut DrapeDrawing,
@@ -1007,7 +981,7 @@ impl<L: TypedLayer> LayerParts for L {
         // The drape's drawing is the layer's while the layer's hooks make its
         // draws.
         std::mem::swap(self.parts_mut().drawing, drawing);
-        update_drape(self, gpu, parameters, atlases, source, drape);
+        update_drape(self, gpu, parameters, source, drape);
         std::mem::swap(self.parts_mut().drawing, drawing);
     }
 
@@ -1090,7 +1064,6 @@ fn update_drape<L: TypedLayer>(
     layer: &mut L,
     gpu: &mut dyn Gpu,
     parameters: &mut PaintParameters<'_>,
-    atlases: &Atlases,
     source: Option<LayerSource<'_>>,
     (drape_tile, globe): (OverscaledTileID, bool),
 ) {
@@ -1101,7 +1074,7 @@ fn update_drape<L: TypedLayer>(
             kept.set_tiles([drape_tile]);
         }
         if begin_frame(layer) {
-            TypedLayer::update_draws_without_source(layer, gpu, parameters, atlases);
+            TypedLayer::update_draws_without_source(layer, gpu, parameters);
         }
         return;
     }
@@ -1117,7 +1090,7 @@ fn update_drape<L: TypedLayer>(
                 layer.remove_all_draws();
             } else if begin_frame(layer) {
                 let image = ImageSourceRenderData { tile_ids: &copies, ..image };
-                TypedLayer::update_image_draws(layer, gpu, parameters, atlases, image);
+                TypedLayer::update_image_draws(layer, gpu, parameters, image);
             }
             return;
         }
@@ -1129,7 +1102,7 @@ fn update_drape<L: TypedLayer>(
     if tiles.is_empty() {
         layer.remove_all_draws();
     } else if begin_frame(layer) {
-        TypedLayer::update_draws(layer, gpu, parameters, atlases, &tiles);
+        TypedLayer::update_draws(layer, gpu, parameters, &tiles);
     }
 }
 

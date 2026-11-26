@@ -22,11 +22,9 @@ pub mod layer;
 #[doc(hidden)]
 pub mod layers;
 mod layout;
-mod line_atlas;
 pub mod map;
 #[cfg(feature = "sqlite")]
 pub mod offline;
-mod pattern_atlas;
 pub mod placement;
 pub mod query;
 mod registry;

@@ -43,7 +43,7 @@ use crate::layer::layer_drawing::{DrawList, DrawObjectsMut, KeptDraw, TileDraws,
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::layout::NoLayout;
 use crate::layer::render_layer::{
-    Atlases, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+    LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
 use crate::layers::color_relief::programs;
 use crate::layers::color_relief::ubo::{ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO};
@@ -354,7 +354,6 @@ impl TypedLayer for RenderColorReliefLayer {
         &mut self,
         gpu: &mut dyn Gpu,
         paint_parameters: &mut PaintParameters<'_>,
-        _atlases: &Atlases,
         render_tiles: &[FrameTile<'_, ColorRelief>],
     ) {
         let RenderColorReliefLayer {
