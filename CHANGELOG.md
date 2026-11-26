@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.18](https://github.com/maplibre/mln-rs/compare/v0.0.17...v0.0.18) - 2026-11-26
+
+- refactor!: gather the symbol layer into mln_engine::symbol ([#995](https://github.com/maplibre/mln-rs/pull/995))
+- fix(engine): ship the Unicode License v3 text with mln_engine ([#994](https://github.com/maplibre/mln-rs/pull/994))
+- refactor!: fold mln_util into mln_engine by owner ([#990](https://github.com/maplibre/mln-rs/pull/990))
+- refactor!: fold mln_frame_pacer into mln_runtime ([#991](https://github.com/maplibre/mln-rs/pull/991))
+- refactor!: fold the tile, storage and sprite crates into mln_engine ([#988](https://github.com/maplibre/mln-rs/pull/988))
+- refactor!: fold the image, text, system fonts and gestures crates into mln_engine ([#989](https://github.com/maplibre/mln-rs/pull/989))
+- refactor!: rename mln_renderer to mln_engine, laid out by owner ([#986](https://github.com/maplibre/mln-rs/pull/986))
+- refactor!: fold mln_map and mln_map_types into mln_engine ([#987](https://github.com/maplibre/mln-rs/pull/987))
+- refactor!: move colors, padding and interpolation to mln_style ([#980](https://github.com/maplibre/mln-rs/pull/980))
+- refactor!: move CanonicalTileID to mln_style ([#981](https://github.com/maplibre/mln-rs/pull/981))
+- refactor!: make mln_util depend on mln_style, not the reverse ([#982](https://github.com/maplibre/mln-rs/pull/982))
+- refactor(style)!: decode image sources' images in the map's loader ([#979](https://github.com/maplibre/mln-rs/pull/979))
+- docs: say how a host recovers a web canvas from a lost WebGPU device ([#985](https://github.com/maplibre/mln-rs/pull/985))
+
 ## [0.0.17](https://github.com/maplibre/mln-rs/compare/v0.0.16...v0.0.17) - 2026-11-26
 
 - chore(deps): take mlt-core 0.24 so dependents on 0.24 build one copy ([#977](https://github.com/maplibre/mln-rs/pull/977))

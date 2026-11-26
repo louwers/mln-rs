@@ -2469,7 +2469,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "geo-types",
  "geojson",
@@ -2493,7 +2493,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-bench"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "libc",
  "mln-rs-bench-workload",
@@ -2521,7 +2521,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-bench-snapshot"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "mlt-core",
  "pmtiles",
@@ -2532,7 +2532,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-bench-workload"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "mln-rs-engine",
  "mln-rs-style",
@@ -2543,7 +2543,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-c"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "geo-types",
  "geojson",
@@ -2575,7 +2575,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-c-abi-gen"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "bindgen",
  "prettyplease",
@@ -2586,7 +2586,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-c-abi-test"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "regex",
  "tempfile",
@@ -2595,7 +2595,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-d3d12"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "gpu-allocator",
  "log",
@@ -2609,7 +2609,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-desktop"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "ash",
  "egui",
@@ -2642,7 +2642,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-engine"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "ab_glyph_rasterizer",
  "block2 0.6.2",
@@ -2710,7 +2710,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-expression-test"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "geo-types",
  "geojson",
@@ -2722,7 +2722,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-feature"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "geo-types",
  "geojson",
@@ -2733,7 +2733,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-geojson"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "foldhash 0.2.0",
  "geo-index",
@@ -2748,7 +2748,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-geometry"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "geo-types",
  "mln-rs-wire",
@@ -2756,7 +2756,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-gfx"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "bytemuck",
  "foldhash 0.2.0",
@@ -2769,7 +2769,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-gl"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "bytemuck",
  "glow",
@@ -2789,7 +2789,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-glsl"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "mln-rs-engine",
  "mln-rs-gfx",
@@ -2798,7 +2798,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-headless"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "geo-types",
  "geojson",
@@ -2828,7 +2828,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-mtl"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "block2 0.6.2",
  "bytemuck",
@@ -2847,11 +2847,11 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-pixelmatch"
-version = "0.0.17"
+version = "0.0.18"
 
 [[package]]
 name = "mln-rs-polylabel"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "mln-rs-geometry",
  "serde_json",
@@ -2859,7 +2859,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-ratchet"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "regex",
  "toml_edit",
@@ -2867,7 +2867,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-render-test"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "fastrand",
  "geojson",
@@ -2889,7 +2889,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-runtime"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "geo-types",
  "geojson",
@@ -2927,7 +2927,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-style"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "cheap-ruler",
  "fixed_decimal",
@@ -2965,7 +2965,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-style-codegen"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "mln-rs-style",
  "mln-rs-vec-map",
@@ -2974,21 +2974,21 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-unicode-tables"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "unicode-bidi",
 ]
 
 [[package]]
 name = "mln-rs-vec-map"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "mln-rs-wire",
 ]
 
 [[package]]
 name = "mln-rs-vulkan"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "ash",
  "bytemuck",
@@ -3005,7 +3005,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-wasm-size"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "serde_json",
  "wasmparser",
@@ -3013,7 +3013,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-web"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "js-sys",
  "log",
@@ -3034,7 +3034,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-web-host"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "js-sys",
  "log",
@@ -3049,7 +3049,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-web-shaper"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "js-sys",
  "mln-rs-engine",
@@ -3058,7 +3058,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-webgpu"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "js-sys",
  "log",
@@ -3072,7 +3072,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-wire"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "bytemuck",
  "foldhash 0.2.0",
@@ -3085,7 +3085,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-wire-derive"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "proc-macro2",
  "quote",
