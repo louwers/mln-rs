@@ -9,9 +9,9 @@ use geometry::Point;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::constants;
 use mln_style::hash::{HashMap, HashSet};
-use mln_util::identity::SimpleIdentity;
 
 use crate::draw::context::Context;
+use crate::draw::identity::SimpleIdentity;
 use crate::draw::indexes::{Indexes, SharedIndexes};
 use crate::draw::mesh::Indexed;
 use crate::draw::segment::SegmentBase;

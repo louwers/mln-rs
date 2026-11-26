@@ -9,10 +9,10 @@ use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_style::color::Color;
 use mln_style::geo::WrapMode;
 use mln_style::types::LightAnchorType;
-use mln_util::identity::SimpleIdentity;
 
 use crate::camera::View;
 use crate::draw::context::Context;
+use crate::draw::identity::SimpleIdentity;
 use crate::draw::indexes::DrawIndexes;
 use crate::draw::objects::{DrawGeometry, DrawObjects, Textures, raw_vertices};
 use crate::draw::segment::SegmentBase;

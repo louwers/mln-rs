@@ -33,12 +33,11 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use mln_util::chrono::{now, parse_http_date};
-use mln_util::http_header::{CacheControl, CachingHeaders, parse_retry_headers};
-
 use crate::log_target;
+use crate::storage::chrono::{now, parse_http_date};
 #[cfg(not(target_family = "wasm"))]
 use crate::storage::file_source::FileSource;
+use crate::storage::http_header::{CacheControl, CachingHeaders, parse_retry_headers};
 use crate::storage::http_header_transform::{HttpHeaderTransform, HttpHeaders};
 use crate::storage::request::Responder;
 use crate::storage::resource::{Kind, Resource, TileFormat};
@@ -494,9 +493,8 @@ impl FileSource for HTTPFileSource {
 
 #[cfg(test)]
 mod tests {
-    use mln_util::chrono::{Timestamp, now, rfc1123};
-
     use super::*;
+    use crate::storage::chrono::{Timestamp, now, rfc1123};
 
     fn response(status: i64, headers: &[(&str, &str)], resource: &Resource) -> Response {
         let transfer = Transfer {

@@ -1,6 +1,6 @@
 # The port and its crates.io release (RELEASING.md). Each library under
 # crates/ and vendor/ is the package mln-rs-<name> (library name unchanged,
-# so the code still says `mln_util::`), and the package here, mln-rs,
+# so the code still says `mln_engine::`), and the package here, mln-rs,
 # re-exports them all. Users depend on mln-rs only.
 [workspace]
 resolver = "3"
@@ -67,7 +67,6 @@ mln_mtl = { package = "mln-rs-mtl", path = "crates/mln_mtl", version = "=0.0.17"
 # them, so that a browser build of mln_c carries one.
 mln_runtime = { package = "mln-rs-runtime", path = "crates/mln_runtime", version = "=0.0.17", default-features = false }
 mln_style = { package = "mln-rs-style", path = "crates/mln_style", version = "=0.0.17" }
-mln_util = { package = "mln-rs-util", path = "crates/mln_util", version = "=0.0.17" }
 mln_vec_map = { package = "mln-rs-vec-map", path = "crates/mln_vec_map", version = "=0.0.17" }
 mln_vulkan = { package = "mln-rs-vulkan", path = "crates/mln_vulkan", version = "=0.0.17" }
 mln_wire = { package = "mln-rs-wire", path = "crates/mln_wire", version = "=0.0.17" }
@@ -95,7 +94,7 @@ flate2 = { version = "1.1.11", default-features = false, features = [
 # crates/mln_gl: OpenGL ES 3.0 and WebGL2 through one set of bindings.
 glow = { version = "0.17.0" }
 harfrust = { version = "0.15.0" }
-# HTTP dates (Expires, Last-Modified, Retry-After): mln_util's parse_http_date.
+# HTTP dates (Expires, Last-Modified, Retry-After): mln_engine's parse_http_date.
 httpdate = { version = "1.0.3" }
 # Percent-decoding (mln_engine's file sources).
 percent-encoding = { version = "2.3.1" }
@@ -549,7 +548,6 @@ mln_engine = { workspace = true, features = [
 ] }
 mln_runtime.workspace = true
 mln_style.workspace = true
-mln_util.workspace = true
 mln_vec_map.workspace = true
 mln_vulkan = { workspace = true, optional = true }
 mln_web_host.workspace = true

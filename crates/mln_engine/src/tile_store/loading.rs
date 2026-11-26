@@ -11,10 +11,10 @@ use mln_style::sources::custom::{CustomVectorTileData, TileDataFormat};
 use mln_style::sources::geojson::{GeoJSONData, TileFeatures};
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::tileset::Tileset;
-use mln_util::chrono::Timestamp;
-use mln_util::pool::TaskGroup;
 use parking_lot::Mutex;
 
+use crate::exec::pool::TaskGroup;
+use crate::storage::chrono::Timestamp;
 use crate::storage::resource::{Priority, TileFormat};
 use crate::storage::response::{Caching, Reason};
 use crate::storage::{Data, FileSource, LoadingMethod, Request, Resource, Response, StoragePolicy};

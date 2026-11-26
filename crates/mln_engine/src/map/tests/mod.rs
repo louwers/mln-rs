@@ -10,6 +10,6 @@ mod terrain_gestures;
 mod terrain_rest;
 
 /// A pool for a test's map.
-fn pool() -> mln_util::pool::Pool {
-    mln_util::pool::Pool::new(4)
+fn pool() -> crate::exec::pool::Pool {
+    crate::exec::pool::Pool::new(4)
 }

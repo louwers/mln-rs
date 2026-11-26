@@ -23,7 +23,6 @@ use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
 use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
 use mln_style::types::{AlignmentType, IconTextFitType, SymbolPlacementType, TextRotationAlignmentType};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
-use mln_util::identity::SimpleIdentity;
 
 use super::cast_matrix;
 use crate::buckets::symbol_bucket::{
@@ -32,6 +31,7 @@ use crate::buckets::symbol_bucket::{
 use crate::camera::{Projection, ProjectionData};
 use crate::draw::atlas_binding::AtlasBinding;
 use crate::draw::context::Context;
+use crate::draw::identity::SimpleIdentity;
 use crate::draw::objects::{DrawGeometry, DrawObjects, copy_shared_attributes};
 use crate::draw::segment::SegmentBase;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};

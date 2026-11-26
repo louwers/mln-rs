@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use mln_engine::camera::{AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase};
+use mln_engine::geo::ScreenCoordinate;
 use mln_engine::gestures::{GestureEvent, GestureRecognizer, Input, Modes, PointerKind};
 use mln_engine::map::MapEvent;
 use mln_runtime::{
@@ -24,7 +25,6 @@ use mln_runtime::{
 };
 use mln_style::geo::LatLng;
 use mln_style::size::Size;
-use mln_util::geo::ScreenCoordinate;
 use mln_web_host::{pump, shaper};
 use parking_lot::Mutex;
 use wasm_bindgen::prelude::*;

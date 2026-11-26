@@ -23,9 +23,9 @@ use mln_style::hash::HashMap;
 use mln_style::source::{DescribeImageJob, Described, ErasedDescription, Fetch, Load, Respond};
 use mln_style::sprite::Sprite;
 use mln_style::{Edit, SourceInstance, Style, StyleLoadError, StyleRegistry, image};
-use mln_util::event_queue::{EventQueue, Waker};
-use mln_util::pool::{Pool, TaskGroup};
 
+use crate::exec::event_queue::{EventQueue, Waker};
+use crate::exec::pool::{Pool, TaskGroup};
 use crate::image::decoder;
 use crate::image::sprite::load_sprite;
 use crate::log_target;

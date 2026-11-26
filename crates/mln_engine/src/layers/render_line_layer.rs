@@ -18,12 +18,12 @@ use mln_style::layers::line_layer_properties::LinePaintProperties;
 use mln_style::size::Size;
 use mln_style::types::{AlignmentType, LayerBlendType, LineCapType, TranslateAnchorType};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
-use mln_util::identity::SimpleIdentity;
 
 use super::{cast_matrix, refresh_paint_attributes};
 use crate::buckets::line_bucket::{LineBinders, LineBucket};
 use crate::draw::atlas_binding::AtlasBinding;
 use crate::draw::context::Context;
+use crate::draw::identity::SimpleIdentity;
 use crate::draw::objects::{DrawGeometry, DrawObjects, Textures};
 use crate::draw::segment::SegmentBase;
 use crate::draw::store::SharedTexture;
@@ -281,7 +281,8 @@ fn offset_line(
     offset: f64,
 ) -> Vec<mln_style::feature::GeometryCoordinates> {
     use geometry::Point;
-    use mln_util::math::{perp, unit};
+
+    use crate::geo::math::{perp, unit};
 
     debug_assert!(offset != 0.0);
     debug_assert!(!rings.is_empty());
@@ -536,14 +537,14 @@ impl RenderLayer for RenderLineLayer {
 
         // Apply offset to geometry
         if offset != 0.0 && !geometry.is_empty() {
-            return mln_util::intersection_tests::polygon_intersects_buffered_multi_line(
+            return crate::geo::intersection_tests::polygon_intersects_buffered_multi_line(
                 query,
                 &offset_line(geometry, f64::from(offset)),
                 half_width,
             );
         }
 
-        mln_util::intersection_tests::polygon_intersects_buffered_multi_line(query, geometry, half_width)
+        crate::geo::intersection_tests::polygon_intersects_buffered_multi_line(query, geometry, half_width)
     }
 }
 

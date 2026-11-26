@@ -2,9 +2,9 @@
 // come from the published snapshot, and its commands go out without waiting.
 
 use mln_engine::camera::{CameraOptions, CameraUpdate};
+use mln_engine::geo::ScreenCoordinate;
 use mln_engine::gestures::{GestureCamera, GestureRecognizer, Input, Modes, PointerKind};
 use mln_style::geo::{LatLng, WrapMode};
-use mln_util::geo::ScreenCoordinate;
 
 use crate::support::{level_terrain_map, map, runtime, serve_level_dem, wait};
 

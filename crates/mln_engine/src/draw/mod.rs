@@ -11,6 +11,7 @@ pub(crate) mod buffer;
 pub(crate) mod context;
 pub(crate) mod dynamic_texture;
 pub(crate) mod dynamic_texture_atlas;
+pub(crate) mod identity;
 pub(crate) mod indexes;
 pub(crate) mod mesh;
 pub(crate) mod objects;

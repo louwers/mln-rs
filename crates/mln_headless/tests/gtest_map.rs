@@ -15,7 +15,10 @@ use mln_engine::camera::{
     AnimationOptions, AxonometricMode, BoundOptions, CameraOptions, ConstrainMode, MapProjection, NorthOrientation,
     ProjectionMode, Viewport, ViewportMode,
 };
+use mln_engine::exec::pool::Pool;
+use mln_engine::geo::{EdgeInsets, ScreenCoordinate};
 use mln_engine::map::{Map, MapMode, MapOptions, RenderFrameStatus, TileSettings};
+use mln_engine::storage::chrono::Timestamp;
 use mln_engine::storage::response::{Reason, ResourceError};
 use mln_engine::storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_engine::storage::{
@@ -51,9 +54,6 @@ use mln_style::tile_id::CanonicalTileID;
 use mln_style::tileset::{PartialTileset, Scheme};
 use mln_style::types::{ProjectionDefinition, ProjectionType, VisibilityType};
 use mln_style::{Edit, PropertyValue, Source, TransitionOptions};
-use mln_util::chrono::Timestamp;
-use mln_util::geo::{EdgeInsets, ScreenCoordinate};
-use mln_util::pool::Pool;
 use parking_lot::Mutex;
 use serde_json::json;
 
@@ -771,7 +771,7 @@ fn default_bound_options() {
 
     let bounds = test.map().snapshot().bounds;
 
-    assert_eq!(bounds.min_zoom, mln_util::constants::MIN_ZOOM);
+    assert_eq!(bounds.min_zoom, mln_engine::camera::constants::MIN_ZOOM);
     assert_eq!(bounds.max_zoom, f64::from(mln_style::constants::DEFAULT_MAX_ZOOM));
     // A snapshot reports the default, unlimited bounds as none.
     assert_eq!(bounds.bounds, None);
@@ -879,7 +879,7 @@ fn expired_or_fresh_response(fixture: &str, expires: Timestamp) -> Response {
 }
 
 fn hours_from_now(hours: i64) -> Timestamp {
-    Timestamp::from_secs(mln_util::chrono::now().secs_since_epoch() + hours * 3600)
+    Timestamp::from_secs(mln_engine::storage::chrono::now().secs_since_epoch() + hours * 3600)
 }
 
 // gtest: Map.StyleFresh

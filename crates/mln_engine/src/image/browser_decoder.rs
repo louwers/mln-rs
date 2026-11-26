@@ -11,12 +11,12 @@ use js_sys::{Reflect, Uint8Array};
 use mln_style::bitmap::{PremultipliedImage, UnassociatedImage};
 use mln_style::error::Error;
 use mln_style::size::Size;
-use mln_util::premultiply::premultiply;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
 use crate::image::decoder::{DecodeDone, ImageDecoder};
 use crate::image::image::ImageType;
+use crate::image::premultiply::premultiply;
 use crate::log_target;
 
 #[wasm_bindgen]

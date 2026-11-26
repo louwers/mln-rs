@@ -9,6 +9,9 @@ use std::sync::{Arc, OnceLock};
 use std::thread::ThreadId;
 
 use mln_engine::Registry;
+use mln_engine::exec::pool::Pool;
+use mln_engine::exec::queue::{Queue, TimedTask};
+use mln_engine::exec::thread::Joined;
 #[cfg(not(target_family = "wasm"))]
 use mln_engine::offline::RegionDatabase;
 use mln_engine::storage::http_header_transform::{HttpHeaderTransform, HttpHeaders};
@@ -20,9 +23,6 @@ use mln_engine::text::GlyphCache;
 use mln_engine::text::font_face_engine::FontFaceEngine;
 use mln_style::error::Error;
 use mln_style::time::Instant;
-use mln_util::pool::Pool;
-use mln_util::queue::{Queue, TimedTask};
-use mln_util::thread::Joined;
 use parking_lot::Mutex;
 
 use crate::completion::{Completion, Resolver};
@@ -321,7 +321,7 @@ pub(crate) fn post_at(
 fn run(core: &mut Option<RuntimeCore>, task: impl FnOnce(&mut RuntimeCore, &mut Outbox), in_burst: bool) {
     let Some(state) = core.as_mut() else { return };
     let mut outbox = Outbox { deliveries: std::mem::take(&mut state.spare_deliveries) };
-    let ran = mln_util::panic::catch(|| {
+    let ran = mln_engine::exec::panic::catch(|| {
         if in_burst {
             state.begin_burst_task();
         }
@@ -349,7 +349,7 @@ fn fail(core: &mut Option<RuntimeCore>, message: &str) {
     let _ = state.failure.set(error);
     // The panic may have left the state half-changed, so its drop may panic
     // too.
-    let _ = mln_util::panic::catch(move || drop(state));
+    let _ = mln_engine::exec::panic::catch(move || drop(state));
 }
 
 /// What a task sends to the host: event batches and results, in order. They
@@ -706,7 +706,7 @@ impl Runtime {
         registry: Arc<Registry>,
         pool: Pool,
     ) -> Result<(ThreadId, Option<Joined>), Error> {
-        let thread = mln_util::thread::spawn("Runtime", move || {
+        let thread = mln_engine::exec::thread::spawn("Runtime", move || {
             let own_pool = pool.clone();
             let mut core = Some(RuntimeCore::new(
                 resource_options,

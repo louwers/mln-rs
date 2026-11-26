@@ -11,11 +11,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use mln_util::constants::{ASSET_PROTOCOL, FILE_PROTOCOL};
-use mln_util::queue::Queue;
 use parking_lot::Mutex;
 
+use crate::exec::queue::Queue;
 use crate::log_target;
+use crate::storage::constants::{ASSET_PROTOCOL, FILE_PROTOCOL};
 use crate::storage::file_source::FileSource;
 use crate::storage::offline_database::{DatabaseError, OfflineDatabase};
 use crate::storage::request::Responder;
@@ -154,7 +154,7 @@ impl<E: 'static> DatabaseFileSource<E> {
         let make: MakeExtension<E> = Box::new(make);
         let queue = DatabaseQueue::new();
         let own = queue.clone();
-        let thread = mln_util::thread::spawn("DatabaseFileSource", move || {
+        let thread = crate::exec::thread::spawn("DatabaseFileSource", move || {
             let mut worker = DatabaseWorker::new(&own, network, &cache_path, read_only, make);
             own.run(&mut worker);
             // What comes once the database has dropped drops at once, so the

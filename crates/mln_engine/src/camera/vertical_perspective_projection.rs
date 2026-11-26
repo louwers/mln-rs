@@ -6,12 +6,12 @@ use glam::{DMat3, DMat4, DQuat, DVec3, DVec4, EulerRot, Vec3Swizzles, Vec4Swizzl
 use mln_style::constants::{EXTENT, LATITUDE_MAX, TILE_SIZE_D};
 use mln_style::geo::{LatLng, WrapMode};
 use mln_style::interpolate::interpolate;
-use mln_util::geo::ScreenCoordinate;
-use mln_util::projection::Projection;
 
 use crate::camera::projection::{ProjectedTilePoint, ProjectionData, mercator_tile_coords};
 use crate::camera::transform_state::TransformState;
 use crate::camera::view::{NorthOrientation, View};
+use crate::geo::ScreenCoordinate;
+use crate::geo::projection::Projection;
 use crate::tile::UnwrappedTileID;
 
 /// How far from the polar axis a unit-sphere point can be and still be on its

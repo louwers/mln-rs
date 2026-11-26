@@ -65,7 +65,7 @@ pub fn prefetch() {
     }
     STARTED.get_or_init(|| {
         // Without a thread, the first `shaped_ranges` finds them.
-        let _ = mln_util::thread::builder("system fonts").spawn(shaped_ranges);
+        let _ = crate::exec::thread::builder("system fonts").spawn(shaped_ranges);
     });
 }
 

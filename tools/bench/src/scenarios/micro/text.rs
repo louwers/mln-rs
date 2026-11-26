@@ -13,14 +13,14 @@ use std::num::NonZeroU16;
 
 use feature::Value;
 use mln_engine::text::atlas::ImagePositions;
+use mln_engine::text::constants::ONE_EM;
 use mln_engine::text::glyph::{GlyphID, GlyphIDType, GlyphPosition, GlyphPositions, GlyphRange, get_glyph_range};
 use mln_engine::text::glyph_pbf::parse_glyph_pbf;
 use mln_engine::text::tagged_string::font_stack_hash;
+use mln_engine::text::tiny_sdf::transform_raster_to_sdf;
 use mln_engine::text::{SectionOptions, ShapedText, Shaper, ShapingOptions, TaggedString, shape_text};
 use mln_style::feature::GeometryTileFeature;
 use mln_style::types::{SymbolAnchorType, TextJustifyType, TextWritingModeType};
-use mln_util::constants::ONE_EM;
-use mln_util::tiny_sdf::transform_raster_to_sdf;
 
 use super::{tile_bytes, tile_data};
 use crate::scenario::{Bench, Kind, Scenario};

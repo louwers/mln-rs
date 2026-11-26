@@ -21,11 +21,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_engine::Registry;
+use mln_engine::exec::pool::Pool;
 use mln_engine::storage::OnlineFileSource;
 use mln_engine::storage::network_status::NetworkStatus;
 use mln_engine::worker::worker_codec::RemoteWorkers;
 use mln_style::hash::HashMap;
-use mln_util::pool::Pool;
 use mln_web_host::{pump, tile_workers};
 
 use crate::log_target;
@@ -54,7 +54,7 @@ pub(crate) fn drive(pool: &Pool, queue: CoreQueue, mut core: Option<RuntimeCore>
 }
 
 /// Asks the pump for a slice once `queue`'s earliest timed task is due.
-fn wake_for_timed<S>(queue: &mln_util::queue::Queue<S>) {
+fn wake_for_timed<S>(queue: &mln_engine::exec::queue::Queue<S>) {
     if let Some(deadline) = queue.next_deadline() {
         pump::wake_at(deadline);
     }

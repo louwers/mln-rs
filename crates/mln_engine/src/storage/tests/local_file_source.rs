@@ -1,8 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use mln_util::constants::FILE_PROTOCOL;
-
 use super::{LocalRequests, TestLoop, cpp_path, req, temp_path};
+use crate::storage::constants::FILE_PROTOCOL;
 use crate::storage::file_source::FileSource;
 use crate::storage::local_file_source::LocalFileSource;
 use crate::storage::resource::{Kind, Resource};

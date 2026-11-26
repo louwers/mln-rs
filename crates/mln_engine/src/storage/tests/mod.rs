@@ -25,9 +25,9 @@ use std::rc::Rc;
 use std::sync::{Arc, Once, mpsc};
 
 use mln_style::hash::HashMap;
-use mln_util::queue::{Queue, WeakQueue};
 use parking_lot::Mutex;
 
+use crate::exec::queue::{Queue, WeakQueue};
 use crate::storage::Request;
 use crate::storage::file_source::{FileSource, FileSourceExt};
 use crate::storage::resource::Resource;
@@ -479,8 +479,8 @@ fn mt19937_matches_the_standard() {
 }
 
 /// A pool for a test's file sources.
-pub(crate) fn pool() -> mln_util::pool::Pool {
-    mln_util::pool::Pool::new(4)
+pub(crate) fn pool() -> crate::exec::pool::Pool {
+    crate::exec::pool::Pool::new(4)
 }
 
 // Ports test/util/http_timeout.test.cpp (marker `// gtest: Group.Name`).

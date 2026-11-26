@@ -13,14 +13,13 @@ use mln_style::error::Error;
 use mln_style::expression::GlobalStateMap;
 use mln_style::hash::HashMap;
 use mln_style::layer::ErasedLayerStyle;
-use mln_util::feature::Feature;
-use mln_util::identity::SimpleIdentity;
-use mln_util::pool::TaskGroup;
 use mln_vec_map::{VecMap, VecSet};
 
 use crate::draw::context::Context;
 use crate::draw::dynamic_texture_atlas::{AtlasLease, BinUse, DynamicTextureAtlas};
+use crate::draw::identity::SimpleIdentity;
 use crate::draw::tile_render_data::TileAtlasTextures;
+use crate::exec::pool::TaskGroup;
 use crate::image::image_store::ImageType;
 use crate::layer::bucket::{Bucket, LayerFeatureStates, UploadNeeds};
 use crate::layer::bucket_geometry::{BucketGeometry, GeometryUpload};
@@ -39,6 +38,7 @@ use crate::text::glyph::{GlyphID, GlyphPositions};
 use crate::text::glyph_store::{GlyphRanges, ShapeResults};
 use crate::text::tagged_string::font_stack_hash;
 use crate::tile::OverscaledTileID;
+use crate::tile::feature::Feature;
 use crate::tile_store::dem::DemContents;
 use crate::tile_store::raster::{Masking, RasterContents};
 use crate::tile_store::tile_mask::TileMask;
@@ -471,7 +471,7 @@ impl GeometryContents {
         id: &OverscaledTileID,
         result: &mut QueryResults,
         query_geometry: &mln_style::feature::GeometryCoordinates,
-        (screen, ground): (&[mln_util::geo::ScreenCoordinate], Option<crate::query::feature_index::QueryGround<'_>>),
+        (screen, ground): (&[crate::geo::ScreenCoordinate], Option<crate::query::feature_index::QueryGround<'_>>),
         view: &crate::camera::View,
         layers: &QueryLayers<'_>,
         options: &RenderedQueryOptions,

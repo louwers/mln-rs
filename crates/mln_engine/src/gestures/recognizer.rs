@@ -6,12 +6,12 @@ use std::ops::{Add, AddAssign, Div, Mul, Sub};
 use std::time::Duration;
 
 use mln_style::unitbezier::UnitBezier;
-use mln_util::geo::ScreenCoordinate;
 
 use crate::camera::{
     AnchoredMomentum, AnimationOptions, CameraDelta, CameraMomentum, CameraOptions, CameraUpdate, CameraUpdateMode,
     CameraVelocity, GesturePhase, MomentumGlide, TransitionOutcome,
 };
+use crate::geo::ScreenCoordinate;
 use crate::gestures::camera::{GestureCamera, PendingEnd};
 use crate::gestures::input::{GestureEvent, Input, Modes, PinchPhase, PointerKind};
 use crate::gestures::notches::NotchWatch;

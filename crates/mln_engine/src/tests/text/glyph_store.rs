@@ -16,19 +16,19 @@ use mln_style::bitmap::AlphaImage;
 use mln_style::error::Error;
 use mln_style::i18n;
 use mln_style::size::Size;
-use mln_util::font_stack::FontStack;
-use mln_util::pool::{Pool, TaskGroup};
-use mln_util::queue::Queue;
 use mln_vec_map::{VecMap, VecSet};
 use parking_lot::Mutex;
 
 use super::glyph_store_bitmaps::{SDF_BITMAP, STUB_BITMAP};
 use super::read_file;
+use crate::exec::pool::{Pool, TaskGroup};
+use crate::exec::queue::Queue;
 use crate::render::events::RendererEvent;
 use crate::storage::response::{Reason, ResourceError};
 use crate::storage::stub_file_source::{ResponseType, StubFileSource};
 use crate::storage::{FileSource, Kind, Resource, Response};
 use crate::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
+use crate::text::font_stack::FontStack;
 use crate::text::glyph::{
     FontData, FontFace, GLYPH_RANGES_PER_FONT_STACK, GLYPHS_PER_GLYPH_RANGE, Glyph, GlyphDependencies, GlyphID,
     GlyphIDType, GlyphIDs, GlyphMap, GlyphMetrics, GlyphRange, NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK,

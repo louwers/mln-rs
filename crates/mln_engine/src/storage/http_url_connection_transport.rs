@@ -31,9 +31,9 @@ use std::time::Duration;
 use jni::errors::Error as JniError;
 use jni::objects::{Global, JByteArray, JObject, JString, JThrowable, JValue, JValueOwned};
 use jni::{Env, JavaVM, jni_sig, jni_str};
-use mln_util::chrono::rfc1123;
 use parking_lot::Mutex;
 
+use crate::storage::chrono::rfc1123;
 use crate::storage::http_file_source::{
     HttpTransport, Transfer, TransferRequest, USER_AGENT, accept_header, range_header, same_origin,
 };
@@ -78,11 +78,11 @@ impl Transport {
         let (requests, receiver) = mpsc::channel::<TransferRequest>();
         let (running, ended) = mpsc::channel::<()>();
         let receiver = Arc::new(Mutex::new(receiver));
-        let workers = (0..mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS)
+        let workers = (0..crate::storage::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS)
             .filter_map(|i| {
                 let receiver = Arc::clone(&receiver);
                 let running = running.clone();
-                mln_util::thread::spawn(format!("HTTPFileSource {i}"), move || {
+                crate::exec::thread::spawn(format!("HTTPFileSource {i}"), move || {
                     // Tells the transport that the worker returned, when it drops.
                     let _running = running;
                     worker(&receiver);

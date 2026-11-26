@@ -8,13 +8,13 @@ use std::f64::consts::PI;
 use glam::{DMat4, DQuat, DVec3};
 #[cfg(test)]
 use mln_style::geo::LatLng;
-#[cfg(test)]
-use mln_util::constants::M2PI;
-#[cfg(test)]
-use mln_util::geo::LatLngAltitude;
-use mln_util::projection::Projection;
 
 use crate::camera::camera::FreeCameraOptions;
+#[cfg(test)]
+use crate::geo::LatLngAltitude;
+#[cfg(test)]
+use crate::geo::constants::M2PI;
+use crate::geo::projection::Projection;
 
 #[cfg(test)]
 fn mercator_x_from_lng(lng: f64) -> f64 {

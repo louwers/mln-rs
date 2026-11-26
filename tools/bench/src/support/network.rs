@@ -15,10 +15,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use mln_engine::exec::pool::Pool;
 use mln_engine::storage::simulated_network::{Clock, OnlineDriver, Transfer, Transport, online_file_source};
 use mln_engine::storage::{Cache, FileSource, Loader, Resource};
 use mln_style::hash::{HashMap, HashSet};
-use mln_util::pool::Pool;
 use parking_lot::Mutex;
 
 use super::fixtures::Fixtures;

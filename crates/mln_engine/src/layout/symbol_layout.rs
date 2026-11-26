@@ -28,7 +28,6 @@ use mln_style::types::{
     VariableAnchorOffsetCollection,
 };
 use mln_style::{PropertyEvaluationParameters, StyleValue as _, i18n};
-use mln_util::constants::ONE_EM;
 use mln_vec_map::VecMap;
 
 use crate::buckets::symbol_bucket::{
@@ -54,6 +53,7 @@ use crate::placement::collision_feature::{AlongLine, BoxLayout, CollisionBox, Co
 use crate::placement::collision_index::OverlapMode;
 use crate::query::feature_index::{FeatureIndexBuilder, IndexedSubfeature};
 use crate::text::atlas::ImagePositions;
+use crate::text::constants::ONE_EM;
 use crate::text::get_anchors::{LineLabel, get_anchors, get_center_anchor};
 use crate::text::glyph::{GlyphID, GlyphIDType, GlyphPositions, Shaping};
 use crate::text::glyph_store::ShapeResults;

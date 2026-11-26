@@ -31,7 +31,6 @@ use std::sync::{Arc, OnceLock, Weak, mpsc};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use mln_util::chrono::rfc1123;
 use parking_lot::Mutex;
 use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
 use ureq::unversioned::resolver::{DefaultResolver, Resolver};
@@ -44,6 +43,7 @@ use ureq::unversioned::transport::{
     Transport as UreqTransport,
 };
 
+use crate::storage::chrono::rfc1123;
 use crate::storage::http_file_source::{
     HttpTransport, Transfer, TransferRequest, USER_AGENT, accept_header, range_header, same_origin,
 };
@@ -56,7 +56,7 @@ const HAPPY_EYEBALLS_DELAY: Duration = Duration::from_millis(200);
 
 /// The transport's worker threads: as many as the online file source's
 /// default maximum of concurrent requests.
-const WORKERS: usize = mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS as usize;
+const WORKERS: usize = crate::storage::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS as usize;
 
 /// The TCP step of ureq's default connector chain with Happy Eyeballs
 /// (RFC 8305): the addresses alternate between the families, starting
@@ -137,7 +137,7 @@ fn start_attempt<A: Connector>(
     let run_connector = Arc::clone(&details.run_connector);
     let register_shutdown = Arc::clone(&details.register_shutdown);
     let per_address = Arc::clone(per_address);
-    mln_util::thread::spawn("HTTPFileSource connect", move || {
+    crate::exec::thread::spawn("HTTPFileSource connect", move || {
         // TcpConnector doesn't resolve; a resolver is only required.
         let resolver = DefaultResolver::default();
         let mut addrs = resolver.empty();
@@ -349,7 +349,7 @@ impl Transport {
                     stopping: Arc::clone(&stopping),
                     _running: running.clone(),
                 };
-                mln_util::thread::spawn(format!("HTTPFileSource {i}"), move || worker.run()).ok()
+                crate::exec::thread::spawn(format!("HTTPFileSource {i}"), move || worker.run()).ok()
             })
             .collect();
         Transport { requests: Some(requests), client, stopping, workers, ended: Mutex::new(ended) }

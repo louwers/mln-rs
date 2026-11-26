@@ -21,10 +21,10 @@ use mln_style::source::{OfflineResources, SourceTypeInfo};
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::tileset::{Tileset, VectorEncoding};
 use mln_style::{Parser, StyleRegistry};
-use mln_util::chrono::now;
-use mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
 use mln_vec_map::VecMap;
 
+use crate::storage::chrono::now;
+use crate::storage::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
 use crate::storage::offline::{
     OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionObserver, OfflineRegionStatus,
 };

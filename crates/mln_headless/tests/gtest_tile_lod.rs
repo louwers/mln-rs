@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use geojson::{Feature, Geometry};
 use mln_engine::Registry;
 use mln_engine::camera::CameraOptions;
+use mln_engine::exec::pool::Pool;
 use mln_engine::map::{Map, MapMode, MapOptions, TileSettings};
 use mln_engine::storage::ResourceOptions;
 use mln_headless::HeadlessFrontend;
@@ -12,7 +13,6 @@ use mln_style::conversion::Convertible;
 use mln_style::geo::LatLngBounds;
 use mln_style::layer::Layer;
 use mln_style::sources::custom_geometry_source::{self, Options as CustomGeometrySourceOptions};
-use mln_util::pool::Pool;
 
 use crate::support::*;
 

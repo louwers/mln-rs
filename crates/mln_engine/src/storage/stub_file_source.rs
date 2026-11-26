@@ -6,10 +6,10 @@
 use std::sync::{Arc, Weak};
 
 use mln_style::hash::HashMap;
-use mln_util::queue::Queue;
 use mln_vec_map::VecMap;
 use parking_lot::Mutex;
 
+use crate::exec::queue::Queue;
 use crate::storage::file_source::FileSource;
 use crate::storage::request::Responder;
 use crate::storage::resource::{Kind, Resource};

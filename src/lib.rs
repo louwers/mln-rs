@@ -5,7 +5,7 @@
 //! through a [`Completion`], and the [`RenderSession`]s that draw them.
 //!
 //! The library crates of <https://github.com/maplibre/mln-rs> are re-exported
-//! here under their crate names: `mln_rs::mln_engine`, `mln_rs::mln_util`,
+//! here under their crate names: `mln_rs::mln_engine`, `mln_rs::mln_style`,
 //! `mln_rs::mln_geojson`, and so on. They are published as the `mln-rs-*`
 //! packages, which only exist for this crate. The tile worker codec's
 //! encoding (`mln_wire`) is internal to the port and not re-exported.
@@ -47,7 +47,6 @@ pub use mln_mtl;
 // root type's methods take or return.
 pub use mln_runtime::{self, *};
 pub use mln_style;
-pub use mln_util;
 pub use mln_vec_map;
 /// Empty on Apple platforms and in the browser build.
 #[cfg(feature = "vulkan")]

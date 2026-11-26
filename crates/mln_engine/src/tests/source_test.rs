@@ -23,13 +23,13 @@ use mln_style::tile_id::CanonicalTileID;
 use mln_style::tileset::{PartialTileset, Tileset};
 use mln_style::types::ProjectionDefinition;
 use mln_style::{Edit, Source, Style};
-use mln_util::pool::{Pool, TaskGroup};
-use mln_util::queue::Queue;
 use parking_lot::Mutex;
 
 use crate::Registry;
 use crate::camera::transform::Transform;
 use crate::camera::{CameraOptions, ConstrainMode, TransformState, ViewportMode};
+use crate::exec::pool::{Pool, TaskGroup};
+use crate::exec::queue::Queue;
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::map::MapMode;
 use crate::source::render_source::RenderSource;
@@ -1327,7 +1327,7 @@ fn a_cached_tile_shows_its_data_only_while_caching_rules_allow() {
         turned.file_source.set_response(Kind::Tile, move |_| {
             let mut response = Response::new();
             response.no_content = true;
-            response.caching.expires = Some(mln_util::chrono::Timestamp::from_secs(expires));
+            response.caching.expires = Some(crate::storage::chrono::Timestamp::from_secs(expires));
             response.caching.must_revalidate = must_revalidate;
             Some(response)
         });
@@ -1356,7 +1356,7 @@ fn a_world_copy_of_a_cached_tile_follows_its_caching_rules() {
         turned.file_source.set_response(Kind::Tile, move |_| {
             let mut response = Response::new();
             response.no_content = true;
-            response.caching.expires = Some(mln_util::chrono::Timestamp::from_secs(expires));
+            response.caching.expires = Some(crate::storage::chrono::Timestamp::from_secs(expires));
             response.caching.must_revalidate = must_revalidate;
             Some(response)
         });

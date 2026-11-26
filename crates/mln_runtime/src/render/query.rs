@@ -1,8 +1,8 @@
 //! The feature queries of a render session.
 
+use mln_engine::geo::ScreenCoordinate;
 use mln_style::error::Error;
 use mln_style::size::Size;
-use mln_util::geo::ScreenCoordinate;
 
 /// The screen area that a rendered feature query covers, in logical pixels
 /// from the top left corner.

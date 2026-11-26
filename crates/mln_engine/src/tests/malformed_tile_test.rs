@@ -14,14 +14,14 @@ use mln_style::size::Size;
 use mln_style::sources::vector_source;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tileset::PartialTileset;
-use mln_util::pool::TaskGroup;
-use mln_util::queue::Queue;
 use proptest::prelude::*;
 use serde_json::json;
 
 use crate::Registry;
 use crate::camera::transform::Transform;
 use crate::camera::{CameraOptions, ConstrainMode, ViewportMode};
+use crate::exec::pool::TaskGroup;
+use crate::exec::queue::Queue;
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::map::MapMode;
 use crate::storage::stub_file_source::{ResponseType, StubFileSource};

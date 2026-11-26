@@ -2,9 +2,9 @@ use std::f64::consts::SQRT_2;
 
 use glam::dvec3;
 use mln_style::constants::LATITUDE_MAX;
-use mln_util::constants::EARTH_RADIUS_M;
 
 use super::*;
+use crate::geo::constants::EARTH_RADIUS_M;
 
 const ABS_DOUBLE_ERROR: f64 = 1e-7;
 

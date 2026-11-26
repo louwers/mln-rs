@@ -9,10 +9,10 @@ use mln_style::error::ErrorKind;
 use mln_style::feature::FeatureState;
 use mln_style::size::Size;
 use mln_style::sources::GeoJsonSourceType;
-use mln_util::queue::Queue;
 use parking_lot::Mutex;
 
 use crate::camera::CameraOptions;
+use crate::exec::queue::Queue;
 use crate::map::{Map, MapOptions, TerrainOptions, TerrainSkirtLength, TileSettings};
 use crate::render::update_slot::Update;
 use crate::storage::stub_file_source::{ResponseType, StubFileSource};

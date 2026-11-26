@@ -8,10 +8,10 @@ use mln_style::bitmap::PremultipliedImage;
 use mln_style::geo::LatLng;
 use mln_style::hash::HashMap;
 use mln_style::tile_id::CanonicalTileID;
-use mln_util::dem::{self, DemCoords, DemUnpack};
 
 use crate::camera::{Elevation, TileCoordinate};
 use crate::render::terrain::cover::{TerrainCover, dem_contents, place_in, world_copy};
+use crate::tile::dem::{self, DemCoords, DemUnpack};
 use crate::tile::{OverscaledTileID, UnwrappedTileID};
 use crate::tile_store::source_tiles::SourceTiles;
 
@@ -221,7 +221,7 @@ impl TerrainElevation {
 
 /// The height, in meters raised by `exaggeration`, that the DEM of `dim`
 /// pixels a side whose bordered image is `image` gives at `uv` through
-/// `coords`, decoded by `unpack`: the height rule of `mln_util::dem`, which
+/// `coords`, decoded by `unpack`: the height rule of `crate::tile::dem`, which
 /// the shaders follow.
 pub(crate) fn dem_height(
     image: &PremultipliedImage,

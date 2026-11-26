@@ -9,7 +9,6 @@ use mln_style::layers::Line;
 use mln_style::layers::line_layer_properties::{LineLayoutProperties, LinePaintProperties};
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
-use mln_util::feature::numeric_value_f64;
 use mln_vec_map::VecMap;
 
 use crate::draw::mesh::Indexed;
@@ -23,6 +22,7 @@ use crate::layout::pattern_layout::PatternLayerMap;
 use crate::log_target;
 use crate::render::globe::subdivision::subdivide_vertex_line;
 use crate::text::atlas::ImagePositions;
+use crate::tile::feature::numeric_value_f64;
 use crate::util::tessellator::Tessellator;
 
 crate::paint_property_binders!(

@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use mln_engine::camera::CameraOptions;
+use mln_engine::exec::pool::Pool;
 use mln_engine::map::{Map, MapMode, MapOptions};
 use mln_engine::storage::Kind;
 use mln_engine::storage::stub_file_source::{ResponseType, StubFileSource};
@@ -20,7 +21,6 @@ use mln_style::geo::LatLng;
 use mln_style::layer::Layer;
 use mln_style::size::Size;
 use mln_style::types::VisibilityType;
-use mln_util::pool::Pool;
 
 use crate::support::*;
 

@@ -23,10 +23,10 @@ use mln_gfx::gpu::Gpu;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthMaskType;
 use mln_style::hash::HashMap;
-use mln_util::identity::SimpleIdentity;
 
 use crate::draw::atlas_binding::AtlasBinding;
 use crate::draw::context::Context;
+use crate::draw::identity::SimpleIdentity;
 use crate::draw::objects::DrawObjects;
 use crate::draw::uniform_buffer::UniformBufferArray;
 use crate::render::layer_composite::Composite;
@@ -1388,9 +1388,8 @@ impl DrapeDrawing {
 
 #[cfg(test)]
 mod tests {
-    use mln_util::identity::SimpleIdentity;
-
     use super::{BucketChanges, ChangedBuckets, TileMap};
+    use crate::draw::identity::SimpleIdentity;
     use crate::tile::OverscaledTileID;
 
     /// Sets what `tiles` keeps of `tile_id` to `value`, if the tile is one

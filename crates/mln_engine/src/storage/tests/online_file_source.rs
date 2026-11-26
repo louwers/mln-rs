@@ -6,10 +6,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::time::Duration;
 
-use mln_util::chrono::{Timestamp, now, rfc1123};
 use parking_lot::Mutex;
 
 use super::network::{Answers, Network, Reply};
+use crate::storage::chrono::{Timestamp, now, rfc1123};
 use crate::storage::file_source::FileSource;
 use crate::storage::http_header_transform::HttpHeaderTransform;
 use crate::storage::network_status::Status;

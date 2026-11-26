@@ -7,7 +7,8 @@ use std::sync::{Arc, OnceLock};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::size::Size;
 use mln_style::tileset::RasterEncoding;
-use mln_util::dem::DemUnpack;
+
+use crate::tile::dem::DemUnpack;
 
 /// A raster-dem tile's elevations, a pixel of border on each side. It reads
 /// back only as `new` can make it (`from_parts`).

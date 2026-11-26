@@ -29,7 +29,7 @@ type TileFunction = Arc<dyn Fn(&CanonicalTileID) + Send + Sync>;
 
 /// The provider, whose calls run on `pool`.
 fn loader(
-    pool: &mln_util::pool::Pool,
+    pool: &crate::exec::pool::Pool,
     fetch: Option<TileFunction>,
     cancel: Option<TileFunction>,
 ) -> Arc<CustomVectorProvider> {
@@ -245,5 +245,5 @@ fn set_mlt_tile_data() {
     };
     let mut result = Vec::new();
     contents.query_source_features(&root, false, &mut result, &options, None).unwrap();
-    assert_ne!(result, Vec::<mln_util::feature::Feature>::new());
+    assert_ne!(result, Vec::<crate::tile::feature::Feature>::new());
 }

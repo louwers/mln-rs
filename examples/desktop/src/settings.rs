@@ -1,7 +1,7 @@
 // The camera and options the app starts with, which the command line
 // overrides.
 
-use mln_util::constants::DEFAULT_FOV;
+use mln_engine::camera::constants::DEFAULT_FOV;
 
 use crate::network::Network;
 

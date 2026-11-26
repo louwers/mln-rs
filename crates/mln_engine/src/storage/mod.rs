@@ -12,12 +12,16 @@
 pub mod android;
 mod archive_tilejson;
 mod asset_file_source;
+pub mod chrono;
+pub mod compression;
+pub mod constants;
 #[cfg(feature = "sqlite")]
 pub mod database_file_source;
 #[cfg(target_family = "wasm")]
 mod fetch_transport;
 pub mod file_source;
 mod http_file_source;
+pub mod http_header;
 pub mod http_header_transform;
 mod http_timeout;
 #[cfg(target_os = "android")]
@@ -51,6 +55,7 @@ pub mod response;
 pub mod simulated_network;
 #[cfg(any(test, feature = "stub-file-source"))]
 pub mod stub_file_source;
+pub mod token;
 #[cfg(not(any(target_family = "wasm", target_vendor = "apple", target_os = "android")))]
 mod ureq_transport;
 

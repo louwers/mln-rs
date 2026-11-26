@@ -17,7 +17,6 @@ use mln_style::property::expression::PropertyExpression;
 use mln_style::range::Range;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::LineCapType;
-use mln_util::feature::feature_id_to_string;
 use mln_vec_map::VecMap;
 
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
@@ -28,6 +27,7 @@ use crate::layout::pattern_layout::PatternDependency;
 use crate::line_atlas::{DashAtlas, LinePatternCap};
 use crate::text::atlas::ImagePositions;
 use crate::tile::TileLayer;
+use crate::tile::feature::feature_id_to_string;
 
 /// Maps vertex range to feature index.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, mln_wire::Wire)]

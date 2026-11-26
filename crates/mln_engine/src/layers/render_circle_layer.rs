@@ -81,7 +81,7 @@ fn project_query_geometry(
 /// `screen`, points from the top left of a view of `size`, in pixels from
 /// its bottom left.
 fn viewport_geometry(
-    screen: &[mln_util::geo::ScreenCoordinate],
+    screen: &[crate::geo::ScreenCoordinate],
     size: mln_style::size::Size,
 ) -> mln_style::feature::GeometryCoordinates {
     let height = f64::from(size.height);
@@ -98,7 +98,7 @@ fn ground_height(ground: Option<TileGround<'_>>, p: mln_style::feature::Geometry
 /// `view`, meet the plane `elevation` meters up, in tile units of the tile
 /// `projector` projects.
 fn plane_geometry(
-    screen: &[mln_util::geo::ScreenCoordinate],
+    screen: &[crate::geo::ScreenCoordinate],
     elevation: f64,
     view: &crate::camera::View,
     projector: &TileProjector<'_>,
@@ -107,7 +107,7 @@ fn plane_geometry(
     screen
         .iter()
         .filter_map(|p| {
-            let up = mln_util::geo::ScreenCoordinate::new(p.x, height - p.y);
+            let up = crate::geo::ScreenCoordinate::new(p.x, height - p.y);
             let location = view.screen_coordinate_to_lat_lng_at(&up, elevation, WrapMode::Unwrapped).ok()?;
             let world = TileCoordinate::from_lat_lng(0.0, &location).p;
             Some(TileCoordinate::to_geometry_coordinate(projector.tile_id(), &world))
@@ -484,7 +484,7 @@ impl RenderLayer for RenderCircleLayer {
                     adjusted_size *= (view.camera_to_center_distance() / w) as f32;
                 }
 
-                if mln_util::intersection_tests::polygon_intersects_buffered_point(
+                if crate::geo::intersection_tests::polygon_intersects_buffered_point(
                     transformed_query_geometry,
                     &transformed_point,
                     adjusted_size,

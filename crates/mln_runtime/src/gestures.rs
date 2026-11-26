@@ -3,10 +3,10 @@
 //! waiting for them.
 
 use mln_engine::camera::{CameraDelta, CameraOptions, CameraUpdate};
+use mln_engine::geo::ScreenCoordinate;
 use mln_engine::gestures::{GestureCamera, PendingEnd};
 use mln_engine::map::MapSnapshot;
 use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
-use mln_util::geo::ScreenCoordinate;
 
 use crate::log_target;
 use crate::map::Map;

@@ -636,7 +636,7 @@ impl Surface {
     /// format that its device's adapter prefers. Other backends ignore it.
     ///
     /// When the browser loses a WebGPU session's device, the session fails
-    /// with [`ErrorKind::TargetLost`](mln_util::ErrorKind), and once it is
+    /// with [`ErrorKind::TargetLost`](mln_style::error::ErrorKind), and once it is
     /// released, a new session can attach to the canvas. After Chromium's GPU
     /// process restarts, though, an `OffscreenCanvas` in a Web Worker shows no
     /// new frames, and the worker gets no more animation frames: the page has

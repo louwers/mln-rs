@@ -9,9 +9,9 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use mln_style::error::Error;
-use mln_util::font_stack::FontStack;
 
 use crate::storage::Response;
+use crate::text::font_stack::FontStack;
 use crate::text::glyph::{FontFace, GlyphRange};
 use crate::text::glyph_store::GlyphResult;
 use crate::tile::TileData;

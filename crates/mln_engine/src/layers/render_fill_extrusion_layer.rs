@@ -44,7 +44,6 @@ use mln_style::layer::LayerStyle;
 use mln_style::layers::FillExtrusion;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionPaintProperties;
 use mln_style::types::{AlignmentType, LayerBlendType};
-use mln_util::identity::SimpleIdentity;
 
 use super::cast_matrix;
 use crate::buckets::fill_extrusion_bucket::{
@@ -54,6 +53,7 @@ use crate::buckets::fill_extrusion_bucket::{
 use crate::camera::View;
 use crate::draw::atlas_binding::AtlasBinding;
 use crate::draw::context::Context;
+use crate::draw::identity::SimpleIdentity;
 use crate::draw::indexes::{Indexes, SharedIndexes};
 use crate::draw::objects::{DrawGeometry, DrawObjects, copy_shared_attributes};
 use crate::draw::segment::SegmentBase;
@@ -580,7 +580,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
             region.pixels_to_tile_units,
         );
 
-        mln_util::intersection_tests::polygon_intersects_multi_polygon(
+        crate::geo::intersection_tests::polygon_intersects_multi_polygon(
             translated_query_geometry.as_ref().unwrap_or(region.geometry),
             geometry,
         )

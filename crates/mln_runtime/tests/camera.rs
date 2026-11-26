@@ -9,12 +9,12 @@ use std::time::Duration;
 use mln_engine::camera::{
     AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, NorthOrientation, TransitionEnd, TransitionOutcome,
 };
+use mln_engine::geo::EdgeInsets;
 use mln_engine::tile_store::TileLodMode;
 use mln_runtime::{
     CameraFitArea, CameraFitOptions, CameraFitUpdate, ErrorKind, EventMask, TileOptions, ViewportOptions,
 };
 use mln_style::geo::{LatLng, LatLngBounds};
-use mln_util::geo::EdgeInsets;
 
 use crate::support::{map, runtime, wait, wait_err};
 

@@ -3,11 +3,11 @@ use std::num::NonZeroU16;
 use std::sync::Arc;
 
 use mln_style::bitmap::AlphaImage;
-use mln_util::font_stack::FontStack;
 use mln_vec_map::VecMap;
 use parking_lot::Mutex;
 
 use crate::text::atlas::RectU16;
+use crate::text::font_stack::FontStack;
 use crate::text::tagged_string::FontStackHash;
 
 /// Where a glyph comes from: glyph PBFs, or a font file that shapes text,

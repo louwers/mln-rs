@@ -9,8 +9,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use mln_engine::camera::CameraOptions;
+use mln_engine::exec::pool::Pool;
+use mln_engine::exec::queue::Queue;
 use mln_engine::map::{Map, MapEvent, MapMode, MapOptions, RenderFrameStatus};
 use mln_engine::offline::{Downloads, OfflineDownload, Post};
+use mln_engine::storage::compression::compress;
 use mln_engine::storage::offline::{
     OfflineRegionDownloadState, OfflineRegionMetadata, OfflineRegionObserver, OfflineRegionStatus,
     OfflineTilePyramidRegionDefinition,
@@ -22,9 +25,6 @@ use mln_engine::storage::{FileSource, Kind, Resource, Response};
 use mln_engine::{Registry, RenderMode};
 use mln_headless::HeadlessFrontend;
 use mln_style::geo::{LatLng, LatLngBounds};
-use mln_util::compression::compress;
-use mln_util::pool::Pool;
-use mln_util::queue::Queue;
 
 fn cpp_path(relative: &str) -> PathBuf {
     std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("testdata").join(relative)

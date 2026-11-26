@@ -11,14 +11,14 @@ use std::time::Duration;
 use geo_types::{Geometry, Point};
 use mln_style::geo::{LatLng, LatLngBounds};
 use mln_style::tileset::Scheme;
-use mln_util::chrono::{Timestamp, now};
-use mln_util::constants::DEFAULT_MAX_CACHE_SIZE;
 use rusqlite::{Connection, OpenFlags, ffi};
 
 use super::{
     FixtureLog, Message, TempPath, copy_file, cpp_path, delete_file, error, file_size, random_string, temp_path,
     warning,
 };
+use crate::storage::chrono::{Timestamp, now};
+use crate::storage::constants::DEFAULT_MAX_CACHE_SIZE;
 use crate::storage::offline::{
     OfflineGeometryRegionDefinition, OfflineRegionDefinition, OfflineRegionExpiry, OfflineRegionMetadata,
     OfflineRegionStatus, OfflineTilePyramidRegionDefinition,
@@ -1336,7 +1336,7 @@ fn invalidating_makes_copies_stale() {
     db.invalidate_region(region.id).unwrap();
     // Invalidating expires the copies at its own clock's second, which can
     // be later than `now`.
-    let now = mln_util::chrono::now();
+    let now = crate::storage::chrono::now();
 
     for (y, before) in cases.iter().enumerate() {
         let caching = db.get(&tile(y)).unwrap().caching;

@@ -32,7 +32,7 @@ type TileFunction = Arc<dyn Fn(&CanonicalTileID) + Send + Sync>;
 
 /// The provider, whose calls run on `pool`.
 fn loader(
-    pool: &mln_util::pool::Pool,
+    pool: &crate::exec::pool::Pool,
     fetch: Option<TileFunction>,
     cancel: Option<TileFunction>,
 ) -> Arc<CustomGeometryProvider> {

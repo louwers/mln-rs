@@ -18,15 +18,15 @@ use mln_style::feature::{
 };
 use mln_style::hash::{HashMap, HashSet};
 use mln_style::types::TranslateAnchorType;
-use mln_util::feature::{Feature, feature_id_to_string};
-use mln_util::geo::ScreenCoordinate;
 use mln_vec_map::VecMap;
 
 use crate::camera::{TileProjector, VerticalPerspectiveProjection, View};
+use crate::geo::ScreenCoordinate;
 use crate::layer::render_layer::RenderLayer;
 use crate::placement::collision_index::OverlapMode;
 use crate::query::RenderedQueryOptions;
 use crate::source::source_state::SourceFeatureState;
+use crate::tile::feature::{Feature, feature_id_to_string};
 use crate::tile::{OverscaledTileID, TileData};
 
 /// The render layers a query looks at, by id.
@@ -496,7 +496,7 @@ impl FeatureIndex {
             (translate[1] * pixels_to_tile_units) as i16,
         );
         if anchor_type == TranslateAnchorType::Viewport {
-            translate_vec = mln_util::math::rotate_i16(translate_vec, -bearing);
+            translate_vec = crate::geo::math::rotate_i16(translate_vec, -bearing);
         }
 
         Some(

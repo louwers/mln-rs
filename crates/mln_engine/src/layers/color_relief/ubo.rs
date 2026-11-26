@@ -12,7 +12,7 @@ uniform_block! {
 uniform_block! {
     /// The color relief shader's per-tile uniform block.
     pub struct ColorReliefTilePropsUBO {
-        /// How the DEM's texels decode, as [`mln_util::dem::DemUnpack`] does:
+        /// How the DEM's texels decode, as [`crate::tile::dem::DemUnpack`] does:
         /// the weights of a texel's red, green and blue channels, from 0 to 255,
         /// then the base added to their sum.
         pub unpack: [f32; 4],

@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use mln_util::queue::Queue;
+use mln_engine::exec::queue::Queue;
 
 /// The panic payload of a test that ran out of time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

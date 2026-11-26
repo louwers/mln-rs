@@ -7,8 +7,8 @@ use std::io::Cursor;
 
 use mln_style::bitmap::{PremultipliedImage, UnassociatedImage};
 use mln_style::size::Size;
-use mln_util::premultiply::premultiply;
 
+use crate::image::premultiply::premultiply;
 use crate::log_target;
 
 /// Decodes WebP `data`. Logs a warning and returns an empty image when the

@@ -1,5 +1,5 @@
 //! The queue a thread that owns some state runs its work from
-//! (`mln_util::queue`): the runtime's thread takes an application's commands
+//! (`mln_engine::exec::queue`): the runtime's thread takes an application's commands
 //! from one, and the online file source's thread keeps the deadlines of its
 //! requests in flight on one. What a task costs on its way through, apart
 //! from its own work.
@@ -7,7 +7,7 @@
 use std::hint::black_box;
 use std::time::Duration;
 
-use mln_util::queue::{Queue, TimedTask};
+use mln_engine::exec::queue::{Queue, TimedTask};
 
 use crate::scenario::{Bench, Kind, Scenario};
 use crate::support::random::Random;

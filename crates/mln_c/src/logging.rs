@@ -135,7 +135,7 @@ fn deliver_later(record: Record) -> Result<(), Record> {
     let mut thread = LOG_THREAD.lock();
     if thread.is_none() {
         let (sender, receiver) = mpsc::channel::<Record>();
-        let started = mln_util::thread::builder("mln-log")
+        let started = mln_engine::exec::thread::builder("mln-log")
             .spawn(move || receiver.into_iter().for_each(|record| deliver(&record)));
         if started.is_err() {
             return Err(record);

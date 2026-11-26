@@ -16,12 +16,12 @@ use mln_style::property::evaluated::Evaluated;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::LightAnchorType;
-use mln_util::constants::{EARTH_RADIUS_M, M2PI};
 use mln_vec_map::VecMap;
 
 use crate::camera::View;
 use crate::draw::mesh::Indexed;
 use crate::draw::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
+use crate::geo::constants::{EARTH_RADIUS_M, M2PI};
 use crate::layer::bucket::{Bucket, BucketBase, UploadNeeds};
 use crate::layer::bucket_geometry::{GeometryUpload, GeometryVec};
 use crate::layer::layer_type::EvaluatedLayer;

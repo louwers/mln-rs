@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use mln_engine::Registry;
 use mln_engine::camera::{BoundOptions, ProjectionMode};
+use mln_engine::exec::pool::Pool;
+use mln_engine::exec::queue::Queue;
 use mln_engine::map::{Map, MapOptions};
 use mln_engine::storage::{FileSource, FileSourceExt};
 use mln_engine::worker::worker_codec::{RemoteWorkers, ThreadWorkerInstances};
@@ -9,8 +11,6 @@ use mln_headless::HeadlessFrontend;
 use mln_style::Edit;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::time::Instant;
-use mln_util::pool::Pool;
-use mln_util::queue::Queue;
 
 use crate::file_source::{Assets, proxy_loader};
 use crate::metadata::{MapMode, TerrainSkirtLength, TestMetadata};
@@ -295,7 +295,7 @@ impl TestRunnerImpl for Impl {
         &mut self,
         geometry: &QueryGeometry,
         options: &crate::metadata::RenderedQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, MapError> {
+    ) -> Result<Vec<mln_engine::tile::feature::Feature>, MapError> {
         // The parser's `convert<style::Filter>(filter)` (C++ asserts it
         // converts).
         let filter = match &options.filter {

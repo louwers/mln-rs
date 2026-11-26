@@ -3,13 +3,13 @@
 
 use ::mln_runtime::{EventMask, Offline};
 use geo_types::Geometry;
+use mln_engine::storage::chrono::Timestamp;
 use mln_engine::storage::offline::{
     OfflineGeometryRegionDefinition, OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState,
     OfflineRegionExpiry, OfflineRegionStatus, OfflineTilePyramidRegionDefinition,
 };
 use mln_style::geo::LatLngBounds;
 use mln_style::geometry::for_each_point;
-use mln_util::chrono::Timestamp;
 
 use crate::buffer::LentText;
 use crate::completion::{self, CompletionValue, Generations, PendingCompletion};

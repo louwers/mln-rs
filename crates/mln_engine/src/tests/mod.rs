@@ -56,14 +56,14 @@ mod terrain_test;
 mod vector_tile_test;
 
 /// A pool for a test's background work.
-pub(crate) fn pool() -> mln_util::pool::Pool {
-    mln_util::pool::Pool::new(4)
+pub(crate) fn pool() -> crate::exec::pool::Pool {
+    crate::exec::pool::Pool::new(4)
 }
 
 /// Port-only: a tile store whose jobs run on `workers` and which frees and
 /// parses glyphs on `pool`, with no images and no sprite loaded.
 pub(crate) fn tile_store(
-    pool: &mln_util::pool::TaskGroup,
+    pool: &crate::exec::pool::TaskGroup,
     workers: Box<dyn crate::worker::tile_workers::TileWorkers>,
 ) -> crate::tile_store::store::TileStore {
     let glyphs = crate::text::glyph_store::GlyphStore::new(
@@ -83,7 +83,7 @@ pub(crate) fn tile_store(
 }
 
 /// Port-only: a tile store whose jobs run on `pool`.
-pub(crate) fn pool_store(pool: &mln_util::pool::TaskGroup) -> crate::tile_store::store::TileStore {
+pub(crate) fn pool_store(pool: &crate::exec::pool::TaskGroup) -> crate::tile_store::store::TileStore {
     tile_store(pool, Box::new(crate::worker::tile_workers::PoolWorkers::new(pool.clone(), 8)))
 }
 

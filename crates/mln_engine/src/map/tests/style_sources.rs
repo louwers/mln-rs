@@ -12,9 +12,9 @@ use mln_style::sources::{ImageSourceType, VectorSourceType, image_source, vector
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::tileset::PartialTileset;
 use mln_style::{Edit, Layer};
-use mln_util::pool::Pool;
-use mln_util::queue::Queue;
 
+use crate::exec::pool::Pool;
+use crate::exec::queue::Queue;
 use crate::map::{Map, MapEvent, MapOptions};
 use crate::storage::response::{Reason, ResourceError};
 use crate::storage::stub_file_source::{ResponseType, StubFileSource};

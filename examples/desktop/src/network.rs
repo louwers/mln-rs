@@ -125,7 +125,7 @@ struct Inner {
 impl Throttle {
     fn new(link: Link) -> Result<Throttle, Error> {
         let (answers, queue) = mpsc::channel::<(Instant, ResourceRequest, Response)>();
-        mln_util::thread::spawn("network-throttle", move || {
+        mln_engine::exec::thread::spawn("network-throttle", move || {
             for (at, request, response) in queue {
                 std::thread::sleep(at.saturating_duration_since(Instant::now()));
                 let _ = request.respond(response);

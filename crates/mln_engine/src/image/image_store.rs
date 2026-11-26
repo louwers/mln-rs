@@ -8,11 +8,15 @@ use std::sync::Arc;
 
 use mln_style::hash::{HashMap, HashSet};
 use mln_style::image::Impl as ImageImpl;
-use mln_util::constants::DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE;
 use mln_vec_map::{VecMap, VecSet};
 
 use crate::log_target;
 use crate::render::events::RendererEvent;
+
+/// Default `ImageManager`'s cache size for images added via
+/// onStyleImageMissing API. Average sprite size with 1.0 pixel ratio is
+/// ~2kB, 8kB for pixel ratio of 2.0.
+pub(crate) const DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE: usize = 100 * 8192;
 
 /// What a layout uses an image as.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, mln_wire::Wire)]

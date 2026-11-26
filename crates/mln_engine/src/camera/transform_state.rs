@@ -8,9 +8,6 @@ use mln_style::error::Error;
 use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
 use mln_style::size::Size;
 use mln_style::types::ProjectionDefinition;
-use mln_util::constants::M2PI;
-use mln_util::geo::{EdgeInsets, ScreenCoordinate};
-use mln_util::projection::Projection;
 
 use crate::camera::camera::{CameraOptions, FreeCameraOptions};
 use crate::camera::camera_limits::CameraLimits;
@@ -21,6 +18,9 @@ use crate::camera::vertical_perspective_projection::VerticalPerspectiveProjectio
 use crate::camera::view::{
     NorthOrientation, View, ViewParams, map_offset, max_mercator_horizon_angle, scale_zoom, zoom_scale,
 };
+use crate::geo::constants::M2PI;
+use crate::geo::projection::Projection;
+use crate::geo::{EdgeInsets, ScreenCoordinate};
 
 fn lat_lng_from_mercator(mercator_coordinate: Point<f64>, wrap_mode: WrapMode) -> Result<LatLng, Error> {
     LatLng::with_mode(

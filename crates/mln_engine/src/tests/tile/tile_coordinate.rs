@@ -3,11 +3,11 @@ use mln_style::constants;
 use mln_style::geo::LatLng;
 use mln_style::size::Size;
 use mln_style::tile_id::CanonicalTileID;
-use mln_util::geo::ScreenCoordinate;
 
 use crate::camera::tile_coordinate::TileCoordinate;
 use crate::camera::transform::{Transform, TransformEvent};
 use crate::camera::{ConstrainMode, ViewportMode};
+use crate::geo::ScreenCoordinate;
 use crate::map::{CameraChange, CameraChangeMode};
 use crate::tile::UnwrappedTileID;
 

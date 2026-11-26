@@ -27,11 +27,10 @@ use mln_style::property::color_ramp::ColorRampPropertyValue;
 use mln_style::size::Size;
 use mln_style::types::ResamplingType;
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
-use mln_util::dem::DemUnpack;
-use mln_util::identity::SimpleIdentity;
 
 use super::cast_matrix;
 use crate::buckets::raster_bucket::{MaskQuads, RasterLayoutVertex};
+use crate::draw::identity::SimpleIdentity;
 use crate::draw::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::draw::objects::{DrawGeometry, DrawObjects, Textures};
 use crate::draw::segment::SegmentBase;
@@ -55,6 +54,7 @@ use crate::render::pass::RenderPass;
 use crate::render::static_data::RenderStaticData;
 use crate::render::tile::FrameTile;
 use crate::render::tile_matrix::to_projection_ubo;
+use crate::tile::dem::DemUnpack;
 use crate::tile_store::dem::DemContents;
 
 /// The ids of the buffers that the draws bind.

@@ -15,13 +15,12 @@ use mln_style::tile_id::CanonicalTileID;
 use mln_style::tileset::{PartialTileset, RasterEncoding};
 use mln_style::types::ProjectionDefinition;
 use mln_style::{Edit, Source, Style};
-use mln_util::dem::{DemCoords, DemUnpack};
-use mln_util::pool::TaskGroup;
 use parking_lot::Mutex;
 
 use crate::Registry;
 use crate::camera::transform::Transform;
 use crate::camera::{CameraOptions, ConstrainMode, Elevation, ViewportMode};
+use crate::exec::pool::TaskGroup;
 use crate::map::{MapMode, TerrainOptions, TerrainSkirtLength};
 use crate::render::events::RendererEvent;
 use crate::render::terrain::{RenderTerrain, TerrainCover, TerrainElevation};
@@ -30,6 +29,7 @@ use crate::source::render_source::RenderSource;
 use crate::storage::response::{Reason, ResourceError};
 use crate::storage::{FileSource, Resource, Responder, Response};
 use crate::tile::OverscaledTileID;
+use crate::tile::dem::{DemCoords, DemUnpack};
 use crate::tile_store::TileLodMode;
 use crate::tile_store::contents::Contents;
 use crate::tile_store::store::{StoreEvent, TileStore};
@@ -463,7 +463,7 @@ fn a_missing_dem_tile_settles() {
 /// The terrain tile under the view's center, which the camera stands on.
 fn center_tile(load: &TerrainLoad) -> OverscaledTileID {
     let center = load.transform.view().center(WrapMode::Wrapped);
-    let world = mln_util::projection::Projection::project(&center, 1.0 / mln_style::constants::TILE_SIZE_D);
+    let world = crate::geo::projection::Projection::project(&center, 1.0 / mln_style::constants::TILE_SIZE_D);
     let cover = load.terrain.cover().expect("terrain draws");
     let holds = |id: &OverscaledTileID| {
         let tiles = f64::from(1u32 << id.canonical.z);
@@ -618,7 +618,7 @@ fn ranges_come_from_the_loaded_dem_tiles() {
     // Raised ground in front of the camera, below the bottom edge of the
     // view, rises into it.
     let center = LatLng::new(45.0, 10.0).unwrap();
-    let center_y = mln_util::projection::Projection::project(&center, 1.0 / mln_style::constants::TILE_SIZE_D).y;
+    let center_y = crate::geo::projection::Projection::project(&center, 1.0 / mln_style::constants::TILE_SIZE_D).y;
     let added: Vec<OverscaledTileID> = cover.tiles.iter().map(|tile| tile.id).filter(|id| !flat.contains(id)).collect();
     assert_ne!(Vec::<OverscaledTileID>::new(), added);
     for tile in added {
@@ -720,7 +720,7 @@ fn the_ground_the_map_stands_on_is_the_height_rule_on_the_drawn_dem() {
     let ground = load.ground_events().pop().flatten().expect("the ground");
 
     let center = LatLng::new(45.0, 10.0).unwrap();
-    let world = mln_util::projection::Projection::project(&center, 1.0 / mln_style::constants::TILE_SIZE_D);
+    let world = crate::geo::projection::Projection::project(&center, 1.0 / mln_style::constants::TILE_SIZE_D);
     let cover = load.terrain.cover().unwrap();
     let (tile, uv) = cover
         .tiles
@@ -744,7 +744,7 @@ fn the_ground_the_map_stands_on_is_the_height_rule_on_the_drawn_dem() {
         let start = (y as usize * stride + x as usize) * 4;
         unpack.decode(data.image().data[start..start + 4].try_into().unwrap())
     };
-    let height = mln_util::dem::sample(dim, coords, uv, texel) * 1.5;
+    let height = crate::tile::dem::sample(dim, coords, uv, texel) * 1.5;
     assert_eq!(Some(f64::from(height)), ground.at(center));
     assert!(height.fract() != 0.0, "{height} reads between pixels");
     assert_eq!(Some(f64::from(data.range().0 * 1.5)), ground.min_at(center));
@@ -753,7 +753,7 @@ fn the_ground_the_map_stands_on_is_the_height_rule_on_the_drawn_dem() {
     assert_eq!(None, ground.surface_at(DVec2::new(world.x - 2.0, world.y)));
     // Ground far from the view, where no tile drew.
     let far = LatLng::new(-45.0, -170.0).unwrap();
-    let far_world = mln_util::projection::Projection::project(&far, 1.0 / mln_style::constants::TILE_SIZE_D);
+    let far_world = crate::geo::projection::Projection::project(&far, 1.0 / mln_style::constants::TILE_SIZE_D);
     assert_eq!((None, None), (ground.at(far), ground.surface_at(DVec2::new(far_world.x, far_world.y))));
 
     load.seen = Some(ground);
@@ -782,7 +782,7 @@ fn an_update_is_grounded_when_it_carries_the_current_ground() {
     // The tiles draw flat while their DEM loads, and the center stands on
     // what they draw.
     let center = load.transform.view().center(WrapMode::Wrapped);
-    let world = mln_util::projection::Projection::project(&center, 1.0 / mln_style::constants::TILE_SIZE_D);
+    let world = crate::geo::projection::Projection::project(&center, 1.0 / mln_style::constants::TILE_SIZE_D);
     assert_eq!((Some(0.0), Some(0.0)), (loading.at(center), loading.surface_at(DVec2::new(world.x, world.y))));
     load.seen = Some(Arc::clone(&loading));
     load.frame();
@@ -833,7 +833,7 @@ fn a_camera_below_the_ground_stands_on_the_dem_under_its_center() {
     let center = LatLng::new(45.0, 10.0).unwrap();
     assert_eq!(Some(3_000_000.0), ground.at(center));
     // No surface drew there.
-    let world = mln_util::projection::Projection::project(&center, 1.0 / mln_style::constants::TILE_SIZE_D);
+    let world = crate::geo::projection::Projection::project(&center, 1.0 / mln_style::constants::TILE_SIZE_D);
     assert_eq!(None, ground.surface_at(DVec2::new(world.x, world.y)));
 }
 
@@ -848,7 +848,7 @@ fn snapshot(load: &TerrainLoad, exaggeration: f32) -> TerrainElevation {
 /// The location of `world`, a Web Mercator point at zoom 0.
 fn location_of(world: DVec2) -> LatLng {
     let point = mln_style::geometry::Point::new(world.x, world.y);
-    mln_util::projection::Projection::unproject(&point, 1.0 / mln_style::constants::TILE_SIZE_D, WrapMode::Unwrapped)
+    crate::geo::projection::Projection::unproject(&point, 1.0 / mln_style::constants::TILE_SIZE_D, WrapMode::Unwrapped)
         .unwrap()
 }
 
@@ -1206,7 +1206,7 @@ fn the_surface_a_hair_west_of_a_copy_is_its_neighbors() {
     load.frame();
     load.answer(|_| Some(terrarium_slope()));
     let ground = snapshot(&load, 1.0);
-    let y = mln_util::projection::Projection::project(
+    let y = crate::geo::projection::Projection::project(
         &LatLng::new(45.0, -179.99).unwrap(),
         1.0 / mln_style::constants::TILE_SIZE_D,
     )

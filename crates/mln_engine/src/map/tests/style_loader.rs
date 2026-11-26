@@ -4,8 +4,8 @@
 use std::sync::Arc;
 
 use mln_style::{Edit, StyleLoadError};
-use mln_util::queue::Queue;
 
+use crate::exec::queue::Queue;
 use crate::map::{Map, MapEvent, MapOptions};
 use crate::storage::response::{Reason, ResourceError};
 use crate::storage::stub_file_source::{ResponseType, StubFileSource};

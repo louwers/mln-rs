@@ -8,10 +8,10 @@ use mln_style::hash::{HashMap, HashSet};
 use mln_style::range::Range;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::tileset::Tileset;
-use mln_util::dem::DemCoords;
 
 use crate::camera::{TileCoordinate, View};
 use crate::tile::OverscaledTileID;
+use crate::tile::dem::DemCoords;
 use crate::tile::dem_data::DEMData;
 use crate::tile_store::contents::Contents;
 use crate::tile_store::dem::DemContents;

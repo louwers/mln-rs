@@ -31,14 +31,14 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 
 use mln_style::time::Instant;
-use mln_util::chrono::{Timestamp, now};
-use mln_util::constants::{ASSET_PROTOCOL, DEFAULT_MAXIMUM_CONCURRENT_REQUESTS, FILE_PROTOCOL};
-use mln_util::queue::{Queue, TimedTask};
 use mln_vec_map::VecMap;
 #[cfg(not(target_family = "wasm"))]
 use parking_lot::Mutex;
 
+use crate::exec::queue::{Queue, TimedTask};
 use crate::log_target;
+use crate::storage::chrono::{Timestamp, now};
+use crate::storage::constants::{ASSET_PROTOCOL, DEFAULT_MAXIMUM_CONCURRENT_REQUESTS, FILE_PROTOCOL};
 use crate::storage::file_source::FileSource;
 use crate::storage::http_file_source::HTTPFileSource;
 use crate::storage::http_header_transform::HttpHeaderTransform;
@@ -589,7 +589,7 @@ impl OnlineFileSource {
         let (mut source, core) = Self::with_core(network);
         let queue = source.queue.clone();
         // The core, and its HTTP client, are made on the thread.
-        let thread = mln_util::thread::spawn("OnlineFileSource", move || {
+        let thread = crate::exec::thread::spawn("OnlineFileSource", move || {
             let mut core = core();
             queue.run(&mut core);
             // What comes once the source has dropped, such as a transfer's

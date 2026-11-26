@@ -3,7 +3,8 @@ use std::time::Duration;
 use glam::{DQuat, DVec3};
 use mln_style::geo::LatLng;
 use mln_style::unitbezier::UnitBezier;
-use mln_util::geo::{EdgeInsets, ScreenCoordinate};
+
+use crate::geo::{EdgeInsets, ScreenCoordinate};
 
 /// Various options for describing the viewpoint of a map. All fields are
 /// optional.

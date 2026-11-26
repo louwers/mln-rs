@@ -6,7 +6,7 @@
 
 use geometry::Point;
 
-use crate::math::{dist_sqr_i16, dist_sqr_i16_f32};
+use crate::geo::math::{dist_sqr_i16, dist_sqr_i16_f32};
 
 type GeometryCoordinate = Point<i16>;
 

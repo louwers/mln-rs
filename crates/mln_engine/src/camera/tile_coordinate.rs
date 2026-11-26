@@ -1,10 +1,10 @@
 use geometry::Point;
 use mln_style::constants;
 use mln_style::geo::LatLng;
-use mln_util::geo::ScreenCoordinate;
-use mln_util::projection::Projection;
 
 use crate::camera::view::View;
+use crate::geo::ScreenCoordinate;
+use crate::geo::projection::Projection;
 use crate::tile::UnwrappedTileID;
 
 pub type TileCoordinatePoint = Point<f64>;

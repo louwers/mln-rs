@@ -5,11 +5,11 @@ use mln_style::feature::GeometryCoordinates;
 use mln_style::hash::{HashMap, HashSet};
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::types::IconOverlapType;
-use mln_util::geo::ScreenLineString;
-use mln_util::intersection_tests::polygon_intersects_polygon;
 
 use crate::buckets::symbol_bucket::{PlacedSymbol, PlacedSymbolPools};
 use crate::camera::{ProjectedTilePoint, TileProjector, View};
+use crate::geo::ScreenLineString;
+use crate::geo::intersection_tests::polygon_intersects_polygon;
 use crate::layout::symbol_projection::{
     LabelPlaneProjector, LineLabel, LinePlacer, PlacedGlyph, SymbolHeights, TileDistance, tile_skew_vectors,
 };

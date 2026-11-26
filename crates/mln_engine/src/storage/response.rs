@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use mln_util::chrono::Timestamp;
+use crate::storage::chrono::Timestamp;
 
 /// A shared response body, as bytes.
 pub type Data = Arc<Vec<u8>>;

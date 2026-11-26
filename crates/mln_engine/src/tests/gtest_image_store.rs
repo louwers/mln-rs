@@ -8,9 +8,10 @@ use mln_style::bitmap::PremultipliedImage;
 use mln_style::hash::HashSet;
 use mln_style::image::Impl as ImageImpl;
 use mln_style::size::Size;
-use mln_util::constants::DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE;
 
-use crate::image::image_store::{ImageDependencies, ImageStore, ImageType, ImageWait};
+use crate::image::image_store::{
+    DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE, ImageDependencies, ImageStore, ImageType, ImageWait,
+};
 use crate::render::events::RendererEvent;
 use crate::tests::fixture_log::FixtureLog;
 

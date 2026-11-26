@@ -15,6 +15,8 @@
 
 use mln_style::tileset::RasterEncoding;
 
+pub const TERRAIN_RGB_MAXZOOM: u8 = 15;
+
 /// How a DEM's texels decode: `(r·w0 + g·w1 + b·w2 + base) · scale`, over
 /// channels from 0 to 255.
 ///

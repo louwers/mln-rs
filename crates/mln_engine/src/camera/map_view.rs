@@ -5,15 +5,15 @@ use mln_style::error::Error;
 use mln_style::geo::{LatLng, WrapMode};
 use mln_style::size::Size;
 use mln_style::types::ProjectionDefinition;
-use mln_util::constants;
-use mln_util::geo::{EdgeInsets, NorthOrientation};
 
 use crate::camera::camera::CameraOptions;
 use crate::camera::camera_limits::{CameraLimits, MAX_FIELD_OF_VIEW, MIN_FIELD_OF_VIEW};
+use crate::camera::constants;
 use crate::camera::mode::{ConstrainMode, ViewportMode};
 use crate::camera::projection_mode::{AxonometricMode, ProjectionMode};
 use crate::camera::transform_state::TransformState;
 use crate::camera::view::{View, ViewParams, map_offset, zoom_scale};
+use crate::geo::{EdgeInsets, NorthOrientation};
 
 /// A camera with every member set: the camera that a map has, where
 /// [`CameraOptions`] is a change to one.

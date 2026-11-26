@@ -8,7 +8,6 @@ use std::num::NonZeroU32;
 use geometry::Point;
 use glam::Vec2;
 use mln_style::types::{AlignmentType, IconTextFitType, TextRotationAlignmentType, TextWritingModeType};
-use mln_util::constants::ONE_EM;
 
 use super::context::translation;
 use super::{JointOpacityState, Placement, VariableOffset};
@@ -21,6 +20,7 @@ use crate::layout::symbol_projection::{
     hide_glyphs, reproject_line_labels, tile_skew_vectors,
 };
 use crate::placement::collision_index::OverlapMode;
+use crate::text::constants::ONE_EM;
 
 /// Appends `n` copies of `value` to `v`.
 fn extend<T: Copy>(v: &mut Vec<T>, n: usize, value: T) {

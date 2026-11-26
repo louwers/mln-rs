@@ -97,7 +97,7 @@ impl OnlineDriver {
     /// task for [`run`](Self::run): a request, a cancellation or a
     /// transfer's answer. The clock's moves don't call it.
     #[cfg(test)]
-    pub(crate) fn set_waker(&self, waker: Option<mln_util::queue::Waker>) {
+    pub(crate) fn set_waker(&self, waker: Option<crate::exec::queue::Waker>) {
         self.queue.set_waker(waker);
     }
 }

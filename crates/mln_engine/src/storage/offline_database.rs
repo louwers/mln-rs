@@ -16,13 +16,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mln_style::error::{Error, ErrorKind};
-use mln_util::chrono::{Timestamp, now};
-use mln_util::compression::{compress, decompress};
-use mln_util::constants::DEFAULT_MAX_CACHE_SIZE;
 use rusqlite::types::FromSqlError;
 use rusqlite::{Connection, OpenFlags, Row, ToSql, ffi, params};
 
 use crate::log_target;
+use crate::storage::chrono::{Timestamp, now};
+use crate::storage::compression::{compress, decompress};
+use crate::storage::constants::DEFAULT_MAX_CACHE_SIZE;
 use crate::storage::merge_sideloaded::MERGE_SIDELOADED_DATABASE_SQL;
 use crate::storage::offline::{
     OfflineRegion, OfflineRegionDefinition, OfflineRegionExpiry, OfflineRegionMetadata, OfflineRegionStatus,

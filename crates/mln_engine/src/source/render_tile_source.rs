@@ -163,7 +163,7 @@ impl RenderSource for RenderTileSource {
 
     fn query_feature_extensions(
         &self,
-        feature: &mln_util::feature::Feature,
+        feature: &crate::tile::feature::Feature,
         extension: &str,
         extension_field: &str,
         args: Option<&feature::PropertyMap>,

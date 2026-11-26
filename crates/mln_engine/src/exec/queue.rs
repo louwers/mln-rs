@@ -228,7 +228,7 @@ impl<S> Queue<S> {
     /// `now` or before taken as passed, whatever the time is: for a caller
     /// that keeps time by a clock of its own, such as the benchmarks'
     /// simulated network, whose deadlines it gives by that clock too.
-    #[cfg(feature = "bench")]
+    #[cfg(any(test, feature = "bench"))]
     #[doc(hidden)]
     pub fn run_once_at(&self, state: &mut S, now: Instant) -> bool {
         self.run_once_by(state, now)

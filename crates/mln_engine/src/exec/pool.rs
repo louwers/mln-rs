@@ -19,7 +19,7 @@ use parking_lot::{Condvar, Mutex};
 
 #[cfg(not(target_family = "wasm"))]
 #[cfg(not(target_family = "wasm"))]
-use crate::thread::Joined;
+use crate::exec::thread::Joined;
 
 /// A task that runs on a pool.
 pub type Task = Box<dyn FnOnce() + Send + 'static>;
@@ -404,7 +404,7 @@ impl Shared {
             }
         }
         let _ended = Ended(self, lane);
-        if let Err(message) = crate::panic::catch(task) {
+        if let Err(message) = crate::exec::panic::catch(task) {
             let handler = self.panic_handler.lock().clone();
             if let Some(handler) = handler {
                 handler(message);
@@ -444,7 +444,7 @@ impl Shared {
         {
             let mut threads = self.threads.lock();
             let shared = Arc::clone(self);
-            match crate::thread::spawn(format!("Worker {}", threads.ids.len() + 1), move || shared.work()) {
+            match crate::exec::thread::spawn(format!("Worker {}", threads.ids.len() + 1), move || shared.work()) {
                 Ok(thread) => {
                     threads.ids.push(thread.thread().id());
                     threads.joined.push(Joined::new(thread));
@@ -863,7 +863,7 @@ mod tests {
         // From a library thread, as a runtime's: it doesn't wait for the
         // running task.
         let shut = pool.clone();
-        crate::thread::spawn("shut down", move || shut.shut_down()).unwrap().join().unwrap();
+        crate::exec::thread::spawn("shut down", move || shut.shut_down()).unwrap().join().unwrap();
         drop(release);
         group.wait();
         assert_eq!(ran.load(Ordering::SeqCst), 0);

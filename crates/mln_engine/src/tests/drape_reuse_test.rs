@@ -185,7 +185,7 @@ struct DrapedMap {
     /// The terrain options the updates carry.
     terrain: TerrainOptions,
     work: TileWork,
-    _pool: mln_util::pool::Pool,
+    _pool: crate::exec::pool::Pool,
 }
 
 impl DrapedMap {

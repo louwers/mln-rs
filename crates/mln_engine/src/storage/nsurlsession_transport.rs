@@ -23,7 +23,6 @@
 use std::sync::Arc;
 
 use block2::{DynBlock, RcBlock};
-use mln_util::chrono::rfc1123;
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::{NSObject, NSObjectProtocol, ProtocolObject};
 use objc2::{AnyThread, define_class, msg_send};
@@ -37,6 +36,7 @@ use objc2_foundation::{
 };
 use parking_lot::Mutex;
 
+use crate::storage::chrono::rfc1123;
 use crate::storage::http_file_source::{
     HttpTransport, Transfer, TransferRequest, USER_AGENT, accept_header, range_header, same_origin,
 };

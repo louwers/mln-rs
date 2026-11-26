@@ -4,9 +4,9 @@
 use std::sync::Arc;
 
 use ::mln_runtime::{RenderSession, RenderedQueryGeometry, RenderedQueryOptions, SourceQueryOptions};
+use mln_engine::geo::ScreenCoordinate;
 use mln_style::expression::Functions;
 use mln_style::filter::Filter;
-use mln_util::geo::ScreenCoordinate;
 
 use crate::abi::{self, Fields};
 use crate::buffer::LentText;
@@ -186,7 +186,7 @@ unsafe fn source_id(view: mln_buffer_view) -> Result<String, Error> {
     Ok(source_id.to_owned())
 }
 
-fn feature_json(feature: &mln_util::feature::Feature) -> LentText {
+fn feature_json(feature: &mln_engine::tile::feature::Feature) -> LentText {
     LentText::new(&geojson::Feature::from(&feature.to_geojson_feature()).to_string())
 }
 
@@ -194,7 +194,7 @@ fn feature_json(feature: &mln_util::feature::Feature) -> LentText {
 struct RenderedFeatures(Vec<[LentText; 5]>);
 
 impl RenderedFeatures {
-    fn new(features: &[mln_util::feature::Feature]) -> Self {
+    fn new(features: &[mln_engine::tile::feature::Feature]) -> Self {
         Self(
             features
                 .iter()

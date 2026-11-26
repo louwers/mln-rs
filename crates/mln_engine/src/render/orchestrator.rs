@@ -18,12 +18,12 @@ use mln_style::{
     GlobalStateChange, Layer, LayerList, PropertyEvaluationParameters, Source, Style, TransitionOptions,
     TransitionParameters, layer,
 };
-use mln_util::pool::{Pool, TaskGroup};
 use mln_vec_map::VecSet;
 use smallvec::SmallVec;
 
 use crate::camera::View;
 use crate::draw::context::Context;
+use crate::exec::pool::{Pool, TaskGroup};
 use crate::image::image_store::ImageStore;
 use crate::layer::layer_drawing::{ChangedBuckets, DrawGroup, DrawOrder, SingleDraw};
 use crate::layer::layer_type::ErasedEvaluatedLayer;
@@ -1442,9 +1442,9 @@ impl RenderOrchestrator {
     /// (a malformed tile).
     pub(crate) fn query_rendered_features(
         &mut self,
-        geometry: &[mln_util::geo::ScreenCoordinate],
+        geometry: &[crate::geo::ScreenCoordinate],
         options: &crate::query::RenderedQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, Error> {
+    ) -> Result<Vec<crate::tile::feature::Feature>, Error> {
         // A query answers from the layouts that arrived since the update.
         self.receive_tiles();
         let render_layers: Vec<&dyn RenderLayer> = match &options.layer_ids {
@@ -1466,7 +1466,7 @@ impl RenderOrchestrator {
     fn query_rendered_symbols(
         &self,
         results_by_layer: &mut crate::query::feature_index::QueryResults,
-        geometry: &[mln_util::geo::ScreenCoordinate],
+        geometry: &[crate::geo::ScreenCoordinate],
         layers: &crate::query::feature_index::QueryLayers<'_>,
         options: &crate::query::RenderedQueryOptions,
     ) -> Result<(), Error> {
@@ -1520,10 +1520,10 @@ impl RenderOrchestrator {
 
     fn query_rendered_features_in(
         &self,
-        geometry: &[mln_util::geo::ScreenCoordinate],
+        geometry: &[crate::geo::ScreenCoordinate],
         options: &crate::query::RenderedQueryOptions,
         layers: &crate::query::feature_index::QueryLayers<'_>,
-    ) -> Result<Vec<mln_util::feature::Feature>, Error> {
+    ) -> Result<Vec<crate::tile::feature::Feature>, Error> {
         let mut source_ids: VecSet<String> = VecSet::new();
         let mut filtered_layers = crate::query::feature_index::QueryLayers::default();
         for (id, layer) in layers {
@@ -1620,7 +1620,7 @@ impl RenderOrchestrator {
         &mut self,
         source_id: &str,
         options: &crate::query::SourceQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, Error> {
+    ) -> Result<Vec<crate::tile::feature::Feature>, Error> {
         self.receive_tiles();
         let Some(source) = self.source_tiles(source_id) else {
             return Ok(Vec::new());
@@ -1634,7 +1634,7 @@ impl RenderOrchestrator {
     pub(crate) fn query_feature_extensions(
         &self,
         source_id: &str,
-        feature: &mln_util::feature::Feature,
+        feature: &crate::tile::feature::Feature,
         extension: &str,
         extension_field: &str,
         args: Option<&feature::PropertyMap>,

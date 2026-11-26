@@ -47,7 +47,6 @@ mln_runtime = { package = "mln-rs-runtime", path = "../../crates/mln_runtime", f
 ] }
 # The style, and its edits.
 mln_style = { package = "mln-rs-style", path = "../../crates/mln_style" }
-mln_util = { package = "mln-rs-util", path = "../../crates/mln_util" }
 # What the GPU's pipeline ran, where the device counts it (support/map.rs).
 mln_webgpu = { package = "mln-rs-webgpu", path = "../../crates/mln_webgpu", features = [
   "bench",

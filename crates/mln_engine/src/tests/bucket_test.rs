@@ -16,7 +16,6 @@ use mln_style::layers::{Fill, Line};
 use mln_style::property::evaluated::Evaluated;
 use mln_style::property::value::PropertyValue;
 use mln_style::tile_id::CanonicalTileID;
-use mln_util::identity::SimpleIdentity;
 use mln_vec_map::VecMap;
 
 use super::with_context;
@@ -28,6 +27,7 @@ use crate::buckets::line_bucket::LineBucket;
 use crate::buckets::raster_bucket::{MaskQuads, RasterLayoutVertex, mask_quads};
 use crate::buckets::symbol_bucket::{SymbolBucket, SymbolBucketStyle, SymbolLayoutFlags};
 use crate::draw::context::Context;
+use crate::draw::identity::SimpleIdentity;
 use crate::draw::indexes::DrawIndexes;
 use crate::draw::segment::SegmentBase;
 use crate::gfx::line_mesh::LineLayoutVertex;

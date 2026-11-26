@@ -5,11 +5,11 @@ use glam::{DVec2, DVec3};
 use mln_style::constants::{LATITUDE_MAX, TILE_SIZE_D};
 use mln_style::error::Error;
 use mln_style::geo::{LatLng, WrapMode};
-use mln_util::geo::ScreenCoordinate;
-use mln_util::projection::Projection;
 
 use crate::camera::vertical_perspective_projection::VerticalPerspectiveProjection;
 use crate::camera::{Elevation, View};
+use crate::geo::ScreenCoordinate;
+use crate::geo::projection::Projection;
 
 /// How far apart, in pixels at the zoom across the ground, a ray samples the
 /// ground, and the most samples it takes (GL JS's `raycastTerrain`).

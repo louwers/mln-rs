@@ -1,7 +1,7 @@
 //! HTTP response headers: what caching headers allow (RFC 9111),
 //! and when a rate-limited request may be retried.
 
-use crate::chrono::{Timestamp, now, parse_http_date, parse_timestamp_i32};
+use crate::storage::chrono::{Timestamp, now, parse_http_date, parse_timestamp_i32};
 
 /// The directives of a response's `Cache-Control` that a private cache
 /// heeds (RFC 9111 §5.2.2). Durations are in seconds.
@@ -269,7 +269,7 @@ mod tests {
     fn expires_counts_from_the_date() {
         // The server's clock is an hour ahead of ours.
         let server_now = RECEIVED + 3600;
-        let expires = crate::chrono::rfc1123(Timestamp::from_secs(server_now + 600));
+        let expires = crate::storage::chrono::rfc1123(Timestamp::from_secs(server_now + 600));
         let f = freshness("public", Some(&expires), Some(server_now), Some(30), None);
         assert_eq!(f.expires, at(570));
         // Without a date it counts from our clock.

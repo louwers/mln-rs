@@ -2,10 +2,10 @@ use glam::DVec2;
 use mln_style::geo::{LatLng, WrapMode};
 use mln_style::size::Size;
 use mln_style::types::ProjectionDefinition;
-use mln_util::geo::{EdgeInsets, ScreenCoordinate};
-use mln_util::projection::Projection;
 
 use crate::camera::{Camera, Elevation, LogicalExtent, MapView, ProjectionMode, View, ViewportMode};
+use crate::geo::projection::Projection;
+use crate::geo::{EdgeInsets, ScreenCoordinate};
 
 const CENTER: (f64, f64) = (46.5, 7.9);
 

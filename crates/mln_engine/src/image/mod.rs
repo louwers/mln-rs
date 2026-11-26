@@ -21,6 +21,7 @@ pub(crate) mod image_store;
 mod jpeg_reader;
 mod png_reader;
 pub mod png_writer;
+pub mod premultiply;
 pub mod sprite;
 mod webp_reader;
 

@@ -12,8 +12,8 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use mln_style::hash::HashMap;
-use mln_util::pool::TaskGroup;
 
+use crate::exec::pool::TaskGroup;
 use crate::log_target;
 use crate::tile_store::inbox::{InboxSender, TileEvent};
 use crate::worker::job::{DataKey, DiscoveryMemo, JobId, JobResult, JobTimes, Reply, Run, run_job};

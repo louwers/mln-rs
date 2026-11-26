@@ -5,11 +5,11 @@ use geo_types::Geometry;
 use mln_engine::camera::{
     AnimationOptions, CameraOptions, CameraUpdateMode, ConstrainMode, NorthOrientation, ViewportMode,
 };
+use mln_engine::geo::EdgeInsets;
 use mln_engine::tile_store::TileLodMode;
 use mln_style::error::Error;
 use mln_style::geo::{LatLng, LatLngBounds};
 use mln_style::geometry::for_each_point;
-use mln_util::geo::EdgeInsets;
 
 /// An area for a camera to fit in the map's view.
 #[derive(Clone, Debug, PartialEq)]

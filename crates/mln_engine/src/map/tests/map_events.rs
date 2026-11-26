@@ -11,10 +11,10 @@ use mln_style::error::{Error, ErrorKind};
 use mln_style::geo::LatLng;
 use mln_style::size::Size;
 use mln_style::time::Instant;
-use mln_util::queue::Queue;
 
 use crate::RendererEvent;
 use crate::camera::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode};
+use crate::exec::queue::Queue;
 use crate::map::options::UnusedStyleImagePolicy;
 use crate::map::{CameraChange, CameraChangeMode, CameraChangeSource, Map, MapEvent, MapMode, MapOptions};
 use crate::storage::stub_file_source::{ResponseType, StubFileSource};

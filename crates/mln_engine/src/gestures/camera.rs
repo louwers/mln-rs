@@ -4,10 +4,10 @@
 use std::sync::Arc;
 
 use mln_style::geo::LatLng;
-use mln_util::geo::ScreenCoordinate;
 use parking_lot::Mutex;
 
 use crate::camera::{CameraDelta, CameraOptions, CameraUpdate, TransformState, TransitionEnd};
+use crate::geo::ScreenCoordinate;
 
 /// What the recognizer needs from a camera: to read it, and
 /// the map's two camera calls, which carry each change's gesture

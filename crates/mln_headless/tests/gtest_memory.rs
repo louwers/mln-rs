@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use mln_engine::Registry;
 use mln_engine::camera::CameraOptions;
+use mln_engine::exec::pool::Pool;
 use mln_engine::map::{Map, MapMode, MapOptions};
 use mln_engine::storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_engine::storage::{Kind, Resource, Response};
@@ -9,7 +10,6 @@ use mln_headless::HeadlessFrontend;
 use mln_style::Edit;
 use mln_style::hash::HashMap;
 use mln_style::size::Size;
-use mln_util::pool::Pool;
 use parking_lot::Mutex;
 
 use crate::support::{TestLoop, read_bytes};

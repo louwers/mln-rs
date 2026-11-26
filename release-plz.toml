@@ -62,7 +62,6 @@ changelog_include = [
   "mln-rs-runtime",
   "mln-rs-shelf-pack",
   "mln-rs-style",
-  "mln-rs-util",
   "mln-rs-vec-map",
   "mln-rs-vulkan",
   "mln-rs-web-host",

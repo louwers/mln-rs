@@ -199,7 +199,8 @@ fn a_not_modified_answer_delivers_the_cached_copy() {
             request.respond(Response { not_modified: true, ..Response::default() }).unwrap();
         } else {
             // A copy that the cache keeps, but must check before each use.
-            let caching = Caching { expires: Some(mln_util::chrono::Timestamp::from_secs(1)), must_revalidate: true };
+            let caching =
+                Caching { expires: Some(mln_engine::storage::chrono::Timestamp::from_secs(1)), must_revalidate: true };
             let response = Response { etag: Some("\"v1\"".to_owned()), caching, ..style_response() };
             request.respond(response).unwrap();
         }

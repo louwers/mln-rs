@@ -3,9 +3,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::ThreadId;
 use std::time::Duration;
 
-use mln_util::pool::Pool;
 use parking_lot::Mutex;
 
+use crate::exec::pool::Pool;
 use crate::render::orchestrator::RenderOrchestrator;
 
 /// Records the thread it drops on, after a delay that a drop on the caller's

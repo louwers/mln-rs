@@ -20,8 +20,8 @@ use mln_style::sources::tileset::{TilesetKind, TilesetSourceType};
 use mln_style::sources::{CustomGeometrySourceType, CustomVectorSourceType, GeoJsonSourceType, ImageSourceType};
 use mln_style::tileset::{RasterEncoding, Tileset, VectorEncoding};
 use mln_style::{Source, constants};
-use mln_util::pool::{Pool, TaskGroup};
 
+use crate::exec::pool::{Pool, TaskGroup};
 use crate::map::MapMode;
 use crate::query::FeatureExtensionValue;
 use crate::source::render_image_source::RenderImageSource;
@@ -79,7 +79,7 @@ pub(crate) trait TileOrigin {
     /// a null value for a type without extensions.
     fn query_feature_extensions(
         &self,
-        _feature: &mln_util::feature::Feature,
+        _feature: &crate::tile::feature::Feature,
         _extension: &str,
         _extension_field: &str,
         _args: Option<&feature::PropertyMap>,
@@ -89,7 +89,7 @@ pub(crate) trait TileOrigin {
 
     /// The highest zoom level that has tiles, as far as the origin knows.
     fn max_zoom(&self) -> u8 {
-        mln_util::constants::TERRAIN_RGB_MAXZOOM
+        crate::tile::dem::TERRAIN_RGB_MAXZOOM
     }
 }
 
@@ -206,7 +206,7 @@ impl<K: TilesetKind> TileOrigin for TilesetOrigin<K> {
     }
 
     fn max_zoom(&self) -> u8 {
-        self.tileset.as_ref().map_or(mln_util::constants::TERRAIN_RGB_MAXZOOM, |tileset| tileset.zoom_range.max)
+        self.tileset.as_ref().map_or(crate::tile::dem::TERRAIN_RGB_MAXZOOM, |tileset| tileset.zoom_range.max)
     }
 }
 
@@ -292,7 +292,7 @@ impl TileOrigin for GeoJsonOrigin {
     /// default 0) or "expansion-zoom". Anything else is a null value.
     fn query_feature_extensions(
         &self,
-        feature: &mln_util::feature::Feature,
+        feature: &crate::tile::feature::Feature,
         extension: &str,
         extension_field: &str,
         args: Option<&feature::PropertyMap>,

@@ -7,8 +7,6 @@ use glam::DVec3;
 use mln_style::constants::{DEFAULT_TRANSITION_EASE, TILE_SIZE_D};
 use mln_style::geo::{LatLng, WrapMode};
 use mln_style::time::Instant;
-use mln_util::geo::ScreenCoordinate;
-use mln_util::projection::Projection;
 
 use super::anchor::sees_plane;
 use super::momentum::MomentumState;
@@ -20,6 +18,8 @@ use crate::camera::{
     AnimationOptions, CameraOptions, CameraVelocity, Elevation, TransformState, TransitionEnd, TransitionOutcome,
     VerticalPerspectiveProjection,
 };
+use crate::geo::ScreenCoordinate;
+use crate::geo::projection::Projection;
 use crate::log_target;
 use crate::map::events::{CameraChange, CameraChangeMode, CameraChangeSource};
 

@@ -12,7 +12,8 @@
 use mln_style::bitmap::{PremultipliedImage, UnassociatedImage};
 use mln_style::error::Error;
 use mln_style::size::Size;
-use mln_util::premultiply::premultiply;
+
+use crate::image::premultiply::premultiply;
 
 pub fn decode_png(data: &[u8]) -> Result<PremultipliedImage, Error> {
     const SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'];

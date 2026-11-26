@@ -12,14 +12,14 @@ use std::time::Duration;
 
 use feature::Value;
 use geometry::Point;
+use mln_engine::exec::pool::Pool;
+use mln_engine::exec::queue::Queue;
 use mln_engine::image::{decode_image, encode_png};
+use mln_engine::tile::feature::Feature;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::geo::LatLng;
 use mln_style::hash::HashMap;
 use mln_style::size::Size;
-use mln_util::feature::Feature;
-use mln_util::pool::Pool;
-use mln_util::queue::Queue;
 
 use crate::file_source::ProxyFileSource;
 use crate::filesystem;
@@ -1067,7 +1067,7 @@ fn get_tile_center_coordinates(tile_id: &TileId) -> LatLng {
     );
     // Projection::unproject(tileCenter, scale) (LatLng::Unwrapped); tile
     // centers are always valid coordinates.
-    mln_util::projection::Projection::unproject(&tile_center, scale, mln_style::geo::WrapMode::Unwrapped)
+    mln_engine::geo::projection::Projection::unproject(&tile_center, scale, mln_style::geo::WrapMode::Unwrapped)
         .expect("tile center")
 }
 

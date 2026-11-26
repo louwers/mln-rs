@@ -7,11 +7,11 @@ use std::sync::Arc;
 
 use glam::DVec2;
 use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
-use mln_util::geo::{EdgeInsets, ScreenCoordinate};
-use mln_util::queue::Queue;
 
 use super::ground::{STYLE, assert_near, flat, ground_event, pitchable, report, world};
 use crate::camera::{CameraOptions, Elevation, MapProjection, View};
+use crate::exec::queue::Queue;
+use crate::geo::{EdgeInsets, ScreenCoordinate};
 use crate::map::Map;
 
 /// One pixel at zoom 12, in Web Mercator at zoom 0.
@@ -250,8 +250,12 @@ fn a_projection_reads_the_height_of_its_ground() {
     let at = |pixels_south: f64| {
         let point = world(&center()) + DVec2::new(0.0, pixels_south * PIXEL);
         let point = geometry::Point::new(point.x, point.y);
-        mln_util::projection::Projection::unproject(&point, 1.0 / mln_style::constants::TILE_SIZE_D, WrapMode::Wrapped)
-            .unwrap()
+        crate::geo::projection::Projection::unproject(
+            &point,
+            1.0 / mln_style::constants::TILE_SIZE_D,
+            WrapMode::Wrapped,
+        )
+        .unwrap()
     };
     assert_near(Ridge::PEAK, from_map.elevation(&at(100.0)).unwrap(), 1e-6, "the peak");
     assert_near(Ridge::PEAK / 2.0, from_map.elevation(&at(130.0)).unwrap(), 1e-6, "the slope");

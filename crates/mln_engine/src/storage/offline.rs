@@ -7,10 +7,10 @@ use mln_style::error::Error;
 #[cfg(any(test, feature = "sqlite"))]
 use mln_style::geo::LatLng;
 use mln_style::geo::LatLngBounds;
-use mln_util::chrono::Timestamp;
 #[cfg(any(test, feature = "sqlite"))]
 use serde_json::{Map, Value as Json};
 
+use crate::storage::chrono::Timestamp;
 use crate::storage::response::ResourceError;
 
 fn check_definition(min_zoom: f64, max_zoom: f64, pixel_ratio: f32) -> Result<(), Error> {

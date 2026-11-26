@@ -3,8 +3,9 @@
 // `util::compress`.
 
 use mln_style::bitmap::PremultipliedImage;
-use mln_util::compression::compress;
-use mln_util::premultiply::unpremultiply;
+
+use crate::image::premultiply::unpremultiply;
+use crate::storage::compression::compress;
 
 fn network_byte_u32(value: u32) -> [u8; 4] {
     value.to_be_bytes()
@@ -112,7 +113,7 @@ mod tests {
         assert_eq!(&png[..8], &[0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n']);
         let decoded = decode_image(&png).unwrap();
         assert_eq!(decoded.size, size);
-        let expected = mln_util::premultiply::premultiply(unpremultiply(pre));
+        let expected = crate::image::premultiply::premultiply(unpremultiply(pre));
         assert_eq!(decoded, expected);
     }
 
@@ -158,7 +159,7 @@ mod tests {
             assert!(image.valid(), "{test}");
             let again = decode_image(&encode_png(&image)).unwrap();
             assert_eq!(again.size, image.size, "{test}");
-            assert_eq!(again, mln_util::premultiply::premultiply(unpremultiply(image.clone())), "{test}");
+            assert_eq!(again, crate::image::premultiply::premultiply(unpremultiply(image.clone())), "{test}");
         }
     }
 }

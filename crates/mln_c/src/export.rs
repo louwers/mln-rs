@@ -53,7 +53,7 @@ macro_rules! export {
 /// when it panics, a bug in the library, instead of unwinding into the
 /// caller, which would end the process.
 pub(crate) fn catch(body: impl FnOnce() -> Result<(), Error>) -> Result<(), Error> {
-    mln_util::panic::catch(body).unwrap_or_else(|message| Err(panicked(&message)))
+    mln_engine::exec::panic::catch(body).unwrap_or_else(|message| Err(panicked(&message)))
 }
 
 /// The failure of a call that a panic with `message` stopped.
@@ -65,7 +65,7 @@ pub(crate) fn panicked(message: &str) -> Error {
 /// release, and logs a panic in it instead of unwinding into the caller.
 pub(crate) fn catch_and_log(body: impl FnOnce()) {
     crate::logging::install_logger();
-    if let Err(message) = mln_util::panic::catch(body) {
+    if let Err(message) = mln_engine::exec::panic::catch(body) {
         log::error!(target: log_target::CRASH, "{}", panicked(&message).message());
     }
 }

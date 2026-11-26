@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::tile_id::CanonicalTileID;
-use mln_util::identity::SimpleIdentity;
 
+use crate::draw::identity::SimpleIdentity;
 use crate::tile_store::tile_mask::{TileMask, is_whole};
 
 /// The mask that keeps a tile's whole extent.

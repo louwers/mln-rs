@@ -4,7 +4,8 @@ use mln_style::geo::{LatLng, LatLngBounds};
 use mln_style::math::{clamp_f64, wrap};
 use mln_style::range::Range;
 use mln_style::tile_id::CanonicalTileID;
-use mln_util::projection::Projection;
+
+use crate::geo::projection::Projection;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TileRange {

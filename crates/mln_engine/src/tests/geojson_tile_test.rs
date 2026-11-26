@@ -8,9 +8,9 @@ use mln_style::layers::Circle;
 use mln_style::property::evaluation::PropertyEvaluationParameters;
 use mln_style::sources::geojson::{Features, GeoJSONData, TileFeatures};
 use mln_style::tile_id::CanonicalTileID;
-use mln_util::pool::TaskGroup;
 
 use crate::Registry;
+use crate::exec::pool::TaskGroup;
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::map::MapMode;
 use crate::tests::{OneTile, style};

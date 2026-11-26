@@ -101,7 +101,7 @@ pub(crate) trait RenderSource {
     /// value.
     fn query_feature_extensions(
         &self,
-        _feature: &mln_util::feature::Feature,
+        _feature: &crate::tile::feature::Feature,
         _extension: &str,
         _extension_field: &str,
         _args: Option<&feature::PropertyMap>,

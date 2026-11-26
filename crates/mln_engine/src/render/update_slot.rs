@@ -14,9 +14,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use mln_style::error::Error;
-use mln_util::event_queue::Waker;
 use parking_lot::Mutex;
 
+use crate::exec::event_queue::Waker;
 use crate::render::update_parameters::UpdateParameters;
 
 /// An update that a slot published.

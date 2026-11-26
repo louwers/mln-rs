@@ -11,19 +11,20 @@ use mln_style::error::Error;
 use mln_style::geo::{LatLng, WrapMode};
 use mln_style::size::Size;
 use mln_style::types::ProjectionDefinition;
-use mln_util::constants::{DEFAULT_FOV, M2PI};
-pub use mln_util::geo::NorthOrientation;
-use mln_util::geo::{EdgeInsets, ScreenCoordinate};
-use mln_util::projection::Projection;
 
 use crate::camera::camera::FreeCameraOptions;
 use crate::camera::camera_pose::CameraPose;
+use crate::camera::constants::DEFAULT_FOV;
 use crate::camera::map_view::{Camera, LogicalExtent, MapView, Viewport};
 use crate::camera::mode::{ConstrainMode, ViewportMode};
 use crate::camera::projection::{ProjectionData, mercator_tile_matrix};
 use crate::camera::projection_mode::{AxonometricMode, ProjectionMode};
 use crate::camera::tile_coordinate::TileCoordinate;
 use crate::camera::vertical_perspective_projection::VerticalPerspectiveProjection;
+pub use crate::geo::NorthOrientation;
+use crate::geo::constants::M2PI;
+use crate::geo::projection::Projection;
+use crate::geo::{EdgeInsets, ScreenCoordinate};
 use crate::tile::UnwrappedTileID;
 
 /// The largest pitch the Mercator horizon is computed for, in radians. Past

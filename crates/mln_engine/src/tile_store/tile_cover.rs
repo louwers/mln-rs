@@ -17,11 +17,11 @@ use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
 use mln_style::math::{fmax, fmin};
 use mln_style::range::Range;
 use mln_style::tile_id::CanonicalTileID;
-use mln_util::bounding_volumes::{AABB, Frustum, IntersectionResult};
-use mln_util::geo::ScreenCoordinate;
-use mln_util::projection::Projection;
 
 use crate::camera::{TileCoordinate, View, ViewportMode};
+use crate::geo::ScreenCoordinate;
+use crate::geo::bounding_volumes::{AABB, Frustum, IntersectionResult};
+use crate::geo::projection::Projection;
 use crate::render::terrain::ElevationRanges;
 use crate::tile::{OverscaledTileID, UnwrappedTileID};
 use crate::tile_store::TileLodMode;
@@ -285,11 +285,11 @@ mod globe {
     use mln_style::constants;
     use mln_style::range::Range;
     use mln_style::tile_id::CanonicalTileID;
-    use mln_util::bounding_volumes::{Frustum, IntersectionResult};
-    use mln_util::projection::Projection;
 
     use super::TileCoverParameters;
     use crate::camera::VerticalPerspectiveProjection;
+    use crate::geo::bounding_volumes::{Frustum, IntersectionResult};
+    use crate::geo::projection::Projection;
     use crate::render::terrain::ElevationRanges;
     use crate::tile::{OverscaledTileID, UnwrappedTileID};
     use crate::tile_store::tile_lod::{TileZoomFunction, elevation_for_tile_culling};
@@ -423,8 +423,8 @@ mod globe {
     fn tile_bounding_volume(tile: &CanonicalTileID, (min_elevation, max_elevation): (f64, f64)) -> ConvexVolume {
         // Distances from the planet's center in a world where the surface is
         // at 1.
-        let min_radius = min_elevation / mln_util::constants::EARTH_RADIUS_M + 1.0;
-        let max_radius = max_elevation / mln_util::constants::EARTH_RADIUS_M + 1.0;
+        let min_radius = min_elevation / crate::geo::constants::EARTH_RADIUS_M + 1.0;
+        let max_radius = max_elevation / crate::geo::constants::EARTH_RADIUS_M + 1.0;
         if tile.z == 0 {
             return aabb_volume(DVec3::splat(-max_radius), DVec3::splat(max_radius));
         }
@@ -634,7 +634,7 @@ mod globe {
             if elevation <= 0.0 || normal_length <= 0.0 {
                 return (frustum.clone(), horizon);
             }
-            let shell_radius = 1.0 + elevation / mln_util::constants::EARTH_RADIUS_M;
+            let shell_radius = 1.0 + elevation / crate::geo::constants::EARTH_RADIUS_M;
             let horizon_cos = (-horizon.w / normal_length).clamp(-1.0, 1.0);
             let shell_cos = (horizon_cos.acos() + (1.0 / shell_radius).acos()).cos();
             let culling_horizon = DVec4::from((horizon.xyz(), -shell_cos * normal_length));
@@ -683,7 +683,7 @@ mod globe {
         let latitude = transform.center(mln_style::geo::WrapMode::Unwrapped).latitude();
         if latitude.abs() > constants::LATITUDE_MAX {
             camera_coord[1] +=
-                center.y - (0.5 - mln_style::math::deg2rad(latitude).tan().asinh() / mln_util::constants::M2PI);
+                center.y - (0.5 - mln_style::math::deg2rad(latitude).tan().asinh() / crate::geo::constants::M2PI);
         }
         let distance_to_center_2d = (center_coord[0] - camera_coord[0]).hypot(center_coord[1] - camera_coord[1]);
         let distance_z = (center_coord[2] - camera_coord[2]).abs();

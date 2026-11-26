@@ -10,10 +10,10 @@
 
 use mln_style::error::Error;
 use mln_style::geo::{LatLng, WrapMode};
-use mln_util::geo::ScreenCoordinate;
 
 use super::{Transform, flip_y};
 use crate::camera::{VerticalPerspectiveProjection, View};
+use crate::geo::ScreenCoordinate;
 
 /// How near the view's center, in squared pixels, an anchor stands at it:
 /// a move around it leaves the center where it is (GL JS's).

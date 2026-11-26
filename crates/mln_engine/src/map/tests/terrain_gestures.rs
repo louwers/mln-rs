@@ -11,8 +11,6 @@ use glam::{DVec2, DVec3};
 use mln_style::constants::DEFAULT_TRANSITION_EASE;
 use mln_style::geo::{LatLng, WrapMode};
 use mln_style::size::Size;
-use mln_util::geo::ScreenCoordinate;
-use mln_util::queue::Queue;
 
 use super::ground::{Plateau, STYLE, Slope, assert_near, flat, ground_event, pitchable, report, world};
 use super::terrain_camera::{Hill, frames, map_over, meters, start};
@@ -22,6 +20,8 @@ use crate::camera::{
     ConstrainMode, Elevation, GesturePhase, GroundHit, MomentumDecay, MomentumDecayModel, MomentumEasing,
     MomentumGlide, View, ViewportMode,
 };
+use crate::exec::queue::Queue;
+use crate::geo::ScreenCoordinate;
 use crate::map::{CameraChangeSource, Map, MapEvent};
 
 /// One pixel at zoom 12, in Web Mercator at zoom 0.

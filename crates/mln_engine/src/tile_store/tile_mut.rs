@@ -197,7 +197,7 @@ impl<'a> TileMut<'a> {
             Fetch::Network { load: current, .. } if current == load => Method::Network,
             Fetch::Idle | Fetch::Cache { .. } | Fetch::Network { .. } => return,
         };
-        let now = mln_util::chrono::now();
+        let now = crate::storage::chrono::now();
         if method == Method::Network {
             // The request stays open: the file source answers it again after
             // an error, and when the data expires.
@@ -691,8 +691,7 @@ impl<'a> TileMut<'a> {
     }
 
     fn request(&mut self, mut method: Method) {
-        let fresh =
-            matches!(&self.tile.load.origin, OriginLoad::Tileset(tileset) if tileset.is_fresh(mln_util::chrono::now()));
+        let fresh = matches!(&self.tile.load.origin, OriginLoad::Tileset(tileset) if tileset.is_fresh(crate::storage::chrono::now()));
         if !fresh && self.take_in_memory() {
             // A required tile whose data expires still asks the network,
             // which the file source holds until the data expires.
@@ -744,7 +743,7 @@ impl<'a> TileMut<'a> {
         let (Some(origin), OriginLoad::Tileset(tileset)) = (&mut self.source.origin, &mut self.tile.load.origin) else {
             return false;
         };
-        let now = mln_util::chrono::now();
+        let now = crate::storage::chrono::now();
         let Some((data, fetched, held)) = origin.in_memory(&self.tile.id, &tileset.resource.url, now) else {
             return false;
         };

@@ -1,4 +1,4 @@
-//! The terrain's height rule on the GPU, against `mln_util::dem` on the CPU.
+//! The terrain's height rule on the GPU, against `crate::tile::dem` on the CPU.
 
 use std::cell::Cell;
 
@@ -15,11 +15,11 @@ use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::{Rgba, Size};
 use mln_style::tileset::RasterEncoding;
-use mln_util::dem::{self, DemCoords, DemUnpack};
 
 use super::{EXTENT, buffer, draw, dynamic, fixed, location, slot, whole};
 use crate::conformance::programs;
 use crate::render::terrain::ubo::TerrainSurfaceUBO;
+use crate::tile::dem::{self, DemCoords, DemUnpack};
 
 /// The most probes a frame draws, one per texel of a one-row target, which
 /// every backend's textures are wide enough for.
@@ -130,7 +130,7 @@ fn axis(dim: u32, scale: f32, offset: f32) -> Vec<f32> {
 }
 
 /// Checks that the terrain's height rule on `gpu` reads the heights that
-/// `mln_util::dem` reads on the CPU, to within 1 mm and 4 ulp of the
+/// `crate::tile::dem` reads on the CPU, to within 1 mm and 4 ulp of the
 /// largest height interpolated.
 ///
 /// The probes read Mapbox, Terrarium and custom DEMs, each with its lowest

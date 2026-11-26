@@ -57,7 +57,6 @@ mln_gfx.workspace = true
 mln_engine = { workspace = true, features = ["system-fonts"] }
 mln_style.workspace = true
 mln_gl = { workspace = true, optional = true }
-mln_util.workspace = true
 mln_webgpu = { workspace = true, optional = true }
 parking_lot.workspace = true
 serde_json.workspace = true

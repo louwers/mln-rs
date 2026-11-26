@@ -5,12 +5,12 @@ use std::time::Duration;
 
 use mln_style::string::to_string_double;
 use mln_style::tileset::Scheme;
-use mln_util::chrono::Timestamp;
-use mln_util::constants::{EARTH_RADIUS_M, M2PI};
-use mln_util::font_stack::{FontStack, font_stack_to_string};
-use mln_util::token::replace_tokens;
 
+use crate::geo::constants::{EARTH_RADIUS_M, M2PI};
+use crate::storage::chrono::Timestamp;
 use crate::storage::response::{Caching, Data, Response};
+use crate::storage::token::replace_tokens;
+use crate::text::font_stack::{FontStack, font_stack_to_string};
 
 /// Token that may appear in a tile URL template.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

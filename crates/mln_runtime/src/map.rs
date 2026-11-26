@@ -7,6 +7,9 @@ use mln_engine::camera::{
     BoundOptions, Camera, CameraCommandId, CameraDelta, CameraOptions, CameraUpdate, Elevation, FrameClock,
     FreeCameraOptions, LogicalExtent, MapProjection, MapView, ProjectionMode, TransitionEnd, TransitionOutcome,
 };
+use mln_engine::exec::event_queue::Waker;
+use mln_engine::exec::pool::Pool;
+use mln_engine::exec::queue::TimedTask;
 use mln_engine::map::{MapEvent, MapMode, MapSnapshot};
 use mln_engine::text::GlyphCache;
 use mln_engine::text::font_face_engine::FontFaceEngine;
@@ -18,9 +21,6 @@ use mln_style::hash::HashMap;
 use mln_style::size::Size;
 use mln_style::time::Instant;
 use mln_style::{Edit, StyleLoadError};
-use mln_util::event_queue::Waker;
-use mln_util::pool::Pool;
-use mln_util::queue::TimedTask;
 use parking_lot::Mutex;
 
 use crate::camera::{self, CameraFitArea, CameraFitOptions, CameraFitUpdate, TileOptions, ViewportOptions};

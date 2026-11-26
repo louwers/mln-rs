@@ -8,11 +8,11 @@ use mln_gfx::{FrameImage, Handoff, Rgba, ScissorRect};
 use mln_style::color::Color;
 use mln_style::error::Error;
 use mln_style::time::Instant;
-use mln_util::event_queue::Waker;
-use mln_util::pool::Pool;
 
 use crate::camera::FrameProjection;
 use crate::draw::context::Context;
+use crate::exec::event_queue::Waker;
+use crate::exec::pool::Pool;
 use crate::layer::layer_drawing::{DrawGroups, DrawOrder};
 use crate::layers::custom::{CustomLayerFrame, end_hosts};
 use crate::render::clip_masks::ClipMasks;
@@ -353,9 +353,9 @@ impl Renderer {
     /// coordinates. `Err` for a malformed tile.
     pub fn query_rendered_features(
         &mut self,
-        geometry: &[mln_util::geo::ScreenCoordinate],
+        geometry: &[crate::geo::ScreenCoordinate],
         options: &crate::query::RenderedQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, Error> {
+    ) -> Result<Vec<crate::tile::feature::Feature>, Error> {
         let features = self.orchestrator.query_rendered_features(geometry, options);
         report(&mut self.orchestrator, self.events.as_ref());
         features
@@ -363,19 +363,19 @@ impl Renderer {
 
     pub fn query_rendered_features_at_point(
         &mut self,
-        point: &mln_util::geo::ScreenCoordinate,
+        point: &crate::geo::ScreenCoordinate,
         options: &crate::query::RenderedQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, Error> {
+    ) -> Result<Vec<crate::tile::feature::Feature>, Error> {
         self.query_rendered_features(&[*point], options)
     }
 
     pub fn query_rendered_features_in_box(
         &mut self,
-        min: &mln_util::geo::ScreenCoordinate,
-        max: &mln_util::geo::ScreenCoordinate,
+        min: &crate::geo::ScreenCoordinate,
+        max: &crate::geo::ScreenCoordinate,
         options: &crate::query::RenderedQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, Error> {
-        use mln_util::geo::ScreenCoordinate;
+    ) -> Result<Vec<crate::tile::feature::Feature>, Error> {
+        use crate::geo::ScreenCoordinate;
         self.query_rendered_features(
             &[*min, ScreenCoordinate::new(max.x, min.y), *max, ScreenCoordinate::new(min.x, max.y), *min],
             options,
@@ -386,7 +386,7 @@ impl Renderer {
         &mut self,
         source_id: &str,
         options: &crate::query::SourceQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, Error> {
+    ) -> Result<Vec<crate::tile::feature::Feature>, Error> {
         let features = self.orchestrator.query_source_features(source_id, options);
         report(&mut self.orchestrator, self.events.as_ref());
         features
@@ -400,7 +400,7 @@ impl Renderer {
     pub fn query_feature_extensions(
         &self,
         source_id: &str,
-        feature: &mln_util::feature::Feature,
+        feature: &crate::tile::feature::Feature,
         extension: &str,
         extension_field: &str,
         args: Option<&feature::PropertyMap>,

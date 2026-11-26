@@ -12,6 +12,9 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
+use mln_engine::exec::event_queue::Waker;
+use mln_engine::exec::pool::Pool;
+use mln_engine::exec::queue::Queue;
 use mln_engine::text::GlyphCache;
 use mln_engine::text::font_face_engine::FontFaceEngine;
 use mln_engine::text::local_fonts::LocalGlyphs;
@@ -22,9 +25,6 @@ use mln_style::error::Error;
 use mln_style::size::Size;
 use mln_style::source::SourceData;
 use mln_style::sources::{GeoJSONData, GeoJsonSourceType};
-use mln_util::event_queue::Waker;
-use mln_util::pool::Pool;
-use mln_util::queue::Queue;
 
 use super::frame::{DemandMode, FrameDemand, FrameDisposition, FrameResult};
 use super::local::LocalTarget;
@@ -57,7 +57,7 @@ fn run(worker: &mut Option<Worker>, task: impl FnOnce(&mut Worker, &mut Outbox))
     let mut outbox = Outbox::default();
     {
         let _gate = shared.gate.lock();
-        let ran = mln_util::panic::catch(|| {
+        let ran = mln_engine::exec::panic::catch(|| {
             if !worker.torn_down && shared.state.lock().lifecycle == RenderSessionState::Abandoned {
                 worker.tear_down(&mut outbox);
             }
@@ -1468,7 +1468,7 @@ impl Worker {
             outbox.resolve(attach, Err(error));
         }
         // These run on the state that the panic left, so they may panic too.
-        let _ = mln_util::panic::catch(|| {
+        let _ = mln_engine::exec::panic::catch(|| {
             if let Some(token) = self.rendering.take() {
                 let result = FrameResult::unrendered(Some(token), FrameDisposition::Failed, self.latest_generation());
                 self.publish(&result, outbox);
@@ -1707,7 +1707,7 @@ impl Worker {
     pub(crate) fn detach(&mut self, outbox: &mut Outbox) {
         // A panic in the teardown, such as a custom layer's, still detaches
         // the session.
-        if let Err(message) = mln_util::panic::catch(|| self.tear_down(outbox)) {
+        if let Err(message) = mln_engine::exec::panic::catch(|| self.tear_down(outbox)) {
             self.fail_after_panic(&message, outbox);
         }
         let map = self.shared.state.lock().map.clone();

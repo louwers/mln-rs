@@ -8,10 +8,10 @@ use mln_style::range::Range;
 use mln_style::size::Size;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::ProjectionDefinition;
-use mln_util::geo::EdgeInsets;
 
 use crate::camera::transform::Transform;
 use crate::camera::{CameraLimits, CameraOptions, ConstrainMode, ViewportMode};
+use crate::geo::EdgeInsets;
 use crate::tile::{OverscaledTileID, UnwrappedTileID};
 use crate::tile_store::TileLodMode;
 use crate::tile_store::tile_cover::{
@@ -1294,7 +1294,7 @@ mod terrain_cover {
     /// Whether GL JS picks each tile's zoom by its distance without terrain:
     /// past a pitch that leaves the top of the view near the horizon.
     fn gljs_allows_variable_zoom(camera: &Camera) -> bool {
-        let fov = camera.fov.unwrap_or(mln_style::math::rad2deg(mln_util::constants::DEFAULT_FOV));
+        let fov = camera.fov.unwrap_or(mln_style::math::rad2deg(crate::camera::constants::DEFAULT_FOV));
         camera.pitch > (78.5 - fov / 2.0).clamp(0.0, 60.0)
     }
 
@@ -1442,7 +1442,7 @@ mod terrain_cover {
         // The zoom functions of fewer zoom levels on screen and fewer tiles.
         let with_lod = |max_zoom_levels_on_screen: f64, tile_count_max_min_ratio: f64| {
             let tile_zoom = TileZoomFunction::new(
-                mln_style::math::rad2deg(mln_util::constants::DEFAULT_FOV),
+                mln_style::math::rad2deg(crate::camera::constants::DEFAULT_FOV),
                 max_zoom_levels_on_screen,
                 tile_count_max_min_ratio,
             );
@@ -1521,7 +1521,7 @@ mod terrain_cover {
         for tile in &flat {
             assert!(raised.contains(tile), "{tile}");
         }
-        let center_y = mln_util::projection::Projection::project(&ll(45.0, 10.0), 1.0 / constants::TILE_SIZE_D).y;
+        let center_y = crate::geo::projection::Projection::project(&ll(45.0, 10.0), 1.0 / constants::TILE_SIZE_D).y;
         let added: Vec<_> = raised.iter().filter(|tile| !flat.contains(tile)).collect();
         assert_ne!(added, Vec::<&OverscaledTileID>::new());
         for tile in added {
@@ -1564,7 +1564,7 @@ mod terrain_cover {
         for tile in &sea_level {
             assert!(raised.contains(tile), "{tile}");
         }
-        let center_y = mln_util::projection::Projection::project(&ll(45.16, 10.0), 1.0 / constants::TILE_SIZE_D).y;
+        let center_y = crate::geo::projection::Projection::project(&ll(45.16, 10.0), 1.0 / constants::TILE_SIZE_D).y;
         let added: Vec<_> = raised.iter().filter(|tile| !sea_level.contains(tile)).collect();
         assert_ne!(added, Vec::<&OverscaledTileID>::new());
         for tile in added {
@@ -1585,9 +1585,8 @@ mod terrain_cover {
     /// tiles under them.
     #[test]
     fn the_globe_cover_keeps_mountains_past_the_horizon() {
-        use mln_util::projection::Projection;
-
         use crate::camera::VerticalPerspectiveProjection;
+        use crate::geo::projection::Projection;
 
         let options = Options { min_zoom: 0, max_zoom: 22, tile_size: 512, reparse_overscaled: false };
         let mut transform = Camera { pitch: 80.0, ..Camera::new((512, 512), (10.0, 45.0), 10.0) }.transform();

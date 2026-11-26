@@ -6,6 +6,8 @@ use std::f64::consts::PI;
 use std::sync::Arc;
 
 use mln_engine::camera::BoundOptions;
+use mln_engine::exec::pool::Pool;
+use mln_engine::exec::queue::Queue;
 use mln_engine::map::{Map, MapMode, MapOptions};
 use mln_engine::storage::resource::TileData;
 use mln_engine::storage::stub_file_source::{ResponseType, StubFileSource};
@@ -14,8 +16,6 @@ use mln_headless::HeadlessFrontend;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::ErrorKind;
 use mln_style::size::Size;
-use mln_util::pool::Pool;
-use mln_util::queue::Queue;
 
 const SIDE: u32 = 256;
 
@@ -406,8 +406,8 @@ fn query_style(globe: bool) -> String {
 /// draws too.
 #[test]
 fn a_rendered_query_over_terrain_finds_a_draped_fill_where_it_draws() {
+    use mln_engine::geo::ScreenCoordinate;
     use mln_engine::query::RenderedQueryOptions;
-    use mln_util::geo::ScreenCoordinate;
 
     for globe in [true, false] {
         let Some((image, _, mut frontend)) = still(&query_style(globe), |_, tile| ridge_png(tile)) else {
@@ -452,8 +452,8 @@ fn corner_blocks_png(tile: &TileData) -> Vec<u8> {
 /// box's east edge draws.
 #[test]
 fn a_box_query_over_uneven_terrain_finds_a_fill_inside_it() {
+    use mln_engine::geo::ScreenCoordinate;
     use mln_engine::query::RenderedQueryOptions;
-    use mln_util::geo::ScreenCoordinate;
 
     for globe in [true, false] {
         let ring: Vec<String> = [(-20.0, 480.0), (-20.0, 520.0), (20.0, 520.0), (20.0, 480.0), (-20.0, 480.0)]

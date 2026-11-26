@@ -29,7 +29,7 @@ fn jobs() -> Result<mpsc::Sender<Job>, Error> {
         return Ok(jobs.clone());
     }
     let (sender, receiver) = mpsc::channel::<Job>();
-    mln_util::thread::builder("mln-parse")
+    mln_engine::exec::thread::builder("mln-parse")
         .spawn(move || {
             for job in receiver {
                 job();
@@ -54,7 +54,7 @@ pub(crate) fn run<R: Send + 'static>(work: impl FnOnce() -> R + Send + 'static) 
     let (reply, result) = mpsc::sync_channel(1);
     let job: Job = Box::new(move || {
         // The caller waits for the reply, so it is there to receive it.
-        let _ = reply.send(mln_util::panic::catch(work));
+        let _ = reply.send(mln_engine::exec::panic::catch(work));
     });
     // The thread catches its jobs' panics, so it never ends.
     let ended = || Error::native("the parse thread ended");

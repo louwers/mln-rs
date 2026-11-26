@@ -12,13 +12,13 @@ use mln_style::property::value::PropertyValue;
 use mln_style::range::Range;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::{Source, constants};
-use mln_util::projection::Projection;
 use mln_vec_map::VecMap;
 use smallvec::SmallVec;
 
 use crate::camera::VerticalPerspectiveProjection;
 use crate::draw::context::Context;
 use crate::draw::dynamic_texture_atlas::DynamicTextureAtlas;
+use crate::geo::projection::Projection;
 use crate::layer::bucket::UploadNeeds;
 use crate::layer::bucket_geometry::BucketGeometry;
 use crate::layer::layer_drawing::ChangedBuckets;
@@ -1017,7 +1017,7 @@ impl SourceTiles {
         let Some(slot) = self.tiles.get_mut(id).filter(|slot| slot.place.is_cached()) else {
             return false;
         };
-        if !slot.tile.load.is_usable(mln_util::chrono::now()) {
+        if !slot.tile.load.is_usable(crate::storage::chrono::now()) {
             self.evict(id, ctx);
             return false;
         }
@@ -1031,7 +1031,7 @@ impl SourceTiles {
     /// geometry that the first of either to upload moves into the context's
     /// stores (`upload_at`).
     pub(crate) fn world_copy(&self, id: &OverscaledTileID) -> Option<WorldCopy> {
-        let now = mln_util::chrono::now();
+        let now = crate::storage::chrono::now();
         let tile = self
             .same_place(id)
             .into_iter()
@@ -1139,7 +1139,7 @@ impl SourceTiles {
     #[expect(clippy::too_many_arguments, reason = "the query's geometry, ground, camera, layers and options")]
     pub(crate) fn query_rendered_features(
         &self,
-        geometry: &[mln_util::geo::ScreenCoordinate],
+        geometry: &[crate::geo::ScreenCoordinate],
         ground: Option<crate::query::feature_index::QueryGround<'_>>,
         view: &crate::camera::View,
         layers: &crate::query::feature_index::QueryLayers<'_>,
@@ -1158,17 +1158,17 @@ impl SourceTiles {
 
         let height = f64::from(view.size().height);
         let globe = view.is_globe();
-        let up = |p: &mln_util::geo::ScreenCoordinate| mln_util::geo::ScreenCoordinate::new(p.x, height - p.y);
+        let up = |p: &crate::geo::ScreenCoordinate| crate::geo::ScreenCoordinate::new(p.x, height - p.y);
         let on_ground =
-            |p: &mln_util::geo::ScreenCoordinate| ground.and_then(|ground| view.ground_under(&up(p), ground.elevation));
+            |p: &crate::geo::ScreenCoordinate| ground.and_then(|ground| view.ground_under(&up(p), ground.elevation));
         let standing = ground.is_some_and(|ground| ground.standing);
-        let to_world = |p: &mln_util::geo::ScreenCoordinate| match on_ground(p) {
+        let to_world = |p: &crate::geo::ScreenCoordinate| match on_ground(p) {
             // On the main world, where the globe's sea-level points are.
             Some(hit) if globe => geometry::Point::new(hit.world.x.rem_euclid(1.0), hit.world.y),
             Some(hit) => geometry::Point::new(hit.world.x, hit.world.y),
             None => TileCoordinate::from_screen_coordinate(view, 0, &up(p)).p,
         };
-        let on_planet = |p: &mln_util::geo::ScreenCoordinate| {
+        let on_planet = |p: &crate::geo::ScreenCoordinate| {
             VerticalPerspectiveProjection::screen_coordinate_hits_globe(view, &up(p), 0.0) || on_ground(p).is_some()
         };
 
@@ -1205,10 +1205,10 @@ impl SourceTiles {
             let mut covered = true;
             let mut reaches_into_space = false;
             for corner in [
-                mln_util::geo::ScreenCoordinate::new(screen_min.0, screen_min.1),
-                mln_util::geo::ScreenCoordinate::new(screen_max.0, screen_min.1),
-                mln_util::geo::ScreenCoordinate::new(screen_min.0, screen_max.1),
-                mln_util::geo::ScreenCoordinate::new(screen_max.0, screen_max.1),
+                crate::geo::ScreenCoordinate::new(screen_min.0, screen_min.1),
+                crate::geo::ScreenCoordinate::new(screen_max.0, screen_min.1),
+                crate::geo::ScreenCoordinate::new(screen_min.0, screen_max.1),
+                crate::geo::ScreenCoordinate::new(screen_max.0, screen_max.1),
             ] {
                 if !on_planet(&corner) {
                     reaches_into_space = true;
@@ -1218,7 +1218,7 @@ impl SourceTiles {
                 covered =
                     covered && bounds_min.0 <= c.x && c.x <= bounds_max.0 && bounds_min.1 <= c.y && c.y <= bounds_max.1;
             }
-            let center = mln_util::geo::ScreenCoordinate::new(
+            let center = crate::geo::ScreenCoordinate::new(
                 f64::midpoint(screen_min.0, screen_max.0),
                 f64::midpoint(screen_min.1, screen_max.1),
             );
@@ -1382,7 +1382,7 @@ impl SourceTiles {
         &self,
         options: &crate::query::SourceQueryOptions,
         global_state: Option<&mln_style::expression::GlobalStateMap>,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_style::error::Error> {
+    ) -> Result<Vec<crate::tile::feature::Feature>, mln_style::error::Error> {
         let mut result = Vec::new();
         for tile in self.cover() {
             if let Some(contents) = tile.contents().and_then(Contents::geometry) {

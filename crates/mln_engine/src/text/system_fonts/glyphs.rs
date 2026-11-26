@@ -13,10 +13,10 @@ use std::sync::Arc;
 
 use mln_style::hash::{HashMap, HashSet};
 use mln_style::i18n;
-use mln_util::font_stack::FontStack;
 
 use crate::text::FontFile;
 use crate::text::font_name::{self, FontName};
+use crate::text::font_stack::FontStack;
 use crate::text::glyph::FontFace;
 use crate::text::local_fonts::FontChooser;
 use crate::text::system_fonts::source::{self, Source};

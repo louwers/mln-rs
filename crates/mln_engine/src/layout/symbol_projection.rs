@@ -10,7 +10,6 @@ use glam::{DMat4, DVec2, DVec3, DVec4, Vec2};
 use mln_style::feature::GeometryCoordinate;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::types::SymbolHeightAnchorType;
-use mln_util::constants::ONE_EM;
 
 use crate::buckets::symbol_bucket::{
     PlacedSymbol, PlacedSymbolPools, SymbolBucket, SymbolDynamicLayoutVertex, SymbolSizeBinder, ZoomEvaluatedSize,
@@ -18,6 +17,7 @@ use crate::buckets::symbol_bucket::{
 use crate::camera::{ProjectedTilePoint, TileProjector, View};
 use crate::layout::symbol_instance::WritingMode;
 use crate::render::terrain::{TerrainElevation, TileGround};
+use crate::text::constants::ONE_EM;
 use crate::tile::UnwrappedTileID;
 
 /// The directions on screen that a pitched, unrotated label's east and south

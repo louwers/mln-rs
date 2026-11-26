@@ -19,10 +19,12 @@ mod bidi_mirroring;
 #[cfg(target_family = "wasm")]
 pub mod browser_glyph_rasterizer;
 pub(crate) mod check_max_angle;
+pub mod constants;
 pub(crate) mod cross_tile_symbol_index;
 mod face;
 pub mod font_face_engine;
 pub mod font_name;
+pub mod font_stack;
 pub(crate) mod get_anchors;
 pub mod glyph;
 pub mod glyph_cache;
@@ -39,6 +41,7 @@ mod shaping_test;
 #[cfg(feature = "system-fonts")]
 pub mod system_fonts;
 pub mod tagged_string;
+pub mod tiny_sdf;
 pub mod weight;
 mod woff;
 

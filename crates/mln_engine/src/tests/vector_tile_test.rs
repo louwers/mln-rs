@@ -1,6 +1,6 @@
 use mln_style::error::Error;
-use mln_util::pool::TaskGroup;
 
+use crate::exec::pool::TaskGroup;
 use crate::map::MapMode;
 use crate::query::SourceQueryOptions;
 use crate::tests::OneTile;

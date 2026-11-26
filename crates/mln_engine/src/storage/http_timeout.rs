@@ -1,11 +1,9 @@
-// HTTP retry timeouts. They live here rather than in
-// `mln_util` because they take a response error's `Reason`.
+// HTTP retry timeouts, which take a response error's `Reason`.
 
 use std::time::Duration;
 
-use mln_util::chrono::{Timestamp, now};
-use mln_util::constants::DEFAULT_RATE_LIMIT_TIMEOUT;
-
+use crate::storage::chrono::{Timestamp, now};
+use crate::storage::constants::DEFAULT_RATE_LIMIT_TIMEOUT;
 use crate::storage::response::Reason;
 
 /// How long from now until `timestamp`; zero once it has passed.

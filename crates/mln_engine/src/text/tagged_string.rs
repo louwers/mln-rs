@@ -4,9 +4,9 @@ use std::sync::Arc;
 use mln_style::color::Color;
 use mln_style::i18n;
 use mln_style::types::VerticalAlign;
-use mln_util::font_stack::FontStack;
 
 use crate::log_target;
+use crate::text::font_stack::FontStack;
 use crate::text::glyph::GlyphIDType;
 use crate::text::shaper::ShapedText;
 

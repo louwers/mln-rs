@@ -20,15 +20,15 @@ use mln_style::geo::{LatLng, WrapMode};
 use mln_style::size::Size;
 use mln_style::time::Instant;
 use mln_style::types::ProjectionDefinition;
-use mln_util::constants::M2PI;
-use mln_util::geo::{EdgeInsets, ScreenCoordinate};
-use mln_util::projection::Projection;
 use parking_lot::Mutex;
 
 use crate::camera::{
     AnimationOptions, CameraLimits, CameraOptions, CenterAndBearing, ConstrainMode, FreeCameraOptions,
     NorthOrientation, ProjectionMode, TransformState, TransitionEnd, VerticalPerspectiveProjection, View, ViewportMode,
 };
+use crate::geo::constants::M2PI;
+use crate::geo::projection::Projection;
+use crate::geo::{EdgeInsets, ScreenCoordinate};
 use crate::log_target;
 
 mod anchor;

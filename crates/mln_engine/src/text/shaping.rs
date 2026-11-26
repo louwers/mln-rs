@@ -10,11 +10,11 @@ use mln_style::i18n;
 use mln_style::image::TextFit;
 use mln_style::padding::Padding;
 use mln_style::types::{IconTextFitType, SymbolAnchorType, TextJustifyType, TextWritingModeType, VerticalAlign};
-use mln_util::constants::ONE_EM;
 use mln_vec_map::VecSet;
 
 use crate::text::atlas::{ImagePosition, ImagePositions};
 use crate::text::bidi;
+use crate::text::constants::ONE_EM;
 use crate::text::glyph::{
     Bounds, Glyph, GlyphID, GlyphIDType, GlyphMetrics, GlyphPositions, PositionedGlyph, PositionedLine, Shaping,
     pbf_code,

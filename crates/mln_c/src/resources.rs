@@ -10,10 +10,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use ::mln_runtime::{ResourceProvider, ResourceRequest};
+use mln_engine::storage::chrono::Timestamp;
 use mln_engine::storage::resource::{Kind, Priority, Usage};
 use mln_engine::storage::response::{Caching, Reason};
 use mln_engine::storage::{LoadingMethod, Resource, ResourceError, Response, StoragePolicy};
-use mln_util::chrono::Timestamp;
 
 use crate::buffer::LentText;
 use crate::callback::Registration;

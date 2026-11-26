@@ -3,8 +3,8 @@
 // the frames the frontend draws when asked.
 
 use mln_engine::camera::CameraOptions;
+use mln_engine::exec::pool::Pool;
 use mln_engine::map::{MapMode, MapOptions};
-use mln_util::pool::Pool;
 
 use super::*;
 
@@ -469,7 +469,7 @@ fn far_dem() -> (Arc<mln_engine::storage::stub_file_source::StubFileSource>, Req
         Arc::new(mln_engine::image::encode_png(&dem))
     };
     let (low, high) = (terrarium(0), terrarium(20_000));
-    let center_y = mln_util::projection::Projection::project(
+    let center_y = mln_engine::geo::projection::Projection::project(
         &mln_style::geo::LatLng::new(45.0, 10.0).unwrap(),
         1.0 / mln_style::constants::TILE_SIZE_D,
     )

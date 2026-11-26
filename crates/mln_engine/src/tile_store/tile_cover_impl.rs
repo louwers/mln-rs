@@ -13,9 +13,9 @@ use mln_style::error::Error;
 use mln_style::geo::LatLng;
 use mln_style::geometry::{FeatureType, to_feature_type};
 use mln_style::math::clamp_f64;
-use mln_util::projection::Projection;
 use mln_vec_map::VecMap;
 
+use crate::geo::projection::Projection;
 use crate::tile::UnwrappedTileID;
 
 pub(crate) type Bounds = Vec<Bound>;

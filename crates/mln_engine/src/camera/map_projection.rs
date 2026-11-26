@@ -5,10 +5,10 @@ use std::sync::Arc;
 
 use mln_style::error::Error;
 use mln_style::geo::{LatLng, WrapMode};
-use mln_util::geo::ScreenCoordinate;
 
 use crate::camera::transform::{TerrainGround, Transform, flip_y, lowest_ground};
 use crate::camera::{Camera, CameraOptions, Elevation, MapView, TransformState, View};
+use crate::geo::ScreenCoordinate;
 use crate::map::map::Map;
 
 /// Converts coordinates for one camera and size, without a map: on the

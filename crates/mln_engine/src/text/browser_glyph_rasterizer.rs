@@ -15,12 +15,12 @@ use std::cell::RefCell;
 use js_sys::Reflect;
 use mln_style::bitmap::AlphaImage;
 use mln_style::size::Size;
-use mln_util::constants::ONE_EM;
-use mln_util::font_stack::FontStack;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{OffscreenCanvas, OffscreenCanvasRenderingContext2d};
 
 use crate::log_target;
+use crate::text::constants::ONE_EM;
+use crate::text::font_stack::FontStack;
 use crate::text::glyph::{Glyph, GlyphID, GlyphMetrics};
 use crate::text::local_fonts::LocalGlyphRasterizer;
 

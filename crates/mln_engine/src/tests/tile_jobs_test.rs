@@ -20,13 +20,13 @@ use mln_style::property::evaluation::PropertyEvaluationParameters;
 use mln_style::size::Size;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
-use mln_util::pool::TaskGroup;
-use mln_util::queue::Queue;
 use parking_lot::Mutex;
 use serde_json::json;
 
 use crate::Registry;
 use crate::draw::dynamic_texture::DynamicTextureBinId;
+use crate::exec::pool::TaskGroup;
+use crate::exec::queue::Queue;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::layer::tile_layout::LayoutParams;
 use crate::map::MapMode;

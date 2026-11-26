@@ -11,6 +11,8 @@ pub mod camera;
 #[cfg(feature = "gpu-conformance")]
 pub mod conformance;
 mod draw;
+pub mod exec;
+pub mod geo;
 mod geometry;
 pub mod gestures;
 mod gfx;

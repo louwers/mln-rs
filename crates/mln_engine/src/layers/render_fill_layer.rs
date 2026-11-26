@@ -15,12 +15,12 @@ use mln_style::layer::LayerStyle;
 use mln_style::layers::Fill;
 use mln_style::layers::fill_layer_properties::FillPaintProperties;
 use mln_style::types::{AlignmentType, LayerBlendType, TranslateAnchorType};
-use mln_util::identity::SimpleIdentity;
 
 use super::{cast_matrix, refresh_paint_attributes};
 use crate::buckets::fill_bucket::{FillBinders, FillBucket, FillLayoutVertex};
 use crate::draw::atlas_binding::AtlasBinding;
 use crate::draw::context::Context;
+use crate::draw::identity::SimpleIdentity;
 use crate::draw::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::draw::objects::{DrawGeometry, DrawObjects, copy_shared_attributes};
 use crate::draw::segment::SegmentBase;
@@ -825,7 +825,7 @@ impl RenderLayer for RenderFillLayer {
             region.pixels_to_tile_units,
         );
 
-        mln_util::intersection_tests::polygon_intersects_multi_polygon(
+        crate::geo::intersection_tests::polygon_intersects_multi_polygon(
             translated_query_geometry.as_ref().unwrap_or(region.geometry),
             geometry,
         )

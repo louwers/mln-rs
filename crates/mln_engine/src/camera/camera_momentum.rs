@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use mln_util::geo::ScreenCoordinate;
+use crate::geo::ScreenCoordinate;
 
 /// A unit cubic Bézier, from (0, 0) to (1, 1), with these control points.
 #[derive(Clone, Copy, Debug, PartialEq)]

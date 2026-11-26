@@ -13,8 +13,10 @@
 //!   `mln_style::feature`.
 
 pub mod cut;
+pub mod dem;
 pub(crate) mod dem_data; // dem-heatmap
 mod error;
+pub mod feature;
 pub mod geometry_tile_data;
 mod mlt;
 mod mvt;

@@ -62,7 +62,7 @@ impl FeatureStateSelector {
             Some(Identifier::Double(value)) if !value.is_finite() => {
                 return Err(Error::invalid_argument("feature_id double_value must be finite"));
             }
-            Some(id) => mln_util::feature::feature_id_to_string(id),
+            Some(id) => mln_engine::tile::feature::feature_id_to_string(id),
         };
         let state_key = self.state_key.clone().filter(|key| !key.is_empty());
         if feature_id.is_none() {

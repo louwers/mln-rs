@@ -7,9 +7,9 @@ use std::rc::Rc;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::hash::{HashMap, HashSet};
 use mln_style::size::Size;
-use mln_util::identity::SimpleIdentity;
 
 use crate::draw::context::Context;
+use crate::draw::identity::SimpleIdentity;
 use crate::draw::store::SharedTexture;
 use crate::tile_store::dem::DemContents;
 

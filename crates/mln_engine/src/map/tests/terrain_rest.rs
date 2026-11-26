@@ -13,9 +13,6 @@ use mln_style::constants::DEFAULT_TRANSITION_EASE;
 use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
 use mln_style::size::Size;
 use mln_style::time::Instant;
-use mln_util::geo::ScreenCoordinate;
-use mln_util::projection::Projection;
-use mln_util::queue::Queue;
 
 use super::ground::{Slope, flat, ground_event, report, world};
 use super::terrain_camera::{FRAME, Hill, frames, map_over, meters, pixel, start};
@@ -25,6 +22,9 @@ use crate::camera::{
     AnimationOptions, CameraDelta, CameraLimits, CameraMomentum, CameraOptions, CameraUpdate, CameraUpdateMode,
     ConstrainMode, Elevation, GesturePhase, MomentumGlide, View, ViewportMode,
 };
+use crate::exec::queue::Queue;
+use crate::geo::ScreenCoordinate;
+use crate::geo::projection::Projection;
 use crate::map::{CameraChangeSource, Map, MapEvent};
 
 /// An ease over a second, with an easing of its own so that it doesn't fly.

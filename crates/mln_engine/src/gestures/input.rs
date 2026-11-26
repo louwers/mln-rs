@@ -7,8 +7,7 @@
 
 use std::ops::BitOr;
 
-use mln_util::geo::ScreenCoordinate;
-
+use crate::geo::ScreenCoordinate;
 use crate::gestures::options::Axis;
 
 /// What kind of device a pointer is. Touches pinch, twist and tilt with two

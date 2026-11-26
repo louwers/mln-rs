@@ -12,15 +12,15 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use mln_util::compression::{decompress, is_compressed};
-use mln_util::constants::{FILE_PROTOCOL, PMTILES_PROTOCOL};
-use mln_util::pool::Pool;
 use mln_vec_map::VecMap;
 use parking_lot::Mutex;
 use pmtiles::{Compression, DirEntry, Directory, Header, PmtError, TileCoord, TileId, TileType};
 use serde_json::{Value as Json, json};
 
+use crate::exec::pool::Pool;
 use crate::storage::archive_tilejson::archive_tilejson;
+use crate::storage::compression::{decompress, is_compressed};
+use crate::storage::constants::{FILE_PROTOCOL, PMTILES_PROTOCOL};
 use crate::storage::file_source::FileSource;
 use crate::storage::request::{Request, Responder};
 use crate::storage::resource::{Kind, LoadingMethod, Resource};

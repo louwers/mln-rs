@@ -1,10 +1,10 @@
 //! What rendering changes in `Map::snapshot`.
 
+use mln_engine::exec::pool::Pool;
+use mln_engine::exec::queue::Queue;
 use mln_engine::map::{Map, MapMode, MapOptions};
 use mln_headless::HeadlessFrontend;
 use mln_style::size::Size;
-use mln_util::pool::Pool;
-use mln_util::queue::Queue;
 
 #[test]
 fn a_rendered_still_shows_in_the_snapshot() {

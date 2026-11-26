@@ -9,9 +9,9 @@ use std::time::Duration;
 use glam::DVec2;
 use mln_style::Edit;
 use mln_style::geo::{LatLng, WrapMode};
-use mln_util::queue::Queue;
 
 use crate::camera::{AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, Elevation};
+use crate::exec::queue::Queue;
 use crate::map::{Map, MapEvent, MapMode, MapOptions};
 use crate::storage::stub_file_source::{ResponseType, StubFileSource};
 use crate::{RenderMode, RendererEvent};
@@ -188,7 +188,7 @@ pub(super) fn pitchable(style: &str, run_loop: &Queue<()>) -> Map {
 
 /// Where `location` is in Web Mercator at zoom 0.
 pub(super) fn world(location: &LatLng) -> DVec2 {
-    let point = mln_util::projection::Projection::project(location, 1.0 / mln_style::constants::TILE_SIZE_D);
+    let point = crate::geo::projection::Projection::project(location, 1.0 / mln_style::constants::TILE_SIZE_D);
     DVec2::new(point.x, point.y)
 }
 

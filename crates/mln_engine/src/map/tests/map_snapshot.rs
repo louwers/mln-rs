@@ -10,14 +10,14 @@ use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
 use mln_style::size::Size;
 use mln_style::sources::GeoJsonSourceType;
 use mln_style::types::{ProjectionDefinition, ProjectionType};
-use mln_util::geo::{EdgeInsets, ScreenCoordinate};
-use mln_util::queue::Queue;
 
 use crate::UpdateReader;
 use crate::camera::{
     AnimationOptions, BoundOptions, CameraDelta, CameraOptions, CameraUpdate, CameraUpdateMode, ConstrainMode,
     FreeCameraOptions, GesturePhase, MapProjection, MapView, NorthOrientation, ProjectionMode, Viewport, ViewportMode,
 };
+use crate::exec::queue::Queue;
+use crate::geo::{EdgeInsets, ScreenCoordinate};
 use crate::map::snapshot::{CameraBounds, FreeCamera, TileSettings};
 use crate::map::{Map, MapMode, MapOptions};
 use crate::storage::stub_file_source::{ResponseType, StubFileSource};

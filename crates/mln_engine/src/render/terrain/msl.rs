@@ -54,7 +54,7 @@ static float ground_visibility(float4 clip, float view_height, texture2d<float, 
 }
 pub(crate) use ground_visibility;
 
-/// The height rule of `mln_util::dem`, over the DEM tile a draw reads: its
+/// The height rule of `crate::tile::dem`, over the DEM tile a draw reads: its
 /// RGBA8 texels behind a one-texel border, decoded by a `TerrainSurfaceUBO`.
 /// A macro, so that `concat!` puts it in the sources of the programs that
 /// read the DEM.
@@ -343,7 +343,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS)
     ),
     // Fast math would let the compiler fuse or reorder the f32 operations of
     // the terrain's height rule, which the CPU does one at a time, in order
-    // (`mln_util::dem`).
+    // (`crate::tile::dem`).
     fast_math: false,
 };
 
@@ -394,6 +394,6 @@ float4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS
     ),
     // Fast math would let the compiler fuse or reorder the f32 operations of
     // the terrain's height rule, which the CPU does one at a time, in order
-    // (`mln_util::dem`).
+    // (`crate::tile::dem`).
     fast_math: false,
 };

@@ -18,7 +18,7 @@ uniform_block! {
 }
 
 /// How the terrain's surface stands: how its DEM's texels decode to
-/// heights, as [`mln_util::dem::DemUnpack`] does, the exaggeration, and how
+/// heights, as [`crate::tile::dem::DemUnpack`] does, the exaggeration, and how
 /// far the surface's skirts reach down. The first members of a
 /// [`TerrainSurfaceUBO`].
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

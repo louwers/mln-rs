@@ -7,6 +7,7 @@
 
 use glam::{DMat4, DVec4};
 use mln_engine::camera::{CameraOptions, CameraUpdate};
+use mln_engine::geo::EdgeInsets;
 use mln_engine::map::MapMode;
 use mln_runtime::{
     AcquiredFrame, AttachOptions, ClipDepthRange, DemandMode, Device, DeviceOptions, ErrorKind, FrameDemand,
@@ -15,7 +16,6 @@ use mln_runtime::{
 };
 use mln_style::geo::LatLng;
 use mln_style::size::Size;
-use mln_util::geo::EdgeInsets;
 
 use crate::support::{eventually, serve_level_dem, wait};
 

@@ -1,12 +1,12 @@
 use std::sync::{Arc, LazyLock};
 use std::thread::ThreadId;
 
+use mln_engine::text::font_stack::FontStack;
 use mln_engine::text::glyph::{FontData, FontFace};
 use mln_engine::text::local_fonts::{FontChooser, LocalGlyphs};
 use mln_style::Edit;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::size::Size;
-use mln_util::font_stack::FontStack;
 use parking_lot::Mutex;
 
 use crate::gtest_map::style_image;

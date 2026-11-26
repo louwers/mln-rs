@@ -1,10 +1,10 @@
 use geometry::Point;
 use glam::{DMat4, DVec2, DVec3, DVec4};
 use mln_style::constants;
-use mln_util::projection::Projection as WebMercator;
 
 use crate::camera::vertical_perspective_projection::VerticalPerspectiveProjection;
 use crate::camera::view::View;
+use crate::geo::projection::Projection as WebMercator;
 use crate::tile::UnwrappedTileID;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

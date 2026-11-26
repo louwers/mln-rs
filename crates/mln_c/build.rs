@@ -1,5 +1,5 @@
 //! Links the browser build's module with a stack the size of the threads'
-//! that other builds parse on (`mln_util::thread::STACK_SIZE`): JSON and the
+//! that other builds parse on (`mln_engine::exec::thread::STACK_SIZE`): JSON and the
 //! expressions built from it recurse as deep as their input nests, and the
 //! browser's instance parses on its one thread (`src/parse_thread.rs`).
 //!

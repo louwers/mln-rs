@@ -3,6 +3,7 @@ use std::sync::Arc;
 use geojson::{Feature, GeoJson, Geometry};
 use mln_engine::Registry;
 use mln_engine::camera::CameraOptions;
+use mln_engine::exec::pool::Pool;
 use mln_engine::map::{Map, MapMode, MapOptions};
 use mln_engine::storage::ResourceOptions;
 use mln_engine::storage::stub_file_source::{ResponseType, StubFileSource};
@@ -13,7 +14,6 @@ use mln_style::geo::{LatLng, LatLngBounds};
 use mln_style::layer::Layer;
 use mln_style::sources::custom_geometry_source::{self, Options as CustomGeometrySourceOptions};
 use mln_style::sources::geojson::GeoJSONOptions;
-use mln_util::pool::Pool;
 use serde_json::json;
 
 use crate::support::*;

@@ -30,13 +30,11 @@ use mln_style::layers::Hillshade;
 use mln_style::layers::hillshade_layer_properties::HillshadePaintProperties;
 use mln_style::math::deg2radf;
 use mln_style::types::{HillshadeIlluminationAnchorType, HillshadeMethodType, ResamplingType, TranslateAnchorType};
-use mln_util::constants;
-use mln_util::dem::DemUnpack;
-use mln_util::identity::SimpleIdentity;
 
 use super::cast_matrix;
 use crate::buckets::raster_bucket::{MaskQuads, RasterLayoutVertex};
 use crate::draw::context::Context;
+use crate::draw::identity::SimpleIdentity;
 use crate::draw::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::draw::objects::{DrawGeometry, DrawObjects, Textures};
 use crate::draw::segment::SegmentBase;
@@ -64,6 +62,7 @@ use crate::render::tile::FrameTile;
 use crate::render::tile_matrix::{bind_no_projection, projection_data, to_projection_ubo};
 use crate::source::render_source::RenderSource;
 use crate::tile::UnwrappedTileID;
+use crate::tile::dem::{DemUnpack, TERRAIN_RGB_MAXZOOM};
 use crate::tile_store::dem::DemContents;
 
 /// The ids of the buffers that the draws bind.
@@ -163,7 +162,7 @@ impl RenderHillshadeLayer {
             values,
             drawing: TileDraws::default(),
             draw_list: DrawList::default(),
-            maxzoom: constants::TERRAIN_RGB_MAXZOOM,
+            maxzoom: TERRAIN_RGB_MAXZOOM,
             static_data_shared_vertices: None,
             static_data_indices: None,
             globe_meshes: GlobeTileMeshCache::new(),

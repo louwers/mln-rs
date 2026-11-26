@@ -4,9 +4,9 @@
 
 use geo_types::Geometry;
 use geojson::GeoJson;
+use mln_engine::geo::{EdgeInsets, ScreenCoordinate};
 use mln_style::geo::{LatLng, LatLngBounds};
 use mln_style::tile_id::CanonicalTileID;
-use mln_util::geo::{EdgeInsets, ScreenCoordinate};
 
 use crate::error::Error;
 use crate::generated::types::{

@@ -1,7 +1,6 @@
 use std::time::Duration;
 
-use mln_util::chrono::{Timestamp, now};
-
+use crate::storage::chrono::{Timestamp, now};
 use crate::storage::http_timeout::error_retry_timeout;
 use crate::storage::response::Reason;
 

@@ -20,12 +20,12 @@
 use std::sync::{Arc, mpsc};
 
 use mln_style::hash::HashSet;
-use mln_util::thread::Joined;
 use mln_wire::payload::Payload;
 
 use super::TileWorkerHost;
 use super::envelope::{self, Encoded};
 use super::map_side::MapCodec;
+use crate::exec::thread::Joined;
 use crate::tile_store::inbox::{InboxSender, TileEvent};
 use crate::worker::job::{JobId, JobResult, JobTimes, Run};
 use crate::worker::tile_workers::{Lane, ReplyBody, TileWorkers};
@@ -291,7 +291,7 @@ impl ThreadWorkerInstances {
     fn start(instance: usize, registry: &Arc<Registry>, replies: &ReplySink) -> Option<WorkerThread> {
         let (registry, replies) = (Arc::clone(registry), replies.clone());
         let (requests, received) = mpsc::channel::<Vec<u8>>();
-        let thread = mln_util::thread::spawn(format!("TileWorker {instance}"), move || {
+        let thread = crate::exec::thread::spawn(format!("TileWorker {instance}"), move || {
             let host = TileWorkerHost::new(registry, move |reply| replies.send(instance, reply));
             for request in received {
                 host.handle(&request);

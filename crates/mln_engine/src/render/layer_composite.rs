@@ -30,10 +30,10 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::ColorBlendFactorType;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMode, DrawModeType, Rgba, Size, StencilMode};
 use mln_style::types::LayerBlendType;
-use mln_util::identity::SimpleIdentity;
 
 use crate::draw::buffer::Buffer;
 use crate::draw::context::Context;
+use crate::draw::identity::SimpleIdentity;
 use crate::draw::objects::Entries;
 use crate::draw::owned::Owned;
 use crate::draw::resources::{GpuTexture, attachment_bytes};

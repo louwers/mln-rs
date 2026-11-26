@@ -8,11 +8,11 @@ use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_style::constants::EXTENT;
 use mln_style::types::TranslateAnchorType;
-use mln_util::constants::M2PI;
 
 use crate::camera::{ProjectionData, View};
 use crate::draw::context::Context;
 use crate::draw::uniform_buffer::UniformBufferArray;
+use crate::geo::constants::M2PI;
 use crate::layers::cast_matrix;
 use crate::render::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render::tile::RenderTile;

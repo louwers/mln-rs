@@ -35,7 +35,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]] MLN_
 }
 
 // The height in meters of the DEM at `coord`, by the rule of
-// `mln_util::dem`. The channels aren't rounded: the decode is linear in
+// `crate::tile::dem`. The channels aren't rounded: the decode is linear in
 // them, so where a linear sampler interpolates them, it interpolates the
 // heights.
 float getElevation(float2 coord, texture2d<float, access::sample> image, sampler image_sampler, float4 unpack,

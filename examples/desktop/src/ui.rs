@@ -19,7 +19,7 @@ use egui::{
     Align2, Color32, CornerRadius, CursorIcon, Frame, Id, LayerId, Margin, Order, Rect, Response, RichText, Sense,
     Shadow, Shape, Stroke, StrokeKind, Ui, Vec2, pos2, vec2,
 };
-use mln_util::geo::ScreenCoordinate;
+use mln_engine::geo::ScreenCoordinate;
 
 use crate::backend::Kind;
 use crate::network::Network;

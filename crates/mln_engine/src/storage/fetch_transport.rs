@@ -30,12 +30,12 @@ use std::pin::pin;
 use std::sync::Arc;
 use std::task::{Poll, Waker};
 
-use mln_util::http_header::CacheControl;
 use parking_lot::Mutex;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
 use crate::storage::http_file_source::{self, Transfer, TransferRequest};
+use crate::storage::http_header::CacheControl;
 use crate::storage::response::{Reason, ResourceError};
 
 #[wasm_bindgen]

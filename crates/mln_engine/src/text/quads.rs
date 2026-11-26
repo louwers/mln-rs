@@ -3,10 +3,10 @@ use mln_style::image::ImageStretch;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::math::deg2radf;
 use mln_style::types::{SymbolPlacementType, TextRotationAlignmentType};
-use mln_util::constants::ONE_EM;
 
 use crate::text::PositionedIcon;
 use crate::text::atlas::{ImagePosition, ImagePositions, RectU16};
+use crate::text::constants::ONE_EM;
 use crate::text::glyph::Shaping;
 
 /// A glyph's or an icon's quad, relative to its symbol's anchor.

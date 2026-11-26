@@ -16,8 +16,7 @@
 
 use std::sync::Arc;
 
-use mln_util::font_stack::FontStack;
-
+use crate::text::font_stack::FontStack;
 use crate::text::glyph::{FontFace, Glyph, GlyphID};
 
 /// Chooses which of the device's fonts draws a cluster: a character and the

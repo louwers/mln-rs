@@ -10,12 +10,12 @@ use mln_gfx::types::{CullFaceWindingType, DepthFunctionType, StencilOpType};
 use mln_gfx::{DepthMaskType, DepthMode, ScissorRect, Size, StencilMode};
 use mln_style::constants::EXTENT;
 use mln_style::tile_id::CanonicalTileID;
-use mln_util::identity::SimpleIdentity;
 use mln_vec_map::VecMap;
 use smallvec::SmallVec;
 
 use crate::camera::{ProjectionData, View, ViewportMode};
 use crate::draw::context::Context;
+use crate::draw::identity::SimpleIdentity;
 use crate::render::clip_masks::ClipMasks;
 use crate::render::frame::Frame;
 use crate::render::layer_composite::LayerComposite;

@@ -27,11 +27,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use mln_engine::geo::ScreenCoordinate;
 use mln_engine::gestures::{Input, Modes, PinchPhase, PointerKind};
 use mln_engine::map::MapEvent;
 use mln_frame_pacer::FramePacer;
 use mln_style::error::Error;
-use mln_util::geo::ScreenCoordinate;
 use parking_lot::{Condvar, Mutex};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
@@ -411,7 +411,7 @@ impl ApplicationHandler<UserEvent> for Host {
         self.open = Some(open);
 
         let proxy = self.proxy.clone();
-        let spawned = mln_util::thread::builder("render").spawn(move || {
+        let spawned = mln_engine::exec::thread::builder("render").spawn(move || {
             // Sent even if the render thread panics, so the window closes.
             struct Ended(EventLoopProxy<UserEvent>, Option<String>);
             impl Drop for Ended {

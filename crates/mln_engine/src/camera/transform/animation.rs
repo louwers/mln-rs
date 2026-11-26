@@ -5,8 +5,6 @@ use std::time::Duration;
 
 use mln_style::geo::{LatLngBounds, WrapMode};
 use mln_style::interpolate::interpolate;
-use mln_util::geo::EdgeInsets;
-use mln_util::projection::Projection;
 
 use super::transition::{AlongFn, FrameFn};
 use super::{
@@ -15,6 +13,8 @@ use super::{
 use crate::camera::{
     AnimationOptions, CameraOptions, TransformState, TransitionOutcome, VerticalPerspectiveProjection,
 };
+use crate::geo::EdgeInsets;
+use crate::geo::projection::Projection;
 
 /// An animation frame's padding, `t` of the way from `start` to `end`; `None`
 /// when it has none (see [`frame_edge_insets`]). Insets that don't change are

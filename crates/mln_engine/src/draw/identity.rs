@@ -11,17 +11,13 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 /// Ordering and equality compare the id. Use `Option<SimpleIdentity>` for an
 /// identity that may be absent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SimpleIdentity {
+pub(crate) struct SimpleIdentity {
     unique_id: NonZeroU64,
 }
 
 impl SimpleIdentity {
     /// Returns a new unique identity.
-    #[expect(
-        clippy::new_without_default,
-        reason = "each `new` is a fresh identity, which `Default` would make implicit"
-    )]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         SimpleIdentity {
             unique_id: NonZeroU64::new(NEXT_ID.fetch_add(1, Ordering::Relaxed)).unwrap_or(NonZeroU64::MIN),
         }

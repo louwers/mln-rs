@@ -13,14 +13,14 @@ use std::time::{Duration, Instant};
 pub(crate) use mln_bench_workload::paths::{tile_at, tile_center};
 use mln_engine::RenderMode;
 use mln_engine::camera::CameraOptions;
+use mln_engine::exec::pool::Pool;
+use mln_engine::exec::queue::Queue;
 use mln_engine::map::{Map, MapEvent, MapMode, MapOptions, RenderFrameStatus};
 use mln_engine::storage::FileSource;
 use mln_headless::HeadlessFrontend;
 use mln_runtime::{BackendRef, Device};
 use mln_style::size::Size;
 use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, create_geojson_data, geojson_source};
-use mln_util::pool::Pool;
-use mln_util::queue::Queue;
 use mln_webgpu::bench::PipelineStatistics;
 
 use super::fixtures::Fixtures;

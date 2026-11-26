@@ -63,6 +63,6 @@ float4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS
     ),
     // Fast math would let the compiler fuse or reorder the f32 operations of
     // the terrain's height rule, which the CPU does one at a time, in order
-    // (`mln_util::dem`).
+    // (`crate::tile::dem`).
     fast_math: false,
 };

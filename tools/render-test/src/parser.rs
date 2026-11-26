@@ -103,7 +103,7 @@ pub(crate) fn to_json_value(value: &Value) -> String {
 }
 
 #[must_use]
-pub(crate) fn to_json_features(features: &[mln_util::feature::Feature]) -> String {
+pub(crate) fn to_json_features(features: &[mln_engine::tile::feature::Feature]) -> String {
     let mut array = Vec::with_capacity(features.len());
     for feature in features {
         // type, geometry, id, properties (the `geojson` crate's order), then
@@ -931,7 +931,7 @@ pub(crate) fn parse_test_operations(metadata: &TestMetadata) -> Result<TestOpera
                 }
                 let size = if compressed {
                     let raw = std::fs::read(&file_path).unwrap_or_default();
-                    mln_util::compression::compress(&raw).map_or(0, |c| c.len() as u64)
+                    mln_engine::storage::compression::compress(&raw).map_or(0, |c| c.len() as u64)
                 } else {
                     std::fs::metadata(&file_path).map_or(0, |m| m.len())
                 };

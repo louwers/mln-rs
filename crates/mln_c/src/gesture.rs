@@ -8,11 +8,11 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use ::mln_engine::camera::{MomentumDecay, MomentumDecayModel, MomentumEasing, MomentumSnap};
+use mln_engine::geo::ScreenCoordinate;
 use mln_engine::gestures::{
     AxisOptions, GestureEvent, GestureOptions, GestureRecognizer, Input, Modes, NextTick, Notch, PinchPhase,
     PointerKind,
 };
-use mln_util::geo::ScreenCoordinate;
 use parking_lot::Mutex;
 
 use crate::abi::{self, Fields};

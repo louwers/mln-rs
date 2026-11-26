@@ -2486,7 +2486,6 @@ dependencies = [
  "mln-rs-polylabel",
  "mln-rs-runtime",
  "mln-rs-style",
- "mln-rs-util",
  "mln-rs-vec-map",
  "mln-rs-vulkan",
  "mln-rs-web-host",
@@ -2508,7 +2507,6 @@ dependencies = [
  "mln-rs-mtl",
  "mln-rs-runtime",
  "mln-rs-style",
- "mln-rs-util",
  "mln-rs-vulkan",
  "mln-rs-webgpu",
  "parking_lot",
@@ -2563,7 +2561,6 @@ dependencies = [
  "mln-rs-mtl",
  "mln-rs-runtime",
  "mln-rs-style",
- "mln-rs-util",
  "mln-rs-vec-map",
  "mln-rs-vulkan",
  "mln-rs-web-host",
@@ -2632,7 +2629,6 @@ dependencies = [
  "mln-rs-mtl",
  "mln-rs-runtime",
  "mln-rs-style",
- "mln-rs-util",
  "mln-rs-vulkan",
  "mln-rs-webgpu",
  "objc2 0.6.5",
@@ -2665,6 +2661,7 @@ dependencies = [
  "geojson",
  "glam",
  "harfrust 0.15.0",
+ "httpdate",
  "httpmock",
  "i_overlay",
  "image-webp",
@@ -2680,7 +2677,6 @@ dependencies = [
  "mln-rs-pixelmatch",
  "mln-rs-polylabel",
  "mln-rs-style",
- "mln-rs-util",
  "mln-rs-vec-map",
  "mln-rs-webgpu",
  "mln-rs-wire",
@@ -2835,7 +2831,6 @@ dependencies = [
  "mln-rs-pixelmatch",
  "mln-rs-runtime",
  "mln-rs-style",
- "mln-rs-util",
  "mln-rs-vulkan",
  "mln-rs-webgpu",
  "naga",
@@ -2900,7 +2895,6 @@ dependencies = [
  "mln-rs-headless",
  "mln-rs-pixelmatch",
  "mln-rs-style",
- "mln-rs-util",
  "mln-rs-wire",
  "parking_lot",
  "regex",
@@ -2930,7 +2924,6 @@ dependencies = [
  "mln-rs-gl",
  "mln-rs-mtl",
  "mln-rs-style",
- "mln-rs-util",
  "mln-rs-vulkan",
  "mln-rs-web-host",
  "mln-rs-webgpu",
@@ -3000,21 +2993,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mln-rs-util"
-version = "0.0.17"
-dependencies = [
- "flate2",
- "geo-types",
- "glam",
- "httpdate",
- "log",
- "mln-rs-feature",
- "mln-rs-geometry",
- "mln-rs-style",
- "parking_lot",
-]
-
-[[package]]
 name = "mln-rs-vec-map"
 version = "0.0.17"
 dependencies = [
@@ -3057,7 +3035,6 @@ dependencies = [
  "mln-rs-gl",
  "mln-rs-runtime",
  "mln-rs-style",
- "mln-rs-util",
  "mln-rs-web-host",
  "mln-rs-webgpu",
  "parking_lot",
@@ -3076,7 +3053,6 @@ dependencies = [
  "log",
  "mln-rs-engine",
  "mln-rs-style",
- "mln-rs-util",
  "mln-rs-wire",
  "parking_lot",
  "wasm-bindgen",

@@ -1,4 +1,13 @@
-//! The camera's screen coordinates, edge insets and orientation.
+//! The map's geometry: the camera's screen coordinates, edge insets and
+//! orientation; spherical Mercator ([`projection`]); the camera's frustum
+//! and the bounding volumes it culls ([`bounding_volumes`]); intersection
+//! tests, point math, and the Earth's size ([`constants`]).
+
+pub mod bounding_volumes;
+pub mod constants;
+pub mod intersection_tests;
+pub mod math;
+pub mod projection;
 
 use geometry::Point;
 use mln_style::geo::LatLng;

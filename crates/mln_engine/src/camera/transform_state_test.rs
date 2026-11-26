@@ -3,11 +3,11 @@ use mln_style::constants::LATITUDE_MAX;
 use mln_style::geo::LatLng;
 use mln_style::size::Size;
 use mln_style::types::ProjectionDefinition;
-use mln_util::constants::DEFAULT_FOV;
-use mln_util::projection::Projection;
 
 use super::TransformState;
+use crate::camera::constants::DEFAULT_FOV;
 use crate::camera::{Camera, CameraLimits, LogicalExtent, MapView, ProjectionMode, Viewport};
+use crate::geo::projection::Projection;
 
 /// A 512 by 512 view at `pitch` degrees, looking north.
 fn pitched(pitch: f64) -> TransformState {
@@ -69,7 +69,7 @@ fn the_map_ends_at_the_horizon() {
 /// the far plane ends sea-level ground there too.
 #[test]
 fn padding_moves_the_map_s_end_with_the_sky_s_horizon() {
-    use mln_util::geo::EdgeInsets;
+    use crate::geo::EdgeInsets;
 
     for (top, bottom) in [(0.0, 40.0), (0.0, 80.0), (0.0, 160.0), (40.0, 0.0)] {
         let mut state = pitched(85.0);
@@ -138,9 +138,9 @@ fn a_center_too_far_to_place_leaves_the_camera_unchanged() {
 fn numbers_out_of_range_do_not_panic() {
     use mln_style::geo::WrapMode;
     use mln_style::types::ProjectionType;
-    use mln_util::geo::{EdgeInsets, ScreenCoordinate};
 
     use crate::camera::FreeCameraOptions;
+    use crate::geo::{EdgeInsets, ScreenCoordinate};
 
     type Setter = (&'static str, fn(&mut TransformState, f64));
     let values =
@@ -245,7 +245,7 @@ fn limits_apply_as_a_whole() {
     let wide = CameraLimits { min_zoom: -3.0, max_pitch: 4.0, ..*state.limits() };
     state.set_limits(wide).unwrap();
     assert_eq!(0.0, state.limits().min_zoom);
-    assert_eq!(mln_util::constants::PITCH_MAX, state.limits().max_pitch);
+    assert_eq!(crate::camera::constants::PITCH_MAX, state.limits().max_pitch);
 }
 
 #[test]
@@ -274,7 +274,7 @@ fn equal_zoom_limits_just_below_the_least_zoom_the_view_allows_apply() {
 /// A 301 by 200 view of the Alps, level or with pitch, roll, padding and a
 /// center below sea level.
 fn alpine(pitched: bool) -> TransformState {
-    use mln_util::geo::EdgeInsets;
+    use crate::geo::EdgeInsets;
 
     let (center_altitude, pitch, roll, top) = if pitched { (-800.0, 72.5, 9.0, 60.0) } else { (0.0, 0.0, 0.0, 0.0) };
     MapView {
@@ -418,7 +418,8 @@ fn the_center_at_its_altitude_draws_at_the_center() {
 #[test]
 fn the_center_altitude_holds_in_meters_through_zoom_and_center_changes() {
     use mln_style::geo::WrapMode;
-    use mln_util::geo::ScreenCoordinate;
+
+    use crate::geo::ScreenCoordinate;
 
     let mut state = pitched(60.0);
     state.set_center_altitude(1200.0);
@@ -451,11 +452,11 @@ fn the_center_altitude_holds_in_meters_through_zoom_and_center_changes() {
 
 /// Where `view`'s projection matrix draws `lat_lng`, `height` meters above
 /// sea level, measured from the bottom edge (y up).
-fn drawn_at(view: &crate::camera::View, lat_lng: &LatLng, height: f64) -> mln_util::geo::ScreenCoordinate {
+fn drawn_at(view: &crate::camera::View, lat_lng: &LatLng, height: f64) -> crate::geo::ScreenCoordinate {
     let point = Projection::project(lat_lng, view.scale());
     let clip = view.projection_matrix() * DVec4::new(point.x, point.y, height, 1.0);
     let size = view.size();
-    mln_util::geo::ScreenCoordinate::new(
+    crate::geo::ScreenCoordinate::new(
         f64::midpoint(clip.x / clip.w, 1.0) * f64::from(size.width),
         f64::midpoint(clip.y / clip.w, 1.0) * f64::from(size.height),
     )
@@ -467,7 +468,8 @@ fn drawn_at(view: &crate::camera::View, lat_lng: &LatLng, height: f64) -> mln_ut
 #[test]
 fn a_point_reads_the_location_its_line_of_sight_meets_on_a_plane() {
     use mln_style::geo::WrapMode;
-    use mln_util::geo::ScreenCoordinate;
+
+    use crate::geo::ScreenCoordinate;
 
     let mut state = pitched(55.0);
     state.set_lat_lng_zoom(&LatLng::new(30.0, 20.0).unwrap(), 12.0);
@@ -491,7 +493,8 @@ fn a_point_reads_the_location_its_line_of_sight_meets_on_a_plane() {
 #[test]
 fn moving_a_location_on_a_plane_puts_it_at_the_point() {
     use mln_style::geo::WrapMode;
-    use mln_util::geo::ScreenCoordinate;
+
+    use crate::geo::ScreenCoordinate;
 
     let mut state = pitched(55.0);
     state.set_lat_lng_zoom(&LatLng::new(30.0, 20.0).unwrap(), 12.0);
@@ -524,7 +527,8 @@ fn moving_a_location_on_a_plane_puts_it_at_the_point() {
 #[test]
 fn the_line_of_sight_runs_from_the_near_plane_to_the_far_plane() {
     use mln_style::geo::WrapMode;
-    use mln_util::geo::ScreenCoordinate;
+
+    use crate::geo::ScreenCoordinate;
 
     let mut state = pitched(60.0);
     state.set_center_altitude(700.0);
@@ -762,7 +766,8 @@ fn the_globe_draws_the_center_at_its_altitude_at_the_center() {
 fn globe_conversions_at_a_height_undo_each_other() {
     use mln_style::geo::WrapMode;
     use mln_style::types::ProjectionType;
-    use mln_util::geo::ScreenCoordinate;
+
+    use crate::geo::ScreenCoordinate;
 
     let state = raised(ProjectionDefinition::new(ProjectionType::VerticalPerspective), 14.0, 1000.0);
     let view = state.view();
@@ -794,9 +799,9 @@ fn globe_conversions_at_a_height_undo_each_other() {
 fn moving_a_location_on_a_sphere_puts_it_at_the_point() {
     use mln_style::geo::WrapMode;
     use mln_style::types::ProjectionType;
-    use mln_util::geo::ScreenCoordinate;
 
     use crate::camera::VerticalPerspectiveProjection;
+    use crate::geo::ScreenCoordinate;
 
     let state = raised(ProjectionDefinition::new(ProjectionType::VerticalPerspective), 14.0, 400.0);
     let (from, to) = (ScreenCoordinate::new(140.0, 120.0), ScreenCoordinate::new(380.0, 200.0));
@@ -825,7 +830,8 @@ fn moving_a_location_on_a_sphere_puts_it_at_the_point() {
 #[test]
 fn the_globe_hands_over_to_mercator_with_the_center_raised() {
     use mln_style::types::ProjectionType;
-    use mln_util::geo::ScreenCoordinate;
+
+    use crate::geo::ScreenCoordinate;
 
     let globe = ProjectionDefinition::new(ProjectionType::VerticalPerspective);
     let farthest_apart = |center_altitude: f64| {
@@ -862,7 +868,7 @@ fn raising_the_eye_keeps_its_place_and_the_center() {
     use mln_style::geo::WrapMode;
 
     let mut state = pitched(70.0);
-    state.set_limits(CameraLimits { max_pitch: mln_util::constants::PITCH_MAX, ..*state.limits() }).unwrap();
+    state.set_limits(CameraLimits { max_pitch: crate::camera::constants::PITCH_MAX, ..*state.limits() }).unwrap();
     state.set_angle(0.5);
     state.set_roll(0.1);
     state.set_center_altitude(1000.0);
@@ -900,7 +906,7 @@ fn raising_the_eye_keeps_its_place_and_the_center() {
 #[test]
 fn an_eye_raised_level_with_the_center_looks_level() {
     let mut state = pitched(95.0);
-    state.set_limits(CameraLimits { max_pitch: mln_util::constants::PITCH_MAX, ..*state.limits() }).unwrap();
+    state.set_limits(CameraLimits { max_pitch: crate::camera::constants::PITCH_MAX, ..*state.limits() }).unwrap();
     state.set_pitch(mln_style::math::deg2rad(95.0));
     let eye = state.view().eye_position();
     assert!(eye.z < 0.0, "{eye}");
@@ -1015,7 +1021,7 @@ fn on_globe(pitch: f64, bearing: f64, center_altitude: f64) -> TransformState {
     }
     .to_state()
     .unwrap();
-    state.set_limits(CameraLimits { max_pitch: mln_util::constants::PITCH_MAX, ..*state.limits() }).unwrap();
+    state.set_limits(CameraLimits { max_pitch: crate::camera::constants::PITCH_MAX, ..*state.limits() }).unwrap();
     assert!(state.view().is_globe());
     state
 }
@@ -1136,7 +1142,7 @@ fn recentering_on_the_globe_keeps_the_eye() {
 /// A `width` by `height` view of the equator at zoom 12, `pitch` and `roll`
 /// degrees, with a field of view of 60 degrees, `padding`, and terrain down
 /// to sea level.
-fn rolled(width: u32, height: u32, pitch: f64, roll: f64, padding: mln_util::geo::EdgeInsets) -> TransformState {
+fn rolled(width: u32, height: u32, pitch: f64, roll: f64, padding: crate::geo::EdgeInsets) -> TransformState {
     let mut state = MapView {
         camera: Camera {
             center: LatLng::new(0.0, 0.0).unwrap(),
@@ -1191,10 +1197,9 @@ fn visible_sea_level(state: &TransformState) -> Vec<(f64, f64)> {
 /// middle on either axis.
 #[test]
 fn the_far_plane_reaches_a_turned_views_farthest_corner() {
-    use mln_util::geo::EdgeInsets;
-
     use crate::camera::mode::ViewportMode;
     use crate::camera::view::NorthOrientation;
+    use crate::geo::EdgeInsets;
 
     let bottom = EdgeInsets::new(0.0, 0.0, 50.0, 0.0);
     let left = EdgeInsets::new(0.0, 200.0, 0.0, 0.0);
@@ -1229,7 +1234,7 @@ fn the_far_plane_reaches_a_turned_views_farthest_corner() {
 /// with 1000 px of left padding, with or without terrain.
 #[test]
 fn padding_far_up_the_map_keeps_the_far_plane() {
-    let mut state = rolled(2000, 500, 30.0, 90.0, mln_util::geo::EdgeInsets::new(0.0, 1000.0, 0.0, 0.0));
+    let mut state = rolled(2000, 500, 30.0, 90.0, crate::geo::EdgeInsets::new(0.0, 1000.0, 0.0, 0.0));
     for min_elevation in [None, Some(0.0)] {
         state.set_terrain_min_elevation(min_elevation);
         let ground = visible_sea_level(&state);

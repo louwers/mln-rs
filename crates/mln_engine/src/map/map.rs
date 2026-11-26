@@ -18,15 +18,15 @@ use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::time::Instant;
 use mln_style::types::{ProjectionDefinition, ProjectionType};
 use mln_style::{Edit, Source, Style, StyleRegistry};
-use mln_util::event_queue::{EventQueue, Waker};
-use mln_util::geo::{EdgeInsets, ScreenCoordinate};
-use mln_util::pool::Pool;
 
 use crate::camera::transform::{CameraCommandId, CommandEnd, FrameClock, TerrainGround, Transform, TransformEvent};
 use crate::camera::{
     AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraLimits, CameraOptions, CameraUpdate, Elevation,
     ProjectionMode, TransformState, VerticalPerspectiveProjection, Viewport,
 };
+use crate::exec::event_queue::{EventQueue, Waker};
+use crate::exec::pool::Pool;
+use crate::geo::{EdgeInsets, ScreenCoordinate};
 use crate::map::events::{MapEvent, RenderFrameStatus};
 use crate::map::feature_state::FeatureStateStore;
 use crate::map::options::{MapOptions, UnusedStyleImagePolicy};

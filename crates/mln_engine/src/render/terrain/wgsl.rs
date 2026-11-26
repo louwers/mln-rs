@@ -54,7 +54,7 @@ fn ground_visibility(clip: vec4<f32>, view_height: f32) -> f32 {
 }
 pub(crate) use ground_visibility;
 
-/// The height rule of `mln_util::dem`, over the DEM tile a draw reads: its
+/// The height rule of `crate::tile::dem`, over the DEM tile a draw reads: its
 /// RGBA8 texels behind a one-texel border, decoded by a `TerrainSurfaceUBO`.
 macro_rules! ground_height {
     () => {

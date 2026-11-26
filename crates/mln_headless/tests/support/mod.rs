@@ -25,6 +25,8 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use mln_engine::exec::pool::Pool;
+use mln_engine::exec::queue::Queue;
 use mln_engine::map::{Map, MapEvent, MapMode, MapOptions, RenderFrameStatus};
 use mln_engine::storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_engine::storage::{FileSource, Kind, Resource, Responder, Response};
@@ -37,8 +39,6 @@ use mln_style::sources::custom::TileFunction;
 use mln_style::sources::custom_geometry_source::CustomGeometrySourceHandle;
 use mln_style::sprite::Sprite;
 use mln_style::tile_id::CanonicalTileID;
-use mln_util::pool::Pool;
-use mln_util::queue::Queue;
 use parking_lot::{Mutex, MutexGuard};
 
 // MARK: - Fixtures

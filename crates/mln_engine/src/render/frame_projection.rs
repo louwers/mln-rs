@@ -9,9 +9,9 @@
 //! backend.
 
 use glam::{DMat4, DVec3};
-use mln_util::projection::Projection;
 
 use crate::camera::{ClipDepthRange, FrameProjection};
+use crate::geo::projection::Projection;
 use crate::render::paint_parameters::TransformParameters;
 
 /// The projection of a frame that drew with `transform`, its 3D layers into
@@ -70,10 +70,10 @@ mod tests {
     use mln_style::geo::LatLng;
     use mln_style::size::Size;
     use mln_style::types::ProjectionDefinition;
-    use mln_util::geo::EdgeInsets;
 
     use super::*;
     use crate::camera::{Camera, LogicalExtent, MapView, ProjectionMode, Viewport};
+    use crate::geo::EdgeInsets;
 
     const SIZE: Size = Size { width: 300, height: 200 };
 

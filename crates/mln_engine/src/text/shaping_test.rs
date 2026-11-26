@@ -5,10 +5,10 @@ use mln_style::i18n;
 use mln_style::image::{ImageContent, Impl, TextFit};
 use mln_style::size::Size;
 use mln_style::types::{IconTextFitType, SymbolAnchorType, TextJustifyType, TextWritingModeType, VerticalAlign};
-use mln_util::constants::ONE_EM;
-use mln_util::font_stack::FontStack;
 
 use crate::text::atlas::{ImagePosition, ImagePositions, RectU16};
+use crate::text::constants::ONE_EM;
+use crate::text::font_stack::FontStack;
 use crate::text::glyph::{
     Bounds, GlyphID, GlyphIDType, GlyphMetrics, GlyphPosition, GlyphPositions, PositionedGlyph, PositionedLine,
     Shaping, face_type,

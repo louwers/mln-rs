@@ -13,8 +13,7 @@ mod tile_coordinate;
 
 use std::sync::Arc;
 
-use mln_util::pool::{Pool, TaskGroup};
-
+use crate::exec::pool::{Pool, TaskGroup};
 use crate::map::MapMode;
 use crate::tests::OneTile;
 use crate::tile::OverscaledTileID;

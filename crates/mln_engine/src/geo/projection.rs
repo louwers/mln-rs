@@ -6,7 +6,8 @@ use mln_style::error::Error;
 use mln_style::geo::{LatLng, WrapMode};
 use mln_style::math::{clamp_f64, deg2rad, rad2deg};
 
-use crate::constants::{EARTH_RADIUS_M, M2PI, MAX_ZOOM, MIN_ZOOM};
+use crate::camera::constants::{MAX_ZOOM, MIN_ZOOM};
+use crate::geo::constants::{EARTH_RADIUS_M, M2PI};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ProjectedMeters {

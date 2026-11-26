@@ -15,9 +15,9 @@ use mln_style::sources::custom::{
 use mln_style::sources::custom_geometry_source::tile_features;
 use mln_style::sources::geojson::TileFeatures;
 use mln_style::tile_id::CanonicalTileID;
-use mln_util::pool::{Pool, TaskGroup};
 use parking_lot::Mutex;
 
+use crate::exec::pool::{Pool, TaskGroup};
 use crate::tile::OverscaledTileID;
 use crate::tile::tile_range::TileRange;
 

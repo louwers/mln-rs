@@ -70,12 +70,11 @@ use mln_style::source::SourceData;
 use mln_style::sources::RasterDemSourceType;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::tileset::RasterEncoding;
-use mln_util::constants;
-use mln_util::dem::DemUnpack;
 pub(crate) use stacks::{DrapeStacks, Draped};
 
 use crate::draw::context::Context;
 use crate::draw::store::SharedTexture;
+use crate::geo::constants;
 use crate::layer::layer_drawing::ChangedBuckets;
 use crate::map::{MapMode, TerrainSkirtLength};
 use crate::render::events::RendererEvent;
@@ -87,6 +86,7 @@ use crate::render::terrain::ground::GroundDepth;
 use crate::render::terrain::ubo::{HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO, TerrainFog, TerrainProps};
 use crate::render::update_parameters::UpdateParameters;
 use crate::tile::OverscaledTileID;
+use crate::tile::dem::DemUnpack;
 use crate::tile_store::source_tiles::SourceTiles;
 
 /// How far the skirts of terrain tiles reach down at `zoom`, in meters, or

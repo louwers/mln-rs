@@ -7,7 +7,6 @@ use mln_style::constants::DEFAULT_TRANSITION_EASE;
 use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
 use mln_style::time::Instant;
 use mln_style::unitbezier::UnitBezier;
-use mln_util::geo::ScreenCoordinate;
 
 use super::anchor::sees_plane;
 use super::transition::Transition;
@@ -17,6 +16,7 @@ use crate::camera::{
     MomentumDecayModel, MomentumEasing, MomentumGlide, MomentumSnap, TransformState, TransitionOutcome,
     VerticalPerspectiveProjection,
 };
+use crate::geo::ScreenCoordinate;
 use crate::log_target;
 use crate::map::events::{CameraChange, CameraChangeMode, CameraChangeSource};
 

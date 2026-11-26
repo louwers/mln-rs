@@ -10,14 +10,14 @@ use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 
 use mln_style::geo::{LatLng, LatLngBounds};
 use mln_style::tileset::Scheme;
-use mln_util::chrono::{Timestamp, now};
-use mln_util::compression::compress;
-use mln_util::queue::Queue;
 use parking_lot::{Mutex, MutexGuard};
 
 use super::cpp_path;
 use crate::Registry;
+use crate::exec::queue::Queue;
 use crate::offline::offline_download::{Downloads, OfflineDownload, Post};
+use crate::storage::chrono::{Timestamp, now};
+use crate::storage::compression::compress;
 use crate::storage::offline::{
     OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionMetadata, OfflineRegionObserver,
     OfflineRegionStatus, OfflineTilePyramidRegionDefinition,
@@ -614,7 +614,7 @@ fn does_not_flood_the_file_source_with_requests() {
     file_source.respond(Kind::Style, &test.response("style.json"));
     test.run_loop.run_once();
 
-    assert_eq!(mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS as usize, file_source.requests().len());
+    assert_eq!(crate::storage::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS as usize, file_source.requests().len());
 }
 
 // gtest: OfflineDownload.GetStatusNoResources

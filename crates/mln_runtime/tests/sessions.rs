@@ -10,7 +10,9 @@ use std::sync::mpsc::channel;
 
 use mln_engine::TileOperation;
 use mln_engine::camera::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode};
+use mln_engine::geo::ScreenCoordinate;
 use mln_engine::map::{MapEvent, MapMode};
+use mln_engine::storage::chrono::Timestamp;
 use mln_engine::storage::resource::Kind;
 use mln_engine::storage::response::{Caching, Reason};
 use mln_engine::storage::{ResourceError, Response};
@@ -23,8 +25,6 @@ use mln_runtime::{
 use mln_style::geo::LatLng;
 use mln_style::size::Size;
 use mln_style::unitbezier::UnitBezier;
-use mln_util::chrono::Timestamp;
-use mln_util::geo::ScreenCoordinate;
 use parking_lot::Mutex;
 
 use crate::support::{EventLog, TIMEOUT, eventually, result_of, runtime, wait, wait_err};
@@ -1580,7 +1580,7 @@ fn rendered_queries_return_the_front_layer_first() {
 fn rendered_queries_select_by_geometry_and_layer() {
     let runtime = runtime();
     let (_map, session) = query_session(&runtime);
-    let names = |features: Vec<mln_util::feature::Feature>| -> Vec<String> {
+    let names = |features: Vec<mln_engine::tile::feature::Feature>| -> Vec<String> {
         let mut names: Vec<String> = features
             .iter()
             .filter_map(|feature| feature.properties.get("name").map(|name| format!("{name:?}")))
@@ -1603,7 +1603,7 @@ fn rendered_queries_select_by_geometry_and_layer() {
         RenderedQueryGeometry::LineString(vec![ScreenCoordinate::new(10.0, 32.0), ScreenCoordinate::new(26.0, 32.0)]);
     assert_eq!(1, wait(session.query_rendered_features(line, RenderedQueryOptions::default())).len());
     let none = RenderedQueryOptions::new(Some(vec!["missing".into()]), None);
-    assert_eq!(wait(session.query_rendered_features(east, none)), Vec::<mln_util::feature::Feature>::new());
+    assert_eq!(wait(session.query_rendered_features(east, none)), Vec::<mln_engine::tile::feature::Feature>::new());
 
     // A box past every edge covers the whole target, and one outside it
     // covers nothing.
@@ -1617,7 +1617,7 @@ fn rendered_queries_select_by_geometry_and_layer() {
         RenderedQueryGeometry::Box { min: ScreenCoordinate::new(100.0, 0.0), max: ScreenCoordinate::new(200.0, 64.0) };
     assert_eq!(
         wait(session.query_rendered_features(outside, RenderedQueryOptions::default())),
-        Vec::<mln_util::feature::Feature>::new()
+        Vec::<mln_engine::tile::feature::Feature>::new()
     );
 
     let invalid =

@@ -5,6 +5,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use mln_engine::exec::pool::Pool;
+use mln_engine::exec::queue::Queue;
 use mln_engine::map::{Map, MapMode, MapOptions};
 use mln_engine::{Custom, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters};
 use mln_headless::HeadlessFrontend;
@@ -12,8 +14,6 @@ use mln_runtime::{BackendType, Device, DeviceOptions};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::ErrorKind;
 use mln_style::size::Size;
-use mln_util::pool::Pool;
-use mln_util::queue::Queue;
 use parking_lot::Mutex;
 
 const SIDE: u32 = 64;

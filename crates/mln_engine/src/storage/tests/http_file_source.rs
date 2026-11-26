@@ -5,10 +5,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use httpmock::{HttpMockResponse, MockServer};
-use mln_util::chrono::{Timestamp, now, parse_timestamp_i32, rfc1123};
 use parking_lot::Mutex;
 
 use super::{Dispatcher, LocalRequests, Req, TestLoop, req};
+use crate::storage::chrono::{Timestamp, now, parse_timestamp_i32, rfc1123};
 use crate::storage::file_source::FileSource;
 use crate::storage::http_file_source::{HTTPFileSource, same_origin};
 use crate::storage::http_header_transform::HttpHeaderTransform;

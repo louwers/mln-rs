@@ -21,12 +21,12 @@
 
 use std::borrow::Cow;
 
-use mln_util::identity::SimpleIdentity;
 #[cfg(target_family = "wasm")]
 use mln_wire::host_bytes::HostBytes;
 use mln_wire::payload::{Payload, pod};
 
 use crate::draw::context::Context;
+use crate::draw::identity::SimpleIdentity;
 use crate::draw::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::draw::vertices::SharedVertices;
 use crate::layer::paint_property_binder::InterleavedVertexBuffer;

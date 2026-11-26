@@ -4,14 +4,14 @@
 use std::sync::Arc;
 
 use mln_engine::camera::{BoundOptions, ViewportMode};
+use mln_engine::exec::pool::Pool;
+use mln_engine::exec::queue::Queue;
 use mln_engine::map::{Map, MapMode, MapOptions};
 use mln_engine::storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_headless::HeadlessFrontend;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::ErrorKind;
 use mln_style::size::Size;
-use mln_util::pool::Pool;
-use mln_util::queue::Queue;
 
 const SIDE: u32 = 256;
 

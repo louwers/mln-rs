@@ -28,7 +28,7 @@ layout(location = 0) in vec2 frag_position;
 layout(location = 0) out vec4 out_color;
 
 // The height in meters of the DEM at `coord`, by the rule of
-// `mln_util::dem`. The channels aren't rounded: the decode is linear in
+// `crate::tile::dem`. The channels aren't rounded: the decode is linear in
 // them, so where a linear sampler interpolates them, it interpolates the
 // heights.
 float getElevation(vec2 coord, vec4 unpack, float unpack_scale) {

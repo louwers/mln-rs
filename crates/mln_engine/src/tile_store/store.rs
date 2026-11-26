@@ -14,11 +14,11 @@ use std::sync::Arc;
 use mln_style::error::Error;
 use mln_style::hash::{HashMap, HashSet};
 use mln_style::layers::Symbol;
-use mln_util::pool::TaskGroup;
 
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::draw::context::Context;
 use crate::draw::dynamic_texture_atlas::DynamicTextureAtlas;
+use crate::exec::pool::TaskGroup;
 use crate::image::image_store::ImageStore;
 use crate::layer::bucket::UploadNeeds;
 use crate::layer::layer_type::{recover_bucket, recover_bucket_mut};

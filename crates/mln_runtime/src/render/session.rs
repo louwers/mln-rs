@@ -10,13 +10,13 @@ use std::thread::ThreadId;
 use std::time::Duration;
 
 use mln_engine::camera::LogicalExtent;
+use mln_engine::exec::thread::Joined;
 use mln_engine::query::{RenderedQueryOptions, SourceQueryOptions};
+use mln_engine::tile::feature::Feature;
 use mln_frame_pacer::{FramePacer, RefreshWaiter};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::Error;
 use mln_style::size::Size;
-use mln_util::feature::Feature;
-use mln_util::thread::Joined;
 use parking_lot::Mutex;
 
 use super::driver::DriverWork;
@@ -1015,7 +1015,7 @@ fn attach_unlocked<R>(
 /// runs the session's queue until the session ends.
 #[cfg(not(target_family = "wasm"))]
 fn start_thread(shared: Arc<SessionShared>) -> Result<(ThreadId, Option<Joined>), Error> {
-    let thread = mln_util::thread::spawn("RenderSession", move || {
+    let thread = mln_engine::exec::thread::spawn("RenderSession", move || {
         let queue = shared.queue.clone();
         let mut worker = None;
         worker::build(&shared, &mut worker, &mut None);
