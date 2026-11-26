@@ -441,7 +441,9 @@ impl<T: CustomSource> TileOrigin for CustomOrigin<T> {
         let differs = SourceData::<T>::recover(previous).is_none_or(|previous| T::differs(data, previous));
         if !same && differs {
             tiles.clear_all(ctx);
-            self.provider = None;
+            if let Some(provider) = self.provider.take() {
+                provider.retire();
+            }
         }
         let provider = self.provider.get_or_insert_with(|| T::provider(data, ctx.pool.pool()));
         if tiles.info.origin.is_none() || !same {

@@ -338,6 +338,14 @@ impl<D: Clone + Send + 'static> CustomProvider<D> {
         self.with_loader(move |loader| loader.invalidate_region(&bounds));
     }
 
+    /// Keeps the provider until the calls made so far have run, so that a
+    /// provider the engine replaces still tells the host about the tiles it
+    /// removed.
+    pub(crate) fn retire(&self) {
+        let this = self.this.upgrade();
+        self.calls.spawn(move || drop(this));
+    }
+
     /// Runs `change` on the tiles' state in the provider's turn, then the
     /// host calls it asked for.
     fn with_loader(&self, change: impl FnOnce(&mut CustomTileLoader<D>) + Send + 'static) {
@@ -478,6 +486,34 @@ mod tests {
         }
         fn set_tile_error(&self, _error: Error) {}
         fn invalidate_tile_data(&self) {}
+    }
+
+    // A retired provider still runs the calls made before it was retired, so
+    // the host learns that the tiles it was asked for are gone.
+    #[test]
+    fn a_retired_provider_cancels_the_tiles_it_removed() {
+        let pool = Pool::new(1);
+        let cancels: Arc<Mutex<Vec<CanonicalTileID>>> = Arc::default();
+        let provider = CustomProvider::new(&pool, |_: &Weak<CustomProvider<u32>>| {
+            let cancels = Arc::clone(&cancels);
+            let fetch: HostFunction = Box::new(|_: &CanonicalTileID| {});
+            let cancel: HostFunction = Box::new(move |tile_id: &CanonicalTileID| cancels.lock().push(*tile_id));
+            (Some(fetch), Some(cancel))
+        });
+
+        let tile = CanonicalTileID::new(3, 1, 2);
+        let id = OverscaledTileID::new(3, 0, tile);
+        provider.fetch_tile(id, 0, Box::new(Recorder(Arc::default())));
+        provider.remove_tile(id, 0);
+        provider.retire();
+        drop(provider);
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while cancels.lock().is_empty() {
+            assert!(std::time::Instant::now() < deadline, "the host wasn't told the tile is gone");
+            std::thread::yield_now();
+        }
+        assert_eq!(vec![tile], *cancels.lock());
     }
 
     // The host's fetches run on a pool thread, in the order the tiles asked,

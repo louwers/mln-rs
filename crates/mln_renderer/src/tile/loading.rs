@@ -235,6 +235,9 @@ pub(crate) trait CustomLoader {
     );
     fn cancel(&self, id: OverscaledTileID, key: SubscriberKey);
     fn remove(&self, id: OverscaledTileID, key: SubscriberKey);
+    /// Keeps the loader until the calls made so far have run: before the
+    /// engine drops a loader whose tiles it just removed.
+    fn retire(&self);
 }
 
 /// What a custom source's host gives a tile.
@@ -277,6 +280,10 @@ impl<D: CustomTileData> CustomLoader for CustomProvider<D> {
 
     fn remove(&self, id: OverscaledTileID, key: SubscriberKey) {
         self.remove_tile(id, key);
+    }
+
+    fn retire(&self) {
+        CustomProvider::retire(self);
     }
 }
 
