@@ -1,5 +1,5 @@
 // When the render thread starts a frame that is due: at the display's next
-// refresh, which a frame pacer (mln_frame_pacer) reports, or, where the
+// refresh, which a frame pacer (mln_runtime::frame_pacer) reports, or, where the
 // platform has no pacer, once a refresh interval passed since the last
 // frame. Animations sample each frame at its start, so frames that start at
 // the display's refreshes show them at evenly spaced times.

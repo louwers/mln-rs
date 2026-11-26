@@ -44,6 +44,7 @@ mod camera;
 mod completion;
 mod event;
 mod feature_state;
+pub mod frame_pacer;
 mod gestures;
 mod map;
 #[cfg(not(target_family = "wasm"))]

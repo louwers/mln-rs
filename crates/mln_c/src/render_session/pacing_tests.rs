@@ -1,6 +1,6 @@
 //! `mln_render_session_set_frame_pacing()`: its options and its session, and
 //! on the platforms with a display to follow, the frames it demands. The
-//! runtime's tests cover how a pacer demands frames, and `mln_frame_pacer`'s
+//! runtime's tests cover how a pacer demands frames, and `mln_runtime::frame_pacer`'s
 //! each platform's source.
 
 use core::ffi::c_void;

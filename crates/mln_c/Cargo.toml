@@ -36,7 +36,6 @@ geo-types.workspace = true
 geojson.workspace = true
 glam.workspace = true
 log = { workspace = true, features = ["kv"] }
-mln_frame_pacer.workspace = true
 mln_gfx.workspace = true
 # The custom layer type.
 mln_engine.workspace = true

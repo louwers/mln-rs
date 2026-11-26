@@ -44,7 +44,7 @@ use mln_engine::geo::ScreenCoordinate;
 use mln_engine::gestures::{GestureEvent, GestureRecognizer, Input, Modes, NextTick, PinchPhase, PointerKind};
 use mln_engine::map::MapEvent;
 use mln_engine::storage::constants::DEFAULT_MAX_CACHE_SIZE;
-use mln_frame_pacer::{FramePacer, RefreshWaiter};
+use mln_runtime::frame_pacer::{FramePacer, RefreshWaiter};
 use mln_runtime::{
     CacheDatabaseOperation, Completion, DemandMode, Device, ErrorKind, EventMask, EventType, FrameDemand,
     FrameDisposition, LogicalExtent, Map, MapOptions, Runtime, RuntimeEventKind, RuntimeOptions, ViewportOptions,

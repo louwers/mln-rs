@@ -2477,7 +2477,6 @@ dependencies = [
  "mln-rs-d3d12",
  "mln-rs-engine",
  "mln-rs-feature",
- "mln-rs-frame-pacer",
  "mln-rs-geojson",
  "mln-rs-geometry",
  "mln-rs-gfx",
@@ -2555,7 +2554,6 @@ dependencies = [
  "mln-rs-d3d12",
  "mln-rs-engine",
  "mln-rs-feature",
- "mln-rs-frame-pacer",
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-mtl",
@@ -2623,7 +2621,6 @@ dependencies = [
  "mln-rs-bench-workload",
  "mln-rs-d3d12",
  "mln-rs-engine",
- "mln-rs-frame-pacer",
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-mtl",
@@ -2732,19 +2729,6 @@ dependencies = [
  "mln-rs-vec-map",
  "mln-rs-wire",
  "serde_json",
-]
-
-[[package]]
-name = "mln-rs-frame-pacer"
-version = "0.0.17"
-dependencies = [
- "libc",
- "mln-rs-style",
- "objc2 0.6.5",
- "objc2-core-foundation",
- "objc2-foundation 0.3.2",
- "objc2-quartz-core 0.3.2",
- "parking_lot",
 ]
 
 [[package]]
@@ -2919,7 +2903,6 @@ dependencies = [
  "mln-rs-d3d12",
  "mln-rs-engine",
  "mln-rs-feature",
- "mln-rs-frame-pacer",
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-mtl",
@@ -2927,6 +2910,10 @@ dependencies = [
  "mln-rs-vulkan",
  "mln-rs-web-host",
  "mln-rs-webgpu",
+ "objc2 0.6.5",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
+ "objc2-quartz-core 0.3.2",
  "parking_lot",
  "pollster",
  "serde_json",

@@ -8,7 +8,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::thread::ThreadId;
 
-use ::mln_frame_pacer::{FramePacer, Limit};
+use ::mln_runtime::frame_pacer::{FramePacer, Limit};
 use ::mln_runtime::{
     AttachOptions, ClipDepthRange, DemandMode, Driver, DriverWork, FrameDemand, FrameDisposition, FrameProjection,
     FrameResult, LogicalExtent, RenderSession, RenderSessionState, RenderTarget,

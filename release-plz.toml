@@ -51,7 +51,6 @@ changelog_include = [
   "mln-rs-d3d12",
   "mln-rs-engine",
   "mln-rs-feature",
-  "mln-rs-frame-pacer",
   "mln-rs-geojson",
   "mln-rs-geometry",
   "mln-rs-gfx",

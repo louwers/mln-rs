@@ -56,7 +56,6 @@ mln_bench_workload = { package = "mln-rs-bench-workload", path = "tools/bench/wo
 # offline regions SQLite, so that examples/web leaves both out
 # (crates/mln_engine/Cargo.toml).
 mln_engine = { package = "mln-rs-engine", path = "crates/mln_engine", version = "=0.0.17", default-features = false }
-mln_frame_pacer = { package = "mln-rs-frame-pacer", path = "crates/mln_frame_pacer", version = "=0.0.17" }
 mln_geojson = { package = "mln-rs-geojson", path = "crates/mln_geojson", version = "=0.0.17" }
 mln_gfx = { package = "mln-rs-gfx", path = "crates/mln_gfx", version = "=0.0.17" }
 mln_gl = { package = "mln-rs-gl", path = "crates/mln_gl", version = "=0.0.17" }
@@ -534,7 +533,6 @@ geojson.workspace = true
 geometry.workspace = true
 glam.workspace = true
 mln_d3d12 = { workspace = true, optional = true }
-mln_frame_pacer.workspace = true
 mln_geojson.workspace = true
 mln_gfx.workspace = true
 mln_gl = { workspace = true, optional = true }

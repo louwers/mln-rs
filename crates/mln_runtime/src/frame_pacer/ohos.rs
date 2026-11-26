@@ -16,7 +16,7 @@ pub(super) mod native_vsync {
     use mln_style::error::Error;
     use parking_lot::Mutex;
 
-    use crate::{Limit, VsyncSource, Vsyncs};
+    use crate::frame_pacer::{Limit, VsyncSource, Vsyncs};
 
     #[repr(C)]
     struct OH_NativeVSync {
@@ -103,7 +103,7 @@ mod tests {
     use std::sync::{Arc, mpsc};
     use std::time::Duration;
 
-    use crate::{FramePacer, RefreshWaiter};
+    use crate::frame_pacer::{FramePacer, RefreshWaiter};
 
     #[test]
     fn a_native_vsync_calls_back_at_vsyncs() {

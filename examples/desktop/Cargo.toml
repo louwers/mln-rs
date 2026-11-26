@@ -28,7 +28,6 @@ egui-winit.workspace = true
 log.workspace = true
 # The benchmark mode's fixtures and camera paths, the benchmarks' (benchmark.rs).
 mln_bench_workload.workspace = true
-mln_frame_pacer.workspace = true
 # Only for its feature: the sessions shape the style's font faces, and the
 # system's fonts that the map falls back to, in-process.
 mln_engine = { workspace = true, features = ["font-face-shaper"] }

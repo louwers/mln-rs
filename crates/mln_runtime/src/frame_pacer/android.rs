@@ -27,7 +27,7 @@ pub(crate) mod choreographer {
     use mln_style::error::Error;
     use parking_lot::Mutex;
 
-    use crate::{Limit, VsyncSource, Vsyncs};
+    use crate::frame_pacer::{Limit, VsyncSource, Vsyncs};
 
     /// Longer than a vsync period at the lowest refresh rate that a phone
     /// display runs at while it is on.
@@ -442,7 +442,7 @@ pub(crate) mod choreographer {
         use mln_style::error::ErrorKind;
 
         use super::*;
-        use crate::{FramePacer, RefreshWaiter};
+        use crate::frame_pacer::{FramePacer, RefreshWaiter};
 
         const TIMEOUT: Duration = Duration::from_secs(10);
 

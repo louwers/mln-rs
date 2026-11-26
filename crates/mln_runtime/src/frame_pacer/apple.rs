@@ -28,7 +28,7 @@ pub(crate) mod display_link {
     use objc2_quartz_core::{CADisplayLink, CAFrameRateRange, CAFrameRateRangeDefault};
     use parking_lot::Mutex;
 
-    use crate::{Limit, VsyncSource, Vsyncs};
+    use crate::frame_pacer::{Limit, VsyncSource, Vsyncs};
 
     // A vsync that waits behind other work delays the frames it demands.
     const QOS_CLASS_USER_INTERACTIVE: u32 = 0x21;

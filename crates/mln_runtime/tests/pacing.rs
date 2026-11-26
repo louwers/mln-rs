@@ -6,7 +6,7 @@ mod support;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use mln_frame_pacer::{FramePacer, Limit, VsyncSource, Vsyncs};
+use mln_runtime::frame_pacer::{FramePacer, Limit, VsyncSource, Vsyncs};
 use mln_runtime::{
     AttachOptions, DemandMode, ErrorKind, FrameDemand, FrameDisposition, FrameResult, Map, RenderSession, RenderTarget,
 };

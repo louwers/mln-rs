@@ -35,7 +35,6 @@ pub use glam;
 #[cfg(feature = "d3d12")]
 pub use mln_d3d12;
 pub use mln_engine;
-pub use mln_frame_pacer;
 pub use mln_geojson;
 pub use mln_gfx;
 #[cfg(feature = "gl")]

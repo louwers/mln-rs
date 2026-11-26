@@ -13,7 +13,6 @@ use mln_engine::camera::LogicalExtent;
 use mln_engine::exec::thread::Joined;
 use mln_engine::query::{RenderedQueryOptions, SourceQueryOptions};
 use mln_engine::tile::feature::Feature;
-use mln_frame_pacer::{FramePacer, RefreshWaiter};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::Error;
 use mln_style::size::Size;
@@ -28,6 +27,7 @@ use super::target::{
 };
 use super::worker::{self, Init, SessionQueue, TargetInit, Worker};
 use crate::completion::{Completion, Home, Resolver};
+use crate::frame_pacer::{FramePacer, RefreshWaiter};
 use crate::log_target;
 use crate::map::{Applied, Map};
 use crate::runtime::Outbox;
