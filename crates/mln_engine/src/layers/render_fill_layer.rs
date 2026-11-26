@@ -1,7 +1,7 @@
 use std::mem::offset_of;
 use std::sync::Arc;
 
-use mln_gfx::gpu::{Gpu, ShaderKey};
+use mln_gfx::gpu::{Caps, Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
@@ -9,7 +9,6 @@ use mln_gfx::shaders::program::Program;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_style::color::Color;
 use mln_style::constants::TILE_SIZE_D;
-use mln_style::error::Error;
 use mln_style::layer::LayerStyle;
 use mln_style::layers::Fill;
 use mln_style::layers::fill_layer_properties::FillPaintProperties;
@@ -25,13 +24,12 @@ use crate::draw::objects::{DrawGeometry, DrawObjects, copy_shared_attributes};
 use crate::draw::segment::SegmentBase;
 use crate::draw::texture2d::Texture2D;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
-use crate::layer::bucket::Bucket;
 use crate::layer::bucket_geometry::{bucket_indexes, bucket_vertices, copied_vertices, paint_vertices};
 use crate::layer::layer_drawing::{
     DrawDepth, DrawList, DrawObjectsMut, FrameDraw, TileDraws, TileObjects, UniformWriter,
 };
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
-use crate::layer::layout::{LayoutParameters, SourceLayer};
+use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
     EvaluateCx, Evaluation, LayerBucket, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer, RenderLayerBase,
     TypedLayer,
@@ -41,7 +39,7 @@ use crate::layers::fill::ubo::{
     FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO,
     FillPatternTilePropsUBO, FillTilePropsUnionUBO,
 };
-use crate::layout::pattern_layout::{FillLayoutSpec, PatternLayout, uses_pattern};
+use crate::layout::pattern_layout::{FillLayoutSpec, PatternLayout};
 use crate::query::feature_index::QueryRegion;
 use crate::render::layer_composite::Composite;
 use crate::render::paint_parameters::PaintParameters;
@@ -79,8 +77,7 @@ const LINE_WIDTH: f32 = 2.0;
 
 /// Whether the layer draws the outlines as quads, which read the buckets'
 /// outline ends, rather than as lines (`LINE_WIDTH`).
-pub(crate) fn draws_outline_quads(context: &Context) -> bool {
-    let caps = context.caps();
+pub(crate) fn draws_outline_quads(caps: &Caps) -> bool {
     caps.max_line_width < LINE_WIDTH && !caps.cpu_rasterizer
 }
 
@@ -99,7 +96,7 @@ enum Outlines {
 impl Outlines {
     /// How the outlines of a layer draw on `context`'s device.
     fn of(context: &Context, pattern: bool) -> Outlines {
-        if !draws_outline_quads(context) {
+        if !draws_outline_quads(context.caps()) {
             Outlines::Lines
         } else if context.caps().binds_vertex_buffers && !pattern {
             Outlines::Pulled
@@ -422,22 +419,8 @@ impl TileBuilder<'_> {
 
 impl LayerType for Fill {
     type Layout = PatternLayout<FillLayoutSpec>;
-    type Bucket = FillBucket;
     type TileBucket<'a> = LayerBucket<'a, Fill>;
     const CROSSFADES: bool = true;
-
-    /// Whether a layer of the group has a pattern.
-    fn layout_can_need_dependencies(group: &[Arc<EvaluatedLayer<Fill>>]) -> bool {
-        uses_pattern::<FillLayoutSpec>(group)
-    }
-
-    fn create_layout(
-        group: &[Arc<EvaluatedLayer<Fill>>],
-        parameters: &mut LayoutParameters<'_>,
-        source_layer: SourceLayer,
-    ) -> Result<Option<PatternLayout<FillLayoutSpec>>, Error> {
-        PatternLayout::new(parameters, group, source_layer).map(Some)
-    }
 
     fn query_radius(_bucket: &FillBucket, layer: &EvaluatedLayer<Fill>) -> f32 {
         let translate = layer.paint.fill_translate.uniform();
@@ -695,7 +678,7 @@ impl TypedLayer for RenderFillLayer {
             };
 
             let render_data = tile.bucket_for_pass(RENDER_PASS);
-            let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
+            let Some(render_data) = render_data else {
                 *entry.value = None;
                 continue;
             };
@@ -705,7 +688,7 @@ impl TypedLayer for RenderFillLayer {
             };
 
             // Draws built from another bucket go.
-            entry.set_bucket(bucket.base.bucket_id);
+            entry.set_bucket(render_data.id);
 
             let evaluated = &render_data.layer.paint;
 

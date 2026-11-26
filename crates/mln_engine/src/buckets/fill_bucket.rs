@@ -1,26 +1,20 @@
-use std::sync::Arc;
-
 use mln_style::color::Color;
-use mln_style::expression::{Image, Value};
-use mln_style::feature::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
+use mln_style::expression::Image;
+use mln_style::feature::{GeometryCollection, GeometryCoordinate};
 use mln_style::hash::{HashMap, HashSet};
-use mln_style::layers::Fill;
-use mln_style::layers::fill_layer_properties::{FillLayoutProperties, FillPaintProperties};
+use mln_style::layers::fill_layer_properties::FillPaintProperties;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
-use mln_vec_map::VecMap;
 use mln_wire::sorted;
 
 use crate::draw::mesh::Indexed;
 use crate::draw::segment::SegmentBase;
 use crate::gfx::fill_mesh::FillBuffers;
-use crate::layer::bucket::{Bucket, BucketBase, UploadNeeds};
-use crate::layer::bucket_geometry::{GeometryUpload, GeometryVec};
-use crate::layer::layer_type::EvaluatedLayer;
-use crate::layer::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
-use crate::layout::pattern_layout::PatternLayerMap;
+use crate::layer::bucket::{Bucket, Upload};
+use crate::layer::bucket_geometry::GeometryVec;
+use crate::layer::paint_property_binder::{CrossFadedPaintPropertyBinder, LayerBinders, PaintPropertyBinder};
+use crate::layers::render_fill_layer::draws_outline_quads;
 use crate::log_target;
-use crate::text::atlas::ImagePositions;
 use crate::util::tessellator::Tessellator;
 
 crate::paint_property_binders!(
@@ -46,8 +40,6 @@ impl FillLayoutVertex {
 
 #[derive(Clone, mln_wire::Wire)]
 pub(crate) struct FillBucket {
-    pub(crate) base: BucketBase,
-
     pub(crate) basic_lines: GeometryVec<u16>,
     pub(crate) basic_line_segments: Vec<SegmentBase>,
 
@@ -60,7 +52,7 @@ pub(crate) struct FillBucket {
     pub(crate) triangle_segments: Vec<SegmentBase>,
     pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
 
-    pub(crate) paint_property_binders: VecMap<String, FillBinders>,
+    pub(crate) paint_property_binders: LayerBinders<FillBinders>,
 
     #[wire(with = "sorted::map")]
     sdf_patterns: HashMap<String, bool>,
@@ -68,40 +60,30 @@ pub(crate) struct FillBucket {
     mixed_sdf_pattern_layers: HashSet<String>,
 }
 
-static EMPTY_FORMATTED_SECTION: Value = Value::Null;
-
 impl FillBucket {
+    /// A bucket with no features of the layers of `paint_property_binders`,
+    /// which splits its polygons as `subdivision_granularity` says.
     #[must_use]
     pub(crate) fn new(
-        _layout: &FillLayoutProperties::PossiblyEvaluated,
-        layer_paint_properties: &VecMap<String, Arc<EvaluatedLayer<Fill>>>,
-        zoom: f32,
-        _overscaling: u32,
+        paint_property_binders: LayerBinders<FillBinders>,
+        subdivision_granularity: SubdivisionGranularitySetting,
     ) -> Self {
-        let mut paint_property_binders = VecMap::new();
-        for (id, properties) in layer_paint_properties {
-            paint_property_binders.entry(id.clone()).or_insert_with(|| FillBinders::new(&properties.paint, zoom));
-        }
         FillBucket {
-            base: BucketBase::default(),
             basic_lines: GeometryVec::default(),
             basic_line_segments: Vec::new(),
             vertices: GeometryVec::default(),
             outline_ends: GeometryVec::default(),
             triangles: GeometryVec::default(),
             triangle_segments: Vec::new(),
-            subdivision_granularity: SubdivisionGranularitySetting::none(),
+            subdivision_granularity,
             paint_property_binders,
             sdf_patterns: HashMap::default(),
             mixed_sdf_pattern_layers: HashSet::default(),
         }
     }
 
-    pub(crate) fn set_subdivision_granularity(&mut self, value: &SubdivisionGranularitySetting) {
-        self.subdivision_granularity = *value;
-    }
-
-    fn generate_buffers(
+    /// Adds the polygons of `geometry`, a feature's in the tile `canonical`.
+    pub(crate) fn add_geometry(
         &mut self,
         geometry: &GeometryCollection,
         canonical: &CanonicalTileID,
@@ -117,49 +99,15 @@ impl FillBucket {
         buffers.add_polygons(geometry, canonical, granularity, tessellator);
     }
 
-    fn populate_binders(
-        &mut self,
-        feature: &dyn GeometryTileFeature,
-        pattern_positions: &ImagePositions,
-        pattern_dependencies: &PatternLayerMap,
-        index: usize,
-        canonical: &CanonicalTileID,
-    ) {
-        let length = self.vertices.len();
-        for (id, binders) in &mut self.paint_property_binders {
-            binders.populate_vertex_vectors(
-                feature,
-                length,
-                index,
-                pattern_positions,
-                pattern_dependencies.get(id),
-                canonical,
-                &EMPTY_FORMATTED_SECTION,
-            );
-        }
-    }
-}
-
-impl Bucket for FillBucket {
-    fn base(&self) -> &BucketBase {
-        &self.base
+    /// Whether the bucket has anything to draw.
+    #[must_use]
+    pub(crate) fn has_data(&self) -> bool {
+        !self.triangle_segments.is_empty() || !self.basic_line_segments.is_empty()
     }
 
-    fn add_feature(
-        &mut self,
-        feature: &dyn GeometryTileFeature,
-        geometry: &GeometryCollection,
-        pattern_positions: &ImagePositions,
-        pattern_dependencies: &PatternLayerMap,
-        index: usize,
-        canonical: &CanonicalTileID,
-        tessellator: &mut Tessellator,
-    ) {
-        self.generate_buffers(geometry, canonical, tessellator);
-        self.populate_binders(feature, pattern_positions, pattern_dependencies, index, canonical);
-    }
-
-    fn record_sdf_pattern(&mut self, layer_id: &str, sdf: bool) {
+    /// Records whether the layer `layer_id` draws a pattern that is an SDF
+    /// image; a layer can't mix both.
+    pub(crate) fn record_sdf_pattern(&mut self, layer_id: &str, sdf: bool) {
         match self.sdf_patterns.get(layer_id) {
             None => {
                 self.sdf_patterns.insert(layer_id.to_owned(), sdf);
@@ -175,47 +123,24 @@ impl Bucket for FillBucket {
         }
     }
 
-    fn is_sdf_pattern(&self, layer_id: &str) -> bool {
+    /// Whether the layer `layer_id`'s patterns are SDF images.
+    #[must_use]
+    pub(crate) fn is_sdf_pattern(&self, layer_id: &str) -> bool {
         self.sdf_patterns.get(layer_id).copied().unwrap_or(false)
     }
+}
 
-    fn upload(&mut self, geometry: &mut GeometryUpload<'_>, needs: UploadNeeds) {
-        geometry.move_vertices(&mut self.vertices);
-        geometry.move_indexes(&mut self.triangles);
-        geometry.move_indexes(&mut self.basic_lines);
-        if needs.fill_outline_ends {
-            geometry.move_vertices(&mut self.outline_ends);
-        } else {
+impl Bucket for FillBucket {
+    fn upload(&mut self, up: &mut Upload<'_>) {
+        up.vec(&mut self.vertices);
+        up.indexes(&mut self.triangles);
+        up.indexes(&mut self.basic_lines);
+        if up.caps().is_some_and(draws_outline_quads) {
+            up.vec(&mut self.outline_ends);
+        } else if up.caps().is_some() {
             // Only the instanced outlines read the outline ends.
             self.outline_ends.discard();
         }
-        for binders in self.paint_property_binders.values_mut() {
-            let depends_on_feature_state = binders.depends_on_feature_state();
-            geometry.move_paint(&mut binders.interleaved_vertex_buffer, depends_on_feature_state);
-        }
-        self.base.uploaded = true;
-    }
-
-    fn has_data(&self) -> bool {
-        !self.triangle_segments.is_empty() || !self.basic_line_segments.is_empty()
-    }
-
-    fn write_wire(&self, w: &mut mln_wire::Writer) {
-        mln_wire::Wire::write(self, w);
-    }
-
-    fn update(
-        &mut self,
-        states: &crate::layer::bucket::FeatureStates,
-        layer: &crate::tile::TileLayer<'_>,
-        layer_id: &str,
-        image_positions: &ImagePositions,
-    ) -> bool {
-        let Some(binders) = self.paint_property_binders.get_mut(layer_id) else {
-            return false;
-        };
-        binders.update_vertex_vectors(states, layer, image_positions);
-        self.base.uploaded = false;
-        true
+        up.binders(&mut self.paint_property_binders);
     }
 }
