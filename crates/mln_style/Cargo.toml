@@ -29,7 +29,6 @@ geo-types.workspace = true
 geometry.workspace = true
 log.workspace = true
 mln_geojson.workspace = true
-mln_image.workspace = true
 mln_math.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true

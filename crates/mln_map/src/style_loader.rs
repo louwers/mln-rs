@@ -1,6 +1,7 @@
 //! The map's style loader: it fetches a style document, the sprites the
 //! document names and the descriptions of the style's sources, and parses
-//! the sprites and the descriptions that need it on the thread pool.
+//! the sprites and the descriptions that need it, and decodes image sources'
+//! images, on the thread pool.
 //!
 //! Requests and jobs answer into one inbox of [`Reply`]s, from whichever
 //! thread sends the response or finishes the job. The map drains it in
@@ -17,9 +18,10 @@
 
 use std::sync::Arc;
 
+use mln_image::decoder;
 use mln_sprite::load_sprite;
 use mln_storage::{Data, FileSource, FileSourceExt, Request, Resource, ResourceError, Response};
-use mln_style::source::{Described, ErasedDescription, Fetch, Load, Respond};
+use mln_style::source::{DescribeImageJob, Described, ErasedDescription, Fetch, Load, Respond};
 use mln_style::sprite::Sprite;
 use mln_style::{Edit, SourceInstance, Style, StyleLoadError, StyleRegistry, image};
 use mln_text::glyph::{FontFaces, style_font_faces};
@@ -108,6 +110,9 @@ struct SourceLoad {
     loaded: bool,
     /// The last response was an error (`error_streak`).
     failing: bool,
+    /// Whether the fetch is an image, which the loader decodes before the
+    /// source's type describes it.
+    image: bool,
 }
 
 /// A sprite of the parsed style, and where its load stands.
@@ -309,8 +314,15 @@ impl StyleLoader {
             if self.sources.get(&load.id).is_some_and(|entry| entry.load == load) {
                 continue;
             }
-            let mut entry =
-                SourceLoad { load: load.clone(), request: None, fetch: 0, describing: 0, loaded: true, failing: false };
+            let mut entry = SourceLoad {
+                load: load.clone(),
+                request: None,
+                fetch: 0,
+                describing: 0,
+                loaded: true,
+                failing: false,
+                image: false,
+            };
             match source.data().plan_load() {
                 Load::Done => {}
                 Load::Ready(description) => edits.push(Edit::SetSourceDescription {
@@ -321,6 +333,7 @@ impl StyleLoader {
                 }),
                 Load::Fetch(target) => {
                     entry.loaded = false;
+                    entry.image = matches!(target, Fetch::Image(_));
                     let resource = match &target {
                         Fetch::Source(url) => Resource::source(url),
                         Fetch::Image(url) => Resource::image(url),
@@ -373,10 +386,16 @@ impl StyleLoader {
         let data = if res.no_content { None } else { Some(res.data.unwrap_or_default()) };
         entry.describing += 1;
         let describing = entry.describing;
-        let job = source.data().describe_job(data);
+        let image = entry.image;
         let replies = self.replies.clone();
         let respond: Respond<_> =
             Box::new(move |result| replies.push(Reply::SourceDescribed { load, describing, result }));
+        if image {
+            let describe = source.data().describe_image_job();
+            self.jobs.spawn(move || describe_image(data, describe, respond));
+            return;
+        }
+        let job = source.data().describe_job(data);
         if source.data().describes_in_background() {
             self.jobs.spawn(move || job(respond));
         } else {
@@ -635,6 +654,19 @@ fn error_streak<'r>(failing: &mut bool, res: &'r Response) -> Result<(), Option<
         return Ok(());
     };
     Err((!std::mem::replace(failing, true)).then_some(error))
+}
+
+/// Decodes `data`, an image source's fetched image, and describes the
+/// image with `describe`, answering through `respond`: at once or, where the
+/// platform decodes images asynchronously (the browser), later.
+fn describe_image(data: Option<Data>, describe: DescribeImageJob, respond: Respond<Described<ErasedDescription>>) {
+    let Some(data) = data else {
+        respond(Err(Error::native("unexpectedly empty image url")));
+        return;
+    };
+    decoder::decode(&data, move |result| {
+        respond(result.map_err(|error| Error::native(error.message)).and_then(describe));
+    });
 }
 
 /// The id a style without a sprite loads under.

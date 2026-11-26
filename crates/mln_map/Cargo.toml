@@ -23,6 +23,7 @@ geo-types.workspace = true
 geojson.workspace = true
 geometry.workspace = true
 log.workspace = true
+mln_image.workspace = true
 mln_map_types.workspace = true
 mln_math.workspace = true
 mln_renderer.workspace = true

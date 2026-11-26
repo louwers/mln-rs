@@ -3,7 +3,6 @@
 
 use std::sync::Arc;
 
-use mln_image::decoder;
 use mln_util::LatLng;
 use mln_util::image::PremultipliedImage;
 
@@ -12,8 +11,7 @@ use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
 use crate::layer::SourceKind;
 use crate::source::{
-    Data, Described, Fetch, Load, OfflineResources, Respond, Source, SourceData, SourceSummary, SourceTypeInfo,
-    StyleSourceType,
+    Described, Fetch, Load, OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType,
 };
 
 /// The image source type.
@@ -39,8 +37,6 @@ impl StyleSourceType for ImageSourceType {
         prefetch: false,
     };
 
-    const DESCRIBES_IN_BACKGROUND: bool = true;
-
     type Options = ImageSourceOptions;
     type Description = Arc<PremultipliedImage>;
 
@@ -56,20 +52,8 @@ impl StyleSourceType for ImageSourceType {
         }
     }
 
-    /// Decodes the fetched image, at once or, where the platform decodes
-    /// images asynchronously (the browser), later.
-    fn describe(
-        _options: &ImageSourceOptions,
-        data: Option<Data>,
-        respond: Respond<Described<Arc<PremultipliedImage>>>,
-    ) {
-        let Some(data) = data else {
-            respond(Err(mln_util::Error::native("unexpectedly empty image url")));
-            return;
-        };
-        decoder::decode(&data, move |result| {
-            respond(result.map(|image| Some(Arc::new(image))).map_err(|error| mln_util::Error::native(error.message)));
-        });
+    fn describe_image(_options: &ImageSourceOptions, image: PremultipliedImage) -> Described<Arc<PremultipliedImage>> {
+        Ok(Some(Arc::new(image)))
     }
 
     fn summary(source: &SourceData<Self>) -> SourceSummary {

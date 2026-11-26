@@ -20,6 +20,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use mln_util::constants;
+use mln_util::image::PremultipliedImage;
 use mln_util::tileset::{Tileset, VectorEncoding};
 
 use crate::conversion::{Convertible, Error};
@@ -107,8 +108,8 @@ pub enum Load<D> {
     /// The description, known without a fetch, such as a tileset that the
     /// style lists.
     Ready(D),
-    /// The resource whose data [`StyleSourceType::describe`] turns into the
-    /// description.
+    /// The resource that [`StyleSourceType::describe`] or, for an image,
+    /// [`StyleSourceType::describe_image`] turns into the description.
     Fetch(Fetch),
 }
 
@@ -117,7 +118,7 @@ pub enum Load<D> {
 pub enum Fetch {
     /// A document that describes the source, such as TileJSON or GeoJSON.
     Source(String),
-    /// An image.
+    /// An image, which the map's loader decodes.
     Image(String),
 }
 
@@ -139,8 +140,7 @@ pub trait StyleSourceType: Sized + Send + Sync + 'static {
     const INFO: SourceTypeInfo;
 
     /// Whether [`describe`](Self::describe) runs on the thread pool rather
-    /// than on the map's thread, for work such as parsing GeoJSON or
-    /// decoding an image.
+    /// than on the map's thread, for work such as parsing GeoJSON.
     const DESCRIBES_IN_BACKGROUND: bool = false;
 
     /// What the style or the API gives: a URL, an inline tileset, GeoJSON
@@ -164,12 +164,17 @@ pub trait StyleSourceType: Sized + Send + Sync + 'static {
         Load::Done
     }
 
-    /// Turns `data`, the fetched resource of a [`Load::Fetch`], into the
+    /// Turns `data`, the fetched resource of a [`Fetch::Source`], into the
     /// description of a source of `options`, and answers through `respond`,
-    /// at once or later (the browser's image decoder). `None` is a response
-    /// without content.
+    /// at once or later. `None` is a response without content.
     fn describe(_options: &Self::Options, _data: Option<Data>, respond: Respond<Described<Self::Description>>) {
         respond(Err(mln_util::Error::native(format!("a {} source fetches nothing", Self::INFO.name))));
+    }
+
+    /// Turns `image`, the decoded image of a [`Fetch::Image`], into the
+    /// description of a source of `options`.
+    fn describe_image(_options: &Self::Options, _image: PremultipliedImage) -> Described<Self::Description> {
+        Err(mln_util::Error::native(format!("a {} source fetches no image", Self::INFO.name)))
     }
 
     /// Whether `new`, a loaded description that replaces `old`, changes what
@@ -292,6 +297,10 @@ pub trait ErasedSource: Any + Send + Sync {
     /// a job that owns what it needs and may run on another thread.
     fn describe_job(&self, data: Option<Data>) -> DescribeJob;
 
+    /// [`StyleSourceType::describe_image`] for the source's options, as a
+    /// job that owns what it needs and may run on another thread.
+    fn describe_image_job(&self) -> DescribeImageJob;
+
     /// This data with `description` in place of its description, or `None`
     /// if `description` isn't one of the type's.
     fn with_description(&self, description: Option<ErasedDescription>) -> Option<Arc<dyn ErasedSource>>;
@@ -319,6 +328,9 @@ pub trait ErasedSource: Any + Send + Sync {
 /// A job that describes a source's fetched data, answering through the
 /// [`Respond`] it takes.
 pub type DescribeJob = Box<dyn FnOnce(Respond<Described<ErasedDescription>>) + Send>;
+
+/// A job that describes a source's decoded image.
+pub type DescribeImageJob = Box<dyn FnOnce(PremultipliedImage) -> Described<ErasedDescription> + Send>;
 
 fn erase<D: Send + 'static>(description: D) -> ErasedDescription {
     Box::new(description)
@@ -350,6 +362,11 @@ impl<T: StyleSourceType> ErasedSource for SourceData<T> {
         Box::new(move |respond| {
             T::describe(&options, data, Box::new(move |described| respond(described.map(|d| d.map(erase)))));
         })
+    }
+
+    fn describe_image_job(&self) -> DescribeImageJob {
+        let options = self.options.clone();
+        Box::new(move |image| T::describe_image(&options, image).map(|d| d.map(erase)))
     }
 
     fn with_description(&self, description: Option<ErasedDescription>) -> Option<Arc<dyn ErasedSource>> {
