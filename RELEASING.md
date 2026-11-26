@@ -73,10 +73,17 @@ release pull request's merge, whatever commit it runs on. Packages that
 crates.io already has at this version are skipped, and so is an existing GitHub
 release. If the fix changes a package, release a new version instead.
 
-crates.io limits how many new crates an account can publish in a short time. The
-first release after adding libraries runs into it: the workflow waits and
-retries until every package is published, up to its 6-hour timeout. Running it
-again continues. To avoid the wait, ask help@crates.io to raise the limit first.
+Trusted Publishing can't create a crate, so the first release of a new library
+stops at it: crates.io answers "Trusted Publishing tokens do not support
+creating new crates". The packages it depends on are published by then. A crate
+owner publishes it from the commit that set the version, with a crates.io API
+token of their own that has the `publish-new` scope, gives it the Trusted
+Publishing config (below) and runs the workflow again:
+
+```sh
+git checkout <the release pull request's merge>
+cargo publish --locked --package mln-rs-<name>
+```
 
 ## What the workflows do
 
@@ -93,9 +100,9 @@ hand. In a fork, it does nothing.
       (without the desktop app). It packages every crate and builds each one
       from its packaged sources. The packages resolve each other locally, so
       this works before any of them is on crates.io.
-   3. Publishes the packages crates.io does not have at this version
-      (`cargo publish --workspace --exclude …`), in dependency order. When
-      crates.io answers 429, it waits 10 minutes and continues.
+   3. Trades the job's GitHub OIDC token for a crates.io token (Trusted
+      Publishing), and publishes the packages crates.io does not have at this
+      version (`cargo publish --workspace --exclude …`), in dependency order.
    4. Creates the tag `v<version>` on that commit and a GitHub release with the
       `.crate` files and the version's part of `CHANGELOG.md`.
 
@@ -144,18 +151,23 @@ A new library under `crates/` or `vendor/` needs:
 - a dependency of mln-rs (root `[dependencies]`) and a `pub use` in
   `src/lib.rs`.
 
+Its first release stops at it, for a crate owner to publish it by hand
+([When a release fails](#when-a-release-fails)).
+
 A library that should not be released gets `publish = false` instead of the
 README and the last three steps. A new third-party crate goes into
 `[workspace.dependencies]` only.
 
 ## Secrets and settings
 
-- **`CARGO_REGISTRY_TOKEN`** (repository secret): a crates.io API token of the
-  account that will own the crates. It needs the `publish-new` and
-  `publish-update` scopes, and can be limited to the crates `mln-rs*`. crates.io
-  tokens can expire, so renew it when it does. The account needs a verified
-  email address to publish. After the first release, `cargo owner --add <user>`
-  adds co-owners.
+- **Trusted Publishing** (each crate's Settings on crates.io): a GitHub
+  publisher with the repository `maplibre/mln-rs`, the workflow `release.yml`
+  and the environment `release`. The release job gets a token only for the
+  crates that have it. A crate owner adds it once the crate is on crates.io, and
+  `cargo owner --add <user>` invites another owner.
+- **The `release` environment** (Settings → Environments): its deployment
+  branches limited to the default branch. Trusted Publishing trusts any job that
+  runs in the environment, including one from a branch that edits the workflow.
 - **Allow GitHub Actions to create and approve pull requests** (Settings →
   Actions → General → Workflow permissions): without it, the workflow's default
   token can't open the release pull request.

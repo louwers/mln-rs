@@ -66,13 +66,13 @@ jobs:
       github.event_name == 'workflow_dispatch' || needs.version.outputs.released
       == 'false'
     runs-on: blacksmith-4vcpu-ubuntu-2604
-    # The publish step waits out crates.io's limit on new crates, which the
-    # first release of new packages runs into.
-    timeout-minutes: 360
-    # Holds CARGO_REGISTRY_TOKEN.
+    timeout-minutes: 60
+    # The crates' Trusted Publishing configs on crates.io name this workflow
+    # and environment: only this job gets a token that publishes them.
     environment: release
     permissions:
       contents: write # the tag and the GitHub release
+      id-token: write # the OIDC token that crates.io trades for its own
     steps:
       - name: Require the default branch
         if:
@@ -128,33 +128,33 @@ jobs:
           done
           cargo package --locked "${args[@]}"
 
+      # Trusted Publishing: a crates.io token for the crates whose config
+      # names this workflow and environment. It lasts 30 minutes, and the
+      # action's post step revokes it.
+      - name: Authenticate with crates.io
+        id: crates-io
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+
       # In dependency order, waiting for each to reach the index. Package
-      # verified these exact packages, so skip the second build. A 429 is
-      # crates.io's limit on new crates: wait, then publish the rest.
+      # verified these exact packages, so skip the second build. Trusted
+      # Publishing can't create a crate: a release that adds a library stops
+      # at it until an owner publishes it by hand (RELEASING.md).
       - name: Publish
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-io.outputs.token }}
           USER_AGENT: mln-rs-release (https://github.com/maplibre/mln-rs)
         run: |
-          set -o pipefail
-          while true; do
-            skip=()
-            for package in $PACKAGES; do
-              if curl -sf -o /dev/null -A "$USER_AGENT" "https://crates.io/api/v1/crates/$package/$VERSION"; then
-                skip+=("--exclude=$package")
-              fi
-            done
-            if [[ ${#skip[@]} == $(wc -w <<< "$PACKAGES") ]]; then
-              echo "crates.io has every package at $VERSION."
-              break
+          skip=()
+          for package in $PACKAGES; do
+            if curl -sf -o /dev/null -A "$USER_AGENT" "https://crates.io/api/v1/crates/$package/$VERSION"; then
+              skip+=("--exclude=$package")
             fi
-            if cargo publish --workspace --locked --no-verify "${skip[@]}" 2>&1 | tee "$RUNNER_TEMP/publish.log"; then
-              break
-            fi
-            grep -q "status 429" "$RUNNER_TEMP/publish.log" || exit 1
-            echo "Rate-limited by crates.io; retrying in 10 minutes."
-            sleep 600
           done
+          if [[ ${#skip[@]} == $(wc -w <<< "$PACKAGES") ]]; then
+            echo "crates.io has every package at $VERSION."
+            exit 0
+          fi
+          cargo publish --workspace --locked --no-verify "${skip[@]}"
 
       # The release notes are the version's section of CHANGELOG.md, which
       # the release pull request wrote, or else a link to crates.io.
