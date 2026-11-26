@@ -6,13 +6,13 @@ use std::sync::Arc;
 
 use geojson::GeoJson;
 use mln_util::constants;
-use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 
 pub use super::custom::{CustomGeometrySourceHandle, TileOptions};
 use super::custom::{CustomGeometrySourceOptions, CustomGeometrySourceType, TileFunction, TileFunctions};
 use super::geojson::TileFeatures;
 use crate::feature::CanonicalTileID;
+use crate::log_target;
 use crate::source::{Source, SourceData};
 
 #[derive(Clone)]
@@ -69,7 +69,7 @@ pub fn tile_features(geojson: GeoJson, tile_id: &CanonicalTileID, options: &Tile
     let features = match feature::geojson::features(geojson) {
         Ok(features) => features,
         Err(e) => {
-            Log::error(Event::General, format!("Invalid custom geometry tile data: {e}"));
+            log::error!(target: log_target::GENERAL, "Invalid custom geometry tile data: {e}");
             return TileFeatures::new();
         }
     };

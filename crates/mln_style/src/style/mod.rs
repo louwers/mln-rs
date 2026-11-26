@@ -3,13 +3,11 @@ use std::sync::Arc;
 use feature::Value;
 use mln_util::error::Error;
 use mln_util::geo::LatLng;
-use mln_util::logging::{Event, Log};
 
 use crate::conversion::Convertible;
 use crate::expression::GlobalStateMap;
 use crate::filter::Filter;
 use crate::font_face::FontFaces;
-use crate::image;
 use crate::layer::{Layer, LayerList, SourceKind};
 use crate::light::Light;
 use crate::projection::Projection;
@@ -21,6 +19,7 @@ use crate::sprite::Sprite;
 use crate::style::edit::Edit;
 use crate::style::parse::Parser;
 use crate::terrain::Terrain;
+use crate::{image, log_target};
 
 pub mod diff;
 pub(crate) mod edit;
@@ -163,7 +162,7 @@ impl Style {
             // A parsed style cannot contain duplicate source ids (they are
             // object keys).
             if sources.get(source.id()).is_some() {
-                Log::error(Event::ParseStyle, format!("Source {} already exists", source.id()));
+                log::error!(target: log_target::PARSE_STYLE, "Source {} already exists", source.id());
                 continue;
             }
             sources.set(source);
@@ -177,7 +176,7 @@ impl Style {
         let mut layers = LayerList::default();
         layers.extend(std::mem::take(&mut parser.layers).into_iter().filter_map(|mut layer| {
             if let Err(error) = check_layer_source(&style.sources, &layer) {
-                Log::error(Event::ParseStyle, error.to_string());
+                log::error!(target: log_target::PARSE_STYLE, "{error}");
                 return None;
             }
             layer.reevaluate_visibility(&global_state);
@@ -203,7 +202,7 @@ impl Style {
             .filter(|terrain| match check_terrain(&style.sources, terrain) {
                 Ok(()) => true,
                 Err(error) => {
-                    Log::error(Event::ParseStyle, error.to_string());
+                    log::error!(target: log_target::PARSE_STYLE, "{error}");
                     false
                 }
             })
@@ -441,7 +440,7 @@ impl Style {
             }
             Edit::RemoveImage(id) => {
                 let Some(index) = self.images.iter().position(|image| image.id == id) else {
-                    Log::warning(Event::General, format!("Image '{id}' is not present in style, cannot remove"));
+                    log::warn!(target: log_target::GENERAL, "Image '{id}' is not present in style, cannot remove");
                     return Ok(());
                 };
                 Arc::make_mut(&mut self.images).remove(index);

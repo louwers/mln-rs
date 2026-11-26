@@ -19,9 +19,7 @@ use mln_text::atlas::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_util::geometry::FeatureType;
 use mln_util::identity::SimpleIdentity;
-use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use mln_vec_map::VecMap;
-use parking_lot::Mutex;
 
 use super::with_context;
 use crate::Registry;
@@ -40,6 +38,7 @@ use crate::gfx::segment::SegmentBase;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::layout::symbol_instance::SymbolInstancePools;
+use crate::tests::fixture_log::FixtureLog;
 use crate::tile::raster::Masking;
 use crate::tile_mask::TileMask;
 use crate::util::tessellator::Tessellator;
@@ -659,40 +658,6 @@ fn raster_bucket_mask_complex() {
     assert_eq!(vec![(0, 0, 24, 36)], segment_tuples(&segments));
 }
 
-type Records = Arc<Mutex<Vec<(EventSeverity, Event, i64, String)>>>;
-
-struct Recorder(Records);
-
-impl Observer for Recorder {
-    fn on_record(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> bool {
-        self.0.lock().push((severity, event, code, msg.to_owned()));
-        true
-    }
-}
-
-/// Captures the calling thread's log records.
-struct FixtureLog(Records);
-
-impl FixtureLog {
-    fn new() -> Self {
-        let records: Records = Arc::new(Mutex::new(Vec::new()));
-        let _ = Log::set_thread_observer(Some(Box::new(Recorder(Arc::clone(&records)))));
-        FixtureLog(records)
-    }
-    fn count(&self, severity: EventSeverity, event: Event, msg: &str) -> usize {
-        self.0.lock().iter().filter(|m| m.0 == severity && m.1 == event && m.2 == -1 && m.3 == msg).count()
-    }
-    fn is_empty(&self) -> bool {
-        self.0.lock().is_empty()
-    }
-}
-
-impl Drop for FixtureLog {
-    fn drop(&mut self) {
-        let _ = Log::set_thread_observer(None);
-    }
-}
-
 // FillBucket.TracksSDFPatternsPerLayer
 // gtest: FillBucket.TracksSDFPatternsPerLayer
 #[test]
@@ -728,8 +693,8 @@ fn warns_once_for_mixed_pattern_types_per_bucket() {
     assert_eq!(
         2,
         log.count(
-            EventSeverity::Warning,
-            Event::Style,
+            log::Level::Warn,
+            crate::log_target::STYLE,
             "Style sheet warning: Cannot mix SDF and non-SDF fill patterns in layer \"mixed-layer\""
         )
     );

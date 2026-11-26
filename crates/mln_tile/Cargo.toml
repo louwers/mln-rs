@@ -21,6 +21,7 @@ feature.workspace = true
 geo-types.workspace = true
 geometry.workspace = true
 i_overlay.workspace = true
+log.workspace = true
 mln_math.workspace = true
 mln_style.workspace = true
 mln_tile_id.workspace = true

@@ -8,52 +8,16 @@ use mln_style::image::Impl as ImageImpl;
 use mln_util::constants::DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE;
 use mln_util::hash::HashSet;
 use mln_util::image::PremultipliedImage;
-use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use mln_util::size::Size;
-use parking_lot::Mutex;
 
 use crate::image_store::{ImageDependencies, ImageStore, ImageType, ImageWait};
 use crate::renderer_event::RendererEvent;
+use crate::tests::fixture_log::FixtureLog;
 
 /// Reads a test fixture from the copy of the C++ files (testdata/).
 fn read_file(relative: &str) -> Vec<u8> {
     let path = std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("testdata").join(relative);
     std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
-}
-
-type Messages = Arc<Mutex<Vec<(EventSeverity, Event, i64, String)>>>;
-
-struct Recorder(Messages);
-
-impl Observer for Recorder {
-    fn on_record(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> bool {
-        self.0.lock().push((severity, event, code, msg.to_owned()));
-        true
-    }
-}
-
-/// `test/src/mln/test/fixture_log_observer.hpp` `FixtureLog` (for the calling
-/// thread).
-struct FixtureLog {
-    messages: Messages,
-}
-
-impl FixtureLog {
-    fn new() -> Self {
-        let messages: Messages = Arc::new(Mutex::new(Vec::new()));
-        let _ = Log::set_thread_observer(Some(Box::new(Recorder(Arc::clone(&messages)))));
-        FixtureLog { messages }
-    }
-
-    fn empty(&self) -> bool {
-        self.messages.lock().is_empty()
-    }
-}
-
-impl Drop for FixtureLog {
-    fn drop(&mut self) {
-        let _ = Log::set_thread_observer(None);
-    }
 }
 
 fn make_image(id: &str, size: Size, pixel_ratio: f32, sdf: bool) -> Arc<ImageImpl> {
@@ -188,7 +152,7 @@ fn remove_releases_bin_pack_rect() {
 
     store.add_image(make_image("big", Size::new(32, 32), 1.0, false));
     assert!(store.image("big").is_some());
-    assert!(log.empty());
+    assert!(log.is_empty());
 }
 
 // gtest: ImageManager.NotifiesRequestorWhenSpriteIsLoaded

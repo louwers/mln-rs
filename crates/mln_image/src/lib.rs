@@ -18,6 +18,12 @@ mod png_reader;
 pub mod png_writer;
 mod webp_reader;
 
+/// The `log` targets of this crate's records. Each names the event that
+/// `mln_c` reports the record under (`mln_c::logging`).
+mod log_target {
+    pub(crate) const IMAGE: &str = "mln_image::image";
+}
+
 pub use image::decode_image;
 pub use png_reader::decode_png;
 pub use png_writer::encode_png;

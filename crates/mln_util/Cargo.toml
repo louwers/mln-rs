@@ -25,6 +25,7 @@ geo-types.workspace = true
 geometry.workspace = true
 glam.workspace = true
 httpdate.workspace = true
+log.workspace = true
 mln_math.workspace = true
 parking_lot.workspace = true
 mln_wire.workspace = true

@@ -12,12 +12,10 @@
 //! the text it compiles from, is in `shaders::program`; the renderer
 //! declares the programs.
 //!
-//! gfx and the backends log through the `log` crate, for the program's own
-//! `log` backend to read. A record's target names the part of the library
-//! that logged it: `<crate>::render` for devices, frames and presenting, and
-//! `<crate>::graphics_backend` for the calls of a graphics API's platform
-//! layer, such as EGL's or WGL's. `mln_c` reports a record to C hosts under
-//! the event its target names.
+//! gfx and the backends log through the `log` crate, as the rest of the
+//! library does, under targets that name the event: `<crate>::render` for
+//! devices, frames and presenting, and `<crate>::graphics_backend` for the
+//! calls of a graphics API's platform layer, such as EGL's or WGL's.
 
 pub mod backend;
 pub mod color_mode;

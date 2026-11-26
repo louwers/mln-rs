@@ -8,7 +8,6 @@ use std::sync::Arc;
 use mln_util::LatLng;
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::hash::{HashMap, HashSet};
-use mln_util::logging::{Event, Log};
 use mln_vec_map::VecSet;
 
 use crate::conversion::borrowed::{Json, JsonObject, borrowed_json_to_value, member, members};
@@ -17,6 +16,7 @@ use crate::expression::GlobalStateMap;
 use crate::font_face::{FontFace, FontFaceRange, FontFaces};
 use crate::layer::{FontStack, InvalidProperty, Layer, convert_layer_with, set_paint_properties};
 use crate::light::{Light, convert_light};
+use crate::log_target;
 use crate::projection::{Projection, convert_projection};
 use crate::property::transition::TransitionOptions;
 use crate::registry::StyleRegistry;
@@ -113,9 +113,9 @@ impl Parser {
                 0
             };
             if version != 8 {
-                Log::warning(
-                    Event::ParseStyle,
-                    "current renderer implementation only supports style spec version 8; using an outdated style will cause rendering errors",
+                log::warn!(
+                    target: log_target::PARSE_STYLE,
+                    "current renderer implementation only supports style spec version 8; using an outdated style will cause rendering errors"
                 );
             }
         }
@@ -130,7 +130,9 @@ impl Parser {
             let mut error = Error::default();
             match convert::<LatLng>(&Convertible::from(value), &mut error) {
                 Some(lat_lng) => self.lat_lng = lat_lng,
-                None => Log::warning(Event::ParseStyle, "center coordinate must be a longitude, latitude pair"),
+                None => {
+                    log::warn!(target: log_target::PARSE_STYLE, "center coordinate must be a longitude, latitude pair");
+                }
             }
         }
 
@@ -220,7 +222,7 @@ impl Parser {
     fn parse_transition(&mut self, value: &Json<'_>) {
         let mut error = Error::default();
         let Some(converted) = convert::<TransitionOptions>(&Convertible::from(value), &mut error) else {
-            Log::warning(Event::ParseStyle, &error.message);
+            log::warn!(target: log_target::PARSE_STYLE, "{}", error.message);
             return;
         };
 
@@ -230,7 +232,7 @@ impl Parser {
     fn parse_light(&mut self, value: &Json<'_>) {
         let mut error = Error::default();
         let Some(converted) = convert_light(&Convertible::from(value), self.registry.functions(), &mut error) else {
-            Log::warning(Event::ParseStyle, &error.message);
+            log::warn!(target: log_target::PARSE_STYLE, "{}", error.message);
             return;
         };
 
@@ -240,7 +242,7 @@ impl Parser {
     fn parse_sky(&mut self, value: &Json<'_>) {
         let mut error = Error::default();
         let Some(converted) = convert_sky(&Convertible::from(value), self.registry.functions(), &mut error) else {
-            Log::warning(Event::ParseStyle, &error.message);
+            log::warn!(target: log_target::PARSE_STYLE, "{}", error.message);
             return;
         };
 
@@ -250,7 +252,7 @@ impl Parser {
     fn parse_terrain(&mut self, value: &Json<'_>) {
         let mut error = Error::default();
         let Some(converted) = convert_terrain(&Convertible::from(value), &mut error) else {
-            Log::warning(Event::ParseStyle, &error.message);
+            log::warn!(target: log_target::PARSE_STYLE, "{}", error.message);
             return;
         };
 
@@ -261,7 +263,7 @@ impl Parser {
         let mut error = Error::default();
         let Some(converted) = convert_projection(&Convertible::from(value), self.registry.functions(), &mut error)
         else {
-            Log::warning(Event::ParseStyle, &error.message);
+            log::warn!(target: log_target::PARSE_STYLE, "{}", error.message);
             return;
         };
 
@@ -270,13 +272,13 @@ impl Parser {
 
     fn parse_state(&mut self, value: &Json<'_>) {
         let Some(object) = value.as_object() else {
-            Log::warning(Event::ParseStyle, "state must be an object");
+            log::warn!(target: log_target::PARSE_STYLE, "state must be an object");
             return;
         };
 
         for (property_name, definition) in members(object) {
             let Some(member_object) = definition.as_object() else {
-                Log::warning(Event::ParseStyle, format!("state property \"{property_name}\" must be an object"));
+                log::warn!(target: log_target::PARSE_STYLE, "state property \"{property_name}\" must be an object");
                 continue;
             };
             let Some(default) = member(member_object, "default") else {
@@ -291,14 +293,14 @@ impl Parser {
 
     fn parse_sources(&mut self, value: &Json<'_>) {
         let Some(object) = value.as_object() else {
-            Log::warning(Event::ParseStyle, "sources must be an object");
+            log::warn!(target: log_target::PARSE_STYLE, "sources must be an object");
             return;
         };
 
         for (id, property) in members(object) {
             let mut error = Error::default();
             let Some(source) = convert_source(&Convertible::from(property), &mut error, id, &self.registry) else {
-                Log::warning(Event::ParseStyle, &error.message);
+                log::warn!(target: log_target::PARSE_STYLE, "{}", error.message);
                 continue;
             };
 
@@ -314,18 +316,18 @@ impl Parser {
             let mut sprite_ids = HashSet::default();
             for sprite_value in array {
                 if !sprite_value.is_object() {
-                    Log::warning(Event::ParseStyle, "sprite child must be an object");
+                    log::warn!(target: log_target::PARSE_STYLE, "sprite child must be an object");
                     continue;
                 }
 
                 let mut error = Error::default();
                 let Some(sprite) = convert::<Sprite>(&Convertible::from(sprite_value), &mut error) else {
-                    Log::warning(Event::ParseStyle, &error.message);
+                    log::warn!(target: log_target::PARSE_STYLE, "{}", error.message);
                     continue;
                 };
 
                 if sprite_ids.contains(&sprite.id) {
-                    Log::warning(Event::ParseStyle, "sprite ids must be unique");
+                    log::warn!(target: log_target::PARSE_STYLE, "sprite ids must be unique");
                     continue;
                 }
 
@@ -333,7 +335,7 @@ impl Parser {
                 self.sprites.push(sprite);
             }
         } else {
-            Log::warning(Event::ParseStyle, "sprite must be an object or string");
+            log::warn!(target: log_target::PARSE_STYLE, "sprite must be an object or string");
         }
     }
 
@@ -341,7 +343,7 @@ impl Parser {
         let mut ids: Vec<String> = Vec::new();
 
         let Some(array) = value.as_array() else {
-            Log::warning(Event::ParseStyle, "layers must be an array");
+            log::warn!(target: log_target::PARSE_STYLE, "layers must be an array");
             return;
         };
 
@@ -349,23 +351,23 @@ impl Parser {
 
         for layer_value in array {
             let Some(layer_object) = layer_value.as_object() else {
-                Log::warning(Event::ParseStyle, "layer must be an object");
+                log::warn!(target: log_target::PARSE_STYLE, "layer must be an object");
                 continue;
             };
 
             let Some(id) = member(layer_object, "id") else {
-                Log::warning(Event::ParseStyle, "layer must have an id");
+                log::warn!(target: log_target::PARSE_STYLE, "layer must have an id");
                 continue;
             };
 
             let Some(id) = id.as_str() else {
-                Log::warning(Event::ParseStyle, "layer id must be a string");
+                log::warn!(target: log_target::PARSE_STYLE, "layer id must be a string");
                 continue;
             };
 
             let layer_id = id.to_owned();
             if layers_map.contains_key(&layer_id) {
-                Log::warning(Event::ParseStyle, format!("duplicate layer id {layer_id}"));
+                log::warn!(target: log_target::PARSE_STYLE, "duplicate layer id {layer_id}");
                 continue;
             }
 
@@ -421,19 +423,19 @@ fn parse_layer(
 
     // Make sure we have not previously attempted to parse this layer.
     if stack.iter().any(|s| s == id) {
-        Log::warning(Event::ParseStyle, format!("layer reference of '{id}' is circular"));
+        log::warn!(target: log_target::PARSE_STYLE, "layer reference of '{id}' is circular");
         return;
     }
 
     if let Some(ref_val) = value.as_object().and_then(|object| member(object, "ref")) {
         // This layer is referencing another layer. Recursively parse that layer.
         let Some(ref_) = ref_val.as_str() else {
-            Log::warning(Event::ParseStyle, format!("layer ref of '{id}' must be a string"));
+            log::warn!(target: log_target::PARSE_STYLE, "layer ref of '{id}' must be a string");
             return;
         };
 
         if !layers_map.contains_key(ref_) {
-            Log::warning(Event::ParseStyle, format!("layer '{id}' references unknown layer {ref_}"));
+            log::warn!(target: log_target::PARSE_STYLE, "layer '{id}' references unknown layer {ref_}");
             return;
         }
 
@@ -448,7 +450,7 @@ fn parse_layer(
 
         let mut layer = reference.clone_ref(id);
         if let Some(error) = set_paint_properties(&mut layer, &Convertible::from(value), InvalidProperty::Skip) {
-            Log::warning(Event::ParseStyle, &error.message);
+            log::warn!(target: log_target::PARSE_STYLE, "{}", error.message);
         }
         if let Some(entry) = layers_map.get_mut(id) {
             entry.layer = Some(layer);
@@ -458,7 +460,7 @@ fn parse_layer(
         let Some(converted) =
             convert_layer_with(registry, &Convertible::from(value), &mut error, InvalidProperty::Skip)
         else {
-            Log::warning(Event::ParseStyle, &error.message);
+            log::warn!(target: log_target::PARSE_STYLE, "{}", error.message);
             return;
         };
         if let Some(entry) = layers_map.get_mut(id) {
@@ -563,13 +565,13 @@ fn parse_font_faces(faces: &JsonObject<'_>) -> FontFaces {
                 let mut warnings = Vec::new();
                 let font_face = parse_font_file(face_name, font_file, &mut warnings);
                 for warning in warnings {
-                    Log::warning(Event::ParseStyle, warning);
+                    log::warn!(target: log_target::PARSE_STYLE, "{warning}");
                 }
 
                 if !font_face.name.is_empty() && !font_face.url.is_empty() && !font_face.ranges.is_empty() {
                     font_faces.push(font_face);
                 } else {
-                    Log::warning(Event::ParseStyle, format!("Invalid font-face definition for: {face_name}"));
+                    log::warn!(target: log_target::PARSE_STYLE, "Invalid font-face definition for: {face_name}");
                 }
             }
         } else if let Some(url) = face_value.as_str() {
@@ -579,7 +581,7 @@ fn parse_font_faces(faces: &JsonObject<'_>) -> FontFaces {
                 ranges: vec![ALL_CODE_POINTS],
             });
         } else {
-            Log::warning(Event::ParseStyle, "font-face must be an object or array");
+            log::warn!(target: log_target::PARSE_STYLE, "font-face must be an object or array");
         }
     }
     font_faces

@@ -6,7 +6,6 @@
 use std::sync::Arc;
 
 use mln_util::constants::{LAST_RESORT_ALPHABETIC_FONT, LAST_RESORT_PAN_UNICODE_FONT};
-use mln_util::logging::{Event, Log};
 use mln_vec_map::VecSet;
 
 use crate::expression::forms::format::FormatExpressionSection;
@@ -15,6 +14,7 @@ use crate::expression::value::from_expression_value;
 use crate::expression::{Dependency, Expr, Formatted, FormattedSection, GlobalStateMap, Type};
 use crate::layer::{FontStack, LayerStyle, LayerTypeInfo, SourceKind, StyleLayerType};
 use crate::layers::symbol_layer_properties::{self, SymbolLayoutProperties, SymbolPaintProperties};
+use crate::log_target;
 use crate::property::evaluated::Evaluated;
 use crate::property::expression::PropertyExpression;
 use crate::property::set::OverridableSection;
@@ -69,13 +69,11 @@ impl StyleLayerType for Symbol {
                     if let Some(value) = value {
                         font_stack.insert(value);
                     } else {
-                        Log::warning(
-                            Event::ParseStyle,
-                            format!(
-                                "Layer '{}' has an invalid value for text-font and will not render text. Output \
-                                 values must be contained as literals within the expression.",
-                                style.id
-                            ),
+                        log::warn!(
+                            target: log_target::PARSE_STYLE,
+                            "Layer '{}' has an invalid value for text-font and will not render text. Output \
+                             values must be contained as literals within the expression.",
+                            style.id
                         );
                         break;
                     }

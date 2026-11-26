@@ -22,10 +22,9 @@ mod pmtiles_file_source;
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Once, mpsc};
 
 use mln_util::hash::HashMap;
-use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use mln_util::queue::{Queue, WeakQueue};
 use parking_lot::Mutex;
 
@@ -263,30 +262,100 @@ impl Drop for TempPath {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Message {
-    pub(crate) severity: EventSeverity,
-    pub(crate) event: Event,
+    pub(crate) level: log::Level,
+    pub(crate) target: &'static str,
     pub(crate) code: i64,
     pub(crate) msg: String,
 }
 
-struct Recorder(Arc<Mutex<Vec<(Message, bool)>>>);
+/// A record the test logger caught: its level, target, code and message.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Caught {
+    pub(crate) level: log::Level,
+    pub(crate) target: String,
+    pub(crate) code: i64,
+    pub(crate) msg: String,
+}
 
-impl Observer for Recorder {
-    fn on_record(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> bool {
-        self.0.lock().push((Message { severity, event, code, msg: msg.to_owned() }, false));
-        true
+type Messages = Arc<Mutex<Vec<(Caught, bool)>>>;
+
+/// A function that sees the records of every thread, and returns whether it
+/// took the record.
+type Watch = Box<dyn Fn(&Caught) -> bool + Send>;
+
+thread_local! {
+    /// The messages of the thread's live `FixtureLog`, if any.
+    static CAUGHT: RefCell<Option<Messages>> = const { RefCell::new(None) };
+}
+
+static WATCH: Mutex<Option<Watch>> = Mutex::new(None);
+
+/// The test binary's `log` logger. It hands each of the library's records to
+/// the process's [`watch`], and those that it doesn't take to the
+/// `FixtureLog` of the thread that logged them, so tests that run on threads
+/// of one process don't see each other's.
+struct Catcher;
+
+impl log::Log for Catcher {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata.target().starts_with("mln_")
     }
+
+    fn log(&self, record: &log::Record<'_>) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        let code = record.key_values().get(log::kv::Key::from_str("code")).and_then(|code| code.to_i64());
+        let caught = Caught {
+            level: record.level(),
+            target: record.target().to_owned(),
+            code: code.unwrap_or(-1),
+            msg: record.args().to_string(),
+        };
+        if WATCH.lock().as_ref().is_some_and(|watch| watch(&caught)) {
+            return;
+        }
+        CAUGHT.with_borrow(|messages| {
+            if let Some(messages) = messages {
+                messages.lock().push((caught, false));
+            }
+        });
+    }
+
+    fn flush(&self) {}
+}
+
+fn install_logger() {
+    static INSTALL: Once = Once::new();
+    INSTALL.call_once(|| {
+        log::set_logger(&Catcher).expect("the test binary has no other logger");
+        log::set_max_level(log::LevelFilter::Info);
+    });
+}
+
+/// Hands every thread's records to `watch` until the guard drops.
+pub(crate) fn watch(watch: impl Fn(&Caught) -> bool + Send + 'static) -> impl Drop {
+    struct Unwatch;
+    impl Drop for Unwatch {
+        fn drop(&mut self) {
+            WATCH.lock().take();
+        }
+    }
+    install_logger();
+    *WATCH.lock() = Some(Box::new(watch));
+    Unwatch
 }
 
 /// Records the calling thread's log messages for a test to check.
 pub(crate) struct FixtureLog {
-    messages: Arc<Mutex<Vec<(Message, bool)>>>,
+    messages: Messages,
 }
 
 impl FixtureLog {
     pub(crate) fn new() -> Self {
-        let messages = Arc::new(Mutex::new(Vec::new()));
-        let _ = Log::set_thread_observer(Some(Box::new(Recorder(Arc::clone(&messages)))));
+        install_logger();
+        let messages = Messages::default();
+        CAUGHT.set(Some(Arc::clone(&messages)));
         FixtureLog { messages }
     }
 
@@ -296,8 +365,8 @@ impl FixtureLog {
         let mut count = 0;
         for (m, checked) in messages.iter_mut() {
             if !*checked
-                && m.severity == message.severity
-                && m.event == message.event
+                && m.level == message.level
+                && m.target == message.target
                 && m.code == message.code
                 && (if substring { m.msg.contains(&message.msg) } else { m.msg == message.msg })
             {
@@ -312,23 +381,28 @@ impl FixtureLog {
         self.messages.lock().iter().filter(|(_, checked)| !checked).count()
     }
 
-    pub(crate) fn unchecked(&self) -> Vec<Message> {
+    pub(crate) fn unchecked(&self) -> Vec<Caught> {
         self.messages.lock().iter().filter(|(_, checked)| !checked).map(|(m, _)| m.clone()).collect()
     }
 }
 
 impl Drop for FixtureLog {
     fn drop(&mut self) {
-        let _ = Log::set_thread_observer(None);
+        CAUGHT.set(None);
     }
 }
 
 pub(crate) fn error(code: i32, msg: &str) -> Message {
-    Message { severity: EventSeverity::Error, event: Event::Database, code: i64::from(code), msg: msg.to_owned() }
+    Message {
+        level: log::Level::Error,
+        target: crate::log_target::DATABASE,
+        code: i64::from(code),
+        msg: msg.to_owned(),
+    }
 }
 
 pub(crate) fn warning(code: i64, msg: &str) -> Message {
-    Message { severity: EventSeverity::Warning, event: Event::Database, code, msg: msg.to_owned() }
+    Message { level: log::Level::Warn, target: crate::log_target::DATABASE, code, msg: msg.to_owned() }
 }
 
 /// A Mersenne Twister (`std::mt19937`, default seed 5489), so `random_string`

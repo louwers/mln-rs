@@ -1,21 +1,23 @@
 //! `logging.h`: the process's log records, sent to a host's callback.
 //!
-//! The core's log hands each record to one observer. This module installs one
-//! that forwards records to the host's handler: on the thread that logged
-//! them, or, for the severities of the async mask, on a log thread of its own,
-//! in the order they were logged.
+//! The library logs through the `log` crate. This module installs the
+//! process's `log` logger, [`Bridge`], which forwards records to the host's
+//! handler: on the thread that logged them, or, for the severities of the
+//! async mask, on a log thread of its own, in the order they were logged. A
+//! record that no handler takes, or whose severity the handler's platform
+//! severities name, goes to the platform's log.
 //!
-//! gfx and the backends, and wgpu and naga, log through the `log` crate
-//! instead. This module installs the process's `log` logger, which hands their
-//! records to the core's log, so that they reach the handler, or the
-//! platform's log, as the core's do.
+//! A library crate names a record's event in its target, as
+//! `<crate>::<event>`: `mln_style::parse_style` is
+//! `MLN_LOG_EVENT_PARSE_STYLE` (see [`EVENTS`]). Other targets are general,
+//! but wgpu's and naga's, which are about the graphics API. A record's
+//! `code` value, such as an SQLite result code, is its code.
 
 use core::cell::Cell;
 use std::borrow::Cow;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Once, mpsc};
 
-use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use parking_lot::{Mutex, RwLock};
 
 use crate::abi::{self, Fields};
@@ -24,15 +26,18 @@ use crate::callback::Registration;
 use crate::error::Error;
 use crate::export::ForbidReentry;
 use crate::generated::types::{
-    MLN_LOG_SEVERITY_ERROR, MLN_LOG_SEVERITY_FLAG_ALL, MLN_LOG_SEVERITY_FLAG_DEFAULT, MLN_LOG_SEVERITY_INFO,
-    MLN_LOG_SEVERITY_WARNING, mln_buffer_view, mln_diagnostic, mln_log_event, mln_log_handler, mln_log_severity,
-    mln_log_severity_flags, mln_status,
+    MLN_LOG_EVENT_CRASH, MLN_LOG_EVENT_DATABASE, MLN_LOG_EVENT_GENERAL, MLN_LOG_EVENT_GLYPH,
+    MLN_LOG_EVENT_GRAPHICS_BACKEND, MLN_LOG_EVENT_HTTP_REQUEST, MLN_LOG_EVENT_IMAGE, MLN_LOG_EVENT_PARSE_STYLE,
+    MLN_LOG_EVENT_PARSE_TILE, MLN_LOG_EVENT_RENDER, MLN_LOG_EVENT_SETUP, MLN_LOG_EVENT_SPRITE, MLN_LOG_EVENT_STYLE,
+    MLN_LOG_EVENT_TIMING, MLN_LOG_SEVERITY_ERROR, MLN_LOG_SEVERITY_FLAG_ALL, MLN_LOG_SEVERITY_FLAG_DEFAULT,
+    MLN_LOG_SEVERITY_INFO, MLN_LOG_SEVERITY_WARNING, mln_buffer_view, mln_diagnostic, mln_log_event, mln_log_handler,
+    mln_log_severity, mln_log_severity_flags, mln_status,
 };
 
 abi::versioned!(mln_log_handler);
 
-/// A log callback can't call the library: the record's thread may hold the
-/// core's log lock and this module's.
+/// A log callback can't call the library: the record's thread may hold this
+/// module's lock.
 const REENTRY: &str = "the C API cannot be called from a log callback, wake, or release";
 
 type Callback = unsafe extern "C" fn(*mut core::ffi::c_void, mln_log_severity, mln_log_event, i64, mln_buffer_view);
@@ -50,13 +55,30 @@ static HANDLER: RwLock<Option<Handler>> = RwLock::new(None);
 /// The severities that go to the log thread.
 static ASYNC_SEVERITIES: AtomicU32 = AtomicU32::new(MLN_LOG_SEVERITY_FLAG_DEFAULT);
 
-static INSTALL: Once = Once::new();
-
 thread_local! {
     /// Whether this thread is in a log callback, where a record that the
     /// host's code logs goes to the platform's log instead.
     static IN_CALLBACK: Cell<bool> = const { Cell::new(false) };
 }
+
+/// The events that the library's targets name: each target's name for it,
+/// its value, and its name in the platform's log.
+const EVENTS: [(&str, mln_log_event, &str); 14] = [
+    ("general", MLN_LOG_EVENT_GENERAL, "General"),
+    ("setup", MLN_LOG_EVENT_SETUP, "Setup"),
+    ("parse_style", MLN_LOG_EVENT_PARSE_STYLE, "ParseStyle"),
+    ("parse_tile", MLN_LOG_EVENT_PARSE_TILE, "ParseTile"),
+    ("render", MLN_LOG_EVENT_RENDER, "Render"),
+    ("style", MLN_LOG_EVENT_STYLE, "Style"),
+    ("database", MLN_LOG_EVENT_DATABASE, "Database"),
+    ("http_request", MLN_LOG_EVENT_HTTP_REQUEST, "HttpRequest"),
+    ("sprite", MLN_LOG_EVENT_SPRITE, "Sprite"),
+    ("image", MLN_LOG_EVENT_IMAGE, "Image"),
+    ("graphics_backend", MLN_LOG_EVENT_GRAPHICS_BACKEND, "GraphicsBackend"),
+    ("crash", MLN_LOG_EVENT_CRASH, "Crash"),
+    ("glyph", MLN_LOG_EVENT_GLYPH, "Glyph"),
+    ("timing", MLN_LOG_EVENT_TIMING, "Timing"),
+];
 
 /// One record, as the log thread carries it.
 struct Record {
@@ -66,12 +88,14 @@ struct Record {
     message: String,
 }
 
-fn severity_value(severity: EventSeverity) -> Option<mln_log_severity> {
-    match severity {
-        EventSeverity::Debug => None,
-        EventSeverity::Info => Some(MLN_LOG_SEVERITY_INFO),
-        EventSeverity::Warning => Some(MLN_LOG_SEVERITY_WARNING),
-        EventSeverity::Error => Some(MLN_LOG_SEVERITY_ERROR),
+/// The severity of a record of `level`; debug records have none, and go to
+/// the platform's log only.
+fn severity(level: log::Level) -> Option<mln_log_severity> {
+    match level {
+        log::Level::Error => Some(MLN_LOG_SEVERITY_ERROR),
+        log::Level::Warn => Some(MLN_LOG_SEVERITY_WARNING),
+        log::Level::Info => Some(MLN_LOG_SEVERITY_INFO),
+        log::Level::Debug | log::Level::Trace => None,
     }
 }
 
@@ -124,60 +148,81 @@ fn deliver_later(record: Record) -> Result<(), Record> {
     }
 }
 
-/// The core log's observer.
-struct Forwarder;
-
-impl Observer for Forwarder {
-    fn on_record(&self, severity: EventSeverity, event: Event, code: i64, message: &str) -> bool {
-        let Some(severity) = severity_value(severity) else { return false };
-        if IN_CALLBACK.get() {
-            return false;
+/// Hands a record to the host's handler, if there is one, now or on the log
+/// thread. Returns whether the record stays out of the platform's log.
+fn forward(severity: mln_log_severity, event: mln_log_event, code: i64, message: &str) -> bool {
+    if IN_CALLBACK.get() {
+        return false;
+    }
+    let platform = {
+        let handler = HANDLER.read();
+        match &*handler {
+            Some(handler) => handler.platform_severities & flag(severity) != 0,
+            None => return false,
         }
-        let platform = {
-            let handler = HANDLER.read();
-            match &*handler {
-                Some(handler) => handler.platform_severities & flag(severity) != 0,
-                None => return false,
-            }
-        };
-        // The headers' events are the core's, in its order.
-        let record = Record { severity, event: event as mln_log_event, code, message: message.to_owned() };
-        if ASYNC_SEVERITIES.load(Ordering::Acquire) & flag(severity) != 0 {
-            if let Err(record) = deliver_later(record) {
-                deliver(&record);
-            }
-        } else {
+    };
+    let record = Record { severity, event, code, message: message.to_owned() };
+    if ASYNC_SEVERITIES.load(Ordering::Acquire) & flag(severity) != 0 {
+        if let Err(record) = deliver_later(record) {
             deliver(&record);
         }
-        // The core sends a record that isn't handled to the platform's log.
-        !platform
+    } else {
+        deliver(&record);
     }
+    !platform
 }
 
-/// The process's `log` logger: it hands records to the core's log.
+/// Writes a record to the platform's log, stderr.
+fn platform_record(level: log::Level, event: &str, code: i64, message: &str) {
+    eprintln!("{}", platform_line(level, event, code, message));
+}
+
+/// A record's line in the platform's log.
+fn platform_line(level: log::Level, event: &str, code: i64, message: &str) -> String {
+    let severity = match level {
+        log::Level::Error => "ERROR",
+        log::Level::Warn => "WARNING",
+        log::Level::Info => "INFO",
+        log::Level::Debug | log::Level::Trace => "DEBUG",
+    };
+    let thread = std::thread::current();
+    let thread = thread.name().unwrap_or_default();
+    let code = if code >= 0 { format!("({code})") } else { String::new() };
+    let separator = if message.is_empty() { "" } else { ": " };
+    format!("[{severity}] {{{thread}}}[{event}]{code}{separator}{message}")
+}
+
+/// The process's `log` logger: it hands records to the host's handler, or to
+/// the platform's log.
 ///
-/// It forwards the library's own records at every severity, as the core's
-/// are, and other crates' warnings and errors: what wgpu and naga log below
-/// that is detail about the graphics API that C hosts haven't asked for.
+/// It takes the library's own records at every severity but debug, which
+/// it prints in debug builds only, and other crates' warnings and errors:
+/// what wgpu and naga log below that is detail about the graphics API that C
+/// hosts haven't asked for.
 struct Bridge;
 
 impl log::Log for Bridge {
     fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
-        metadata.level() <= log::Level::Warn || library_crate(metadata.target()).is_some()
+        let floor = match library_crate(metadata.target()) {
+            Some(_) if cfg!(debug_assertions) => log::Level::Debug,
+            Some(_) => log::Level::Info,
+            None => log::Level::Warn,
+        };
+        metadata.level() <= floor
     }
 
     fn log(&self, record: &log::Record<'_>) {
         if !self.enabled(record.metadata()) {
             return;
         }
-        let severity = match record.level() {
-            log::Level::Error => EventSeverity::Error,
-            log::Level::Warn => EventSeverity::Warning,
-            log::Level::Info => EventSeverity::Info,
-            log::Level::Debug | log::Level::Trace => EventSeverity::Debug,
-        };
+        let (event, name) = event(record.target());
+        let code = record.key_values().get(log::kv::Key::from_str("code")).and_then(|code| code.to_i64());
+        let code = code.unwrap_or(-1);
         let message = record.args().as_str().map_or_else(|| Cow::Owned(record.args().to_string()), Cow::Borrowed);
-        Log::record(severity, event(record.target()), -1, &message);
+        if severity(record.level()).is_some_and(|severity| forward(severity, event, code, &message)) {
+            return;
+        }
+        platform_record(record.level(), name, code, &message);
     }
 
     fn flush(&self) {}
@@ -190,27 +235,26 @@ fn library_crate(target: &str) -> Option<&str> {
     krate.starts_with("mln_").then_some(rest)
 }
 
-/// The event a `log` record reports, by its target. The library's crates
-/// name the event in the target (`mln_gfx`'s crate docs); other crates'
-/// records are about the graphics API, from wgpu and naga, or general.
-fn event(target: &str) -> Event {
-    match library_crate(target) {
-        Some("render") => Event::Render,
-        Some("graphics_backend") => Event::GraphicsBackend,
-        None if target.starts_with("wgpu") || target.starts_with("naga") => Event::GraphicsBackend,
-        Some(_) | None => Event::General,
-    }
+/// The event a `log` record reports, by its target, and its name in the
+/// platform's log.
+fn event(target: &str) -> (mln_log_event, &'static str) {
+    let name = match library_crate(target) {
+        Some(event) => event,
+        None if target.starts_with("wgpu") || target.starts_with("naga") => "graphics_backend",
+        None => "general",
+    };
+    let (_, event, name) = EVENTS.iter().find(|(known, ..)| *known == name).unwrap_or(&EVENTS[0]);
+    (*event, name)
 }
 
 /// Makes [`Bridge`] the process's `log` logger, once, before the library
-/// first logs through `log`: when it creates a runtime or a device, and when
-/// it installs the log callback. A Rust program that links the library and
-/// installed a logger of its own keeps it, and reads these records there.
+/// first logs: when an entry point first runs. A Rust program that links the
+/// library and installed a logger of its own keeps it, and reads the
+/// library's records there.
 pub(crate) fn install_logger() {
     static LOGGER: Once = Once::new();
     LOGGER.call_once(|| {
         if log::set_logger(&Bridge).is_ok() {
-            // The core's log drops debug records in release builds.
             log::set_max_level(if cfg!(debug_assertions) { log::LevelFilter::Debug } else { log::LevelFilter::Info });
         }
     });
@@ -249,8 +293,6 @@ pub(crate) unsafe extern "C" fn mln_log_set_callback(
         registration.accept();
         // Before the log thread can call the host.
         crate::process_exit::watch();
-        INSTALL.call_once(|| Log::set_observer(Box::new(Forwarder)));
-        install_logger();
         replace(Some(Handler { callback, registration, platform_severities: handler.platform_severities }));
         Ok(())
     })
@@ -287,7 +329,7 @@ pub(crate) unsafe extern "C" fn mln_log_set_async_severity_mask(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use core::ffi::c_void;
     use std::sync::Arc;
     use std::thread::ThreadId;
@@ -300,7 +342,6 @@ mod tests {
     use crate::delivery::{mln_delivery_queue_dispatch, mln_delivery_queue_release};
     use crate::diagnostic::tests::{diagnostic, message};
     use crate::generated::types::{
-        MLN_LOG_EVENT_GENERAL, MLN_LOG_EVENT_GRAPHICS_BACKEND, MLN_LOG_EVENT_RENDER, MLN_LOG_EVENT_TIMING,
         MLN_LOG_SEVERITY_FLAG_ERROR, MLN_LOG_SEVERITY_FLAG_INFO, MLN_LOG_SEVERITY_FLAG_WARNING,
         MLN_STATUS_INVALID_ARGUMENT, MLN_STATUS_INVALID_STATE, MLN_STATUS_OK, mln_delivery_queue,
     };
@@ -310,10 +351,10 @@ mod tests {
 
     /// The log state is the process's, so its tests take turns, and each
     /// restores the defaults when it ends.
-    struct LogState(#[expect(dead_code, reason = "held for its lifetime")] MutexGuard<'static, ()>);
+    pub(crate) struct LogState(#[expect(dead_code, reason = "held for its lifetime")] MutexGuard<'static, ()>);
 
     impl LogState {
-        fn take() -> Self {
+        pub(crate) fn take() -> Self {
             static TURN: Mutex<()> = Mutex::new(());
             Self(TURN.lock())
         }
@@ -330,18 +371,18 @@ mod tests {
     }
 
     #[derive(Clone, Debug, PartialEq)]
-    struct Seen {
-        severity: mln_log_severity,
-        event: mln_log_event,
-        code: i64,
-        message: String,
-        thread: ThreadId,
+    pub(crate) struct Seen {
+        pub(crate) severity: mln_log_severity,
+        pub(crate) event: mln_log_event,
+        pub(crate) code: i64,
+        pub(crate) message: String,
+        pub(crate) thread: ThreadId,
     }
 
     /// What a handler saw: the records with this test's marker, the releases,
     /// and the status of a call back into the library, if it made one.
     #[derive(Default)]
-    struct Probe {
+    pub(crate) struct Probe {
         marker: String,
         records: Mutex<Vec<Seen>>,
         releases: AtomicU32,
@@ -350,11 +391,11 @@ mod tests {
     }
 
     impl Probe {
-        fn new(marker: &str, call_back: bool) -> Arc<Self> {
+        pub(crate) fn new(marker: &str, call_back: bool) -> Arc<Self> {
             Arc::new(Self { marker: marker.to_owned(), call_back, ..Self::default() })
         }
 
-        fn records(&self) -> Vec<Seen> {
+        pub(crate) fn records(&self) -> Vec<Seen> {
             self.records.lock().clone()
         }
 
@@ -406,7 +447,7 @@ mod tests {
         }
     }
 
-    fn handler(probe: &Arc<Probe>, queue: mln_delivery_queue) -> mln_log_handler {
+    pub(crate) fn handler(probe: &Arc<Probe>, queue: mln_delivery_queue) -> mln_log_handler {
         mln_log_handler {
             size: size_of::<mln_log_handler>() as u32,
             callback: Some(record),
@@ -417,12 +458,12 @@ mod tests {
         }
     }
 
-    fn set(handler: &mln_log_handler) -> mln_status {
+    pub(crate) fn set(handler: &mln_log_handler) -> mln_status {
         // SAFETY: a local handler and a null diagnostic.
         unsafe { mln_log_set_callback(handler, NULL_DIAGNOSTIC) }
     }
 
-    fn set_async(mask: mln_log_severity_flags) -> mln_status {
+    pub(crate) fn set_async(mask: mln_log_severity_flags) -> mln_status {
         // SAFETY: a null diagnostic.
         unsafe { mln_log_set_async_severity_mask(mask, NULL_DIAGNOSTIC) }
     }
@@ -459,7 +500,7 @@ mod tests {
         for rejected in [small, silent, unknown, past] {
             assert_eq!(set(&rejected), MLN_STATUS_INVALID_ARGUMENT);
         }
-        Log::warning(Event::General, "kept");
+        log::warn!(target: "mln_c::general", "kept");
         assert_eq!(installed.wait_for(1).len(), 1);
         assert_eq!(rejected.releases.load(Ordering::SeqCst), 0);
         assert_eq!(clear(), MLN_STATUS_OK);
@@ -486,10 +527,10 @@ mod tests {
         let probe = Probe::new("threads", false);
         assert_eq!(set_async(MLN_LOG_SEVERITY_FLAG_WARNING), MLN_STATUS_OK);
         assert_eq!(set(&handler(&probe, 0)), MLN_STATUS_OK);
-        Log::info(Event::Timing, "threads: info");
-        Log::warning(Event::General, "threads: first");
-        Log::warning(Event::General, "threads: second");
-        Log::error(Event::General, "threads: error");
+        log::info!(target: "mln_c::timing", "threads: info");
+        log::warn!(target: "mln_c::general", "threads: first");
+        log::warn!(target: "mln_c::general", "threads: second");
+        log::error!(target: "mln_c::general", "threads: error");
         let records = probe.wait_for(4);
         let here = std::thread::current().id();
         let sync: Vec<_> = records.iter().filter(|seen| seen.thread == here).collect();
@@ -542,12 +583,12 @@ mod tests {
         assert_eq!(set_async(0), MLN_STATUS_OK);
         let probe = Probe::new("reentry", true);
         assert_eq!(set(&handler(&probe, 0)), MLN_STATUS_OK);
-        Log::warning(Event::General, "reentry");
+        log::warn!(target: "mln_c::general", "reentry");
         let (status, text) = probe.reentry.lock().take().unwrap();
         assert_eq!(status, MLN_STATUS_INVALID_STATE);
         assert!(text.contains("log callback"), "{text}");
         // The callback's call changed nothing.
-        Log::warning(Event::General, "reentry again");
+        log::warn!(target: "mln_c::general", "reentry again");
         assert_eq!(probe.records().len(), 2);
 
         assert_eq!(clear(), MLN_STATUS_OK);
@@ -561,15 +602,15 @@ mod tests {
         let probe = Probe::new("cleared", false);
         assert_eq!(set_async(MLN_LOG_SEVERITY_FLAG_ALL), MLN_STATUS_OK);
         assert_eq!(set(&handler(&probe, 0)), MLN_STATUS_OK);
-        Log::error(Event::General, "cleared: before");
+        log::error!(target: "mln_c::general", "cleared: before");
         assert_eq!(probe.wait_for(1).len(), 1);
         assert_eq!(clear(), MLN_STATUS_OK);
-        Log::error(Event::General, "cleared: after");
+        log::error!(target: "mln_c::general", "cleared: after");
         // The log thread delivers in order, so once another handler sees a
         // later record, the cleared one would have seen this one.
         let next = Probe::new("cleared", false);
         assert_eq!(set(&handler(&next, 0)), MLN_STATUS_OK);
-        Log::error(Event::General, "cleared: next");
+        log::error!(target: "mln_c::general", "cleared: next");
         assert_eq!(next.wait_for(1).len(), 1);
         assert_eq!(probe.records().len(), 1);
     }
@@ -581,7 +622,7 @@ mod tests {
         let queue = queue();
         let probe = Probe::new("queued", true);
         assert_eq!(set(&handler(&probe, queue)), MLN_STATUS_OK);
-        Log::info(Event::General, "queued");
+        log::info!(target: "mln_c::general", "queued");
         assert_eq!(probe.records(), Vec::<Seen>::new());
         // SAFETY: a null diagnostic.
         assert_eq!(unsafe { mln_delivery_queue_dispatch(queue, NULL_DIAGNOSTIC) }, MLN_STATUS_OK);
@@ -598,14 +639,14 @@ mod tests {
         let probe = Probe::new("platform", false);
         let platform = MLN_LOG_SEVERITY_FLAG_ERROR | MLN_LOG_SEVERITY_FLAG_INFO;
         assert_eq!(set(&mln_log_handler { platform_severities: platform, ..handler(&probe, 0) }), MLN_STATUS_OK);
-        // The core prints the records that its observer didn't handle.
-        let handled = |severity| Forwarder.on_record(severity, Event::General, -1, "platform");
-        assert!(!handled(EventSeverity::Info));
-        assert!(handled(EventSeverity::Warning));
-        assert!(!handled(EventSeverity::Error));
+        // The bridge prints the records that `forward` doesn't keep out.
+        let kept_out = |severity| forward(severity, MLN_LOG_EVENT_GENERAL, -1, "platform");
+        assert!(!kept_out(MLN_LOG_SEVERITY_INFO));
+        assert!(kept_out(MLN_LOG_SEVERITY_WARNING));
+        assert!(!kept_out(MLN_LOG_SEVERITY_ERROR));
         assert_eq!(probe.records().len(), 3);
         assert_eq!(clear(), MLN_STATUS_OK);
-        assert!(!handled(EventSeverity::Warning));
+        assert!(!kept_out(MLN_LOG_SEVERITY_WARNING));
     }
 
     #[test]
@@ -616,6 +657,8 @@ mod tests {
         assert_eq!(set(&handler(&probe, 0)), MLN_STATUS_OK);
         log::info!(target: "mln_gl::render", "bridge: render");
         log::error!(target: "mln_gl::graphics_backend", "bridge: {}", "backend");
+        log::warn!(target: "mln_style::parse_style", "bridge: style");
+        log::error!(target: "mln_storage::database", code = 11; "bridge: database");
         log::info!(target: "mln_gl::gpu", "bridge: general");
         log::warn!(target: "wgpu_hal::vulkan::instance", "bridge: wgpu");
         log::info!(target: "wgpu_core::device", "bridge: wgpu info");
@@ -632,11 +675,38 @@ mod tests {
             [
                 (MLN_LOG_SEVERITY_INFO, MLN_LOG_EVENT_RENDER, -1, "bridge: render".to_owned()),
                 (MLN_LOG_SEVERITY_ERROR, MLN_LOG_EVENT_GRAPHICS_BACKEND, -1, "bridge: backend".to_owned()),
+                (MLN_LOG_SEVERITY_WARNING, MLN_LOG_EVENT_PARSE_STYLE, -1, "bridge: style".to_owned()),
+                (MLN_LOG_SEVERITY_ERROR, MLN_LOG_EVENT_DATABASE, 11, "bridge: database".to_owned()),
                 (MLN_LOG_SEVERITY_INFO, MLN_LOG_EVENT_GENERAL, -1, "bridge: general".to_owned()),
                 (MLN_LOG_SEVERITY_WARNING, MLN_LOG_EVENT_GRAPHICS_BACKEND, -1, "bridge: wgpu".to_owned()),
                 (MLN_LOG_SEVERITY_ERROR, MLN_LOG_EVENT_GENERAL, -1, "bridge: other".to_owned()),
             ]
         );
+    }
+
+    #[test]
+    fn the_platform_log_names_the_severity_thread_event_and_code() {
+        let line = std::thread::Builder::new()
+            .name("logger".to_owned())
+            .spawn(|| {
+                [
+                    platform_line(log::Level::Error, "Database", 11, "Can't open"),
+                    platform_line(log::Level::Warn, "General", -1, ""),
+                ]
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(line, ["[ERROR] {logger}[Database](11): Can't open", "[WARNING] {logger}[General]"]);
+    }
+
+    #[test]
+    fn every_event_has_its_own_target() {
+        for (name, value, platform) in EVENTS {
+            assert_eq!(event(&format!("mln_map::{name}")), (value, platform));
+        }
+        assert_eq!(event("mln_map::transform"), (MLN_LOG_EVENT_GENERAL, "General"));
+        assert_eq!(event("naga::front"), (MLN_LOG_EVENT_GRAPHICS_BACKEND, "GraphicsBackend"));
     }
 
     #[test]

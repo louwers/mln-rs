@@ -997,7 +997,6 @@ fn a_tile_lays_out_again_once_a_failed_glyph_range_loads() {
     assert_eq!(file_source.pending(), 1, "the glyph range's request");
     let mut failed = Response::new();
     failed.error = Some(Box::new(ResourceError::new(Reason::Other, "offline")));
-    let _log = crate::tests::text::SquelchLog::new();
     file_source.respond(failed);
     tiles.settle(&[first]);
     assert!(!has_glyph(&tiles, &first), "laid out without the glyph");

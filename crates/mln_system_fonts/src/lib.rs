@@ -49,6 +49,13 @@ mod directwrite;
 #[cfg(all(unix, not(any(target_vendor = "apple", target_os = "android"))))]
 mod fontconfig;
 
+/// The `log` targets of this crate's records. Each names the event that
+/// `mln_c` reports the record under (`mln_c::logging`).
+mod log_target {
+    #[cfg(not(target_family = "wasm"))]
+    pub(crate) const GLYPH: &str = "mln_system_fonts::glyph";
+}
+
 #[cfg(not(target_family = "wasm"))]
 pub use glyphs::SystemFonts;
 

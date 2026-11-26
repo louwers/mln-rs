@@ -27,6 +27,7 @@ foldhash.workspace = true
 geojson.workspace = true
 geo-types.workspace = true
 geometry.workspace = true
+log.workspace = true
 mln_geojson.workspace = true
 mln_image.workspace = true
 mln_math.workspace = true

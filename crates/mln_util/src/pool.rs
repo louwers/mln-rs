@@ -17,7 +17,6 @@ use std::thread::ThreadId;
 use parking_lot::{Condvar, Mutex};
 
 #[cfg(not(target_family = "wasm"))]
-use crate::logging::{Event, Log};
 #[cfg(not(target_family = "wasm"))]
 use crate::thread::Joined;
 use crate::time::Instant;
@@ -454,7 +453,7 @@ impl Shared {
                 // wait for a later task to start one.
                 Err(error) => {
                     self.ring.lock().started -= 1;
-                    Log::error(Event::General, format!("can't start a pool worker: {error}"));
+                    log::error!(target: crate::log_target::GENERAL, "can't start a pool worker: {error}");
                 }
             }
         }

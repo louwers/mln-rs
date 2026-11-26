@@ -20,17 +20,16 @@
 use std::sync::{Arc, mpsc};
 
 use mln_util::hash::HashSet;
-use mln_util::logging::{Event, Log};
 use mln_util::thread::Joined;
 use mln_wire::payload::Payload;
 
 use super::TileWorkerHost;
 use super::envelope::{self, Encoded};
 use super::map_side::MapCodec;
-use crate::Registry;
 use crate::tile::inbox::{InboxSender, TileEvent};
 use crate::tile::job::{JobId, JobResult, JobTimes, Run};
 use crate::tile::tile_workers::{Lane, ReplyBody, TileWorkers};
+use crate::{Registry, log_target};
 
 /// The jobs a lane takes at once.
 const JOBS_PER_LANE: usize = 2;
@@ -176,7 +175,7 @@ impl RemoteWorkers {
     /// read, and its shared tables, on both sides.
     fn lose(&mut self, lane: Lane) -> Option<TileEvent> {
         let remote = self.lanes.get_mut(lane.0)?;
-        Log::error(Event::General, format!("Tile worker {} was lost", lane.0));
+        log::error!(target: log_target::GENERAL, "Tile worker {} was lost", lane.0);
         let live = self.instances.as_mut().is_some_and(|instances| instances.replace(lane.0));
         *remote = RemoteLane::new(&self.registry, remote.instance + 1, live);
         Some(TileEvent::LaneLost(lane))
@@ -301,7 +300,7 @@ impl ThreadWorkerInstances {
         match thread {
             Ok(thread) => Some(WorkerThread { requests, _thread: Joined::new(thread) }),
             Err(error) => {
-                Log::error(Event::General, format!("Tile worker {instance}'s thread didn't start: {error}"));
+                log::error!(target: log_target::GENERAL, "Tile worker {instance}'s thread didn't start: {error}");
                 None
             }
         }

@@ -1,10 +1,9 @@
-use mln_util::logging::{Event, Log};
-
 use crate::expression::forms::interpolate::Interpolate;
 use crate::expression::forms::step::Step;
 use crate::expression::functions::Role;
 use crate::expression::parse::ParsingError;
 use crate::expression::{Dependency, Expr, Node};
+use crate::log_target;
 
 /// The alternatives of `variant<const Interpolate*, const Step*, ParsingError>`.
 #[derive(Clone)]
@@ -120,7 +119,7 @@ pub fn find_zoom_curve_checked(e: &Expr) -> ZoomCurvePtr<'_> {
     }
     match find_zoom_curve(e) {
         Some(ZoomCurve::Error(err)) => {
-            Log::error(Event::Style, format!("Invalid Expression: {}", err.message));
+            log::error!(target: log_target::STYLE, "Invalid Expression: {}", err.message);
             ZoomCurvePtr::Null
         }
         Some(ZoomCurve::Interpolate(i)) => ZoomCurvePtr::Interpolate(i),

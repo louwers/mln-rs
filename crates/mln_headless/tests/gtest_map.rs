@@ -48,7 +48,6 @@ use mln_util::chrono::Timestamp;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::hash::HashSet;
 use mln_util::image::PremultipliedImage;
-use mln_util::logging::{Event, EventSeverity};
 use mln_util::pool::Pool;
 use mln_util::size::Size;
 use mln_util::tileset::{PartialTileset, Scheme};
@@ -833,7 +832,7 @@ fn set_style_invalid_json() {
     let serde_error = serde_json::from_str::<serde_json::Value>("invalid").unwrap_err();
     assert_eq!(
         1,
-        log.count(EventSeverity::Error, Event::ParseStyle, -1, &format!("Failed to parse style: {serde_error}"))
+        log.count(log::Level::Error, "mln_map::parse_style", &format!("Failed to parse style: {serde_error}"))
     );
     let unchecked = log.unchecked();
     assert!(unchecked.is_empty(), "{unchecked:?}");

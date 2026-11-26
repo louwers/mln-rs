@@ -32,7 +32,6 @@ use std::time::Duration;
 
 use mln_util::chrono::{Timestamp, now};
 use mln_util::constants::{ASSET_PROTOCOL, DEFAULT_MAXIMUM_CONCURRENT_REQUESTS, FILE_PROTOCOL};
-use mln_util::logging::{Event, Log};
 use mln_util::queue::{Queue, TimedTask};
 use mln_util::time::Instant;
 use mln_vec_map::VecMap;
@@ -43,6 +42,7 @@ use crate::file_source::FileSource;
 use crate::http_file_source::HTTPFileSource;
 use crate::http_header_transform::HttpHeaderTransform;
 use crate::http_timeout::{error_retry_timeout, until};
+use crate::log_target;
 use crate::network_status::{NetworkStatus, Status, Subscription};
 use crate::request::{Request, Responder};
 use crate::resource::{Priority, RequestOrder, Resource};
@@ -511,7 +511,11 @@ impl OnlineCore {
         let Some(req) = self.requests.get_mut(&id) else { return };
         if let Some(error) = &response.error {
             if error.reason == Reason::NotFound {
-                Log::error(Event::General, format!("The resource `{}` not found", sanitize_url(&req.resource.url)));
+                log::error!(
+                    target: log_target::GENERAL,
+                    "The resource `{}` not found",
+                    sanitize_url(&req.resource.url)
+                );
             }
             req.failed_requests += 1;
             req.failed_request_reason = error.reason;
@@ -597,7 +601,7 @@ impl OnlineFileSource {
             Ok(thread) => *source.thread.get_mut() = Some(thread),
             Err(error) => {
                 source.queue.close();
-                Log::error(Event::General, format!("The online file source's thread didn't start: {error}"));
+                log::error!(target: log_target::GENERAL, "The online file source's thread didn't start: {error}");
             }
         }
         source

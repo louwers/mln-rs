@@ -23,7 +23,6 @@ use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::TextureChannelDataType;
 use mln_util::hash::HashMap;
-use mln_util::logging::{Event, Log};
 
 use crate::gfx::buffer::{self, Buffer};
 use crate::gfx::indexes::{Indexes, SharedIndexes};
@@ -35,6 +34,7 @@ use crate::gfx::texture2d::{Texture2D, TextureMut};
 use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::vertex_attribute::Uniforms;
 use crate::gfx::vertices::{SharedVertices, TypedVertices, VertexStore, Vertices};
+use crate::log_target;
 
 pub(crate) struct Context {
     device: Device,
@@ -182,7 +182,7 @@ impl Context {
         doomed.sort_unstable_by_key(destroy_order);
         for resource in doomed.drain(..) {
             if let Err(error) = gpu.destroy(resource) {
-                Log::error(Event::Render, format!("Destroying {resource:?} failed: {error}"));
+                log::error!(target: log_target::RENDER, "Destroying {resource:?} failed: {error}");
                 debug_assert!(false, "destroying {resource:?} failed: {error}");
             }
         }
@@ -537,9 +537,9 @@ impl Drop for Context {
     /// that it did.
     fn drop(&mut self) {
         if !self.torn_down && !std::thread::panicking() {
-            Log::warning(
-                Event::Render,
-                "A renderer was dropped without its tear-down; its GPU objects stay until the backend goes",
+            log::warn!(
+                target: log_target::RENDER,
+                "A renderer was dropped without its tear-down; its GPU objects stay until the backend goes"
             );
         }
     }

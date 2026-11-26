@@ -3,6 +3,7 @@
 mod bucket_test;
 // Cameras that move faster than the network answers.
 mod fast_camera_test;
+mod fixture_log;
 // Ports test/layout/sort_key.test.cpp.
 mod gtest_sky;
 mod gtest_subdivision;

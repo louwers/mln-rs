@@ -31,5 +31,11 @@ pub use tile_data::{Feature, FeatureGroups, GeoJsonFeature, TileData, TileLayer}
 
 #[cfg(test)]
 mod malformed_tile_test;
+/// The `log` targets of this crate's records. Each names the event that
+/// `mln_c` reports the record under (`mln_c::logging`).
+mod log_target {
+    pub(crate) const PARSE_TILE: &str = "mln_tile::parse_tile";
+}
+
 #[cfg(test)]
 mod vector_tile_test;

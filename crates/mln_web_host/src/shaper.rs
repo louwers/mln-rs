@@ -12,10 +12,11 @@ use mln_renderer::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
 use mln_text::glyph::{FontData, Glyph, GlyphID, GlyphIDType, GlyphMetrics};
 use mln_text::{GlyphAdjust, ShapedText};
 use mln_util::image::AlphaImage;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
+
+use crate::log_target;
 
 // A panic in the shaper traps its instance, and the trap is a JavaScript
 // exception here. Each call catches it, as an error: thrown through this
@@ -178,7 +179,7 @@ impl FontFaceEngine for ShaperModuleEngine {
         match opened {
             Ok(face) => face.map(|face| -> Box<dyn FontFaceShaper> { Box::new(ShaperFace { face, type_ }) }),
             Err(error) => {
-                Log::error(Event::Glyph, format!("opening a font face failed: {}", message(&error)));
+                log::error!(target: log_target::GLYPH, "opening a font face failed: {}", message(&error));
                 None
             }
         }
@@ -200,7 +201,9 @@ impl FontFaceShaper for ShaperFace {
                     shaped.adjusts.push(GlyphAdjust::new(glyph[1], glyph[2], glyph[3]));
                 }
             }
-            Err(error) => Log::error(Event::Glyph, format!("shaping with a font face failed: {}", message(&error))),
+            Err(error) => {
+                log::error!(target: log_target::GLYPH, "shaping with a font face failed: {}", message(&error));
+            }
         }
     }
 
@@ -208,7 +211,7 @@ impl FontFaceShaper for ShaperFace {
         match self.face.glyph_of(c) {
             Ok(code) => Some(GlyphID::with_type(code?, self.type_)),
             Err(error) => {
-                Log::error(Event::Glyph, format!("finding a font face's glyph failed: {}", message(&error)));
+                log::error!(target: log_target::GLYPH, "finding a font face's glyph failed: {}", message(&error));
                 None
             }
         }
@@ -219,7 +222,7 @@ impl FontFaceShaper for ShaperFace {
         let parts = match self.face.rasterize(glyph.code) {
             Ok(parts) => parts,
             Err(error) => {
-                Log::error(Event::Glyph, format!("rasterizing a font face's glyph failed: {}", message(&error)));
+                log::error!(target: log_target::GLYPH, "rasterizing a font face's glyph failed: {}", message(&error));
                 return empty;
             }
         };

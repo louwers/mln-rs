@@ -19,7 +19,6 @@ use mln_storage::{FileSource, Loader, OnlineFileSource, ResourceOptions};
 use mln_storage_offline::RegionDatabase;
 use mln_text::GlyphCache;
 use mln_util::error::Error;
-use mln_util::logging::{Event, Log};
 use mln_util::pool::Pool;
 use mln_util::queue::{Queue, TimedTask};
 use mln_util::thread::Joined;
@@ -28,6 +27,7 @@ use parking_lot::Mutex;
 
 use crate::completion::{Completion, Resolver};
 use crate::event::{EventHandler, RuntimeEvent};
+use crate::log_target;
 use crate::map::{Applied, Map, MapEntry, MapId, MapOptions, MapShared, Published};
 use crate::offline::Offline;
 use crate::resources::{CacheDatabaseOperation, ProviderFileSource, ResourceHooks, ResourceProvider};
@@ -345,7 +345,7 @@ fn run(core: &mut Option<RuntimeCore>, task: impl FnOnce(&mut RuntimeCore, &mut 
 fn fail(core: &mut Option<RuntimeCore>, message: &str) {
     let Some(state) = core.take() else { return };
     let error = Error::native(format!("the runtime stopped after a panic in the library: {message}"));
-    Log::error(Event::Crash, &error.message);
+    log::error!(target: log_target::CRASH, "{}", error.message);
     let _ = state.failure.set(error);
     // The panic may have left the state half-changed, so its drop may panic
     // too.

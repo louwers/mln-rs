@@ -1,48 +1,79 @@
-//! Test helpers: the C++ `FixtureLog` (per thread, see `mln_util::logging`)
+//! Test helpers: the C++ `FixtureLog`, over the `log` crate and per thread,
 //! and `convertJSON`.
 
 use std::borrow::Cow;
-use std::sync::Arc;
+use std::cell::RefCell;
+use std::sync::{Arc, Once};
 
-use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use parking_lot::Mutex;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LogMessage {
-    pub(crate) severity: EventSeverity,
-    pub(crate) event: Event,
-    pub(crate) code: i64,
+    pub(crate) level: log::Level,
+    pub(crate) target: String,
     pub(crate) msg: String,
 }
 
-struct Recorder(Arc<Mutex<Vec<(LogMessage, bool)>>>);
+type Messages = Arc<Mutex<Vec<(LogMessage, bool)>>>;
 
-impl Observer for Recorder {
-    fn on_record(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> bool {
-        self.0.lock().push((LogMessage { severity, event, code, msg: msg.to_owned() }, false));
-        true
+thread_local! {
+    /// The messages of the thread's live `FixtureLog`, if any.
+    static CAUGHT: RefCell<Option<Messages>> = const { RefCell::new(None) };
+}
+
+/// The test binary's `log` logger. It hands each of the library's records to
+/// the `FixtureLog` of the thread that logged it, so tests that run on
+/// threads of one process don't see each other's.
+struct Catcher;
+
+impl log::Log for Catcher {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata.target().starts_with("mln_")
     }
+
+    fn log(&self, record: &log::Record<'_>) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        CAUGHT.with_borrow(|caught| {
+            if let Some(messages) = caught {
+                let message = LogMessage {
+                    level: record.level(),
+                    target: record.target().to_owned(),
+                    msg: record.args().to_string(),
+                };
+                messages.lock().push((message, false));
+            }
+        });
+    }
+
+    fn flush(&self) {}
 }
 
 /// Records this thread's log messages while alive.
 pub(crate) struct FixtureLog {
-    messages: Arc<Mutex<Vec<(LogMessage, bool)>>>,
+    messages: Messages,
 }
 
 impl FixtureLog {
     pub(crate) fn new() -> Self {
-        let messages = Arc::new(Mutex::new(Vec::new()));
-        let _ = Log::set_thread_observer(Some(Box::new(Recorder(Arc::clone(&messages)))));
+        static INSTALL: Once = Once::new();
+        INSTALL.call_once(|| {
+            log::set_logger(&Catcher).expect("the test binary has no other logger");
+            log::set_max_level(log::LevelFilter::Info);
+        });
+        let messages = Messages::default();
+        CAUGHT.set(Some(Arc::clone(&messages)));
         FixtureLog { messages }
     }
 
     /// `count(message)`: the number of matching messages, which are then
-    /// checked (C++ ignores the code when it is -1 in the pattern).
-    pub(crate) fn count(&self, severity: EventSeverity, event: Event, msg: &str) -> usize {
+    /// checked.
+    pub(crate) fn count(&self, level: log::Level, target: &str, msg: &str) -> usize {
         let mut messages = self.messages.lock();
         let mut count = 0;
         for (m, checked) in messages.iter_mut() {
-            if m.severity == severity && m.event == event && m.msg == msg {
+            if m.level == level && m.target == target && m.msg == msg {
                 *checked = true;
                 count += 1;
             }
@@ -66,7 +97,7 @@ impl FixtureLog {
 
 impl Drop for FixtureLog {
     fn drop(&mut self) {
-        let _ = Log::set_thread_observer(None);
+        CAUGHT.set(None);
     }
 }
 

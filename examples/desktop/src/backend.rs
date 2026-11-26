@@ -25,7 +25,6 @@ use mln_runtime::{
 };
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::host::Inbox;
@@ -325,7 +324,7 @@ impl WindowSession {
     pub(crate) fn close(self) {
         let released = self.session.release().and_then(|released| serviced(&self.driver, released));
         if let Err(e) = released {
-            Log::warning(Event::Render, format!("The render session didn't end cleanly: {e}"));
+            log::warn!("The render session didn't end cleanly: {e}");
         }
     }
 }

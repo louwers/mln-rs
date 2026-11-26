@@ -59,6 +59,15 @@ mod style;
 #[cfg(target_family = "wasm")]
 mod web;
 
+/// The `log` targets of this crate's records. Each names the event that
+/// `mln_c` reports the record under (`mln_c::logging`).
+mod log_target {
+    pub(crate) const GENERAL: &str = "mln_runtime::general";
+    pub(crate) const CRASH: &str = "mln_runtime::crash";
+    pub(crate) const RENDER: &str = "mln_runtime::render";
+    pub(crate) const HTTP_REQUEST: &str = "mln_runtime::http_request";
+}
+
 pub use camera::{CameraFitArea, CameraFitOptions, CameraFitUpdate, TileOptions, ViewportOptions};
 pub use completion::Completion;
 pub use event::{EventHandler, EventMask, EventSource, EventType, RuntimeEvent, RuntimeEventKind};

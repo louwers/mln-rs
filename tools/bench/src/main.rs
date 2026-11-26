@@ -59,6 +59,7 @@ fn main() -> ExitCode {
     if std::env::args().nth(1).as_deref() == Some("exec") {
         aslr::fix();
     }
+    mln_headless::log_to_stderr();
     // Before any thread starts, so that the counters count them all.
     meter::start_counters();
     match run(std::env::args().skip(1).collect()) {

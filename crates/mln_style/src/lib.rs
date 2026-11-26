@@ -77,5 +77,13 @@ pub use style::edit::{Edit, SourceUpdate};
 pub use style::parse::{Parser, parse_fallback_font_faces};
 pub use style::{Style, StyleCamera, StyleLoadError, diff};
 
+/// The `log` targets of this crate's records. Each names the event that
+/// `mln_c` reports the record under (`mln_c::logging`).
+mod log_target {
+    pub(crate) const GENERAL: &str = "mln_style::general";
+    pub(crate) const PARSE_STYLE: &str = "mln_style::parse_style";
+    pub(crate) const STYLE: &str = "mln_style::style";
+}
+
 #[cfg(test)]
 mod tests;

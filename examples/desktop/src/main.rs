@@ -189,8 +189,8 @@ fn parse_args() -> Result<Args, String> {
     Ok(args)
 }
 
-/// Prints the `log` records of the library's graphics backends, and other
-/// crates' warnings and errors, to stderr, as the library prints its own log.
+/// Prints the `log` records of the library and this program, and other
+/// crates' warnings and errors, to stderr.
 struct StderrLog;
 
 impl log::Log for StderrLog {

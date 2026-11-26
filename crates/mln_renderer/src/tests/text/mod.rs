@@ -13,8 +13,6 @@ mod glyph_store_bitmaps;
 
 use std::path::PathBuf;
 
-use mln_util::logging::{Event, EventSeverity, Log, Observer};
-
 /// A path of the C++ repository, in the copy of its files these tests read
 /// (testdata/).
 #[must_use]
@@ -27,35 +25,4 @@ pub(crate) fn cpp_path(relative: &str) -> PathBuf {
 pub(crate) fn read_file(relative: &str) -> Vec<u8> {
     let path = cpp_path(relative);
     std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
-}
-
-struct NullObserver;
-
-impl Observer for NullObserver {
-    fn on_record(&self, _: EventSeverity, _: Event, _: i64, _: &str) -> bool {
-        true
-    }
-}
-
-/// Silences the calling thread's log until dropped.
-pub(crate) struct SquelchLog;
-
-impl SquelchLog {
-    #[must_use]
-    pub(crate) fn new() -> Self {
-        let _ = Log::set_thread_observer(Some(Box::new(NullObserver)));
-        SquelchLog
-    }
-}
-
-impl Default for SquelchLog {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Drop for SquelchLog {
-    fn drop(&mut self) {
-        let _ = Log::set_thread_observer(None);
-    }
 }

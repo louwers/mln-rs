@@ -23,11 +23,12 @@ use mln_style::types::ProjectionDefinition;
 use mln_util::constants::M2PI;
 use mln_util::error::Error;
 use mln_util::geo::{EdgeInsets, LatLng, ScreenCoordinate, WrapMode};
-use mln_util::logging::{Event, Log};
 use mln_util::projection::Projection;
 use mln_util::size::Size;
 use mln_util::time::Instant;
 use parking_lot::Mutex;
+
+use crate::log_target;
 
 mod anchor;
 mod animation;
@@ -81,7 +82,7 @@ fn lat_lng(lat: f64, lon: f64) -> LatLng {
 /// interpolate to NaN): the frame keeps the insets it has.
 fn frame_edge_insets(top: f64, left: f64, bottom: f64, right: f64) -> Option<EdgeInsets> {
     if [top, left, bottom, right].iter().any(|value| value.is_nan()) {
-        Log::error(Event::General, "an animation frame's insets are NaN");
+        log::error!(target: log_target::GENERAL, "an animation frame's insets are NaN");
         return None;
     }
     Some(EdgeInsets::new(top, left, bottom, right))
@@ -91,7 +92,9 @@ fn frame_edge_insets(top: f64, left: f64, bottom: f64, right: f64) -> Option<Edg
 /// point with no `LatLng`, such as NaN: the frame keeps the center and zoom,
 /// as [`frame_edge_insets`] does.
 fn frame_unproject(p: &Point<f64>, scale: f64, wrap_mode: WrapMode) -> Option<LatLng> {
-    Projection::unproject(p, scale, wrap_mode).map_err(|e| Log::error(Event::General, &e.message)).ok()
+    Projection::unproject(p, scale, wrap_mode)
+        .map_err(|e| log::error!(target: log_target::GENERAL, "{}", e.message))
+        .ok()
 }
 
 /// Identifies a camera command that the transform started, in the

@@ -9,13 +9,13 @@ use feature::Value as MbglValue;
 use geojson::GeoJson;
 use geometry::Point;
 use mln_util::geometry::{FeatureType, to_feature_type};
-use mln_util::logging::{Event, Log};
 
 use super::within::BoundaryMode;
 use crate::conversion::{Convertible, Error};
 use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::{EvalResult, EvaluationContext, EvaluationError, Expr, Node};
 use crate::feature::{CanonicalTileID, GeometryTileFeature, convert_geometry};
+use crate::log_target;
 
 // The algorithms work on `mapbox::geometry`'s shapes, as in C++: a polygon
 // is its rings, the exterior first. `Geometry::from_geo` converts to them.
@@ -187,7 +187,7 @@ fn get_range_size(range: &IndexRange) -> usize {
 fn is_range_safe(range: &IndexRange, threshold: usize) -> bool {
     let ret = range.1 >= range.0 && range.1 < threshold;
     if !ret {
-        Log::error(Event::Style, "Index is out of range");
+        log::error!(target: log_target::STYLE, "Index is out of range");
     }
     ret
 }
@@ -235,7 +235,7 @@ fn get_polygon_bbox(polygon: &Polygon<f64>) -> DistanceBBox {
 
 fn is_multi_point_valid(points: &MultiPoint<f64>) -> bool {
     if points.is_empty() {
-        Log::error(Event::Style, "Invalid MultiPoint with empty geometry points");
+        log::error!(target: log_target::STYLE, "Invalid MultiPoint with empty geometry points");
         return false;
     }
     true
@@ -243,7 +243,7 @@ fn is_multi_point_valid(points: &MultiPoint<f64>) -> bool {
 
 fn is_line_string_valid(line: &LineString<f64>) -> bool {
     if line.len() < 2 {
-        Log::error(Event::Style, "Invalid LineString with fewer than 2 geometry points");
+        log::error!(target: log_target::STYLE, "Invalid LineString with fewer than 2 geometry points");
         return false;
     }
     true
@@ -251,12 +251,12 @@ fn is_line_string_valid(line: &LineString<f64>) -> bool {
 
 fn is_polygon_valid(polygon: &Polygon<f64>) -> bool {
     if polygon.is_empty() {
-        Log::error(Event::Style, "Invalid Polygon with empty rings");
+        log::error!(target: log_target::STYLE, "Invalid Polygon with empty rings");
         return false;
     }
     for ring in polygon {
         if ring.len() < 3 {
-            Log::error(Event::Style, "Invalid Polygon with ring having fewer than 3 geometry points");
+            log::error!(target: log_target::STYLE, "Invalid Polygon with ring having fewer than 3 geometry points");
             return false;
         }
     }
@@ -518,7 +518,7 @@ fn points_to_polygon_distance(
         // brute-force directly
         if get_range_size(&range) <= MIN_LINE_POINTS_SIZE {
             if !is_range_safe(&range, points.len()) {
-                Log::error(Event::Style, "Index is out of range");
+                log::error!(target: log_target::STYLE, "Index is out of range");
                 return None;
             }
             for p in &points[range.0..=range.1] {
@@ -700,7 +700,7 @@ fn points_to_line_distance(
         // brute-force directly
         if get_range_size(&range_a) <= MIN_POINTS_SIZE && get_range_size(&range_b) <= MIN_LINE_POINTS_SIZE {
             if !is_range_safe(&range_a, points.len()) || !is_range_safe(&range_b, line.len()) {
-                Log::error(Event::Style, "Index is out of range");
+                log::error!(target: log_target::STYLE, "Index is out of range");
                 return None;
             }
             let sub_line: LineString<f64> = line[range_b.0..=range_b.1].to_vec();

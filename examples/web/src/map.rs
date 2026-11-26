@@ -23,7 +23,6 @@ use mln_runtime::{
 };
 use mln_util::LatLng;
 use mln_util::geo::ScreenCoordinate;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use mln_web_host::{pump, shaper};
 use parking_lot::Mutex;
@@ -651,7 +650,7 @@ fn sent<T>(result: Result<T, Error>) -> Option<T> {
 }
 
 fn log_refused(error: &Error) {
-    Log::error(Event::General, format!("the map refused a command: {error}"));
+    log::error!("the map refused a command: {error}");
 }
 
 /// How far the page lets the camera tilt, in degrees; compare.ts's GL JS

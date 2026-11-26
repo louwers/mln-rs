@@ -6,8 +6,8 @@ use mln_gestures::{GestureCamera, PendingEnd};
 use mln_map::{CameraDelta, CameraOptions, CameraUpdate, MapSnapshot};
 use mln_util::LatLng;
 use mln_util::geo::{LatLngBounds, ScreenCoordinate, WrapMode};
-use mln_util::logging::{Event, Log};
 
+use crate::log_target;
 use crate::map::Map;
 
 impl Map {
@@ -21,7 +21,7 @@ impl Map {
 /// Logs a command that a released map refused, which the recognizer can't
 /// act on.
 fn sent<T>(result: Result<T, mln_util::Error>) -> Option<T> {
-    result.map_err(|error| Log::warning(Event::General, format!("gesture camera command: {error}"))).ok()
+    result.map_err(|error| log::warn!(target: log_target::GENERAL, "gesture camera command: {error}")).ok()
 }
 
 impl GestureCamera for Map {

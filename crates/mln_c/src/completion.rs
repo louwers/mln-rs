@@ -10,7 +10,6 @@ use core::ffi::c_void;
 use std::sync::Arc;
 
 use mln_util::ErrorKind;
-use mln_util::logging::{Event, Log};
 
 use crate::buffer::{LentText, Strided};
 use crate::callback::{self, UserData};
@@ -19,7 +18,7 @@ use crate::error::Error;
 use crate::generated::types::{
     MLN_STATUS_CANCELLED, MLN_STATUS_OK, mln_buffer_view, mln_completion, mln_completion_result,
 };
-use crate::{abi, process_exit};
+use crate::{abi, log_target, process_exit};
 
 /// The generations that a map command's completion reports.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -256,7 +255,7 @@ pub(crate) fn complete_or_log<V: CompletionValue>(
 pub(crate) fn log_discarded(error: &Error) {
     let status = error.status();
     if status != MLN_STATUS_CANCELLED {
-        Log::warning(Event::General, format!("discarded command failed (status {status}): {}", error.message()));
+        log::warn!(target: log_target::GENERAL, "discarded command failed (status {status}): {}", error.message());
     }
 }
 
@@ -276,7 +275,10 @@ pub(crate) mod tests {
     use super::*;
     use crate::delivery::tests::{Log, queue, queue_with_abandon};
     use crate::delivery::{mln_delivery_queue_dispatch, mln_delivery_queue_release};
-    use crate::generated::types::{MLN_STATUS_INVALID_STATE, MLN_STATUS_NOT_FOUND, mln_status};
+    use crate::generated::types::{
+        MLN_LOG_EVENT_GENERAL, MLN_LOG_SEVERITY_WARNING, MLN_STATUS_INVALID_STATE, MLN_STATUS_NOT_FOUND, MLN_STATUS_OK,
+        mln_status,
+    };
 
     /// What a completion callback saw.
     #[derive(Debug, PartialEq)]
@@ -392,32 +394,36 @@ pub(crate) mod tests {
         assert_eq!(seen(user_data)[0].status, MLN_STATUS_CANCELLED);
     }
 
-    /// Collects the warnings logged on this thread.
-    pub(crate) struct Warnings(pub(crate) Arc<Mutex<Vec<String>>>);
-
-    impl mln_util::logging::Observer for Warnings {
-        fn on_record(&self, severity: mln_util::logging::EventSeverity, event: Event, _: i64, msg: &str) -> bool {
-            if severity == mln_util::logging::EventSeverity::Warning && event == Event::General {
-                self.0.lock().push(msg.to_owned());
-            }
-            true
-        }
+    /// The general warnings that `body` logs on this thread with "discarded
+    /// command failed".
+    pub(crate) fn discard_warnings(body: impl FnOnce()) -> Vec<String> {
+        use crate::logging::tests::{LogState, Probe, handler, set, set_async};
+        let _state = LogState::take();
+        assert_eq!(set_async(0), MLN_STATUS_OK);
+        let probe = Probe::new("discarded command failed", false);
+        assert_eq!(set(&handler(&probe, 0)), MLN_STATUS_OK);
+        body();
+        let here = std::thread::current().id();
+        let records = probe.records().into_iter().filter(|seen| seen.thread == here);
+        records
+            .filter(|seen| (seen.severity, seen.event) == (MLN_LOG_SEVERITY_WARNING, MLN_LOG_EVENT_GENERAL))
+            .map(|seen| seen.message)
+            .collect()
     }
 
     #[test]
     fn a_command_without_a_completion_logs_its_failure_as_a_warning() {
-        let warnings = Arc::new(Mutex::new(Vec::new()));
-        let previous = mln_util::logging::Log::set_thread_observer(Some(Box::new(Warnings(Arc::clone(&warnings)))));
         let finish = |result: Result<(), mln_util::Error>| (result.map_err(Error::from), Generations::default());
-        forward(mln_runtime::Completion::ready(Ok(())), None, finish);
-        let failed = mln_util::Error::new(ErrorKind::InvalidState, "map has no open command group");
-        forward(mln_runtime::Completion::ready(Err(failed)), None, finish);
-        let cancelled = mln_util::Error::new(ErrorKind::Cancelled, "the map was released");
-        forward(mln_runtime::Completion::ready(Err(cancelled)), None, finish);
-        drop(mln_util::logging::Log::set_thread_observer(previous));
+        let warnings = discard_warnings(|| {
+            forward(mln_runtime::Completion::ready(Ok(())), None, finish);
+            let failed = mln_util::Error::new(ErrorKind::InvalidState, "map has no open command group");
+            forward(mln_runtime::Completion::ready(Err(failed)), None, finish);
+            let cancelled = mln_util::Error::new(ErrorKind::Cancelled, "the map was released");
+            forward(mln_runtime::Completion::ready(Err(cancelled)), None, finish);
+        });
         assert_eq!(
             [format!("discarded command failed (status {MLN_STATUS_INVALID_STATE}): map has no open command group")],
-            warnings.lock().as_slice()
+            warnings.as_slice()
         );
     }
 

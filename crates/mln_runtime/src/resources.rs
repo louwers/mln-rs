@@ -429,9 +429,9 @@ pub(crate) fn sanitize_headers(headers: HttpHeaders) -> HttpHeaders {
     let mut sanitized: HttpHeaders = Vec::with_capacity(headers.len());
     for (name, value) in headers {
         if is_managed_http_header(&name) {
-            mln_util::logging::Log::warning(
-                mln_util::logging::Event::HttpRequest,
-                format!("a header transform can't set the managed header {name}"),
+            log::warn!(
+                target: crate::log_target::HTTP_REQUEST,
+                "a header transform can't set the managed header {name}"
             );
             continue;
         }

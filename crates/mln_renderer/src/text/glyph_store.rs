@@ -65,12 +65,12 @@ use mln_util::error::Error;
 use mln_util::font_stack::FontStack;
 use mln_util::hash::HashMap;
 use mln_util::i18n;
-use mln_util::logging::{Event, Log};
 use mln_util::pool::TaskGroup;
 use mln_util::tiny_sdf::transform_raster_to_sdf;
 use mln_vec_map::{VecMap, VecSet};
 use parking_lot::Mutex;
 
+use crate::log_target;
 use crate::renderer_event::RendererEvent;
 use crate::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
 use crate::tile::inbox::{InboxSender, TileEvent, Waker};
@@ -740,7 +740,7 @@ impl GlyphStore {
             let url = self.face(range.type_).map(|face| face.url.as_str()).unwrap_or_default();
             if url.is_empty() {
                 // The request of an empty URL fails, as the glyphs do.
-                Log::error(Event::Style, format!("font face {} has no URL", range.type_.id()));
+                log::error!(target: log_target::STYLE, "font face {} has no URL", range.type_.id());
             }
             Resource::font_face(url)
         };
@@ -826,12 +826,10 @@ impl GlyphStore {
             } else {
                 format!("{} (font file)", range.type_.id())
             };
-            Log::error(
-                Event::Style,
-                format!(
-                    "Failed to load glyph range {range_name} for font stack {}: {error}",
-                    mln_util::font_stack::font_stack_to_string(font_stack)
-                ),
+            log::error!(
+                target: log_target::STYLE,
+                "Failed to load glyph range {range_name} for font stack {}: {error}",
+                mln_util::font_stack::font_stack_to_string(font_stack)
             );
             self.events.push(RendererEvent::GlyphsError {
                 font_stack: font_stack.clone(),
@@ -899,7 +897,7 @@ impl GlyphStore {
         let (readiness, wake) = (Arc::clone(&self.engine_readiness), Arc::clone(&self.wake));
         self.engine.prepare(Box::new(move |result| {
             if let Err(error) = &result {
-                Log::error(Event::Glyph, format!("font faces can't be loaded: {error}"));
+                log::error!(target: log_target::GLYPH, "font faces can't be loaded: {error}");
             }
             let waiting = {
                 let mut readiness = readiness.lock();

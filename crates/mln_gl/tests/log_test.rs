@@ -106,6 +106,6 @@ fn each_device_logs_its_platform_and_the_first_context_its_gpu() {
     let platform = records.first().map(|record| record.2.clone()).unwrap_or_default();
     assert!(PLATFORMS.contains(&platform.as_str()), "{records:?}");
     let mut expected = vec![(log::Level::Info, "mln_gl::render".to_owned(), platform); devices];
-    expected.push((log::Level::Info, "mln_gl::gpu".to_owned(), format!("GPU Identifier: {renderer}")));
+    expected.push((log::Level::Info, "mln_gl::general".to_owned(), format!("GPU Identifier: {renderer}")));
     assert_eq!(records, expected);
 }

@@ -5,12 +5,12 @@ use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_util::image::AlphaImage;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::gfx::context::Context;
 use crate::gfx::store::SharedTexture;
 use crate::gfx::texture_size;
+use crate::log_target;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct LinePatternPos {
@@ -358,7 +358,7 @@ impl DashAtlas {
         let y_offset = self.next_row;
         let end = y_offset + rows;
         if end > MAX_DASH_ATLAS_HEIGHT {
-            Log::warning(Event::Render, "line-dasharray: too many dash patterns in one tile");
+            log::warn!(target: log_target::RENDER, "line-dasharray: too many dash patterns in one tile");
             return SOLID_DASH;
         }
         if end > self.image.size.height {

@@ -10,7 +10,6 @@ use mln_storage::{
     Responder, Response,
 };
 use mln_util::constants::ASSET_PROTOCOL;
-use mln_util::logging::{Event, Log};
 use mln_util::pool::Pool;
 use parking_lot::Mutex;
 
@@ -173,11 +172,10 @@ impl FileSource for ProxyFileSource {
             answered(number);
             if logged.loading_method == LoadingMethod::CacheOnly && response.no_content {
                 match (&logged.tile_data, logged.kind) {
-                    (Some(tile_data), Kind::Tile) => Log::info(
-                        Event::Database,
-                        format!("Resource not found in cache: {}({})", logged.url, tile_data.url_template),
-                    ),
-                    _ => Log::info(Event::Database, format!("Resource not found in cache: {}", logged.url)),
+                    (Some(tile_data), Kind::Tile) => {
+                        log::info!("Resource not found in cache: {}({})", logged.url, tile_data.url_template);
+                    }
+                    _ => log::info!("Resource not found in cache: {}", logged.url),
                 }
             }
 

@@ -50,7 +50,6 @@ use mln_runtime::{
 use mln_util::constants::DEFAULT_MAX_CACHE_SIZE;
 use mln_util::error::Error;
 use mln_util::geo::{LatLng, ScreenCoordinate};
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event_loop::EventLoopProxy;
@@ -148,7 +147,7 @@ pub(crate) fn run(launch: Launch) -> Result<(), String> {
     if network != Network::Online {
         log_failure(network.apply(&runtime));
         if benchmark.is_none() {
-            Log::warning(Event::Setup, format!("Network: {}", network.label()));
+            log::warn!("Network: {}", network.label());
         }
     }
     if settings.cache_disabled {
@@ -210,7 +209,7 @@ pub(crate) fn run(launch: Launch) -> Result<(), String> {
             Some(DisplayRefreshes { pacer, waiter, inbox: Arc::clone(&inbox) })
         }
         Some(Err(e)) => {
-            Log::info(Event::Render, format!("Pacing frames on a timer: {}", e.message));
+            log::info!("Pacing frames on a timer: {}", e.message);
             None
         }
         None => None,
@@ -289,19 +288,16 @@ pub(crate) fn run(launch: Launch) -> Result<(), String> {
     match view.map.camera().and_then(Completion::wait) {
         Ok(query) => {
             let camera = query.camera;
-            Log::info(
-                Event::General,
-                format!(
-                    "Exit location: --lat={:.6} --lon={:.6} --zoom={:.6} --bearing={:.6} --pitch={:.6}",
-                    camera.center.latitude(),
-                    camera.center.longitude(),
-                    camera.zoom,
-                    camera.bearing,
-                    camera.pitch,
-                ),
+            log::info!(
+                "Exit location: --lat={:.6} --lon={:.6} --zoom={:.6} --bearing={:.6} --pitch={:.6}",
+                camera.center.latitude(),
+                camera.center.longitude(),
+                camera.zoom,
+                camera.bearing,
+                camera.pitch
             );
         }
-        Err(e) => Log::warning(Event::General, e.message),
+        Err(e) => log::warn!("{}", e.message),
     }
     // The session lets go of the window's surface while the window is still
     // open; the map and the runtime go after it.
@@ -321,10 +317,10 @@ fn log_failure<T: Send + 'static>(sent: Result<Completion<T>, Error>) {
     match sent {
         Ok(completion) => completion.on_complete(|result| {
             if let Err(e) = result {
-                Log::warning(Event::General, e.message);
+                log::warn!("{}", e.message);
             }
         }),
-        Err(e) => Log::warning(Event::General, e.message),
+        Err(e) => log::warn!("{}", e.message),
     }
 }
 
@@ -333,10 +329,10 @@ fn log_edit_failure(sent: Result<Completion<Result<(), Error>>, Error>) {
     match sent {
         Ok(completion) => completion.on_complete(|result| {
             if let Err(e) = result.and_then(|edited| edited) {
-                Log::warning(Event::General, e.message);
+                log::warn!("{}", e.message);
             }
         }),
-        Err(e) => Log::warning(Event::General, e.message),
+        Err(e) => log::warn!("{}", e.message),
     }
 }
 
@@ -457,10 +453,10 @@ impl View {
             Ok(loaded) => loaded.on_complete(|result| match result {
                 // Another style's load replaced it.
                 Err(e) if e.kind == ErrorKind::Cancelled => {}
-                Err(e) => Log::error(Event::General, format!("Failed to load the style: {}", e.message)),
+                Err(e) => log::error!("Failed to load the style: {}", e.message),
                 Ok(_) => {}
             }),
-            Err(e) => Log::error(Event::General, e.message),
+            Err(e) => log::error!("{}", e.message),
         }
         let name = if !style.name.is_empty() {
             style.name.clone()
@@ -503,7 +499,7 @@ impl View {
                     inbox.send(Message::Style { info, loaded });
                 }
             }),
-            Err(e) => Log::warning(Event::General, e.message),
+            Err(e) => log::warn!("{}", e.message),
         }
     }
 
@@ -544,7 +540,7 @@ impl View {
         let results = match results {
             Ok(results) => results,
             Err(e) => {
-                Log::error(Event::Render, format!("The render session ended: {e}"));
+                log::error!("The render session ended: {e}");
                 self.quit = true;
                 return;
             }
@@ -574,7 +570,7 @@ impl View {
                 FrameDisposition::Failed => {
                     let failure = window.session().snapshot().ok().and_then(|snapshot| snapshot.failure);
                     let failure = failure.map_or_else(|| "unknown".to_owned(), |e| e.message);
-                    Log::error(Event::Render, format!("The render session failed: {failure}"));
+                    log::error!("The render session failed: {failure}");
                     self.quit = true;
                 }
                 FrameDisposition::NoUpdate | FrameDisposition::Superseded => {}
@@ -656,7 +652,7 @@ impl View {
                 self.dirty = false;
             }
             Err(e) => {
-                Log::error(Event::Render, format!("Failed to request a frame: {e}"));
+                log::error!("Failed to request a frame: {e}");
                 self.quit = true;
             }
         }
@@ -911,11 +907,11 @@ impl View {
         // back.
         self.close_window();
         let attached = self.reattach(kind, None).or_else(|e| {
-            Log::error(Event::GraphicsBackend, format!("Can't switch to {}: {e}", kind.name()));
+            log::error!("Can't switch to {}: {e}", kind.name());
             self.reattach(old, None)
         });
         if let Err(e) = attached {
-            Log::error(Event::GraphicsBackend, e.message);
+            log::error!("{}", e.message);
             self.quit = true;
         }
     }
@@ -955,13 +951,13 @@ impl View {
         match self.runtime.run_cache_database_operation(CacheDatabaseOperation::Reset) {
             Ok(reset) => reset.on_complete(move |result| {
                 match result {
-                    Ok(()) => Log::info(Event::Database, "Reset the cache"),
-                    Err(e) => Log::error(Event::Database, format!("Failed to reset cache: {e}")),
+                    Ok(()) => log::info!("Reset the cache"),
+                    Err(e) => log::error!("Failed to reset cache: {e}"),
                 }
                 inbox.send(Message::CacheReset);
             }),
             Err(e) => {
-                Log::warning(Event::Database, format!("There is no cache database to reset: {e}"));
+                log::warn!("There is no cache database to reset: {e}");
                 self.clear_renderer();
             }
         }
@@ -987,7 +983,7 @@ impl View {
             let fps = f64::from(self.frames) / elapsed;
             self.frame_time /= self.frames as f32;
             self.frame_report = format!("Frame time: {:.2} ms ({fps:.0} fps)", self.frame_time);
-            Log::info(Event::Render, &self.frame_report);
+            log::info!("{}", self.frame_report);
             self.frames = 0;
             self.frame_time = 0.0;
             self.last_reported = Instant::now();
@@ -1010,10 +1006,7 @@ impl View {
             "(unnamed)".to_owned()
         };
         let plural = |n, word| if n == 1 { format!("{n} {word}") } else { format!("{n} {word}s") };
-        Log::info(
-            Event::Style,
-            format!("Loaded style {label} ({}, {})", plural(info.layers, "layer"), plural(info.sources, "source")),
-        );
+        log::info!("Loaded style {label} ({}, {})", plural(info.layers, "layer"), plural(info.sources, "source"));
     }
 
     /// The checks after each frame: the gesture test, the readback and the
@@ -1030,7 +1023,7 @@ impl View {
         if let Some(quit_at) = self.quit_at
             && Instant::now() >= quit_at
         {
-            Log::info(Event::General, "--quit-after: closing the window");
+            log::info!("--quit-after: closing the window");
             self.quit = true;
         }
     }
@@ -1049,19 +1042,21 @@ impl View {
             Ok(image) => {
                 let png = mln_image::encode_png(&image);
                 match std::fs::write(&path, png) {
-                    Ok(()) => Log::info(
-                        Event::General,
-                        format!("Read back the map ({}x{}) to {}", image.size.width, image.size.height, path.display()),
+                    Ok(()) => log::info!(
+                        "Read back the map ({}x{}) to {}",
+                        image.size.width,
+                        image.size.height,
+                        path.display()
                     ),
-                    Err(e) => Log::error(Event::General, format!("Failed to write {}: {e}", path.display())),
+                    Err(e) => log::error!("Failed to write {}: {e}", path.display()),
                 }
             }
-            Err(e) => Log::error(Event::General, format!("Failed to read the map back: {e}")),
+            Err(e) => log::error!("Failed to read the map back: {e}"),
         }
         if !self.quit
             && let Err(e) = self.reattach(self.kind, Some(device))
         {
-            Log::error(Event::GraphicsBackend, e.message);
+            log::error!("{}", e.message);
             self.quit = true;
         }
     }
@@ -1160,7 +1155,7 @@ impl View {
                 ("switch to the next backend", vec![], vec![], vec![Action::SetBackend(next)])
             }
             _ => {
-                Log::info(Event::General, "Gesture test: done");
+                log::info!("Gesture test: done");
                 self.gesture_test = None;
                 self.quit = true;
                 return;
@@ -1189,20 +1184,17 @@ impl View {
         let camera = match self.map.camera().and_then(Completion::wait) {
             Ok(query) => query.camera,
             Err(e) => {
-                Log::warning(Event::General, e.message);
+                log::warn!("{}", e.message);
                 return;
             }
         };
-        Log::info(
-            Event::General,
-            format!(
-                "Gesture test step {step} ({name}): center {:.5},{:.5} zoom {:.3} bearing {:.1} pitch {:.1}",
-                camera.center.latitude(),
-                camera.center.longitude(),
-                camera.zoom,
-                camera.bearing,
-                camera.pitch,
-            ),
+        log::info!(
+            "Gesture test step {step} ({name}): center {:.5},{:.5} zoom {:.3} bearing {:.1} pitch {:.1}",
+            camera.center.latitude(),
+            camera.center.longitude(),
+            camera.zoom,
+            camera.bearing,
+            camera.pitch
         );
     }
 }

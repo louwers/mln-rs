@@ -13,11 +13,12 @@ use mln_storage::Data;
 use mln_style::image::{Image, ImageContent, ImageStretches, Impl, TextFit};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
-use mln_util::logging::{Event, Log};
 use mln_util::pool::Respond;
 use mln_util::size::Size;
 use mln_util::string::to_string_double;
 use serde_json::{Map, Value as JSValue};
+
+use crate::log_target;
 
 /// Extracts an individual image from a spritesheet at the given location.
 /// Logs and returns `None` for invalid metrics or metadata.
@@ -67,7 +68,7 @@ pub(crate) fn create_style_image(
             image.size.height,
             to_string_double(ratio)
         );
-        Log::error(Event::Sprite, message);
+        log::error!(target: log_target::SPRITE, "{message}");
         return None;
     }
 
@@ -91,14 +92,14 @@ pub(crate) fn create_style_image(
     ) {
         Ok(image) => Some(image),
         Err(ex) => {
-            Log::error(Event::Sprite, format!("Can't create image with invalid metadata: {ex}"));
+            log::error!(target: log_target::SPRITE, "Can't create image with invalid metadata: {ex}");
             None
         }
     }
 }
 
 fn warn(name: &str, message: std::fmt::Arguments<'_>) {
-    Log::warning(Event::Sprite, format!("Invalid sprite image '{name}': {message}"));
+    log::warn!(target: log_target::SPRITE, "Invalid sprite image '{name}': {message}");
 }
 
 /// The member `property` of the sprite entry `name`, as `read` takes it. A

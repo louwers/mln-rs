@@ -13,11 +13,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use mln_util::constants::{ASSET_PROTOCOL, FILE_PROTOCOL};
-use mln_util::logging::{Event, Log};
 use mln_util::queue::Queue;
 use parking_lot::Mutex;
 
 use crate::file_source::FileSource;
+use crate::log_target;
 use crate::offline_database::{DatabaseError, OfflineDatabase};
 use crate::request::Responder;
 use crate::resource::{LoadingMethod, Resource, StoragePolicy};
@@ -164,7 +164,7 @@ impl<E: 'static> DatabaseFileSource<E> {
             own.close();
             drop(worker);
         })
-        .inspect_err(|error| Log::error(Event::Database, format!("The database's thread didn't start: {error}")))
+        .inspect_err(|error| log::error!(target: log_target::DATABASE, "The database's thread didn't start: {error}"))
         .ok();
         if thread.is_none() {
             queue.close();

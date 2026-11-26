@@ -5,11 +5,9 @@
 use core::cell::Cell;
 use core::marker::PhantomData;
 
-use mln_util::logging::{Event, Log};
-
-use crate::diagnostic;
 use crate::error::Error;
 use crate::generated::types::{MLN_STATUS_OK, mln_diagnostic, mln_status};
+use crate::{diagnostic, log_target};
 
 /// The body of a C entry point that returns `mln_status`:
 ///
@@ -19,13 +17,15 @@ use crate::generated::types::{MLN_STATUS_OK, mln_diagnostic, mln_status};
 /// })
 /// ```
 ///
-/// It fails with `MLN_STATUS_INVALID_ARGUMENT` when a pointer that
-/// `non_null(...)` lists is null, with `MLN_STATUS_INVALID_STATE`, without
-/// running the body, inside a [`ForbidReentry`] scope, and as [`catch`] does
-/// when the body panics. Then it writes the error's message to
-/// `out_diagnostic`, or clears it on success, and returns the status.
+/// It installs the library's `log` logger first, if it isn't yet. It fails
+/// with `MLN_STATUS_INVALID_ARGUMENT` when a pointer that `non_null(...)`
+/// lists is null, with `MLN_STATUS_INVALID_STATE`, without running the body,
+/// inside a [`ForbidReentry`] scope, and as [`catch`] does when the body
+/// panics. Then it writes the error's message to `out_diagnostic`, or clears
+/// it on success, and returns the status.
 macro_rules! export {
     ($diagnostic:ident, $(non_null($($pointer:ident),+ $(,)?),)? $body:block) => {{
+        $crate::logging::install_logger();
         // The closure gives the body a scope for `?` and `return`.
         let result = $crate::export::refusal().map_or_else(
             || {
@@ -64,8 +64,9 @@ pub(crate) fn panicked(message: &str) -> Error {
 /// Runs the `body` of an entry point that returns nothing, such as a
 /// release, and logs a panic in it instead of unwinding into the caller.
 pub(crate) fn catch_and_log(body: impl FnOnce()) {
+    crate::logging::install_logger();
     if let Err(message) = mln_util::panic::catch(body) {
-        Log::error(Event::Crash, panicked(&message).message());
+        log::error!(target: log_target::CRASH, "{}", panicked(&message).message());
     }
 }
 

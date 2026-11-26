@@ -10,7 +10,6 @@ use mln_tile_id::CanonicalTileID;
 use mln_util::Color;
 use mln_util::feature::numeric_value_f64;
 use mln_util::geometry::FeatureType;
-use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
 
@@ -21,6 +20,7 @@ use crate::gfx::mesh::Indexed;
 use crate::gfx::segment::SegmentBase;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
+use crate::log_target;
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, DashArrayBinder, PaintPropertyBinder};
 use crate::util::subdivision::subdivide_vertex_line;
 use crate::util::tessellator::Tessellator;
@@ -125,7 +125,8 @@ impl LineBucket {
             // A line layer can't draw a source's points, such as a GeoJSON
             // `MultiPoint`. The layer and source aren't known here.
             static WARNED_INVALID_GEOMETRY: Once = Once::new();
-            WARNED_INVALID_GEOMETRY.call_once(|| Log::warning(Event::General, "Invalid geometry in line layer"));
+            WARNED_INVALID_GEOMETRY
+                .call_once(|| log::warn!(target: log_target::GENERAL, "Invalid geometry in line layer"));
             return;
         }
         let granularity = self.subdivision_granularity.line.granularity_for_zoom_level(canonical.z);

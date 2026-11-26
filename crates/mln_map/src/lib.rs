@@ -33,5 +33,15 @@ pub use mln_util::event_queue::Waker;
 pub use mln_util::{Error, ErrorKind};
 pub use transform::{CameraCommandId, CommandEnd, FrameClock};
 
+/// The `log` targets of this crate's records. Each names the event that
+/// `mln_c` reports the record under (`mln_c::logging`).
+mod log_target {
+    pub(crate) const GENERAL: &str = "mln_map::general";
+    pub(crate) const SETUP: &str = "mln_map::setup";
+    pub(crate) const PARSE_STYLE: &str = "mln_map::parse_style";
+    pub(crate) const STYLE: &str = "mln_map::style";
+    pub(crate) const RENDER: &str = "mln_map::render";
+}
+
 #[cfg(test)]
 mod tests;

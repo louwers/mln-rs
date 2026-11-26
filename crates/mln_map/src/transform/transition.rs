@@ -10,7 +10,6 @@ use mln_map_types::{
 };
 use mln_util::constants::{DEFAULT_TRANSITION_EASE, TILE_SIZE_D};
 use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
-use mln_util::logging::{Event, Log};
 use mln_util::projection::Projection;
 use mln_util::time::Instant;
 
@@ -20,6 +19,7 @@ use super::{
     ALTITUDE, BEARING, CENTER, CameraCommandId, CommandEnd, FOV, PADDING, PITCH, ROLL, Transform, TransformEvent, ZOOM,
     camera_fields, max_pitch_for_padding,
 };
+use crate::log_target;
 use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
 
 /// A command's camera at an eased progress: every field set, except a
@@ -349,7 +349,7 @@ impl Transform {
                     coupled_fields = fields;
                 }
                 Err(e) => {
-                    Log::error(Event::General, &e.message);
+                    log::error!(target: log_target::GENERAL, "{}", e.message);
                     anchor = None;
                 }
             }
@@ -430,7 +430,7 @@ impl Transform {
                     .view()
                     .screen_coordinate_to_lat_lng_at(&anchor, height, WrapMode::Unwrapped)
                     .unwrap_or_else(|e| {
-                        Log::error(Event::General, &e.message);
+                        log::error!(target: log_target::GENERAL, "{}", e.message);
                         anchor_lat_lng
                     });
                 Some((location, self.state.view().zoom()))
@@ -492,7 +492,7 @@ impl Transform {
             return;
         }
         if let Err(e) = self.state.move_lat_lng_at(location, anchor, height) {
-            Log::error(Event::General, &e.message);
+            log::error!(target: log_target::GENERAL, "{}", e.message);
         }
     }
 

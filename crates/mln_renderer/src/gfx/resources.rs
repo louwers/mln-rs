@@ -7,10 +7,10 @@ use std::rc::Rc;
 use mln_gfx::Size;
 use mln_gfx::gpu::{BufferDesc, BufferUsage, Gpu, GpuError, TextureDesc, TextureFormat, TextureId, TextureUsage};
 use mln_gfx::rendering_stats::RenderingStats;
-use mln_util::logging::{Event, Log};
 
 use crate::gfx::buffer::{self, Buffer};
 use crate::gfx::release::{Release, ReleaseQueue};
+use crate::log_target;
 
 /// A texture of the context's `Gpu`, which goes to the context's release
 /// queue when it drops, as a [`Buffer`] does.
@@ -61,7 +61,7 @@ impl Device {
     /// Logs `message`, why something of the frame being encoded failed on
     /// the GPU, and keeps it as the frame's failure unless one came first.
     pub(crate) fn fail(&mut self, message: String) {
-        Log::error(Event::Render, &message);
+        log::error!(target: log_target::RENDER, "{message}");
         self.failure.get_or_insert(message);
     }
 

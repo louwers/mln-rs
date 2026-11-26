@@ -10,6 +10,13 @@
 //! packages, which only exist for this crate. The tile worker codec's
 //! encoding (`mln_wire`) is internal to the port and not re-exported.
 //!
+//! The library logs through the `log` crate and installs no logger: install
+//! a `log` backend to read its records. A record's target is
+//! `<crate>::<event>`, where the event says what logged it, as the C API's
+//! log events do: `mln_style::parse_style`, `mln_storage::database`,
+//! `mln_vulkan::render`. The offline database's errors carry their SQLite or
+//! I/O error code as a `code` key-value.
+//!
 //! GeoJSON is the `geojson` crate's and feature geometry is `geo_types`'.
 //! Both crates are re-exported.
 //!

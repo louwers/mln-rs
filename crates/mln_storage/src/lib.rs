@@ -67,5 +67,14 @@ pub use resource::{Kind, LoadingMethod, RequestOrder, Resource, StoragePolicy, T
 pub use resource_options::ResourceOptions;
 pub use response::{Data, ResourceError, Response};
 
+/// The `log` targets of this crate's records. Each names the event that
+/// `mln_c` reports the record under (`mln_c::logging`).
+mod log_target {
+    pub(crate) const GENERAL: &str = "mln_storage::general";
+    #[cfg_attr(not(feature = "sqlite"), expect(dead_code, reason = "only the database logs"))]
+    pub(crate) const DATABASE: &str = "mln_storage::database";
+    pub(crate) const HTTP_REQUEST: &str = "mln_storage::http_request";
+}
+
 #[cfg(test)]
 mod tests;

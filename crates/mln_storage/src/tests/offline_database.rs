@@ -12,7 +12,6 @@ use geo_types::{Geometry, Point};
 use mln_util::chrono::{Timestamp, now};
 use mln_util::constants::DEFAULT_MAX_CACHE_SIZE;
 use mln_util::geo::{LatLng, LatLngBounds};
-use mln_util::logging::{Event, EventSeverity};
 use mln_util::tileset::Scheme;
 use rusqlite::{Connection, OpenFlags, ffi};
 
@@ -109,8 +108,8 @@ fn removing() -> Message {
     warning(-1, "Removing existing incompatible offline database")
 }
 
-fn message(severity: EventSeverity, code: i64, msg: &str) -> Message {
-    Message { severity, event: Event::Database, code, msg: msg.to_owned() }
+fn message(level: log::Level, code: i64, msg: &str) -> Message {
+    Message { level, target: crate::log_target::DATABASE, code, msg: msg.to_owned() }
 }
 
 fn hull(a: (f64, f64), b: (f64, f64)) -> LatLngBounds {
@@ -960,7 +959,7 @@ fn put_fails_when_eviction_insuffices() {
 
     assert!(!db.put(&style("http://example.com/big"), &big).0);
 
-    assert_eq!(1, log.count(&message(EventSeverity::Info, -1, "Unable to make space for entry"), false));
+    assert_eq!(1, log.count(&message(log::Level::Info, -1, "Unable to make space for entry"), false));
     check_log_empty(&log);
 
     assert!(db.get(&style("http://example.com/big")).is_none());
@@ -1666,7 +1665,7 @@ fn merge_database_with_invalid_path() {
     let result = db.merge_database(&filename_sideload);
     assert!(result.is_err());
 
-    assert_eq!(1, log.count(&message(EventSeverity::Error, -1, "Merge database has incorrect user_version"), false));
+    assert_eq!(1, log.count(&message(log::Level::Error, -1, "Merge database has incorrect user_version"), false));
     check_log_empty(&log);
 }
 
@@ -1787,7 +1786,7 @@ fn update_database_read_only_mode() {
     assert_eq!(
         1,
         log.count(
-            &message(EventSeverity::Error, -1, "Can't clear ambient cache: Cannot modify database in read-only mode"),
+            &message(log::Level::Error, -1, "Can't clear ambient cache: Cannot modify database in read-only mode"),
             false
         )
     );

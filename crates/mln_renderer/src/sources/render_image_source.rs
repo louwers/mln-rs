@@ -14,7 +14,6 @@ use mln_style::sources::ImageSourceType;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::constants;
 use mln_util::geo::LatLngBounds;
-use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
@@ -23,6 +22,7 @@ use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::gfx::context::Context;
 use crate::gfx::segment::SegmentBase;
 use crate::layer_type::ErasedEvaluatedLayer;
+use crate::log_target;
 use crate::render_source::{RenderSource, RenderSourceBase, RenderTileParameters};
 use crate::tile::store::TileStore;
 use crate::tile_parameters::TileParameters;
@@ -499,7 +499,12 @@ impl RenderSource for RenderImageSource {
     }
 
     fn dump_debug_logs(&self) {
-        Log::info(Event::General, format!("Image source {}: loaded {}", self.base.style_source.id(), self.loaded()));
+        log::info!(
+            target: log_target::GENERAL,
+            "Image source {}: loaded {}",
+            self.base.style_source.id(),
+            self.loaded()
+        );
     }
 
     fn max_zoom(&self) -> Option<u8> {

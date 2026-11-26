@@ -18,6 +18,7 @@ doctest = false
 [dependencies]
 flate2.workspace = true
 image-webp.workspace = true
+log.workspace = true
 mln_util.workspace = true
 png.workspace = true
 

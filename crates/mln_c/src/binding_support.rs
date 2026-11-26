@@ -4,14 +4,12 @@
 
 use core::ffi::c_void;
 
-use mln_util::logging::{Event, Log};
-
 use crate::error::Error;
 use crate::generated::types::{mln_diagnostic, mln_render_abandon_result, mln_render_session, mln_status, mln_wake};
 use crate::handles::{self, HandleKind};
 use crate::{
-    abi, delivery, gesture, gpu_device, map, projection, render_session, resources, runtime, style_expression,
-    transforms,
+    abi, delivery, gesture, gpu_device, log_target, map, projection, render_session, resources, runtime,
+    style_expression, transforms,
 };
 
 /// A finalizer token: the owned handle that a host's finalizer disposes of.
@@ -51,14 +49,12 @@ pub(crate) unsafe extern "C" fn mln_binding_owner_finalize(token: *mut c_void) {
     let mut disposed = Ok(());
     crate::export::catch_and_log(|| disposed = dispose_owner(token.handle));
     if let Err(error) = disposed {
-        Log::error(
-            Event::General,
-            format!(
-                "owner finalization failed for handle {} (status {}): {}",
-                token.handle,
-                error.status(),
-                error.message(),
-            ),
+        log::error!(
+            target: log_target::GENERAL,
+            "owner finalization failed for handle {} (status {}): {}",
+            token.handle,
+            error.status(),
+            error.message()
         );
     }
 }

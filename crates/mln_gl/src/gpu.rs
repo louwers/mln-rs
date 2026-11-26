@@ -418,7 +418,7 @@ fn buffer_target(usage: BufferUsage) -> u32 {
 /// waits on the GPU.
 fn log_gpu_identifier(renderer: &str) {
     static LOGGED: Once = Once::new();
-    LOGGED.call_once(|| log::info!("GPU Identifier: {renderer}"));
+    LOGGED.call_once(|| log::info!(target: log_target::GENERAL, "GPU Identifier: {renderer}"));
 }
 
 /// A [`Gpu`] on an OpenGL ES 3.0, WebGL2 or desktop OpenGL 3.3 context,

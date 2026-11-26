@@ -19,10 +19,10 @@ use mln_util::chrono::{Timestamp, now};
 use mln_util::compression::{compress, decompress};
 use mln_util::constants::DEFAULT_MAX_CACHE_SIZE;
 use mln_util::error::{Error, ErrorKind};
-use mln_util::logging::{Event, EventSeverity, Log};
 use rusqlite::types::FromSqlError;
 use rusqlite::{Connection, OpenFlags, Row, ToSql, ffi, params};
 
+use crate::log_target;
 use crate::merge_sideloaded::MERGE_SIDELOADED_DATABASE_SQL;
 use crate::offline::{
     OfflineRegion, OfflineRegionDefinition, OfflineRegionExpiry, OfflineRegionMetadata, OfflineRegionStatus,
@@ -269,7 +269,7 @@ impl OfflineDatabase {
 
     #[cfg(test)]
     pub(crate) fn change_path(&mut self, path: &str) {
-        Log::info(Event::Database, "Changing the database path.");
+        log::info!(target: log_target::DATABASE, "Changing the database path.");
         self.cleanup();
         self.path = path.to_owned();
         if let Err(e) = self.initialize() {
@@ -383,11 +383,10 @@ impl OfflineDatabase {
                     // The database was corruped, moved away, or deleted.
                     // We're going to start fresh with a clean slate for the
                     // next operation.
-                    Log::record(
-                        EventSeverity::Error,
-                        Event::Database,
-                        i64::from(primary_code),
-                        &format!("Can't {action}: {message}"),
+                    log::error!(
+                        target: log_target::DATABASE,
+                        code = i64::from(primary_code);
+                        "Can't {action}: {message}"
                     );
                     if let Err(io_ex) = self.remove_existing() {
                         self.handle_error(&io_ex, action);
@@ -395,28 +394,22 @@ impl OfflineDatabase {
                 } else {
                     // We treat the error as temporary, and pretend we have an
                     // inaccessible DB.
-                    Log::record(
-                        EventSeverity::Warning,
-                        Event::Database,
-                        i64::from(primary_code),
-                        &format!("Can't {action}: {message}"),
+                    log::warn!(
+                        target: log_target::DATABASE,
+                        code = i64::from(primary_code);
+                        "Can't {action}: {message}"
                     );
                 }
             }
             DatabaseError::Io { code, message } => {
                 // We failed to delete the database file.
-                Log::record(
-                    EventSeverity::Error,
-                    Event::Database,
-                    i64::from(*code),
-                    &format!("Can't {action}: {message}"),
-                );
+                log::error!(target: log_target::DATABASE, code = i64::from(*code); "Can't {action}: {message}");
             }
             DatabaseError::Runtime(message) => {
-                Log::error(Event::Database, format!("Can't {action}: {message}"));
+                log::error!(target: log_target::DATABASE, "Can't {action}: {message}");
             }
             DatabaseError::Logic(_) => {
-                Log::error(Event::Database, format!("Can't {action}"));
+                log::error!(target: log_target::DATABASE, "Can't {action}");
             }
             // `RegionNotFound` is the caller's to report.
             DatabaseError::RegionNotFound(_) => {}
@@ -424,7 +417,7 @@ impl OfflineDatabase {
     }
 
     fn remove_existing(&mut self) -> DbResult<()> {
-        Log::warning(Event::Database, "Removing existing incompatible offline database");
+        log::warn!(target: log_target::DATABASE, "Removing existing incompatible offline database");
 
         self.discard_pending_accessed();
         let filename = match &self.db {
@@ -686,7 +679,7 @@ impl OfflineDatabase {
         let stats = if evict {
             let stats = DatabaseSizeChangeStats::new(self)?;
             if !self.evict(size, &stats, true)? {
-                Log::info(Event::Database, "Unable to make space for entry");
+                log::info!(target: log_target::DATABASE, "Unable to make space for entry");
                 return Ok((false, 0));
             }
             Some(stats)
@@ -844,7 +837,7 @@ impl OfflineDatabase {
             let definition = match decode_offline_region_definition(&definition) {
                 Ok(definition) => definition,
                 Err(e) if skip_malformed => {
-                    Log::error(Event::General, &e.message);
+                    log::error!(target: log_target::GENERAL, "{}", e.message);
                     continue;
                 }
                 Err(e) => return Err(e.into()),
@@ -922,11 +915,10 @@ impl OfflineDatabase {
         match self.execute("ATTACH DATABASE ?1 AS side", params![side_database_path]) {
             Ok(_) => {}
             Err(e @ DatabaseError::Sqlite { code, .. }) => {
-                Log::record(
-                    EventSeverity::Error,
-                    Event::Database,
-                    i64::from(code & 0xff),
-                    &format!("Can't attach database ({side_database_path}) for merge: {e}"),
+                log::error!(
+                    target: log_target::DATABASE,
+                    code = i64::from(code & 0xff);
+                    "Can't attach database ({side_database_path}) for merge: {e}"
                 );
                 return Err(e);
             }
@@ -959,7 +951,7 @@ impl OfflineDatabase {
             // logic errors, which propagate (side stays attached).
             Err(e) if !matches!(e, DatabaseError::Logic(_)) => {
                 exec(self.get_db()?, "DETACH DATABASE side")?;
-                Log::error(Event::Database, e.to_string());
+                log::error!(target: log_target::DATABASE, "{e}");
                 Err(e)
             }
             result => result,

@@ -20,12 +20,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use mln_util::constants;
-use mln_util::logging::{Event, Log};
 use mln_util::tileset::{Tileset, VectorEncoding};
 
 use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
 use crate::layer::SourceKind;
+use crate::log_target;
 use crate::sources::geojson::GeoJSONOptions;
 
 mod convert;
@@ -214,9 +214,10 @@ fn warn_if_overscale_factor_caps_prefetch_delta(overscale: Option<u8>, prefetch:
     if let Some(overscale) = overscale
         && overscale < prefetch_delta
     {
-        Log::warning(
-            Event::Style,
-            format!("Parent tile overscale factor will cap prefetch delta to {}", i32::from(overscale)),
+        log::warn!(
+            target: log_target::STYLE,
+            "Parent tile overscale factor will cap prefetch delta to {}",
+            i32::from(overscale)
         );
     }
 }

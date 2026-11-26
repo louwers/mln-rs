@@ -10,7 +10,6 @@ use std::rc::Rc;
 
 use egui_glow::glow::{self, HasContext as _};
 use mln_gl::surface_target::{Overlay, OverlayTarget};
-use mln_util::logging::{Event, Log};
 
 use crate::overlay::Paint;
 
@@ -39,7 +38,7 @@ pub(crate) fn gl_overlay(paint: Rc<RefCell<Paint>>) -> Overlay {
                 Ok(made) => painter = Some(Painter(made)),
                 Err(e) => {
                     failed = true;
-                    Log::error(Event::Render, format!("Can't draw the controls with OpenGL ES: {e}"));
+                    log::error!("Can't draw the controls with OpenGL ES: {e}");
                 }
             }
         }

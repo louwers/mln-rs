@@ -22,7 +22,6 @@ use mln_gfx::gpu::{
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_util::hash::HashMap;
-use mln_util::logging::{Event, Log};
 use mln_vulkan::{Overlay, OverlayTarget, ShaderStage, VulkanGpu, compile_glsl};
 
 use crate::overlay::Paint;
@@ -126,7 +125,7 @@ impl Overlay for VulkanOverlay {
             match Painter::new(target) {
                 Ok(new) => self.painter = Some(new),
                 Err(e) => {
-                    Log::error(Event::Render, format!("The controls can't be drawn: {e}"));
+                    log::error!("The controls can't be drawn: {e}");
                     self.failed = true;
                     return;
                 }
@@ -138,12 +137,12 @@ impl Overlay for VulkanOverlay {
         for (id, deltas) in &textures.set {
             for delta in deltas {
                 if let Err(e) = painter.update_texture(target, *id, delta) {
-                    Log::error(Event::Render, format!("A texture of the controls can't be updated: {e}"));
+                    log::error!("A texture of the controls can't be updated: {e}");
                 }
             }
         }
         if let Err(e) = painter.paint(target, &paint.primitives, paint.pixels_per_point) {
-            Log::error(Event::Render, format!("The controls can't be drawn: {e}"));
+            log::error!("The controls can't be drawn: {e}");
             self.failed = true;
         }
         for id in &textures.free {

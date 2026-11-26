@@ -17,6 +17,7 @@ doctest = false
 
 [dependencies]
 geometry.workspace = true
+log.workspace = true
 mln_image.workspace = true
 mln_storage.workspace = true
 mln_style.workspace = true

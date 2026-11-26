@@ -35,7 +35,7 @@ use mln_vec_map::{VecMap, VecSet};
 use parking_lot::Mutex;
 
 use super::glyph_store_bitmaps::{SDF_BITMAP, STUB_BITMAP};
-use super::{SquelchLog, read_file};
+use super::read_file;
 use crate::renderer_event::RendererEvent;
 use crate::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
 use crate::text::glyph_store::{GlyphRanges, GlyphStore, GlyphWait, ShapeResults};
@@ -302,7 +302,6 @@ struct GlyphStoreTest {
     observer: Rc<StubGlyphStoreObserver>,
     requestor: Rc<StubGlyphRequestor>,
     store: Rc<Store>,
-    squelch_log: Option<SquelchLog>,
 }
 
 impl GlyphStoreTest {
@@ -330,14 +329,7 @@ impl GlyphStoreTest {
         let source: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
         let store =
             Store::new(local, glyph_cache, engine, source, Rc::<StubGlyphStoreObserver>::clone(&observer), &run_loop);
-        GlyphStoreTest {
-            file_source,
-            observer,
-            requestor: Rc::new(StubGlyphRequestor::default()),
-            store,
-            run_loop,
-            squelch_log: None,
-        }
+        GlyphStoreTest { file_source, observer, requestor: Rc::new(StubGlyphRequestor::default()), store, run_loop }
     }
 
     /// What the test's queue runs its tasks with.
@@ -354,9 +346,6 @@ impl GlyphStoreTest {
     }
 
     fn run(&mut self, url: &str, dependencies: GlyphDependencies) {
-        // Squelch logging.
-        self.squelch_log = Some(SquelchLog::new());
-
         self.glyph_store().set_url(url);
         self.request_glyphs(dependencies);
 
@@ -636,7 +625,6 @@ fn a_wait_resolves_a_range_that_failed_during_it_as_missing() {
         response.error = Some(Box::new(ResourceError::new(Reason::Other, "Failed by the test case")));
         Some(response)
     });
-    let _log = SquelchLog::new();
     test.glyph_store().set_url("test/fixtures/resources/glyphs.pbf");
 
     let file_source = test.store.file_source.borrow().clone().unwrap();
@@ -1034,7 +1022,6 @@ fn immediate_file_source() {
 #[test]
 fn immediate_file_source_failure_requests_the_range_again() {
     let test = GlyphStoreTest::with(local(StubLocalGlyphRasterizer), ResponseType::Synchronous);
-    let _log = SquelchLog::new();
     let requests = count_requests(&test);
     test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs());
 
@@ -1146,7 +1133,7 @@ fn font_face_test(engine: &Arc<DeferredEngine>) -> GlyphStoreTest {
     });
     let face = FontFace { type_: FONT_FACE, ..FontFace::new("Test Stack", "test://face.ttf", vec![]) };
     test.glyph_store().set_font_faces(Some(Arc::new(vec![face])));
-    GlyphStoreTest { squelch_log: Some(SquelchLog::new()), ..test }
+    test
 }
 
 /// Requests the font face's file and the shaping of "\u{5}\u{6}" with it;
@@ -1333,7 +1320,6 @@ fn a_fallback_face_draws_local_glyphs_before_the_device() {
         Arc::default(),
         Arc::<DeferredEngine>::clone(&engine),
     );
-    let _log = SquelchLog::new();
     test.file_source.set_response(Kind::Glyphs, |resource: &Resource| -> Option<Response> {
         panic!("requested {}", resource.url);
     });
@@ -1614,7 +1600,6 @@ fn a_device_face_loads_without_a_file_source() {
 #[test]
 fn a_fallback_face_that_failed_to_load_is_requested_again() {
     let (test, _) = letter_test(&StubChooser::new(|_| None));
-    let _log = SquelchLog::new();
     let requests = Arc::new(AtomicU32::new(0));
     let r = Arc::clone(&requests);
     test.file_source.set_response(Kind::Glyphs, move |resource: &Resource| {
@@ -1665,7 +1650,6 @@ fn a_rasterized_glyph_stands_in_for_a_face_that_failed_to_load() {
     let local = LocalGlyphs { ideographs: true, chooser: None, rasterizer: Some(Arc::new(WideLocalGlyphRasterizer)) };
     let test =
         GlyphStoreTest::with_all(local, ResponseType::Synchronous, Arc::default(), Arc::new(LetterEngine::default()));
-    let _log = SquelchLog::new();
     test.file_source.set_response(Kind::Glyphs, fails_first_then(b"font"));
     let face = FontFace { type_: FONT_FACE, ..FontFace::new("", "app://face.ttf", vec![(0x4E2D, 0x4E2D)]) };
     test.glyph_store().set_font_faces(Some(Arc::new(vec![face])));
@@ -1686,7 +1670,6 @@ fn a_rasterized_glyph_stands_in_for_a_face_that_failed_to_load() {
 #[test]
 fn a_local_glyph_stands_in_for_a_range_that_failed_to_load() {
     let test = GlyphStoreTest::with(local(WideLocalGlyphRasterizer), ResponseType::Synchronous);
-    let _log = SquelchLog::new();
     test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs());
     test.glyph_store().set_url("test/fixtures/resources/glyphs.pbf");
     let range = (test_stack(), GlyphRange::new(0, 255, GlyphIDType::FontPBF));
@@ -1715,7 +1698,6 @@ fn a_device_glyph_is_its_fonts_glyph_of_the_character() {
 #[test]
 fn a_cjk_glyph_without_a_device_font_comes_from_the_pbf() {
     let (test, _) = letter_test(&StubChooser::new(|_| None));
-    let _log = SquelchLog::new();
     let requested = Rc::new(RefCell::new(Vec::new()));
     let r = Rc::clone(&requested);
     *test.observer.glyphs_requested.borrow_mut() = Some(Box::new(move |_, range| r.borrow_mut().push(*range)));

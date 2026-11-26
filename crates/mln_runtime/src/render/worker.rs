@@ -23,7 +23,6 @@ use mln_text::local_fonts::LocalGlyphs;
 use mln_util::error::Error;
 use mln_util::event_queue::Waker;
 use mln_util::image::PremultipliedImage;
-use mln_util::logging::{Event, Log};
 use mln_util::pool::Pool;
 use mln_util::queue::Queue;
 use mln_util::size::Size;
@@ -35,6 +34,7 @@ use super::target::{
     BorrowedRing, Device, DeviceLease, Driver, ExportKind, ExportedRing, SentSurface, Surface, SurfaceOverlay,
 };
 use crate::completion::Resolver;
+use crate::log_target;
 use crate::map::Published as MapPublished;
 use crate::runtime::Outbox;
 
@@ -1426,7 +1426,7 @@ impl Worker {
     /// render on again. Returns whether it failed.
     fn fail_if_device_lost(&mut self, outbox: &mut Outbox) -> bool {
         let Some(error) = self.gfx.as_ref().and_then(|gfx| gfx.target.device().lost()) else { return false };
-        Log::error(Event::Render, error.message.clone());
+        log::error!(target: log_target::RENDER, "{}", error.message);
         self.fail(error, outbox);
         true
     }
@@ -1456,7 +1456,7 @@ impl Worker {
     /// detach or release still ends the session.
     fn fail_after_panic(&mut self, message: &str, outbox: &mut Outbox) {
         let error = Error::native(format!("the render session stopped after a panic in the library: {message}"));
-        Log::error(Event::Crash, &error.message);
+        log::error!(target: log_target::CRASH, "{}", error.message);
         let attach = {
             let mut state = self.shared.state.lock();
             if matches!(state.lifecycle, RenderSessionState::Attaching | RenderSessionState::Attached) {

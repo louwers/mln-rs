@@ -19,7 +19,6 @@ use mln_util::error::Error;
 use mln_util::feature::Feature;
 use mln_util::hash::HashMap;
 use mln_util::identity::SimpleIdentity;
-use mln_util::logging::{Event, Log};
 use mln_util::pool::TaskGroup;
 use mln_vec_map::{VecMap, VecSet};
 
@@ -32,6 +31,7 @@ use crate::image_store::ImageType;
 use crate::layer_drawing::{BucketChanges, ChangedBuckets};
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::{Dependencies, Resolved};
+use crate::log_target;
 use crate::query::{RenderedQueryOptions, SourceQueryOptions};
 use crate::render_layer::ErasedLayerBucket;
 use crate::render_orchestrator::drop_on_workers;
@@ -528,7 +528,7 @@ impl GeometryContents {
         }
         // No source layers, specified, nothing to do
         let Some(source_layers) = &options.source_layers else {
-            Log::warning(Event::General, "At least one sourceLayer required");
+            log::warn!(target: log_target::GENERAL, "At least one sourceLayer required");
             return Ok(());
         };
         for source_layer in source_layers {

@@ -8,11 +8,9 @@ use geojson::GeoJson;
 use mln_geojson::{cluster, tile};
 use mln_util::constants;
 use mln_util::error::Error;
-use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 use mln_vec_map::VecMap;
 
-use crate::Edit;
 use crate::conversion::geojson::convert_json_geojson;
 use crate::conversion::{Convertible, Error as ConversionError};
 use crate::expression::{Expr, Functions, evaluate_accumulated, from_expression_value};
@@ -22,12 +20,13 @@ use crate::source::{
     Data, Described, Fetch, Load, OfflineResources, Respond, Source, SourceData, SourceSummary, SourceTypeInfo,
     StyleSourceType,
 };
+use crate::{Edit, log_target};
 
 /// The features of tile `id`. A tile past the maximum zoom or the last row
 /// is logged, and empty.
 fn tile_features(index: &tile::TileIndex, id: &CanonicalTileID) -> Arc<TileFeatures> {
     index.tile(id.z, id.x, id.y).unwrap_or_else(|e| {
-        Log::error(Event::General, e.to_string());
+        log::error!(target: log_target::GENERAL, "{e}");
         Arc::default()
     })
 }
@@ -327,13 +326,13 @@ impl GeoJsonSourceOptions {
 fn build_geojson(data: &[u8], options: &GeoJsonSourceOptions) -> Option<Arc<dyn GeoJSONData>> {
     let mut error = ConversionError::default();
     let Some(geojson) = convert_json_geojson(data, &mut error) else {
-        Log::error(Event::ParseStyle, format!("Failed to parse GeoJSON data: {}", error.message));
+        log::error!(target: log_target::PARSE_STYLE, "Failed to parse GeoJSON data: {}", error.message);
         return None;
     };
     match options.data_builder().build(geojson) {
         Ok(data) => Some(data),
         Err(e) => {
-            Log::error(Event::ParseStyle, format!("Failed to parse GeoJSON data: {e}"));
+            log::error!(target: log_target::PARSE_STYLE, "Failed to parse GeoJSON data: {e}");
             None
         }
     }

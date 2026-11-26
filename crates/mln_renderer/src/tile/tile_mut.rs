@@ -12,12 +12,12 @@ use mln_storage::response::Reason;
 use mln_storage::{Request, Response};
 use mln_util::error::Error;
 use mln_util::hash::{HashSet, hash_bytes};
-use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 
 use crate::layer_drawing::ChangedBuckets;
 use crate::layout::tile_layout::{Dependencies, LayoutParams};
+use crate::log_target;
 use crate::render_orchestrator::drop_on_workers;
 use crate::text::glyph_store::GlyphRanges;
 use crate::tile::contents::{Contents, GeometryContents, LayoutResult, release};
@@ -672,9 +672,10 @@ impl<'a> TileMut<'a> {
             }
             JobResult::NeedsDeps(_) => {
                 layout.work = LayoutWork::Current;
-                Log::error(
-                    Event::General,
-                    format!("Tile {} asked again for the dependencies it was given", job.id.tile.id),
+                log::error!(
+                    target: log_target::GENERAL,
+                    "Tile {} asked again for the dependencies it was given",
+                    job.id.tile.id
                 );
                 self.fail(Error::native("a layout asked again for the dependencies it was given"));
             }

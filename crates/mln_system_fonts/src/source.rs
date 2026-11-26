@@ -10,7 +10,6 @@ use std::sync::Arc;
 use memmap2::Mmap;
 use mln_text::glyph::FontData;
 use mln_util::hash::HashMap;
-use mln_util::logging::{Event, Log};
 use skrifa::raw::tables::cmap::Cmap;
 use skrifa::raw::tables::fvar::Fvar;
 use skrifa::raw::tables::name::Name;
@@ -18,6 +17,7 @@ use skrifa::raw::tables::os2::Os2;
 use skrifa::raw::types::NameId;
 use skrifa::raw::{FontData as RawData, FontRead};
 
+use crate::log_target;
 use crate::sfnt::{self, Table};
 
 /// A font that the platform found.
@@ -134,13 +134,13 @@ pub(crate) fn drawn_weight(tables: &[Table], probe: char, weight: u16) -> Option
 /// thousand of its glyphs.
 fn map(path: &Path) -> Option<Mmap> {
     let file = File::open(path)
-        .inspect_err(|error| Log::warning(Event::Glyph, format!("Couldn't open {}: {error}", path.display())))
+        .inspect_err(|error| log::warn!(target: log_target::GLYPH, "Couldn't open {}: {error}", path.display()))
         .ok()?;
     // SAFETY: the mapping is read-only, and system font files aren't changed
     // in place: an update replaces a font by renaming a new file over it,
     // which leaves the mapped file as it was.
     unsafe { Mmap::map(&file) }
-        .inspect_err(|error| Log::warning(Event::Glyph, format!("Couldn't map {}: {error}", path.display())))
+        .inspect_err(|error| log::warn!(target: log_target::GLYPH, "Couldn't map {}: {error}", path.display()))
         .ok()
 }
 

@@ -15,7 +15,6 @@ use mln_renderer::query::{RenderedQueryOptions, SourceQueryOptions};
 use mln_util::error::Error;
 use mln_util::feature::Feature;
 use mln_util::image::PremultipliedImage;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use mln_util::thread::Joined;
 use parking_lot::Mutex;
@@ -29,6 +28,7 @@ use super::target::{
 };
 use super::worker::{self, Init, SessionQueue, TargetInit, Worker};
 use crate::completion::{Completion, Home, Resolver};
+use crate::log_target;
 use crate::map::{Applied, Map};
 use crate::runtime::Outbox;
 
@@ -637,9 +637,9 @@ impl SessionShared {
             } else {
                 "only a detach frees OpenGL and WebGPU objects"
             };
-            Log::warning(
-                Event::Render,
-                format!("An abandoned render session keeps {kept} graphics objects until the process exits: {reason}"),
+            log::warn!(
+                target: log_target::RENDER,
+                "An abandoned render session keeps {kept} graphics objects until the process exits: {reason}"
             );
         }
         let lost = || Error::target_lost("the render session was abandoned");

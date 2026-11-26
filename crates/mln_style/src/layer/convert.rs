@@ -1,7 +1,6 @@
-use mln_util::logging::{Event, Log};
-
 use super::{Convertible, Error};
 use crate::layer::{Layer, PropertyScope, SourceKind};
+use crate::log_target;
 use crate::registry::StyleRegistry;
 
 fn set_object_member(layer: &mut Layer, value: &Convertible<'_>, member: &str, error: &mut Error) -> bool {
@@ -38,7 +37,7 @@ fn set_properties(
         match invalid {
             InvalidProperty::Fail => Some(error),
             InvalidProperty::Skip => {
-                Log::warning(Event::ParseStyle, &error.message);
+                log::warn!(target: log_target::PARSE_STYLE, "{}", error.message);
                 None
             }
         }

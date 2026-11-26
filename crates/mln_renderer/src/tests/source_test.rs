@@ -25,7 +25,6 @@ use mln_style::{Edit, Source, Style};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
 use mln_util::geo::LatLng;
-use mln_util::logging::{Event, EventSeverity, Log, Observer as LogObserver};
 use mln_util::pool::{Pool, TaskGroup};
 use mln_util::queue::Queue;
 use mln_util::size::Size;
@@ -36,6 +35,7 @@ use parking_lot::Mutex;
 use crate::Registry;
 use crate::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::render_source::RenderSource;
+use crate::tests::fixture_log::FixtureLog;
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::store::{StoreEvent, TileStore};
 use crate::tile_parameters::TileParameters;
@@ -1045,51 +1045,6 @@ fn geojson_source_slices_inline_while_a_background_slice_runs() {
     assert!(render_source.is_loaded(&store));
 }
 
-type Records = Arc<Mutex<Vec<((EventSeverity, Event, String), bool)>>>;
-
-struct Recorder(Records);
-
-impl LogObserver for Recorder {
-    fn on_record(&self, severity: EventSeverity, event: Event, _code: i64, msg: &str) -> bool {
-        self.0.lock().push(((severity, event, msg.to_owned()), false));
-        true
-    }
-}
-
-/// Captures this thread's log records.
-struct FixtureLog {
-    messages: Records,
-}
-
-impl FixtureLog {
-    fn new() -> Self {
-        let messages: Records = Arc::new(Mutex::new(Vec::new()));
-        let _ = Log::set_thread_observer(Some(Box::new(Recorder(Arc::clone(&messages)))));
-        FixtureLog { messages }
-    }
-
-    fn count(&self, severity: EventSeverity, event: Event, msg: &str) -> usize {
-        let mut count = 0;
-        for (m, checked) in self.messages.lock().iter_mut() {
-            if m.0 == severity && m.1 == event && m.2 == msg {
-                *checked = true;
-                count += 1;
-            }
-        }
-        count
-    }
-
-    fn unchecked_count(&self) -> usize {
-        self.messages.lock().iter().filter(|(_, checked)| !checked).count()
-    }
-}
-
-impl Drop for FixtureLog {
-    fn drop(&mut self) {
-        let _ = Log::set_thread_observer(None);
-    }
-}
-
 // gtest: Source.SetMaxParentOverscaleFactor
 #[test]
 fn set_max_parent_overscale_factor() {
@@ -1142,7 +1097,7 @@ fn set_max_parent_overscale_factor() {
 
     assert_eq!(
         1,
-        log.count(EventSeverity::Warning, Event::Style, "Parent tile overscale factor will cap prefetch delta to 3")
+        log.count(log::Level::Warn, "mln_style::style", "Parent tile overscale factor will cap prefetch delta to 3")
     );
     assert_eq!(0, log.unchecked_count());
 }

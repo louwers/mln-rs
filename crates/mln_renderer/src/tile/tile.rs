@@ -8,9 +8,9 @@ use mln_map_types::MapMode;
 use mln_storage::Data;
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
-use mln_util::logging::{Event, Log};
 
 use crate::layout::tile_layout::Dependencies;
+use crate::log_target;
 use crate::tile::contents::Contents;
 use crate::tile::loading::Load;
 use crate::tile::pipeline::{Layout, Pipeline};
@@ -220,10 +220,10 @@ impl Tile {
             TileKind::Dem(_) => "RasterDEM",
         };
         let yes = |value: bool| if value { "yes" } else { "no" };
-        Log::info(Event::General, format!("Tile::Kind: {kind}"));
-        Log::info(Event::General, format!("Tile::id: {}", self.id));
-        Log::info(Event::General, format!("Tile::renderable: {}", yes(self.is_renderable())));
-        Log::info(Event::General, format!("Tile::complete: {}", yes(self.is_complete())));
-        Log::info(Event::General, format!("Tile::loaded: {}", yes(self.settled)));
+        log::info!(target: log_target::GENERAL, "Tile::Kind: {kind}");
+        log::info!(target: log_target::GENERAL, "Tile::id: {}", self.id);
+        log::info!(target: log_target::GENERAL, "Tile::renderable: {}", yes(self.is_renderable()));
+        log::info!(target: log_target::GENERAL, "Tile::complete: {}", yes(self.is_complete()));
+        log::info!(target: log_target::GENERAL, "Tile::loaded: {}", yes(self.settled));
     }
 }

@@ -11,7 +11,6 @@ use std::rc::Rc;
 
 use mln_mtl::surface_target::{Overlay, OverlayTarget};
 use mln_util::hash::HashMap;
-use mln_util::logging::{Event, Log};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::NSString;
@@ -85,7 +84,7 @@ pub(crate) fn metal_overlay(paint: Rc<RefCell<Paint>>) -> Overlay {
             match Painter::new(target.device, target.texture.pixelFormat()) {
                 Ok(new) => painter = Some(new),
                 Err(e) => {
-                    Log::error(Event::Render, format!("The controls can't be drawn: {e}"));
+                    log::error!("The controls can't be drawn: {e}");
                     failed = true;
                     return;
                 }

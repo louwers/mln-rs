@@ -10,7 +10,6 @@
 use js_sys::{Reflect, Uint8Array};
 use mln_util::error::Error;
 use mln_util::image::{PremultipliedImage, UnassociatedImage};
-use mln_util::logging::{Event, Log};
 use mln_util::premultiply::premultiply;
 use mln_util::size::Size;
 use wasm_bindgen::prelude::*;
@@ -18,6 +17,7 @@ use wasm_bindgen_futures::JsFuture;
 
 use crate::decoder::{DecodeDone, ImageDecoder};
 use crate::image::ImageType;
+use crate::log_target;
 
 #[wasm_bindgen]
 extern "C" {
@@ -41,7 +41,7 @@ impl ImageDecoder for BrowserDecoder {
                 Ok(image) => Ok(premultiply(image)),
                 // `decodeWEBP`: an empty image, and a warning.
                 Err(_) if kind == ImageType::Webp => {
-                    Log::warning(Event::Image, "Failed to decode WebP image contents!");
+                    log::warn!(target: log_target::IMAGE, "Failed to decode WebP image contents!");
                     Ok(PremultipliedImage::default())
                 }
                 Err(error) => {

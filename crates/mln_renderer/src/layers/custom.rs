@@ -35,13 +35,13 @@ use mln_map_types::{FrameProjection, MapView};
 use mln_style::StyleRegistry;
 use mln_style::layer::{Layer, LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
 use mln_style::property::table::{PropertyTable, PropertyVisitor};
-use mln_util::logging::{Event, Log};
 
 use crate::bucket::NoBucket;
 use crate::gfx::context::Context;
 use crate::layer_drawing::{DrawGroup, DrawOrder, LayerDrawing, TileMap};
 use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layout::layout::NoLayout;
+use crate::log_target;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
 use crate::render_pass::RenderPass;
@@ -225,7 +225,7 @@ pub(crate) fn end_hosts(gpu: &mut dyn Gpu, hosts: EndedHosts) {
         return;
     }
     if let Err(error) = gpu.flush(true) {
-        Log::error(Event::Render, format!("Waiting for a custom layer's frames failed: {error}"));
+        log::error!(target: log_target::RENDER, "Waiting for a custom layer's frames failed: {error}");
     }
     for host in hosts {
         host.deinitialize();

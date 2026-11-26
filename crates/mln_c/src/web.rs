@@ -92,8 +92,9 @@ pub(crate) use table::required;
 mod upcalls {
     use std::cell::RefCell;
 
-    use mln_util::logging::{Event, Log};
     use wasm_bindgen::prelude::*;
+
+    use crate::log_target;
 
     thread_local! {
         static DISPATCHER: RefCell<Option<js_sys::Function>> = const { RefCell::new(None) };
@@ -121,12 +122,12 @@ mod upcalls {
     /// `undefined`, which a trampoline returns as zero.
     pub(crate) fn dispatch(name: &str, arguments: &[JsValue]) -> JsValue {
         let Some(dispatcher) = DISPATCHER.with(|cell| cell.borrow().clone()) else {
-            Log::error(Event::General, format!("{name} ran with no upcall dispatcher set"));
+            log::error!(target: log_target::GENERAL, "{name} ran with no upcall dispatcher set");
             return JsValue::UNDEFINED;
         };
         let call = std::iter::once(JsValue::from_str(name)).chain(arguments.iter().cloned()).collect::<js_sys::Array>();
         dispatcher.apply(&JsValue::NULL, &call).unwrap_or_else(|error| {
-            Log::error(Event::General, format!("the upcall dispatcher threw for {name}: {error:?}"));
+            log::error!(target: log_target::GENERAL, "the upcall dispatcher threw for {name}: {error:?}");
             JsValue::UNDEFINED
         })
     }

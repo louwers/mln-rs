@@ -6,27 +6,28 @@
 use std::io::Cursor;
 
 use mln_util::image::{PremultipliedImage, UnassociatedImage};
-use mln_util::logging::{Event, Log};
 use mln_util::premultiply::premultiply;
 use mln_util::size::Size;
+
+use crate::log_target;
 
 /// Decodes WebP `data`. Logs a warning and returns an empty image when the
 /// data can't be decoded, as C++ does.
 #[must_use]
 pub(crate) fn decode_webp(data: &[u8]) -> PremultipliedImage {
     let Ok(mut decoder) = image_webp::WebPDecoder::new(Cursor::new(data)) else {
-        Log::warning(Event::Image, "Failed to decode WebP image header!");
+        log::warn!(target: log_target::IMAGE, "Failed to decode WebP image header!");
         return PremultipliedImage::default();
     };
 
     let (width, height) = decoder.dimensions();
     let Some(buffer_size) = decoder.output_buffer_size() else {
-        Log::warning(Event::Image, "Failed to decode WebP image contents!");
+        log::warn!(target: log_target::IMAGE, "Failed to decode WebP image contents!");
         return PremultipliedImage::default();
     };
     let mut buffer = vec![0u8; buffer_size];
     if decoder.read_image(&mut buffer).is_err() {
-        Log::warning(Event::Image, "Failed to decode WebP image contents!");
+        log::warn!(target: log_target::IMAGE, "Failed to decode WebP image contents!");
         return PremultipliedImage::default();
     }
 

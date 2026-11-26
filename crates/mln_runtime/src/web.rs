@@ -25,10 +25,10 @@ use mln_renderer::tile::worker_codec::RemoteWorkers;
 use mln_storage::OnlineFileSource;
 use mln_storage::network_status::NetworkStatus;
 use mln_util::hash::HashMap;
-use mln_util::logging::{Event, Log};
 use mln_util::pool::Pool;
 use mln_web_host::{pump, tile_workers};
 
+use crate::log_target;
 use crate::render::{SessionId, SessionQueue};
 use crate::runtime::{CoreQueue, RuntimeCore};
 
@@ -220,20 +220,22 @@ pub(crate) fn tile_workers(registry: &Arc<Registry>) -> Option<RemoteWorkers> {
     let ports = match tile_workers::connect() {
         Ok(ports) => ports,
         Err(error) => {
-            Log::warning(
-                Event::General,
-                format!("The tile workers didn't start, so tiles load on this thread: {error}"),
+            log::warn!(
+                target: log_target::GENERAL,
+                "The tile workers didn't start, so tiles load on this thread: {error}"
             );
             return None;
         }
     };
     let fatal = |instance: usize, message: wasm_bindgen::JsValue| {
         let message = message.as_string().unwrap_or_else(|| format!("{message:?}"));
-        Log::error(Event::General, format!("Tile worker {instance} panicked: {message}"));
+        log::error!(target: log_target::GENERAL, "Tile worker {instance} panicked: {message}");
     };
     let respawn = |instance: usize| {
         tile_workers::respawn(instance)
-            .inspect_err(|error| Log::error(Event::General, format!("No tile worker took {instance}'s place: {error}")))
+            .inspect_err(
+                |error| log::error!(target: log_target::GENERAL, "No tile worker took {instance}'s place: {error}"),
+            )
             .ok()
     };
     Some(tile_workers::workers(ports, Arc::clone(registry), fatal, respawn))

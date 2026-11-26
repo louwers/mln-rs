@@ -3,7 +3,6 @@ use std::collections::BTreeSet;
 use mln_image::decode_image;
 use mln_style::image::{ImageContent, TextFit};
 use mln_util::image::PremultipliedImage;
-use mln_util::logging::{Event, EventSeverity};
 
 use super::{FixtureLog, read_file};
 use crate::sprite_parser::{create_style_image, parse_sprite};
@@ -17,11 +16,11 @@ fn create(image: &PremultipliedImage, x: i32, y: i32, w: i32, h: i32, ratio: f64
 }
 
 fn sprite_error(log: &FixtureLog, msg: &str) -> usize {
-    log.count(EventSeverity::Error, Event::Sprite, -1, msg)
+    log.count(log::Level::Error, crate::log_target::SPRITE, msg)
 }
 
 fn sprite_warning(log: &FixtureLog, msg: &str) -> usize {
-    log.count(EventSeverity::Warning, Event::Sprite, -1, msg)
+    log.count(log::Level::Warn, crate::log_target::SPRITE, msg)
 }
 
 // gtest: Sprite.SpriteImageCreationInvalid

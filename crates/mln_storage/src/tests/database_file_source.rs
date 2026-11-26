@@ -4,9 +4,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_util::chrono::now;
-use mln_util::logging::{Event, EventSeverity, Log, Observer};
 
-use super::{LocalRequests, TestLoop, req, temp_path};
+use super::{Caught, LocalRequests, TestLoop, req, temp_path, watch};
 use crate::database_file_source::{Cache, DatabaseFileSource};
 use crate::file_source::FileSource;
 use crate::offline_database::{DatabaseError, OfflineDatabase};
@@ -133,33 +132,12 @@ fn can_request() {
     )));
 }
 
-/// Counts the database thread's failed `accessed` flushes whose message
-/// contains `marker`; other records go on to the default output.
-struct FlushFailures {
-    count: Arc<AtomicUsize>,
-    marker: String,
-}
-
-impl Observer for FlushFailures {
-    fn on_record(&self, _: EventSeverity, event: Event, _: i64, msg: &str) -> bool {
-        if event != Event::Database
-            || !msg.starts_with("Can't flush accessed timestamps")
-            || !msg.contains(&self.marker)
-        {
-            return false;
-        }
-        self.count.fetch_add(1, Ordering::SeqCst);
-        true
-    }
-}
-
-/// Deletes a database and its journals, now and when dropped.
-struct RemoveObserver;
-
-impl Drop for RemoveObserver {
-    fn drop(&mut self) {
-        Log::remove_observer();
-    }
+/// Whether `record` is a failed flush of `accessed` timestamps whose message
+/// contains `marker`.
+fn flush_failure(record: &Caught, marker: &str) -> bool {
+    record.target == crate::log_target::DATABASE
+        && record.msg.starts_with("Can't flush accessed timestamps")
+        && record.msg.contains(marker)
 }
 
 fn cached_request(run_loop: &TestLoop, source: &DatabaseFileSource, resource: &Resource) -> Response {
@@ -209,8 +187,14 @@ fn failed_accessed_flush_waits_for_next_read() {
     ))
     .unwrap();
     let failures = Arc::new(AtomicUsize::new(0));
-    Log::set_observer(Box::new(FlushFailures { count: Arc::clone(&failures), marker }));
-    let _remove_observer = RemoveObserver;
+    let count = Arc::clone(&failures);
+    let _unwatch = watch(move |record| {
+        let failed = flush_failure(record, &marker);
+        if failed {
+            count.fetch_add(1, Ordering::SeqCst);
+        }
+        failed
+    });
 
     let source = DatabaseFileSource::new(&String::from(&path), None);
     let cached = cached_request(&run_loop, &source, &resource);

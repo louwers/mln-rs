@@ -9,9 +9,9 @@ use std::sync::Arc;
 use mln_style::image::Impl as ImageImpl;
 use mln_util::constants::DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE;
 use mln_util::hash::{HashMap, HashSet};
-use mln_util::logging::{Event, Log};
 use mln_vec_map::{VecMap, VecSet};
 
+use crate::log_target;
 use crate::renderer_event::RendererEvent;
 
 /// What a layout uses an image as.
@@ -119,7 +119,7 @@ impl ImageStore {
     }
 
     pub(crate) fn dump_debug_logs(&self) {
-        Log::info(Event::General, format!("ImageManager::loaded: {}", if self.is_loaded() { "1" } else { "0" }));
+        log::info!(target: log_target::GENERAL, "ImageManager::loaded: {}", if self.is_loaded() { "1" } else { "0" });
     }
 
     pub(crate) fn image(&self, id: &str) -> Option<&Arc<ImageImpl>> {

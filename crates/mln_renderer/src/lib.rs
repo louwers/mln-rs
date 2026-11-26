@@ -79,5 +79,15 @@ pub use renderer_event::{
 pub use update_parameters::UpdateParameters;
 pub use update_slot::{Update, UpdateReader, UpdateSlot};
 
+/// The `log` targets of this crate's records. Each names the event that
+/// `mln_c` reports the record under (`mln_c::logging`).
+mod log_target {
+    pub(crate) const GENERAL: &str = "mln_renderer::general";
+    pub(crate) const RENDER: &str = "mln_renderer::render";
+    pub(crate) const STYLE: &str = "mln_renderer::style";
+    pub(crate) const GLYPH: &str = "mln_renderer::glyph";
+    pub(crate) const TIMING: &str = "mln_renderer::timing";
+}
+
 #[cfg(test)]
 mod tests;

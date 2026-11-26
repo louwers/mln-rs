@@ -24,6 +24,12 @@ pub mod shaper;
 pub mod tile_worker;
 pub mod tile_workers;
 
+/// The `log` targets of this crate's records. Each names the event that
+/// `mln_c` reports the record under (`mln_c::logging`).
+mod log_target {
+    pub(crate) const GLYPH: &str = "mln_web_host::glyph";
+}
+
 use wasm_bindgen::JsValue;
 
 /// Logs a panic's message to the console, and leaves it in the global

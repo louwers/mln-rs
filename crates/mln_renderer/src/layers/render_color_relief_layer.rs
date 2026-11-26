@@ -28,7 +28,6 @@ use mln_util::dem::DemUnpack;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use super::cast_matrix;
@@ -47,6 +46,7 @@ use crate::layer_type::{EvaluatedLayer, LayerType};
 use crate::layers::color_relief::programs;
 use crate::layers::color_relief::ubo::{ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO};
 use crate::layout::layout::NoLayout;
+use crate::log_target;
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{
     Atlases, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
@@ -550,7 +550,7 @@ impl TypedLayer for RenderColorReliefLayer {
                 }
             } else {
                 // The tile's draw, if it has one, draws as it was.
-                Log::warning(Event::Render, "ColorRelief: DEM image not valid for tile");
+                log::warn!(target: log_target::RENDER, "ColorRelief: DEM image not valid for tile");
             }
 
             let Some(cached) = entry.value.as_ref() else {

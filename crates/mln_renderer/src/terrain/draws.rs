@@ -19,7 +19,6 @@ use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_map_types::View;
 use mln_tile_id::CanonicalTileID;
 use mln_util::clip_depth::ClipDepthRange;
-use mln_util::logging::{Event, Log};
 
 use super::mesh::{TerrainMesh, TerrainVertex};
 use super::{DemBindings, DrapeStacks, Drapes, Surface, TerrainCover};
@@ -33,6 +32,7 @@ use crate::gfx::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArr
 use crate::gfx::vertices::SharedVertices;
 use crate::layer_drawing::{DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileMap, finish_tiles, tile_objects};
 use crate::layers::render_hillshade_layer::lat_range;
+use crate::log_target;
 use crate::paint_parameters::PaintParameters;
 use crate::terrain::programs;
 use crate::terrain::ubo::{HillshadeTilePropsUBO, TerrainDrawableUBO, TerrainFog, TerrainSurfaceUBO};
@@ -281,7 +281,7 @@ impl TerrainDraws {
             .map(|program| context.shader_key(program, Uniforms::default(), variant));
         if let Err(error) = shaders.iter().try_for_each(|shader| context.shader(gpu, shader).map(|_| ())) {
             self.failed = true;
-            Log::warning(Event::Render, format!("Terrain draws nothing on this backend: {error}"));
+            log::warn!(target: log_target::RENDER, "Terrain draws nothing on this backend: {error}");
             return None;
         }
         Some(self.shaders.insert((variant, shaders)).1.clone())

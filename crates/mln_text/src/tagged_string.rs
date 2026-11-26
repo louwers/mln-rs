@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use mln_style::types::VerticalAlign;
 use mln_util::font_stack::FontStack;
-use mln_util::logging::{Event, Log};
 use mln_util::{Color, i18n};
 
 use crate::glyph::GlyphIDType;
+use crate::log_target;
 use crate::shaper::ShapedText;
 
 /// The index of a section of a [`TaggedString`]. A label in the device's
@@ -176,7 +176,7 @@ impl TaggedString {
     /// warning and drops any more.
     pub fn add_image_section(&mut self, image_id: &str, vertical_align: VerticalAlign) {
         let Some(next) = self.next_image_char() else {
-            Log::warning(Event::Style, "Exceeded maximum number of images in a label.");
+            log::warn!(target: log_target::STYLE, "Exceeded maximum number of images in a label.");
             return;
         };
         self.styled_text.text.push(next);

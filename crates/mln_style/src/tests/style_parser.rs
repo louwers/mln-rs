@@ -1,14 +1,13 @@
 use std::path::PathBuf;
 
 use feature::Value;
-use mln_util::logging::{Event, EventSeverity, Log};
 use mln_vec_map::VecSet;
 
 use super::util::FixtureLog;
-use crate::StyleRegistry;
 use crate::layer::FontStack;
 use crate::property::table::Kind;
 use crate::style::parse::Parser;
+use crate::{StyleRegistry, log_target};
 
 fn fixtures_dir() -> PathBuf {
     std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("testdata/test/fixtures/style_parser")
@@ -27,6 +26,29 @@ fn fixture_names() -> Vec<String> {
     names
 }
 
+/// The level of a fixture's severity, as the C++ core names it.
+fn fixture_level(severity: &str) -> log::Level {
+    match severity {
+        "ERROR" => log::Level::Error,
+        "WARNING" => log::Level::Warn,
+        "INFO" => log::Level::Info,
+        _ => panic!("unknown severity {severity}"),
+    }
+}
+
+/// The target of this crate's records of a fixture's event, as the C++ core
+/// names it: `ParseStyle` is `mln_style::parse_style`.
+fn fixture_target(event: &str) -> String {
+    let mut target = String::from("mln_style::");
+    for (i, c) in event.chars().enumerate() {
+        if c.is_ascii_uppercase() && i > 0 {
+            target.push('_');
+        }
+        target.push(c.to_ascii_lowercase());
+    }
+    target
+}
+
 /// One `StyleParserTest.ParseStyle` instance. Returns the failure, if any.
 fn parse_style_fixture(name: &str) -> Result<(), String> {
     let base = fixtures_dir().join(name);
@@ -38,7 +60,7 @@ fn parse_style_fixture(name: &str) -> Result<(), String> {
 
     let mut parser = Parser::new(&StyleRegistry::with_builtins());
     if let Err(error) = parser.parse(&style_json) {
-        Log::error(Event::ParseStyle, format!("Failed to parse style: {error}"));
+        log::error!(target: log_target::PARSE_STYLE, "Failed to parse style: {error}");
     }
 
     for (property_name, value) in info_doc.as_object().unwrap() {
@@ -46,10 +68,10 @@ fn parse_style_fixture(name: &str) -> Result<(), String> {
             for js_entry in js_log.as_array().unwrap() {
                 let js_entry = js_entry.as_array().unwrap();
                 let count = js_entry[0].as_u64().unwrap() as usize;
-                let severity = js_entry[1].as_str().unwrap().parse::<EventSeverity>().unwrap();
-                let event = js_entry[2].as_str().unwrap().parse::<Event>().unwrap();
+                let level = fixture_level(js_entry[1].as_str().unwrap());
+                let target = fixture_target(js_entry[2].as_str().unwrap());
                 let msg = js_entry[3].as_str().unwrap();
-                let observed = log.count(severity, event, msg);
+                let observed = log.count(level, &target, msg);
                 if count != observed {
                     return Err(format!("{name}/{property_name}: Message: {msg}: expected {count}, got {observed}"));
                 }

@@ -1,5 +1,5 @@
 //! Utilities shared by the other crates: geometry, math, colors, images,
-//! time, strings, URLs, logging, threading helpers and more, one module per
+//! time, strings, URLs, threading helpers and more, one module per
 //! file.
 
 #[cfg(target_os = "android")]
@@ -34,7 +34,6 @@ pub mod i18n;
 pub mod identity;
 pub mod image;
 pub mod intersection_tests;
-pub mod logging;
 pub mod math;
 pub mod panic;
 pub mod pool;
@@ -48,6 +47,13 @@ pub mod tileset;
 pub mod time;
 pub mod tiny_sdf;
 pub mod token;
+
+/// The `log` targets of this crate's records. Each names the event that
+/// `mln_c` reports the record under (`mln_c::logging`).
+mod log_target {
+    #[cfg(not(target_family = "wasm"))]
+    pub(crate) const GENERAL: &str = "mln_util::general";
+}
 
 #[cfg(test)]
 mod tests;

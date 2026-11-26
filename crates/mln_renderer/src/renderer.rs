@@ -10,11 +10,9 @@ use mln_text::local_fonts::LocalGlyphs;
 use mln_util::Color;
 use mln_util::error::Error;
 use mln_util::event_queue::Waker;
-use mln_util::logging::{Event, Log};
 use mln_util::pool::Pool;
 use mln_util::time::Instant;
 
-use crate::Registry;
 use crate::clip_masks::ClipMasks;
 use crate::frame::Frame;
 use crate::frame_projection::{self, FrameProjection};
@@ -30,6 +28,7 @@ use crate::renderer_event::{RenderMode, RendererEvent, RendererEvents};
 use crate::tile::worker_codec::RemoteWorkers;
 use crate::tile_matrix::to_projection_ubo;
 use crate::update_parameters::UpdateParameters;
+use crate::{Registry, log_target};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RenderState {
@@ -491,7 +490,7 @@ impl Renderer {
         self.orchestrator.reduce_memory_use();
         self.encoder.context.destroy_released(gpu);
         if let Err(error) = gpu.flush(true) {
-            Log::error(Event::Render, format!("Waiting for the GPU failed: {error}"));
+            log::error!(target: log_target::RENDER, "Waiting for the GPU failed: {error}");
         }
         report(&mut self.orchestrator, self.events.as_ref());
     }

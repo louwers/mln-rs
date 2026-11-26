@@ -12,9 +12,9 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use mln_util::hash::HashMap;
-use mln_util::logging::{Event, Log};
 use mln_util::pool::TaskGroup;
 
+use crate::log_target;
 use crate::tile::inbox::{InboxSender, TileEvent};
 use crate::tile::job::{DataKey, DiscoveryMemo, JobId, JobResult, JobTimes, Reply, Run, run_job};
 use crate::tile::worker_codec::{Encoded, RemoteEvent};
@@ -305,6 +305,6 @@ impl Jobs {
             use std::fmt::Write as _;
             let _ = write!(line, ", {} B sent and {} B received per job", sent / submitted, got / received.max(1));
         }
-        Log::info(Event::Timing, line);
+        log::info!(target: log_target::TIMING, "{line}");
     }
 }

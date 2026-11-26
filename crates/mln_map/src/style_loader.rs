@@ -26,8 +26,9 @@ use mln_text::glyph::{FontFaces, style_font_faces};
 use mln_util::error::Error;
 use mln_util::event_queue::{EventQueue, Waker};
 use mln_util::hash::HashMap;
-use mln_util::logging::{Event, Log};
 use mln_util::pool::{Pool, TaskGroup};
+
+use crate::log_target;
 
 /// What a request or a job of the loader answers.
 pub(crate) enum Reply {
@@ -399,7 +400,7 @@ impl StyleLoader {
         if let Err(error) = error_streak(&mut self.failing, res) {
             if let Some(error) = error {
                 let message = format!("loading style failed: {}", error.message);
-                Log::error(Event::Setup, &message);
+                log::error!(target: log_target::SETUP, "{message}");
                 if !self.delivered {
                     events.push(LoadEvent::Failed(StyleLoadError::Load(message)));
                 }
@@ -418,7 +419,7 @@ impl StyleLoader {
                 "the style request returned not modified, but no earlier response delivered the style"
             };
             let message = format!("loading style failed: {error}");
-            Log::error(Event::Setup, &message);
+            log::error!(target: log_target::SETUP, "{message}");
             events.push(LoadEvent::Failed(StyleLoadError::Load(message)));
             events.push(LoadEvent::ResourceError(Error::native(error)));
         }
@@ -435,7 +436,7 @@ impl StyleLoader {
             Ok(parsed) => parsed,
             Err(error) => {
                 let message = format!("Failed to parse style: {error}");
-                Log::error(Event::ParseStyle, &message);
+                log::error!(target: log_target::PARSE_STYLE, "{message}");
                 events.push(LoadEvent::Failed(StyleLoadError::Parse(message)));
                 events.push(LoadEvent::ResourceError(error));
                 return;
@@ -549,7 +550,7 @@ impl StyleLoader {
     /// for a sprite the document names.
     fn sprite_failed(&mut self, sprite: Option<Sprite>, error: Error, events: &mut Vec<LoadEvent>) {
         self.last_error = Some(error.clone());
-        Log::error(Event::Style, format!("Failed to load sprite: {error}"));
+        log::error!(target: log_target::STYLE, "Failed to load sprite: {error}");
         let id = sprite.as_ref().map_or(DEFAULT_SPRITE, |sprite| sprite.id.as_str());
         if let Some(entry) = self.sprites.iter_mut().find(|entry| entry.id() == id) {
             entry.loaded = sprite.is_some();

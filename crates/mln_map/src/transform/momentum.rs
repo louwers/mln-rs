@@ -11,12 +11,12 @@ use mln_map_types::{
 use mln_util::UnitBezier;
 use mln_util::constants::DEFAULT_TRANSITION_EASE;
 use mln_util::geo::{LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
-use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 
 use super::anchor::sees_plane;
 use super::transition::Transition;
 use super::{BEARING, CENTER, PITCH, Transform, TransformEvent, ZOOM, max_pitch_for_padding, nanos_from_secs};
+use crate::log_target;
 use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
 
 /// How far one part of a momentum moves, over how long, and along which
@@ -494,7 +494,7 @@ impl Transform {
         match self.state.view().screen_coordinate_to_lat_lng_at(&point, height, WrapMode::Unwrapped) {
             Ok(lat_lng) => Some((point, lat_lng, height)),
             Err(e) => {
-                Log::error(Event::General, &e.message);
+                log::error!(target: log_target::GENERAL, "{}", e.message);
                 None
             }
         }
@@ -510,7 +510,7 @@ impl Transform {
             return;
         }
         if let Err(e) = self.state.move_lat_lng_at(&lat_lng, &point, height) {
-            Log::error(Event::General, &e.message);
+            log::error!(target: log_target::GENERAL, "{}", e.message);
         }
     }
 
@@ -545,7 +545,7 @@ impl Transform {
             let unwrapped = match self.center_moving_on_plane(&point, &center, self.view().center_altitude()) {
                 Ok(lat_lng) => lat_lng,
                 Err(e) => {
-                    Log::error(Event::General, &e.message);
+                    log::error!(target: log_target::GENERAL, "{}", e.message);
                     break;
                 }
             };

@@ -8,7 +8,6 @@ use mln_text::atlas::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_util::Color;
 use mln_util::hash::{HashMap, HashSet};
-use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
 use mln_wire::sorted;
@@ -20,6 +19,7 @@ use crate::gfx::mesh::Indexed;
 use crate::gfx::segment::SegmentBase;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
+use crate::log_target;
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
 use crate::util::tessellator::Tessellator;
 
@@ -166,11 +166,9 @@ impl Bucket for FillBucket {
             }
             Some(&existing) => {
                 if existing != sdf && self.mixed_sdf_pattern_layers.insert(layer_id.to_owned()) {
-                    Log::warning(
-                        Event::Style,
-                        format!(
-                            "Style sheet warning: Cannot mix SDF and non-SDF fill patterns in layer \"{layer_id}\""
-                        ),
+                    log::warn!(
+                        target: log_target::STYLE,
+                        "Style sheet warning: Cannot mix SDF and non-SDF fill patterns in layer \"{layer_id}\""
                     );
                 }
             }

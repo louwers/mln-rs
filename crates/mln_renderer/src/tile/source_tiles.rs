@@ -14,7 +14,6 @@ use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
 use mln_util::geo::{LatLngBounds, WrapMode};
 use mln_util::hash::HashSet;
-use mln_util::logging::{Event, Log};
 use mln_util::projection::Projection;
 use mln_util::range::Range;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -30,6 +29,7 @@ use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::layer_drawing::ChangedBuckets;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::layout::tile_layout::LayoutParams;
+use crate::log_target;
 use crate::tile::contents::Contents;
 use crate::tile::dem;
 use crate::tile::job::SourceStyle;
@@ -716,13 +716,11 @@ impl SourceTiles {
                 pan_tiles = base_tiles;
             }
             if parameters.mode == MapMode::Tile && !info.round_zoom && ideal_tiles.len() > 1 {
-                Log::warning(
-                    Event::General,
-                    format!(
-                        "Provided camera options returned {} tiles, only {} is taken in Tile mode.",
-                        ideal_tiles.len(),
-                        ideal_tiles[0]
-                    ),
+                log::warn!(
+                    target: log_target::GENERAL,
+                    "Provided camera options returned {} tiles, only {} is taken in Tile mode.",
+                    ideal_tiles.len(),
+                    ideal_tiles[0]
                 );
                 ideal_tiles = vec![ideal_tiles[0]];
             }

@@ -42,5 +42,13 @@ pub use shaper::{GlyphAdjust, ShapedText, Shaper};
 pub use shaping::{PositionedIcon, ShapingOptions, anchor_alignment, anchor_justification, shape_text};
 pub use tagged_string::{SectionOptions, TaggedString};
 
+/// The `log` targets of this crate's records. Each names the event that
+/// `mln_c` reports the record under (`mln_c::logging`).
+mod log_target {
+    pub(crate) const STYLE: &str = "mln_text::style";
+    #[cfg(target_family = "wasm")]
+    pub(crate) const GLYPH: &str = "mln_text::glyph";
+}
+
 #[cfg(test)]
 mod tests;

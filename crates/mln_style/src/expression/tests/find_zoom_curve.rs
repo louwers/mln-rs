@@ -1,36 +1,23 @@
-use std::sync::mpsc::{Sender, channel};
-
-use mln_util::logging::{Event, EventSeverity, Log, Observer};
-
 use crate::expression::dsl::*;
 use crate::expression::value::Value;
 use crate::expression::zoom_curve::find_zoom_curve_checked;
-
-struct Recorder(Sender<(EventSeverity, Event, String)>);
-
-impl Observer for Recorder {
-    fn on_record(&self, severity: EventSeverity, event: Event, _code: i64, msg: &str) -> bool {
-        let _ = self.0.send((severity, event, msg.to_owned()));
-        true
-    }
-}
+use crate::log_target;
+use crate::tests::util::FixtureLog;
 
 #[test]
 fn invalid_zoom_curve_is_logged() {
-    let (sender, records) = channel();
-    let previous = Log::set_thread_observer(Some(Box::new(Recorder(sender))));
+    let log = FixtureLog::new();
 
     // A zoom step nested below the top level.
     let expression =
         eq(step(zoom(), literal(Value::Number(1.0)), 5.0, literal(Value::Number(2.0))), literal(Value::Number(1.0)));
     assert!(find_zoom_curve_checked(&expression).is_null());
 
-    let _ = Log::set_thread_observer(previous);
     assert_eq!(
-        records.try_iter().collect::<Vec<_>>(),
+        log.messages().into_iter().map(|m| (m.level, m.target, m.msg)).collect::<Vec<_>>(),
         [(
-            EventSeverity::Error,
-            Event::Style,
+            log::Level::Error,
+            log_target::STYLE.to_owned(),
             r#"Invalid Expression: "zoom" expression may only be used as input to a top-level "step" or "interpolate" expression."#
                 .to_owned()
         )]

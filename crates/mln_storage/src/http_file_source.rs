@@ -35,11 +35,11 @@ use std::sync::Arc;
 
 use mln_util::chrono::{now, parse_http_date};
 use mln_util::http_header::{CacheControl, CachingHeaders, parse_retry_headers};
-use mln_util::logging::{Event, Log};
 
 #[cfg(not(target_family = "wasm"))]
 use crate::file_source::FileSource;
 use crate::http_header_transform::{HttpHeaderTransform, HttpHeaders};
+use crate::log_target;
 use crate::request::Responder;
 use crate::resource::{Kind, Resource, TileFormat};
 use crate::response::{Caching, Reason, ResourceError, Response};
@@ -341,9 +341,10 @@ fn warn_of_other_vector_format(resource: &Resource, content_type: &str) {
         TileFormat::Image => return,
     };
     if vector_tile_format(content_type).is_some_and(|sent| sent != expected) {
-        Log::warning(
-            Event::HttpRequest,
-            format!("{}: the tileset's tiles are {name}, but the response is {content_type}", resource.url),
+        log::warn!(
+            target: log_target::HTTP_REQUEST,
+            "{}: the tileset's tiles are {name}, but the response is {content_type}",
+            resource.url
         );
     }
 }
@@ -585,24 +586,12 @@ mod tests {
         assert_eq!(None, vector_tile_format("application/octet-stream"));
     }
 
-    struct Recorder(std::sync::mpsc::Sender<String>);
-
-    impl mln_util::logging::Observer for Recorder {
-        fn on_record(&self, _: mln_util::logging::EventSeverity, event: Event, _: i64, msg: &str) -> bool {
-            if event == Event::HttpRequest {
-                let _ = self.0.send(msg.to_owned());
-            }
-            true
-        }
-    }
-
-    /// The messages logged while `responses` builds responses.
+    /// The HTTP request messages logged while `responses` builds responses.
     fn logged(responses: impl FnOnce()) -> Vec<String> {
-        let (sender, records) = std::sync::mpsc::channel();
-        let previous = Log::set_thread_observer(Some(Box::new(Recorder(sender))));
+        let log = crate::tests::FixtureLog::new();
         responses();
-        let _ = Log::set_thread_observer(previous);
-        records.try_iter().collect()
+        let records = log.unchecked().into_iter();
+        records.filter(|record| record.target == log_target::HTTP_REQUEST).map(|record| record.msg).collect()
     }
 
     #[test]

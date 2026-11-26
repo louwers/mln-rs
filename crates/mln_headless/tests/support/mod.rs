@@ -36,7 +36,6 @@ use mln_style::sprite::Sprite;
 use mln_tile_id::CanonicalTileID;
 use mln_util::Error;
 use mln_util::image::PremultipliedImage;
-use mln_util::logging::{Event, EventSeverity, Log};
 use mln_util::pool::Pool;
 use mln_util::queue::Queue;
 use parking_lot::{Mutex, MutexGuard};
@@ -445,16 +444,42 @@ impl FileSource for FakeFileSource {
 
 // MARK: - FixtureLog (test/include/mln/test/fixture_log_observer.hpp)
 
-type LogRecord = (EventSeverity, Event, i64, String);
+/// A caught record: its level, target and message.
+type LogRecord = (log::Level, String, String);
 type LogRecords = Arc<Mutex<Vec<(LogRecord, bool)>>>;
 
-struct Recorder(LogRecords);
+thread_local! {
+    /// The records of the thread's live `FixtureLog`, if any.
+    static CAUGHT: RefCell<Option<LogRecords>> = const { RefCell::new(None) };
+}
 
-impl mln_util::logging::Observer for Recorder {
-    fn on_record(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> bool {
-        self.0.lock().push(((severity, event, code, msg.to_owned()), false));
-        true
+/// The crates whose records describe the machine's GPU, which no test checks.
+const GRAPHICS_CRATES: [&str; 6] = ["mln_gfx", "mln_gl", "mln_webgpu", "mln_vulkan", "mln_mtl", "mln_d3d12"];
+
+/// The test binary's `log` logger. It hands each of the library's records,
+/// but the graphics backends', to the `FixtureLog` of the thread that logged
+/// it, so tests that run on threads of one process don't see each other's.
+struct Catcher;
+
+impl log::Log for Catcher {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        let krate = metadata.target().split("::").next().unwrap_or_default();
+        krate.starts_with("mln_") && !GRAPHICS_CRATES.contains(&krate)
     }
+
+    fn log(&self, record: &log::Record<'_>) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        CAUGHT.with_borrow(|caught| {
+            if let Some(records) = caught {
+                let message = (record.level(), record.target().to_owned(), record.args().to_string());
+                records.lock().push((message, false));
+            }
+        });
+    }
+
+    fn flush(&self) {}
 }
 
 /// Captures the log records of the calling thread while it lives (C++
@@ -465,16 +490,21 @@ pub(crate) struct FixtureLog {
 
 impl FixtureLog {
     pub(crate) fn new() -> Self {
-        let messages: LogRecords = Arc::new(Mutex::new(Vec::new()));
-        let _ = Log::set_thread_observer(Some(Box::new(Recorder(Arc::clone(&messages)))));
+        static INSTALL: std::sync::Once = std::sync::Once::new();
+        INSTALL.call_once(|| {
+            log::set_logger(&Catcher).expect("the test binary has no other logger");
+            log::set_max_level(log::LevelFilter::Info);
+        });
+        let messages = LogRecords::default();
+        CAUGHT.set(Some(Arc::clone(&messages)));
         FixtureLog { messages }
     }
 
     /// Counts the matching records, and marks them checked.
-    pub(crate) fn count(&self, severity: EventSeverity, event: Event, code: i64, msg: &str) -> usize {
+    pub(crate) fn count(&self, level: log::Level, target: &str, msg: &str) -> usize {
         let mut count = 0;
-        for ((s, e, c, m), checked) in self.messages.lock().iter_mut() {
-            if *s == severity && *e == event && *c == code && m == msg {
+        for ((l, t, m), checked) in self.messages.lock().iter_mut() {
+            if *l == level && t == target && m == msg {
                 *checked = true;
                 count += 1;
             }
@@ -496,7 +526,7 @@ impl Default for FixtureLog {
 
 impl Drop for FixtureLog {
     fn drop(&mut self) {
-        let _ = Log::set_thread_observer(None);
+        CAUGHT.set(None);
     }
 }
 

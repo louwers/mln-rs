@@ -12,7 +12,6 @@ use std::any::Any;
 use std::sync::Arc;
 
 use feature::{Value, ValueObject};
-use mln_util::logging::{Event, Log};
 use mln_vec_map::VecSet;
 
 use crate::conversion::{Converter, Convertible, Error, convert};
@@ -20,6 +19,7 @@ use crate::expression::{
     Dependency, EvaluationContext, Expr, Functions, GlobalStateMap, ParsingContext, Type, from_expression_value,
 };
 use crate::filter::{Filter, convert_filter};
+use crate::log_target;
 use crate::property::table::{SetPropertyError, StyleProperty};
 use crate::registry::StyleRegistry;
 use crate::types::VisibilityType;
@@ -219,9 +219,10 @@ impl Layer {
             if let Some(source_layer) = convert::<String>(value, &mut error) {
                 if self.info().source == SourceKind::None {
                     // Quirk kept: no space between "to" and "the".
-                    Log::warning(
-                        Event::General,
-                        format!("'source-layer' property cannot be set tothe layer {}", self.style.base().id),
+                    log::warn!(
+                        target: log_target::GENERAL,
+                        "'source-layer' property cannot be set tothe layer {}",
+                        self.style.base().id
                     );
                     return None;
                 }
@@ -232,9 +233,10 @@ impl Layer {
             && let Some(source_id) = convert::<String>(value, &mut error)
         {
             if self.info().source == SourceKind::None {
-                Log::warning(
-                    Event::General,
-                    format!("'source' property cannot be set tothe layer {}", self.style.base().id),
+                log::warn!(
+                    target: log_target::GENERAL,
+                    "'source' property cannot be set tothe layer {}",
+                    self.style.base().id
                 );
                 return None;
             }
@@ -398,9 +400,9 @@ fn evaluate_visibility_expression(expression: &Expr, global_state: &GlobalStateM
     {
         return visibility;
     }
-    Log::warning(
-        Event::ParseStyle,
-        r#"visibility expression did not evaluate to "visible" or "none"; defaulting to "visible""#,
+    log::warn!(
+        target: log_target::PARSE_STYLE,
+        r#"visibility expression did not evaluate to "visible" or "none"; defaulting to "visible""#
     );
     VisibilityType::Visible
 }

@@ -16,12 +16,11 @@ use mln_style::feature::{GeometryCollection, GeometryCoordinate, GeometryCoordin
 use mln_util::constants::EXTENT;
 use mln_util::geometry::FeatureType;
 use mln_util::hash::HashMap;
-use mln_util::logging::{Event, Log};
 use mlt_core::wire::{Analyze as _, LogicalEncoding, PhysicalEncoding};
 use mlt_core::{GeometryType, GeometryValues, ParsedLayer01, ParsedProperty};
 
-use crate::TileError;
 use crate::tile_data::FeatureGroups;
+use crate::{TileError, log_target};
 
 struct MltData {
     bytes: Arc<Vec<u8>>,
@@ -56,7 +55,7 @@ impl MltTile {
     fn layers(&self) -> &[Layer] {
         self.0.layers.get_or_init(|| {
             decode(&self.0.bytes, self.0.fast_pfor_enabled).unwrap_or_else(|e| {
-                Log::warning(Event::ParseTile, format!("MLT parse failed: {e}"));
+                log::warn!(target: log_target::PARSE_TILE, "MLT parse failed: {e}");
                 Vec::new()
             })
         })

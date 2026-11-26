@@ -20,13 +20,11 @@ use mln_text::local_fonts::LocalGlyphs;
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::error::Error;
 use mln_util::hash::{HashMap, HashSet};
-use mln_util::logging::{Event, Log};
 use mln_util::pool::{Pool, TaskGroup};
 use mln_util::time::Instant;
 use mln_vec_map::VecSet;
 use smallvec::SmallVec;
 
-use crate::Registry;
 use crate::frame::{Frame, FrameLayer};
 use crate::gfx::context::Context;
 use crate::globe_depth_pass::GlobeDepthPass;
@@ -53,6 +51,7 @@ use crate::tile::tile_workers::PoolWorkers;
 use crate::tile::worker_codec::RemoteWorkers;
 use crate::tile_parameters::TileParameters;
 use crate::update_parameters::UpdateParameters;
+use crate::{Registry, log_target};
 
 /// The keys whose values differ between two global state snapshots. Values
 /// of unchanged keys are copied verbatim between snapshots, so exact
@@ -98,7 +97,7 @@ fn create_render_layer(registry: &Registry, style: &Arc<dyn ErasedLayerStyle>) -
     let render_layer = registry.layer_type(name).and_then(|layer_type| layer_type.create_render_layer(style));
     debug_assert!(render_layer.is_some(), "the renderer's registry has no layer type '{name}'");
     if render_layer.is_none() {
-        Log::error(Event::Render, format!("no render layer for layer type '{name}'"));
+        log::error!(target: log_target::RENDER, "no render layer for layer type '{name}'");
     }
     render_layer
 }
@@ -1178,7 +1177,7 @@ impl RenderOrchestrator {
             match event {
                 StoreEvent::Changed => self.events.push(RendererEvent::Invalidate),
                 StoreEvent::Error { source, tile, error } => {
-                    Log::error(Event::Style, format!("Failed to load tile {tile} for source {source}: {error}"));
+                    log::error!(target: log_target::STYLE, "Failed to load tile {tile} for source {source}: {error}");
                     self.events.push(RendererEvent::ResourceError(error));
                     // A failed tile is done loading, and its parents or
                     // children may stand in for it, as when it changes: a

@@ -14,12 +14,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_util::error::Error;
-use mln_util::logging::{Event, Log};
 
 use super::envelope::{self, Encoded};
 use super::worker_side::WorkerCodec;
-use crate::Registry;
 use crate::tile::job::{DEFAULT_DATA_CACHE_BYTES, DataCache, DiscoveryMemo, JobResult, JobTimes, Reply, Run, run_job};
+use crate::{Registry, log_target};
 
 /// Where a host's replies go, encoded: back to the map side of its
 /// instance. Their payloads (pixels, vertices, indices) can be transferred
@@ -96,7 +95,7 @@ impl TileWorkerHost {
     /// Tells the map side that this instance can't go on: a frame it can't
     /// read leaves it out of step with the map side's tables.
     fn lost(&self, error: &str) {
-        Log::error(Event::General, format!("Not a tile worker request: {error}"));
+        log::error!(target: log_target::GENERAL, "Not a tile worker request: {error}");
         (self.replies)(Encoded::default());
     }
 }

@@ -23,7 +23,6 @@ use mln_gfx::gpu::{
 use mln_gfx::shaders::bindings::{BUFFER_IDS, MAX_TEXTURES};
 use mln_gfx::shaders::program::Program;
 use mln_gfx::stencil_mode::StencilMode;
-use mln_util::logging::{Event, Log};
 
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
@@ -34,6 +33,7 @@ use crate::gfx::uniform_buffer::UniformBufferArray;
 use crate::gfx::upload::{self, AttributeBindingArray, AttributeSlots};
 use crate::gfx::vertex_attribute::VertexAttributeArray;
 use crate::gfx::vertices::SharedVertices;
+use crate::log_target;
 use crate::paint_parameters::{DrawTarget, PaintParameters};
 
 /// The textures a draw binds, by the slots of its program's textures.
@@ -723,13 +723,11 @@ fn vertex_slots(
         }
     }
     if slots.len() > MAX_VERTEX_BUFFERS {
-        Log::warning(
-            Event::Render,
-            format!(
-                "{} uses {} vertex buffers, exceeding the limit of {MAX_VERTEX_BUFFERS}",
-                program.name,
-                slots.len()
-            ),
+        log::warn!(
+            target: log_target::RENDER,
+            "{} uses {} vertex buffers, exceeding the limit of {MAX_VERTEX_BUFFERS}",
+            program.name,
+            slots.len()
         );
         slots.truncate(MAX_VERTEX_BUFFERS);
     }

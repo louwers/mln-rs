@@ -935,7 +935,7 @@ pub(crate) mod tests {
     use std::time::{Duration, Instant};
 
     use super::*;
-    use crate::completion::tests::Warnings;
+    use crate::completion::tests::discard_warnings;
     use crate::diagnostic::tests::{diagnostic, message};
     use crate::generated::types::{
         MLN_RENDER_TARGET_KIND_OFFSCREEN, MLN_STATUS_INVALID_ARGUMENT, MLN_STATUS_INVALID_STATE,
@@ -1148,20 +1148,17 @@ pub(crate) mod tests {
     fn a_session_command_without_a_completion_logs_its_failure_as_a_warning() {
         let (runtime, map, session) = rendered_session();
         let object = resolve(session).unwrap();
-        let warnings = Arc::new(Mutex::new(Vec::new()));
-        let previous = mln_util::logging::Log::set_thread_observer(Some(Box::new(Warnings(Arc::clone(&warnings)))));
         let finish = |result: Result<(), mln_util::Error>| (result.map_err(Error::from), Generations::default());
         // A command that fails without the session's thread completes on
-        // this one, which the observer watches.
+        // this one, whose warnings the test reads.
         let fail = |_: &RenderSession| {
             let lost = mln_util::Error::new(ErrorKind::TargetLost, "the target is gone");
             Ok(::mln_runtime::Completion::ready(Err(lost)))
         };
-        assert!(send_then(&object.session, fail, None, finish).is_ok());
-        drop(mln_util::logging::Log::set_thread_observer(previous));
+        let warnings = discard_warnings(|| assert!(send_then(&object.session, fail, None, finish).is_ok()));
         assert_eq!(
             [format!("discarded command failed (status {MLN_STATUS_TARGET_LOST}): the target is gone")],
-            warnings.lock().as_slice()
+            warnings.as_slice()
         );
         drop(object);
         release_session(session);

@@ -75,6 +75,13 @@ mod web;
 #[cfg(all(test, windows))]
 mod wgl_tests;
 
+/// The `log` targets of this crate's records. Each names the event that
+/// `mln_c` reports the record under (`mln_c::logging`).
+mod log_target {
+    pub(crate) const GENERAL: &str = "mln_c::general";
+    pub(crate) const CRASH: &str = "mln_c::crash";
+}
+
 #[rustfmt::skip]
 mod generated {
     // An allow, not an expect: which lints the generated code trips changes

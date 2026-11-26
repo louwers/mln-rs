@@ -21,6 +21,7 @@ name = "mln_headless"
 doctest = false
 
 [dependencies]
+log.workspace = true
 mln_gfx.workspace = true
 mln_map.workspace = true
 mln_renderer.workspace = true

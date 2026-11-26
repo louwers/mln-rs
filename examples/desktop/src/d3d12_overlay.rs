@@ -48,7 +48,6 @@ use mln_gfx::gpu::{
     TextureRegion, TextureUsage, destroy_unused,
 };
 use mln_util::hash::HashMap;
-use mln_util::logging::{Event, Log};
 
 use crate::overlay::Paint;
 
@@ -167,7 +166,7 @@ impl Overlay for D3d12Overlay {
             match Painter::new(target.gpu.device().device(), target.format) {
                 Ok(new) => self.painter = Some(new),
                 Err(e) => {
-                    Log::error(Event::Render, format!("The controls can't be drawn: {e}"));
+                    log::error!("The controls can't be drawn: {e}");
                     self.failed = true;
                     return;
                 }
@@ -179,7 +178,7 @@ impl Overlay for D3d12Overlay {
         }
         painter.frame = None;
         if let Err(e) = painter.set_format(target) {
-            Log::error(Event::Render, format!("The controls can't be drawn: {e}"));
+            log::error!("The controls can't be drawn: {e}");
             self.failed = true;
             return;
         }
@@ -188,12 +187,12 @@ impl Overlay for D3d12Overlay {
         for (id, deltas) in &textures.set {
             for delta in deltas {
                 if let Err(e) = painter.update_texture(target.gpu, *id, delta) {
-                    Log::error(Event::Render, format!("A texture of the controls can't be updated: {e}"));
+                    log::error!("A texture of the controls can't be updated: {e}");
                 }
             }
         }
         if let Err(e) = painter.prepare(target, &paint.primitives, paint.pixels_per_point) {
-            Log::error(Event::Render, format!("The controls can't be drawn: {e}"));
+            log::error!("The controls can't be drawn: {e}");
             self.failed = true;
         }
         for id in &textures.free {

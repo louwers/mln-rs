@@ -28,7 +28,7 @@ mod style_image;
 mod style_json;
 mod style_layer;
 mod style_parser;
-mod util;
+pub(crate) mod util;
 mod variable_anchor_offset_collection;
 
 /// gtest `EXPECT_NEAR(val1, val2, abs_error)` (in double).

@@ -27,13 +27,13 @@ use mln_util::error::Error;
 use mln_util::event_queue::{EventQueue, Waker};
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::geometry::for_each_point;
-use mln_util::logging::{Event, Log};
 use mln_util::pool::Pool;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::time::Instant;
 
 use crate::feature_state::FeatureStateStore;
+use crate::log_target;
 use crate::map_event::{MapEvent, RenderFrameStatus};
 use crate::map_options::{MapOptions, UnusedStyleImagePolicy};
 use crate::map_snapshot::{CameraBounds, FreeCamera, MapSnapshot, TileSettings};
@@ -438,7 +438,7 @@ impl Map {
                     self.emit(MapEvent::SpriteError(sprite, error));
                 }
                 LoadEvent::SourceDescribed { load, result: Err(error) } => {
-                    Log::error(Event::Style, format!("Failed to load source {}: {error}", load.id));
+                    log::error!(target: log_target::STYLE, "Failed to load source {}: {error}", load.id);
                     self.on_resource_error(error);
                 }
                 LoadEvent::SourceDescribed { load, result: Ok(description) } => {
@@ -1007,7 +1007,7 @@ impl Map {
     /// layer uses it, which logs a warning.
     pub fn remove_source(&mut self, id: &str) -> Option<Source> {
         if self.style.get_layers().any(|layer| layer.get_source_id() == id) {
-            Log::warning(Event::General, format!("Source '{id}' is in use, cannot remove"));
+            log::warn!(target: log_target::GENERAL, "Source '{id}' is in use, cannot remove");
             return None;
         }
         let source = self.style.get_source(id)?.clone();
@@ -1569,9 +1569,9 @@ impl Map {
         if self.transform.follow_terrain() && still && grounded {
             self.ground_moves += 1;
             if self.ground_moves == MAX_GROUND_MOVES_PER_STILL {
-                Log::warning(
-                    Event::Render,
-                    "The camera didn't settle on the terrain: the still image shows it where it last moved",
+                log::warn!(
+                    target: log_target::RENDER,
+                    "The camera didn't settle on the terrain: the still image shows it where it last moved"
                 );
             }
         }
@@ -1666,13 +1666,17 @@ impl Map {
     /// Logs the style's sources and their state.
     pub fn dump_debug_logs(&self) {
         let rule = "-".repeat(80);
-        Log::info(Event::General, &rule);
-        Log::info(Event::General, format!("styleURL: {}", self.loader.url().unwrap_or_default()));
+        log::info!(target: log_target::GENERAL, "{rule}");
+        log::info!(target: log_target::GENERAL, "styleURL: {}", self.loader.url().unwrap_or_default());
         for source in self.style.get_sources().iter() {
-            Log::info(Event::General, format!("Source::id: {}", source.id()));
-            Log::info(Event::General, format!("Source::loaded: {}", i32::from(self.loader.source_loaded(source.id()))));
+            log::info!(target: log_target::GENERAL, "Source::id: {}", source.id());
+            log::info!(
+                target: log_target::GENERAL,
+                "Source::loaded: {}",
+                i32::from(self.loader.source_loaded(source.id()))
+            );
         }
-        Log::info(Event::General, &rule);
+        log::info!(target: log_target::GENERAL, "{rule}");
     }
 }
 
@@ -1747,10 +1751,10 @@ fn camera_for_lat_lngs_on_screen(
             transform.state().limits().max_zoom,
         );
     } else {
-        Log::error(
-            Event::General,
+        log::error!(
+            target: log_target::GENERAL,
             "Unable to calculate appropriate zoom level for bounds. Vertical or horizontal padding is greater than \
-             map's height or width.",
+             map's height or width."
         );
     }
 
@@ -1885,7 +1889,7 @@ fn camera_for_lat_lngs_on_globe(
         }
     }
     if !smallest.is_finite() || smallest == 0.0 {
-        Log::warning(Event::General, "Unable to fit the bounds on the globe; keeping the flat fit.");
+        log::warn!(target: log_target::GENERAL, "Unable to fit the bounds on the globe; keeping the flat fit.");
         return Ok(fit);
     }
     Ok(CameraOptions {

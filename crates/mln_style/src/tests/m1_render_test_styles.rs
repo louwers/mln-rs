@@ -11,7 +11,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_util::logging::{Event, EventSeverity};
 use mln_util::time::Instant;
 use mln_util::{Color, UnitBezier};
 
@@ -223,7 +222,11 @@ fn background_opacity_overlay() {
     assert_eq!(1, style.get_sources().len());
     assert_eq!(
         0,
-        log.count(EventSeverity::Warning, Event::ParseStyle, "Unsupported layer type! Null factory for type: raster")
+        log.count(
+            log::Level::Warn,
+            crate::log_target::PARSE_STYLE,
+            "Unsupported layer type! Null factory for type: raster"
+        )
     );
     let evaluated = evaluate_static(&style, "background_overlay");
     assert_background(&evaluated, Color::parse("green").unwrap(), 0.5);

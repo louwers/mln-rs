@@ -16,13 +16,13 @@ use js_sys::Reflect;
 use mln_util::constants::ONE_EM;
 use mln_util::font_stack::FontStack;
 use mln_util::image::AlphaImage;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{OffscreenCanvas, OffscreenCanvasRenderingContext2d};
 
 use crate::glyph::{Glyph, GlyphID, GlyphMetrics};
 use crate::local_fonts::LocalGlyphRasterizer;
+use crate::log_target;
 
 // 2x bitmap with 1x logical metrics.
 const TEXTURE_SCALE: u32 = 2;
@@ -91,7 +91,7 @@ impl LocalGlyphRasterizer for BrowserGlyphRasterizer {
                 *state = match Canvas::new() {
                     Ok(canvas) => CanvasState::Made(canvas),
                     Err(error) => {
-                        Log::warning(Event::Glyph, format!("Unable to create a canvas for local glyphs: {error:?}"));
+                        log::warn!(target: log_target::GLYPH, "Unable to create a canvas for local glyphs: {error:?}");
                         CanvasState::Failed
                     }
                 };
@@ -100,7 +100,7 @@ impl LocalGlyphRasterizer for BrowserGlyphRasterizer {
             match canvas.draw(&font, &text.to_string()) {
                 Ok((bitmap, metrics)) => Some(Glyph { id: glyph_id, bitmap, metrics }),
                 Err(error) => {
-                    Log::warning(Event::Glyph, format!("Unable to draw glyph {}: {error:?}", glyph_id.code));
+                    log::warn!(target: log_target::GLYPH, "Unable to draw glyph {}: {error:?}", glyph_id.code);
                     None
                 }
             }
