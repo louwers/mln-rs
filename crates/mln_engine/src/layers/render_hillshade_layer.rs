@@ -47,13 +47,13 @@ use crate::layer::layer_drawing::{DrawList, DrawObjectsMut, FrameDraw, KeptDraw,
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::layout::NoLayout;
 use crate::layer::render_layer::{
-    LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+    EvaluateCx, Evaluation, LayerUpdateParameters, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer,
+    RenderLayerBase, TypedLayer,
 };
 use crate::layers::hillshade::programs;
 use crate::layers::hillshade::ubo::{HillshadeDrawableUBO, HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO};
 use crate::render::globe::globe_tile_mesh::GlobeTileMeshCache;
 use crate::render::paint_parameters::PaintParameters;
-use crate::render::pass::RenderPass;
 use crate::render::static_data::RenderStaticData;
 use crate::render::target::RenderTarget;
 use crate::render::terrain::SurfaceLight;
@@ -294,10 +294,16 @@ fn hillshade_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArra
     attrs
 }
 
+/// Whether the light of the layer's values `evaluated` is anchored to the
+/// viewport, so that it turns with the map's bearing.
+fn lit_by_bearing(evaluated: &EvaluatedLayer<Hillshade>) -> bool {
+    *evaluated.paint.hillshade_illumination_anchor.uniform() == HillshadeIlluminationAnchorType::Viewport
+}
+
 impl TypedLayer for RenderHillshadeLayer {
     type Type = Hillshade;
     type Drawing = TileDraws<HillshadeTile>;
-    const DRAPES: bool = true;
+    const TERRAIN: OnTerrain = OnTerrain::Drapes;
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -314,15 +320,11 @@ impl TypedLayer for RenderHillshadeLayer {
         }
     }
 
-    fn drapes_by_bearing(&self, evaluated: &EvaluatedLayer<Hillshade>) -> bool {
-        *evaluated.paint.hillshade_illumination_anchor.uniform() == HillshadeIlluminationAnchorType::Viewport
-    }
-
     /// Lit from the viewport, the surface shades its slopes with its lights
     /// at the frame's bearing, so that its drapes don't turn with the map.
     fn surface_light(&mut self, parameters: &PaintParameters<'_>) -> Option<SurfaceLight> {
         let evaluated = &self.values.evaluated;
-        if !self.drapes_by_bearing(evaluated) {
+        if !lit_by_bearing(evaluated) {
             return None;
         }
         let Illumination { props, num_lights } = Self::illumination(&mut self.illumination, evaluated, parameters);
@@ -336,12 +338,16 @@ impl TypedLayer for RenderHillshadeLayer {
         Some(SurfaceLight { props, tile })
     }
 
-    fn passes(&self, evaluated: &EvaluatedLayer<Hillshade>) -> RenderPass {
-        if *evaluated.paint.hillshade_exaggeration.uniform() > 0.0 {
-            RenderPass::Translucent | RenderPass::Pass3D
+    /// The layer draws a drape by the map's bearing where its light is
+    /// anchored to the viewport.
+    fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
+        let evaluated = &*cx.evaluated;
+        let evaluation = if *evaluated.paint.hillshade_exaggeration.uniform() > 0.0 {
+            Evaluation::TRANSLUCENT
         } else {
-            RenderPass::None
-        }
+            Evaluation::NONE
+        };
+        Evaluation { drapes_by_bearing: lit_by_bearing(evaluated), ..evaluation }
     }
 
     /// Makes the render target of each DEM it has none of, which prepares
