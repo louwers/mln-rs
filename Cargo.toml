@@ -224,7 +224,7 @@ wasmparser = { version = "0.263.0", default-features = false, features = [
   "std",
 ] }
 # The Unicode bidi algorithm (mln_engine's text/bidi.rs). Its mirroring and
-# Arabic tables come from the same Unicode version: mise.toml's
+# Arabic tables come from the same Unicode version: .config/mise/config.toml's
 # unicode_version, which a bump changes with them.
 unicode-bidi = { version = "0.3.18" }
 # Where label text may break into lines (mln_engine's text/line_breaks.rs): UAX #14.

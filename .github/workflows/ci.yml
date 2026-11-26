@@ -33,8 +33,8 @@ defaults:
 
 env:
   # Keep every mise command (including task-scoped tool auto-installs such as
-  # zig) locked to mise.lock so CI never resolves unlocked tools or rewrites
-  # mise.lock.
+  # zig) locked to .config/mise/mise.lock so CI never resolves unlocked tools or
+  # rewrites .config/mise/mise.lock.
   MISE_LOCKED: "1"
 
 jobs:
@@ -65,7 +65,7 @@ jobs:
         with:
           persist-credentials: false
           sparse-checkout: |
-            mise-tasks/ci
+            .config/mise/tasks/ci
             tools/ci
 
       - name: Select jobs
@@ -73,13 +73,14 @@ jobs:
         env:
           RUBBERSTAMP_ALL: ${{ steps.rubberstamp.outputs.all }}
           RUBBERSTAMP_UNITS: ${{ steps.rubberstamp.outputs.units }}
-        run: bash mise-tasks/ci/plan
+        run: bash .config/mise/tasks/ci/plan
 
-  # The formatters and linters (`mise run check`, hk.pkl), CI planner tests,
-  # the API docs as docs.rs builds them, clippy for wasm32 and 32-bit x86
+  # The formatters and linters (`mise run check`, .config/hk.pkl), CI planner
+  # tests, the API docs as docs.rs builds them, clippy for wasm32 and 32-bit x86
   # Linux, the minimum Rust that Cargo.toml declares and the C library's
   # generated declarations against its headers. Runs on every event without
-  # waiting for the plan. Warnings are errors (mise.toml denies them in CI).
+  # waiting for the plan. Warnings are errors (.config/mise/config.toml denies
+  # them in CI).
   lint:
     if: github.event.pull_request.state != 'closed'
     runs-on: blacksmith-4vcpu-ubuntu-2604
@@ -127,8 +128,8 @@ jobs:
   # Every test (`mise run ci:test`) on WebGPU on Linux (wgpu on Vulkan, on
   # lavapipe, Mesa's software rasterizer), on the Metal backend on macOS under
   # Metal's API validation, and on Direct3D 12 on Windows (WARP with DXC), with
-  # coverage uploaded to Codecov (codecov.yml) where enabled. Non-Linux runners
-  # also run clippy on the code that only they build.
+  # coverage uploaded to Codecov (.github/codecov.yml) where enabled. Non-Linux
+  # runners also run clippy on the code that only they build.
   test:
     needs: plan
     if:

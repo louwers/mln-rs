@@ -192,7 +192,8 @@ runs:
       shell: bash
       env:
         FILES_HASH:
-          ${{ hashFiles('mise.toml', 'mise.lock', 'rust-toolchain.toml') }}
+          ${{ hashFiles('.config/mise/config.toml', '.config/mise/mise.lock',
+          'rust-toolchain.toml') }}
       run: |
         prefix="toolchains-v1-${RUNNER_OS}-${RUNNER_ARCH}-${ImageOS:-unknown}"
         echo "prefix=${prefix}" >> "$GITHUB_OUTPUT"
@@ -216,8 +217,9 @@ runs:
         restore-keys: |
           ${{ steps.toolchain-key.outputs.prefix }}-
 
-    # The tools that mise.toml pins, Rust from rust-toolchain.toml among
-    # them, at the versions mise.lock records (plus any MISE_ENV overlay).
+    # The tools that .config/mise/config.toml pins, Rust from
+    # rust-toolchain.toml among them, at the versions .config/mise/mise.lock
+    # records (plus any MISE_ENV overlay).
     - name: Install mise toolchains
       uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
       env:

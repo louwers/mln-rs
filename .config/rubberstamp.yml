@@ -7,8 +7,7 @@ context: >-
   workspace libraries (core map/style/renderer crates, per-backend renderers,
   browser crates, and `mln_c` for the C API), `vendor/` holds ported
   dependencies, `examples/` holds the desktop and browser apps, `tools/` holds
-  developer and test tooling, and `mise.toml` / `mise-tasks/` define build and
-  test tasks.
+  developer and test tooling, and `.config/mise/` defines build and test tasks.
 
 # `tools/ci/jobs.json` maps each unit to the CI jobs it runs. A unit's rule
 # applies it unconditionally when a changed file matches, using GitHub Actions
@@ -88,7 +87,7 @@ ci:
       rules:
         - if:
             files:
-              - mise.target-android.*
+              - .config/mise/*.target-android.*
               - tools/android-test-host/**
               - tools/ci/boot-android.sh
           then: apply
@@ -103,7 +102,7 @@ ci:
         - if:
             files:
               - .config/device-farm.toml
-              - mise-tasks/device-farm/**
+              - .config/mise/tasks/device-farm/**
               - tools/device-farm/*
               - tools/device-farm/android/**
               - tools/android-test-host/**
@@ -124,7 +123,7 @@ ci:
               - crates/mln_engine/src/**/msl.rs
               - crates/mln_engine/src/conformance.rs
               - crates/mln_engine/src/conformance/**
-              - mise.target-apple.*
+              - .config/mise/*.target-apple.*
           then: apply
     ios-device-farm:
       covers: >-
@@ -137,7 +136,7 @@ ci:
         - if:
             files:
               - .config/device-farm.toml
-              - mise-tasks/device-farm/**
+              - .config/mise/tasks/device-farm/**
               - tools/device-farm/*
               - tools/device-farm/ios/**
               - tools/ios-test-host/**
@@ -168,7 +167,7 @@ ci:
       rules:
         - if:
             files:
-              - mise.target-freebsd.*
+              - .config/mise/*.target-freebsd.*
               - tools/ci/boot-freebsd.sh
               - tools/zig-cc-freebsd.sh
           then: apply
@@ -182,7 +181,7 @@ ci:
       rules:
         - if:
             files:
-              - mise.target-ohos.*
+              - .config/mise/*.target-ohos.*
           then: apply
     web:
       covers: >-

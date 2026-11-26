@@ -24,7 +24,7 @@ You need [rustup](https://rustup.rs) and [mise](https://mise.jdx.dev), which
 installs the other tools and runs the dev tasks:
 
 ```sh
-mise install       # the tools that mise.toml pins
+mise install       # the tools that .config/mise/config.toml pins
 mise run desktop   # run the desktop demo app
 mise run web:dev   # serve the browser demo at http://localhost:5173/
 mise run test      # every test, including the render suite

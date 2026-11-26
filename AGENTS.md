@@ -24,13 +24,13 @@ the C API.
 
 ## Dev tool commands
 
-`mise install` installs the tools that mise.toml pins. `mise tasks` lists every
-task. The common ones:
+`mise install` installs the tools that .config/mise/config.toml pins.
+`mise tasks` lists every task. The common ones:
 
 - `mise run test`: every test, including the render suite.
-- `mise run check`, `mise run fix`: the formatters and linters (hk.pkl); `fix`
-  formats with dprint and the pinned nightly rustfmt. `hk install --mise` adds a
-  pre-commit hook that fixes the staged files, if you want one.
+- `mise run check`, `mise run fix`: the formatters and linters (.config/hk.pkl);
+  `fix` formats with dprint and the pinned nightly rustfmt. `hk install --mise`
+  adds a pre-commit hook that fixes the staged files, if you want one.
 - `CI=true mise run ci:lint`: CI's lint job, warnings as errors.
 - `mise run bench`, `mise run bench:compare <ref>`: the benchmarks, and this
   checkout's against another commit (tools/bench/README.md). They install the

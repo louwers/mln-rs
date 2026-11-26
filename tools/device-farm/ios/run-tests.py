@@ -38,9 +38,9 @@ PACKAGE = pathlib.Path(os.environ["DEVICEFARM_TEST_PACKAGE_PATH"])
 ARTIFACTS = pathlib.Path(os.environ["DEVICEFARM_LOG_DIR"])
 DEVICE = os.environ["DEVICEFARM_DEVICE_UDID"]
 
-# What the tests run with: the render suite on Metal with its API validation,
-# as on the simulator (mise-tasks/ci/target), and in the test's process, since
-# an app can't start another. Stable Rust's harness writes JSON with
+# What the tests run with: the render suite on Metal with its API validation, as
+# on the simulator (.config/mise/tasks/ci/target), and in the test's process,
+# since an app can't start another. Stable Rust's harness writes JSON with
 # RUSTC_BOOTSTRAP.
 ENVIRONMENT = {
     "MLN_RENDER_BACKEND": "metal",

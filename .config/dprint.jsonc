@@ -26,8 +26,9 @@
       { "Regex": ".*", "Priority": 1 },
     ],
   },
-  // Rust: the nightly rustfmt that mise.toml's MLN_NIGHTLY names, with its
-  // unstable import options; rustfmt.toml has the rest. Bump the two together.
+  // Rust: the nightly rustfmt that .config/mise/config.toml's MLN_NIGHTLY
+  // names, with its unstable import options; rustfmt.toml has the rest. Bump
+  // the two together.
   "exec": {
     "commands": [
       {
@@ -37,23 +38,24 @@
       },
     ],
   },
+  // Relative to this file, in .config/.
   "excludes": [
     // Generated code stays as its generator writes it, and the changelog as
     // release-plz writes it (release-plz.toml).
-    "CHANGELOG.md",
+    "../CHANGELOG.md",
     // The fixtures' manifest, whose hash names the directory they install in.
-    "tools/bench/fixtures.json",
-    "crates/mln_c/src/generated/**",
-    "crates/mln_style/src/layers/*_layer_properties.rs",
-    "crates/mln_style/src/light_properties.rs",
-    "crates/mln_style/src/sky_properties.rs",
-    "crates/mln_engine/src/text/arabic_tables.rs",
-    "crates/mln_engine/src/text/bidi_mirroring.rs",
-    "examples/web/pnpm-lock.yaml",
+    "../tools/bench/fixtures.json",
+    "../crates/mln_c/src/generated/**",
+    "../crates/mln_style/src/layers/*_layer_properties.rs",
+    "../crates/mln_style/src/light_properties.rs",
+    "../crates/mln_style/src/sky_properties.rs",
+    "../crates/mln_engine/src/text/arabic_tables.rs",
+    "../crates/mln_engine/src/text/bidi_mirroring.rs",
+    "../examples/web/pnpm-lock.yaml",
     // Copies of other projects' files, kept as they are there.
     "**/testdata/**",
-    "patches/**",
-    "tools/style-codegen/v8.json",
+    "../patches/**",
+    "../tools/style-codegen/v8.json",
   ],
   "plugins": [
     "npm:@dprint/clang-format@0.2.1",

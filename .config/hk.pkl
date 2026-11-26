@@ -9,11 +9,11 @@ import "package://github.com/jdx/hk/releases/download/v2.12.0/hk@2.12.0#/Builtin
 
 // Quick, and only on the files they're given: every hook.
 local fileSteps = new Mapping<String, Step> {
-  // dprint.jsonc
+  // .config/dprint.jsonc
   ["dprint"] = Builtins.dprint
   // .github/jactionlint.yaml
   ["jactionlint"] = Builtins.jactionlint
-  // The tasks in mise-tasks/ and the scripts they source.
+  // The tasks in .config/mise/tasks/ and the scripts they source.
   ["shellcheck"] = Builtins.shellcheck
 }
 
@@ -29,7 +29,7 @@ local workspaceSteps = new Mapping<String, Step> {
     fix = "mise run clippy --fix --allow-dirty --allow-staged"
   }
   ["licenses"] {
-    glob = List("**/Cargo.toml", "Cargo.lock", "deny.toml")
+    glob = List("**/Cargo.toml", "Cargo.lock", ".cargo/deny.toml")
     check = "mise run licenses"
   }
 }

@@ -45,9 +45,9 @@ case $platform in
             python3 - << 'PYEOF'
 import tomllib
 
-with open("mise.lock", "rb") as f:
+with open(".config/mise/mise.lock", "rb") as f:
     nextest = tomllib.load(f)["tools"]["github:nextest-rs/nextest"][0]["platforms.linux-x64"]
-with open("mise.target-android.toml", "rb") as f:
+with open(".config/mise/config.target-android.toml", "rb") as f:
     devices_cli = tomllib.load(f)["tools"]["go:github.com/sargunv/devices-cli"]
 print(nextest["url"], nextest["checksum"].removeprefix("sha256:"), devices_cli)
 PYEOF

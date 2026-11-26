@@ -1,6 +1,6 @@
 # shellcheck shell=bash
-# Sourced by the tasks in mise-tasks/ that build or run native code. On NixOS,
-# that code builds and runs inside flake.nix's dev shell, which has the C
+# Sourced by the tasks in .config/mise/tasks/ that build or run native code. On
+# NixOS, that code builds and runs inside flake.nix's dev shell, which has the C
 # toolchain and the libraries it loads (the Vulkan loader, Wayland, X11, ...);
 # elsewhere (macOS, CI) the system's libraries are the environment.
 #

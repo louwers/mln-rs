@@ -16,11 +16,11 @@ process of its own, so nextest runs them in parallel.
   the dex with its JDK and the build-tools' d8, and the native half with the
   NDK.
 - `runner.sh` is the environment's Cargo runner for Android
-  (`mise.target-android.toml`). It runs each test on this checkout's emulator,
-  or a device assigned to it, through devices-cli, which copies the executable,
-  the test host and the test's package to the device. It builds the test host
-  into `target/android-test-host` the first time, and again when its sources
-  change.
+  (`.config/mise/config.target-android.toml`). It runs each test on this
+  checkout's emulator, or a device assigned to it, through devices-cli, which
+  copies the executable, the test host and the test's package to the device. It
+  builds the test host into `target/android-test-host` the first time, and again
+  when its sources change.
 - AWS Device Farm's runs use the same test host and `runner.sh`, with
   `ANDROID_TEST_HOST` set to the prebuilt test host in the test package
   (`tools/device-farm`).

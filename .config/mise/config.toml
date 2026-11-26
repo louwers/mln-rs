@@ -1,7 +1,7 @@
 # https://mise.jdx.dev: the tools that build, run and check mln-rs, and the
 # tasks that run them. `mise install` installs the tools, `mise tasks` lists
 # the tasks and `mise run <task>` runs one. The tasks of more than a few lines
-# are scripts in mise-tasks/.
+# are scripts in .config/mise/tasks/.
 
 min_version = "2026.10.0"
 
@@ -11,8 +11,8 @@ pin = true
 lockfile = true
 # Default from mise 2026.10.19 (merge mode is removed in 2027.10.0).
 lockfile_mode = "generate"
-# Keep every supported host platform in mise.lock regardless of a contributor's
-# global ~/.config/mise/config.toml lockfile_platforms setting.
+# Keep every supported host platform in .config/mise/mise.lock regardless of a
+# contributor's global ~/.config/mise/config.toml lockfile_platforms setting.
 lockfile_platforms = [
   "linux-arm64",
   "linux-x64",
@@ -37,7 +37,7 @@ all_compile = false
 # The test runner, which ends a test that hangs (.config/nextest.toml).
 "github:nextest-rs/nextest" = { version = "0.9.151", version_prefix = "cargo-nextest-" }
 # Cargo subcommands: the tests' coverage, the packages' licenses
-# (deny.toml) and unused dependencies.
+# (.cargo/deny.toml) and unused dependencies.
 "aqua:taiki-e/cargo-llvm-cov" = "0.9.1"
 "aqua:EmbarkStudios/cargo-deny" = "0.20.2"
 "github:est31/cargo-udeps" = "0.1.61"
@@ -51,8 +51,9 @@ all_compile = false
 "aqua:pnpm/pnpm" = "12.18.0"
 # The jq that reads Cargo's JSON output.
 "aqua:jqlang/jq" = "1.8.2"
-# The formatters and linters (hk.pkl): hk runs them, dprint formats
-# (dprint.jsonc), jactionlint lints the workflows and shellcheck the tasks.
+# The formatters and linters (.config/hk.pkl): hk runs them, dprint formats
+# (.config/dprint.jsonc), jactionlint lints the workflows and shellcheck the
+# tasks.
 "aqua:jdx/hk" = "2.12.0"
 "aqua:dprint/dprint" = "0.64.3"
 "aqua:jdx/jactionlint" = "2.6.0"
@@ -94,15 +95,15 @@ RUST_BACKTRACE = "{% if get_env(name='RUST_BACKTRACE', default='') != '' %}{{ ge
 # The nightly whose rustfmt dprint runs (its import options,
 # imports_granularity and group_imports, are unstable), and that builds the
 # sanitizer tests and runs udeps. Pinned so every machine formats alike: bump
-# it on purpose, with the one in dprint.jsonc, then run `mise run fix`.
+# it on purpose, with the one in .config/dprint.jsonc, then run `mise run fix`.
 MLN_NIGHTLY = "nightly-2026-11-04"
 
 [tasks.check]
-description = "Check every file with the formatters and linters (hk.pkl)"
+description = "Check every file with the formatters and linters (.config/hk.pkl)"
 run = "hk check --all"
 
 [tasks.fix]
-description = "Format every file and apply the linters' fixes (hk.pkl)"
+description = "Format every file and apply the linters' fixes (.config/hk.pkl)"
 run = "hk fix --all"
 
 # The C library as maplibre-native-ffi's 32-bit presets build it (Android's
@@ -174,7 +175,7 @@ hide = true
 run = "rustup toolchain install {{env.MLN_NIGHTLY}} --profile minimal --component rustfmt --no-self-update"
 
 [tasks.licenses]
-description = "Check every dependency's license against deny.toml"
+description = "Check every dependency's license against .cargo/deny.toml"
 run = "cargo deny --locked check licenses"
 
 [tasks.ratchet]

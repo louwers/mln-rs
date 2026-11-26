@@ -338,7 +338,7 @@ class PlanCommandTest(unittest.TestCase):
             summary = root / "summary"
             event.write_text(json.dumps(event_payload))
             subprocess.run(
-                ["bash", str(ROOT / "mise-tasks/ci/plan")],
+                ["bash", str(ROOT / ".config/mise/tasks/ci/plan")],
                 cwd=root,
                 env={
                     "PATH": os.environ["PATH"],

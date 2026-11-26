@@ -1,0 +1,7 @@
+# Early-init mise settings read before .config/mise/config.toml; adopt upcoming
+# defaults early.
+
+# Default in mise 2027.6.0.
+auto_env = true
+# Default in mise 2027.8.10.
+env_conf_d = true

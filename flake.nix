@@ -14,10 +14,10 @@
     {
       devShells = forAllSystems (pkgs: {
         # `nix develop` enters it on any Linux with Nix, and the tasks in
-        # mise-tasks/ run in it on NixOS, which has no system-wide libraries for
-        # a build or a dlopen() to find. Rust and the other tools come from
-        # mise (mise.toml); this adds the C toolchain, for the crates that
-        # compile C, and the libraries.
+        # .config/mise/tasks/ run in it on NixOS, which has no system-wide
+        # libraries for a build or a dlopen() to find. Rust and the other tools
+        # come from mise (.config/mise/config.toml); this adds the C toolchain,
+        # for the crates that compile C, and the libraries.
         default = pkgs.mkShell {
           # tools/c-abi-test builds the C ABI suite with
           # CMake, against the Vulkan headers and loader, and for its OpenGL

@@ -12,7 +12,8 @@ runs:
         $ErrorActionPreference = "Stop"
         $ProgressPreference = "SilentlyContinue"
 
-        # Matches the DirectXShaderCompiler pin in mise.target-windows.toml.
+        # Matches the DirectXShaderCompiler pin in
+        # .config/mise/config.target-windows.toml.
         $dxcVersion = "1.9.2609"
         $archiveName = "dxc_2026_09_29.zip"
         $dxcUrl = "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v$dxcVersion/$archiveName"

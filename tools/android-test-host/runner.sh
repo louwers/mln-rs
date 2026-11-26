@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cargo's target runner for Android (mise.target-android.toml,
+# Cargo's target runner for Android (.config/mise/config.target-android.toml,
 # tools/device-farm): runs a test executable on this checkout's emulator, or a
 # device assigned to it, through devices-cli, in a Java VM's process
 # (README.md). devices-cli copies the executable, the test host and the test's

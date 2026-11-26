@@ -5,11 +5,11 @@
 //! `mise run generate:unicode-tables` runs it on the files that `mise deps`
 //! downloads.
 //!
-//! The files must be of unicode-bidi's Unicode version, which mise.toml's
-//! `unicode_version` names, so that the characters unicode-bidi resolves as
-//! right to left and the ones that the tables mirror and shape come from one
-//! version. The tables store UTF-16 code units, so every character in them must
-//! be in the BMP.
+//! The files must be of unicode-bidi's Unicode version, which
+//! `.config/mise/config.toml`'s `unicode_version` names, so that the characters
+//! unicode-bidi resolves as right to left and the ones that the tables mirror
+//! and shape come from one version. The tables store UTF-16 code units, so
+//! every character in them must be in the BMP.
 
 mod arabic_shaping;
 mod bidi_mirroring;
@@ -63,7 +63,7 @@ fn ucd_version(text: &str, name: &str) -> Result<String, String> {
     let expected = format!("{major}.{minor}.{update}");
     if version != expected {
         return Err(format!(
-            "{name}.txt is of Unicode {version}, not unicode-bidi's {expected}: set unicode_version in mise.toml to it"
+            "{name}.txt is of Unicode {version}, not unicode-bidi's {expected}: set unicode_version in .config/mise/config.toml to it"
         ));
     }
     Ok(expected)

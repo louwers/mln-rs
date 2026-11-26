@@ -9,7 +9,8 @@
 # host.
 set -euo pipefail
 
-# The release the suites run on, matching mise.target-freebsd.toml.
+# The release the suites run on, matching
+# .config/mise/config.target-freebsd.toml.
 release="${MLN_FREEBSD_RELEASE:-14.4}"
 if [[ -z "${ANYVM:-}" ]]; then
     anyvm=$(mise where http:anyvm)

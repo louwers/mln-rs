@@ -6,8 +6,8 @@ needs no COOP/COEP headers.
 
 ## Build and run
 
-mise.toml pins the tools: wasm-bindgen-cli, binaryen's `wasm-opt`, Node and
-pnpm.
+.config/mise/config.toml pins the tools: wasm-bindgen-cli, binaryen's
+`wasm-opt`, Node and pnpm.
 
 ```sh
 mise install
