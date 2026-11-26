@@ -37,7 +37,6 @@ use crate::draw::segment::SegmentBase;
 use crate::draw::store::SharedTexture;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::SharedVertices;
-use crate::layer::bucket::NoBucket;
 use crate::layer::bucket_geometry::copied_vertices;
 use crate::layer::layer_drawing::{DrawList, DrawObjectsMut, KeptDraw, TileDraws, TileObjects};
 use crate::layer::layer_type::LayerType;
@@ -96,7 +95,6 @@ struct ReliefUniforms {
 
 impl LayerType for ColorRelief {
     type Layout = NoLayout;
-    type Bucket = NoBucket;
     type TileBucket<'a> = &'a DemContents;
 
     fn render_layer(style: Arc<LayerStyle<ColorRelief>>) -> Box<dyn RenderLayer> {
