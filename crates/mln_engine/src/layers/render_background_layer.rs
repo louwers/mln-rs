@@ -25,8 +25,9 @@ use crate::layer::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::layout::NoLayout;
 use crate::layer::render_layer::{
-    Atlases, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+    LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
+use crate::layers::background::pattern_atlas::PatternAtlas;
 use crate::layers::background::programs;
 use crate::layers::background::ubo::{
     BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO,
@@ -44,15 +45,6 @@ use crate::tile_store::tile_cover::{TileCoverParameters, tile_cover};
 /// The ids of the buffers that the draws bind.
 const DRAWABLE_ID: usize = programs::BACKGROUND.buffer_id("drawableVector");
 const PROPS_ID: usize = programs::BACKGROUND.buffer_id("props");
-
-/// Adds the image `id` to the pattern atlas if it isn't there yet.
-fn add_pattern_if_needed(id: &str, params: &mut LayerUpdateParameters<'_>) {
-    if params.atlases.pattern.pattern(id).is_none()
-        && let Some(image) = params.images.image(id)
-    {
-        params.atlases.pattern.add_pattern(image);
-    }
-}
 
 impl LayerType for Background {
     type Layout = NoLayout;
@@ -91,12 +83,20 @@ pub(crate) struct RenderBackgroundLayer {
     /// The frame's draws as the update makes them, with their uniform blocks
     /// and projections.
     draw_list: DrawList<(BackgroundDrawableUnionUBO, ProjectionUBO)>,
+    /// The patterns of `background-pattern`.
+    patterns: PatternAtlas,
 }
 
 impl RenderBackgroundLayer {
     pub(crate) fn new(impl_: Arc<LayerStyle<Background>>) -> Self {
         let (base, values) = LayerValues::new(impl_);
-        RenderBackgroundLayer { base, values, drawing: TileDraws::default(), draw_list: DrawList::default() }
+        RenderBackgroundLayer {
+            base,
+            values,
+            drawing: TileDraws::default(),
+            draw_list: DrawList::default(),
+            patterns: PatternAtlas::new(),
+        }
     }
 
     /// The GPU objects of the draw of the tile `tile_id`, with `shader` and
@@ -182,13 +182,8 @@ impl TypedLayer for RenderBackgroundLayer {
     /// tiles that cover the view, or a drape's tile. It builds the draw of a
     /// tile it keeps none of or whose draw was built for other passes or
     /// patterns, and writes the layer's buffers the draws read.
-    fn update_draws_without_source(
-        &mut self,
-        gpu: &mut dyn Gpu,
-        paint_parameters: &mut PaintParameters<'_>,
-        atlases: &Atlases,
-    ) {
-        let RenderBackgroundLayer { base, values, drawing, draw_list } = self;
+    fn update_draws_without_source(&mut self, gpu: &mut dyn Gpu, paint_parameters: &mut PaintParameters<'_>) {
+        let RenderBackgroundLayer { base, values, drawing, draw_list, patterns } = self;
         let layer = &*values.evaluated;
         let evaluated = &layer.paint;
         let has_pattern = !evaluated.background_pattern.faded().to.empty();
@@ -198,11 +193,9 @@ impl TypedLayer for RenderBackgroundLayer {
         let program = if has_pattern { &programs::BACKGROUND_PATTERN } else { &programs::BACKGROUND };
         let shader = paint_parameters.context.shader_key(program, Uniforms::default(), base.projection_variant);
 
-        let pattern_atlas = &atlases.pattern;
         let faded = evaluated.background_pattern.faded();
         let pattern_positions = if has_pattern {
-            let (Some(from), Some(to)) = (pattern_atlas.pattern(faded.from.id()), pattern_atlas.pattern(faded.to.id()))
-            else {
+            let (Some(from), Some(to)) = (patterns.pattern(faded.from.id()), patterns.pattern(faded.to.id())) else {
                 // The pattern isn't valid: the layer draws nothing.
                 return;
             };
@@ -210,7 +203,10 @@ impl TypedLayer for RenderBackgroundLayer {
         } else {
             None
         };
-        let pattern_texture = pattern_atlas.texture().filter(|_| has_pattern);
+        if has_pattern {
+            patterns.upload(gpu, paint_parameters.context);
+        }
+        let pattern_texture = patterns.texture().filter(|_| has_pattern);
         if let Some(mut texture) = pattern_texture.and_then(|texture| paint_parameters.context.texture_mut(texture)) {
             texture.set_sampler(SamplerState {
                 filter: TextureFilterType::Linear,
@@ -245,6 +241,7 @@ impl TypedLayer for RenderBackgroundLayer {
             draw_list.push(draw, Self::uniforms(&tile_id, has_pattern, paint_parameters));
         }
 
+        let texsize = patterns.pixel_size();
         drawing.finish(draw_list, gpu, paint_parameters.context, |writer| {
             let opacity = *evaluated.background_opacity.uniform();
             if let Some((from, to)) = pattern_positions {
@@ -260,6 +257,9 @@ impl TypedLayer for RenderBackgroundLayer {
                     scale_b: crossfade.to_scale,
                     mix: crossfade.t,
                     opacity,
+                    texsize: [texsize.width as f32, texsize.height as f32],
+                    pad1: 0.0,
+                    pad2: 0.0,
                 };
                 writer.uniform(PROPS_ID, &props);
             } else {
@@ -294,7 +294,8 @@ impl TypedLayer for RenderBackgroundLayer {
     }
 
     /// Picks the tiles that cover the view, which the layer draws, having no
-    /// source, and adds its pattern to the pattern atlas.
+    /// source, and packs its patterns, again those whose images the style
+    /// replaced.
     fn update_without_source(&mut self, parameters: &mut LayerUpdateParameters<'_>) {
         let (state, update_parameters) = (parameters.view, parameters.update_parameters);
         let zoom = state.integer_zoom();
@@ -316,10 +317,12 @@ impl TypedLayer for RenderBackgroundLayer {
         self.drawing.tiles_mut().set_tiles(tiles);
 
         let evaluated = &self.values.evaluated.paint;
-        if !evaluated.background_pattern.faded().to.empty() {
+        let faded = evaluated.background_pattern.faded();
+        if !faded.to.empty() {
             // The encode uploads the atlas image with the patterns.
-            add_pattern_if_needed(evaluated.background_pattern.faded().from.id(), parameters);
-            add_pattern_if_needed(evaluated.background_pattern.faded().to.id(), parameters);
+            self.patterns.remove_stale(parameters.images);
+            self.patterns.add(faded.from.id(), parameters.images);
+            self.patterns.add(faded.to.id(), parameters.images);
         }
     }
 }

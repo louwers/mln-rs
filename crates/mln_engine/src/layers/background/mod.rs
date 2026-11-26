@@ -7,6 +7,7 @@ mod glsl;
 mod glsl_es;
 #[rustfmt::skip]
 mod msl;
+pub(crate) mod pattern_atlas;
 pub mod programs;
 pub mod ubo;
 mod wgsl;

@@ -54,7 +54,7 @@ struct FragmentInput {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
-    let texsize = paintParams.pattern_atlas_texsize;
+    let texsize = props.texsize;
 
     // A crossfade at 0 or 1 shows one pattern, so skip the other.
     var color_a = vec4<f32>(0.0);

@@ -57,7 +57,7 @@ layout(location = 0) out vec4 out_color;
 
 void main() {
 
-    const vec2 texsize = paintParams.pattern_atlas_texsize;
+    const vec2 texsize = props.texsize;
 
     // A crossfade at 0 or 1 shows one pattern, so skip the other.
     vec4 color1 = vec4(0.0);

@@ -26,13 +26,13 @@ void main() {
     vec4 color1 = vec4(0.0);
     if (u_mix < 1.0) {
         vec2 imagecoord = mod(v_pos_a, 1.0);
-        highp vec2 pos = atlas_pos(u_pattern_tl_a / u_pattern_atlas_texsize, (u_pattern_br_a - u_pattern_tl_a) / u_pattern_atlas_texsize * imagecoord);
+        highp vec2 pos = atlas_pos(u_pattern_tl_a / u_texsize, (u_pattern_br_a - u_pattern_tl_a) / u_texsize * imagecoord);
         color1 = texture(u_image, pos);
     }
     vec4 color2 = vec4(0.0);
     if (u_mix > 0.0) {
         vec2 imagecoord_b = mod(v_pos_b, 1.0);
-        highp vec2 pos2 = atlas_pos(u_pattern_tl_b / u_pattern_atlas_texsize, (u_pattern_br_b - u_pattern_tl_b) / u_pattern_atlas_texsize * imagecoord_b);
+        highp vec2 pos2 = atlas_pos(u_pattern_tl_b / u_texsize, (u_pattern_br_b - u_pattern_tl_b) / u_texsize * imagecoord_b);
         color2 = texture(u_image, pos2);
     }
 

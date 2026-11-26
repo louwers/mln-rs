@@ -48,6 +48,10 @@ uniform_block! {
         pub scale_b: f32,
         pub mix: f32,
         pub opacity: f32,
+        /// The size of the layer's pattern atlas, in texels.
+        pub texsize: [f32; 2],
+        pub pad1: f32,
+        pub pad2: f32,
     }
 }
 

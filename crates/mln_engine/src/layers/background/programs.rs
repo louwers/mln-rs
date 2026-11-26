@@ -44,7 +44,7 @@ pub static BACKGROUND: Program = Program {
 pub static BACKGROUND_PATTERN: Program = Program {
     name: "BackgroundPatternShader",
     buffers: BACKGROUND_PATTERN_BUFFERS,
-    paint_params: Some(Stages::Fragment),
+    paint_params: None,
     projection: Projection::PerDraw,
     attributes: &[POS],
     instance_attributes: &[],

@@ -1,3 +1,7 @@
+//! The atlas of a background layer's patterns.
+
+use std::sync::Arc;
+
 use etagere::{AllocId, BucketedAtlasAllocator, size2};
 use geometry::Point;
 use mln_gfx::gpu::{Gpu, TextureFormat};
@@ -9,6 +13,7 @@ use mln_style::size::Size;
 use crate::draw::context::Context;
 use crate::draw::store::SharedTexture;
 use crate::draw::texture_size;
+use crate::image::image_store::ImageStore;
 use crate::text::atlas::{ImagePosition, RectU16};
 
 /// When copied into the atlas texture, image data is padded by one pixel on
@@ -20,14 +25,30 @@ const PADDING: u16 = 1;
 struct Pattern {
     alloc_id: AllocId,
     position: ImagePosition,
+    /// The style's image the pattern was packed from.
+    image: Arc<ImageImpl>,
 }
 
+/// A background layer's pattern images, packed into one texture, each with
+/// a padding that wraps it.
 pub(crate) struct PatternAtlas {
     allocator: BucketedAtlasAllocator,
     patterns: HashMap<String, Pattern>,
     atlas_image: PremultipliedImage,
     texture: Option<SharedTexture>,
     dirty: bool,
+}
+
+/// Clears `pattern` from the atlas's `image` and frees its bin in
+/// `allocator`.
+fn clear(image: &mut PremultipliedImage, allocator: &mut BucketedAtlasAllocator, pattern: &Pattern) {
+    let b = pattern.position.padded_rect;
+    let _ = PremultipliedImage::clear(
+        image,
+        Point::new(u32::from(b.x), u32::from(b.y)),
+        Size::new(u32::from(b.w), u32::from(b.h)),
+    );
+    allocator.deallocate(pattern.alloc_id);
 }
 
 impl Default for PatternAtlas {
@@ -53,7 +74,29 @@ impl PatternAtlas {
         self.patterns.get(id).map(|pattern| pattern.position.clone())
     }
 
-    pub(crate) fn add_pattern(&mut self, image: &ImageImpl) -> Option<ImagePosition> {
+    /// Packs the image `id` of `images` unless the atlas holds it.
+    pub(crate) fn add(&mut self, id: &str, images: &ImageStore) {
+        if !self.patterns.contains_key(id)
+            && let Some(image) = images.image(id)
+        {
+            self.add_pattern(image);
+        }
+    }
+
+    /// Drops the patterns whose images `images` no longer has, or has
+    /// replaced since they were packed.
+    pub(crate) fn remove_stale(&mut self, images: &ImageStore) {
+        let PatternAtlas { allocator, patterns, atlas_image, .. } = self;
+        patterns.retain(|id, pattern| {
+            let current = images.image(id).is_some_and(|image| Arc::ptr_eq(image, &pattern.image));
+            if !current {
+                clear(atlas_image, allocator, pattern);
+            }
+            current
+        });
+    }
+
+    pub(crate) fn add_pattern(&mut self, image: &Arc<ImageImpl>) -> Option<ImagePosition> {
         if self.patterns.contains_key(&image.id) {
             return None;
         }
@@ -95,21 +138,15 @@ impl PatternAtlas {
         self.dirty = true;
 
         let position = ImagePosition::new(bin, image);
-        self.patterns.insert(image.id.clone(), Pattern { alloc_id, position: position.clone() });
+        let pattern = Pattern { alloc_id, position: position.clone(), image: Arc::clone(image) };
+        self.patterns.insert(image.id.clone(), pattern);
         Some(position)
     }
 
+    #[cfg(test)]
     pub(crate) fn remove_pattern(&mut self, id: &str) {
         if let Some(pattern) = self.patterns.remove(id) {
-            // Clear pattern from the atlas image.
-            let b = pattern.position.padded_rect;
-            let _ = PremultipliedImage::clear(
-                &mut self.atlas_image,
-                Point::new(u32::from(b.x), u32::from(b.y)),
-                Size::new(u32::from(b.w), u32::from(b.h)),
-            );
-
-            self.allocator.deallocate(pattern.alloc_id);
+            clear(&mut self.atlas_image, &mut self.allocator, &pattern);
         }
     }
 
@@ -174,9 +211,8 @@ impl PatternAtlas {
     pub(crate) fn atlas_image(&self) -> &PremultipliedImage {
         &self.atlas_image
     }
-
-    #[must_use]
-    pub(crate) fn is_empty(&self) -> bool {
-        self.patterns.is_empty()
-    }
 }
+
+// gtests-core: test/renderer/pattern_atlas.test.cpp.
+#[cfg(test)]
+mod gtest_pattern_atlas;

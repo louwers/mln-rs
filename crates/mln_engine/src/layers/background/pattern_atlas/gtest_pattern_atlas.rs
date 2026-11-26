@@ -1,11 +1,12 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::image::Impl as ImageImpl;
 use mln_style::size::Size;
 
+use super::PatternAtlas;
 use crate::image::decode_image;
-use crate::pattern_atlas::PatternAtlas;
 
 /// The path of `test/fixtures/...` in the copy of the C++ files (testdata/).
 fn cpp_path(relative: &str) -> PathBuf {
@@ -42,8 +43,9 @@ fn check_image(base: &str, actual: &PremultipliedImage) {
     assert!(diff <= image_threshold, "{base}: image diff {diff} > {image_threshold}");
 }
 
-fn make_image(id: &str, image: PremultipliedImage, pixel_ratio: f32, sdf: bool) -> ImageImpl {
-    ImageImpl::new(id.to_owned(), image, pixel_ratio, sdf, Vec::new(), Vec::new(), None, None, None).expect("image")
+fn make_image(id: &str, image: PremultipliedImage, pixel_ratio: f32, sdf: bool) -> Arc<ImageImpl> {
+    let image = ImageImpl::new(id.to_owned(), image, pixel_ratio, sdf, Vec::new(), Vec::new(), None, None, None);
+    Arc::new(image.expect("image"))
 }
 
 // gtest: PatternAtlas.Basic
