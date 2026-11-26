@@ -13,6 +13,7 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
+use mln_style::StyleValue as _;
 use mln_style::color::Color;
 use mln_style::constants::EXTENT;
 use mln_style::error::Error;
@@ -22,7 +23,6 @@ use mln_style::layers::Symbol;
 use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
 use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
 use mln_style::types::{AlignmentType, IconTextFitType, SymbolPlacementType, TextRotationAlignmentType};
-use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 
 use crate::camera::{Projection, ProjectionData};
 use crate::draw::atlas_binding::AtlasBinding;
@@ -41,8 +41,8 @@ use crate::layer::layer_drawing::{
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::layout::{LayoutParameters, SourceLayer};
 use crate::layer::render_layer::{
-    BucketKey, BucketPlacementData, LayerBucket, LayerUpdateParameters, LayerValues, Parts, PartsMut, PlacedTile,
-    RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer,
+    BucketKey, BucketPlacementData, EvaluateCx, Evaluation, LayerBucket, LayerUpdateParameters, LayerValues, OnTerrain,
+    Parts, PartsMut, PlacedTile, RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer,
 };
 use crate::layers::cast_matrix;
 use crate::query::feature_index::FeatureIndex;
@@ -947,8 +947,7 @@ impl TypedLayer for RenderSymbolLayer {
     /// Over terrain, the symbols stand on the ground under their anchors,
     /// which placement gives them from the surface the frame drew, and hide
     /// behind the ground in front.
-    const STANDS: bool = true;
-    const HIDES_BEHIND_GROUND: bool = true;
+    const TERRAIN: OnTerrain = OnTerrain::Stands { hides_behind_ground: true };
 
     fn parts(&self) -> Parts<'_, Self> {
         Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
@@ -958,25 +957,17 @@ impl TypedLayer for RenderSymbolLayer {
         PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
     }
 
-    /// The text of a `text-field` with format sections takes the values
-    /// its sections override.
-    fn complete_evaluation(
-        &mut self,
-        parameters: &PropertyEvaluationParameters,
-        evaluated: &mut EvaluatedLayer<Symbol>,
-    ) {
+    fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
+        let parameters = cx.parameters;
         if SymbolLayerPaintPropertyOverrides::has_overrides(&self.values.style.layout.text_field) {
             mln_style::layers::symbol_layer::set_overrides(
                 &self.values.style.layout,
-                &mut evaluated.paint,
+                &mut cx.evaluated.paint,
                 &self.values.unevaluated,
                 &parameters.global_state,
             );
         }
-    }
-
-    fn passes(&self, evaluated: &EvaluatedLayer<Symbol>) -> RenderPass {
-        let evaluated = &evaluated.paint;
+        let evaluated = &cx.evaluated.paint;
         let has_icon_opacity = evaluated.icon_color.constant_or(&SymbolPaintProperties::Defaults::icon_color()).a > 0.0
             || evaluated.icon_halo_color.constant_or(&SymbolPaintProperties::Defaults::icon_halo_color()).a > 0.0;
         let has_text_opacity = evaluated.text_color.constant_or(&SymbolPaintProperties::Defaults::text_color()).a > 0.0
@@ -985,9 +976,9 @@ impl TypedLayer for RenderSymbolLayer {
         if (evaluated.icon_opacity.constant_or(&1.0) > 0.0 && has_icon_opacity && self.icon_size > 0.0)
             || (evaluated.text_opacity.constant_or(&1.0) > 0.0 && has_text_opacity && self.text_size > 0.0)
         {
-            RenderPass::Translucent
+            Evaluation::TRANSLUCENT
         } else {
-            RenderPass::None
+            Evaluation::NONE
         }
     }
 
