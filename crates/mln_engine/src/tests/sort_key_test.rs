@@ -17,7 +17,6 @@ use crate::Registry;
 use crate::buckets::circle_bucket::CircleBucket;
 use crate::buckets::fill_bucket::FillBucket;
 use crate::buckets::line_bucket::LineBucket;
-use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::image::image_store::ImageDependencies;
 use crate::layer::bucket::Bucket;
 use crate::layer::bucket_parameters::BucketParameters;
@@ -27,6 +26,7 @@ use crate::layer::layout::{BuildParams, LayoutParameters, SourceLayer};
 use crate::layer::tile_layout::{Built, Resolved};
 use crate::map::MapMode;
 use crate::query::feature_index::FeatureIndexBuilder;
+use crate::symbol::bucket::SymbolBucket;
 use crate::text::atlas::{ImagePosition, ImagePositions, RectU16};
 use crate::text::glyph::GlyphDependencies;
 use crate::tile::OverscaledTileID;
@@ -245,7 +245,7 @@ fn symbol_order() {
         assert_eq!(type_ == SortKeyType::Undefined, bucket.sort_features_by_y, "{type_:?}");
         match type_ {
             SortKeyType::Undefined => {
-                assert_eq!(bucket.sort_key_ranges, Vec::<crate::buckets::symbol_bucket::SortKeyRange>::new());
+                assert_eq!(bucket.sort_key_ranges, Vec::<crate::symbol::bucket::SortKeyRange>::new());
             }
             SortKeyType::Constant | SortKeyType::Camera => {
                 assert_eq!(bucket.sort_key_ranges.len(), 1, "{type_:?}");

@@ -6,8 +6,8 @@
 //! presentation forms instead (`arabic.rs`).
 //!
 //! Glyph requests (`glyph_store`), the font-face engine
-//! ([`font_face_engine`]), the device's fonts ([`system_fonts`], with the
-//! `system-fonts` feature) and symbol geometry are the engine's own.
+//! ([`font_face_engine`]) and the device's fonts ([`system_fonts`], with the
+//! `system-fonts` feature) are the engine's own.
 
 mod arabic;
 #[rustfmt::skip]
@@ -18,21 +18,17 @@ mod bidi;
 mod bidi_mirroring;
 #[cfg(target_family = "wasm")]
 pub mod browser_glyph_rasterizer;
-pub(crate) mod check_max_angle;
 pub mod constants;
-pub(crate) mod cross_tile_symbol_index;
 mod face;
 pub mod font_face_engine;
 pub mod font_name;
 pub mod font_stack;
-pub(crate) mod get_anchors;
 pub mod glyph;
 pub mod glyph_cache;
 pub mod glyph_pbf;
 pub(crate) mod glyph_store;
 mod line_breaks;
 pub mod local_fonts;
-pub(crate) mod quads;
 mod rasterize;
 mod shaper;
 pub mod shaping;

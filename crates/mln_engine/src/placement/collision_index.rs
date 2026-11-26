@@ -6,17 +6,17 @@ use mln_style::hash::{HashMap, HashSet};
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::types::IconOverlapType;
 
-use crate::buckets::symbol_bucket::{PlacedSymbol, PlacedSymbolPools};
 use crate::camera::{ProjectedTilePoint, TileProjector, View};
 use crate::geo::ScreenLineString;
 use crate::geo::intersection_tests::polygon_intersects_polygon;
-use crate::layout::symbol_projection::{
-    LabelPlaneProjector, LineLabel, LinePlacer, PlacedGlyph, SymbolHeights, TileDistance, tile_skew_vectors,
-};
 use crate::map::MapMode;
 use crate::placement::collision_feature::{CollisionBox, CollisionFeature};
 use crate::placement::collision_grid::{Aabb, Grid, Shape};
 use crate::query::feature_index::IndexedSubfeature;
+use crate::symbol::bucket::{PlacedSymbol, PlacedSymbolPools};
+use crate::symbol::projection::{
+    LabelPlaneProjector, LineLabel, LinePlacer, PlacedGlyph, SymbolHeights, TileDistance, tile_skew_vectors,
+};
 
 /// A box's edges: [x1, y1, x2, y2].
 pub(crate) type CollisionBoundaries = [f32; 4];

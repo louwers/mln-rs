@@ -2,11 +2,5 @@
 //! into buckets.
 
 pub(crate) mod circle_layout;
-pub(crate) mod clip_lines;
 pub(crate) mod heatmap_layout;
-pub(crate) mod merge_lines;
 pub(crate) mod pattern_layout;
-pub(crate) mod symbol_feature;
-pub(crate) mod symbol_instance;
-pub(crate) mod symbol_layout;
-pub(crate) mod symbol_projection;

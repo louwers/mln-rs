@@ -135,7 +135,8 @@ pub mod terrain {
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program::Program;
 
-use crate::layers::{background, circle, color_relief, fill, fill_extrusion, heatmap, hillshade, line, raster, symbol};
+use crate::layers::{background, circle, color_relief, fill, fill_extrusion, heatmap, hillshade, line, raster};
+use crate::symbol;
 
 /// Every program the renderer draws with, and, with the `gpu-conformance`
 /// feature, those the conformance cases draw with.

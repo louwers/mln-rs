@@ -11,12 +11,12 @@ use mln_style::feature::GeometryCoordinate;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::types::SymbolHeightAnchorType;
 
-use crate::buckets::symbol_bucket::{
+use crate::camera::{ProjectedTilePoint, TileProjector, View};
+use crate::render::terrain::{TerrainElevation, TileGround};
+use crate::symbol::bucket::{
     PlacedSymbol, PlacedSymbolPools, SymbolBucket, SymbolDynamicLayoutVertex, SymbolSizeBinder, ZoomEvaluatedSize,
 };
-use crate::camera::{ProjectedTilePoint, TileProjector, View};
-use crate::layout::symbol_instance::WritingMode;
-use crate::render::terrain::{TerrainElevation, TileGround};
+use crate::symbol::instance::WritingMode;
 use crate::text::constants::ONE_EM;
 use crate::tile::UnwrappedTileID;
 

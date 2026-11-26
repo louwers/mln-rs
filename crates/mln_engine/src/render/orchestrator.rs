@@ -169,7 +169,7 @@ pub(crate) struct RenderOrchestrator {
     render_light: crate::render::light::RenderLight,
     render_sky: Option<crate::render::sky::RenderSky>,
 
-    cross_tile_symbol_index: crate::text::cross_tile_symbol_index::CrossTileSymbolIndex,
+    cross_tile_symbol_index: crate::symbol::cross_tile_index::CrossTileSymbolIndex,
     placement_controller: crate::placement::PlacementController,
     background_layer_as_color: bool,
     placed_symbol_data_collected: bool,
@@ -231,7 +231,7 @@ impl RenderOrchestrator {
             still_image_request_id: 0,
             view: View::default(),
             tile_store,
-            cross_tile_symbol_index: crate::text::cross_tile_symbol_index::CrossTileSymbolIndex::default(),
+            cross_tile_symbol_index: crate::symbol::cross_tile_index::CrossTileSymbolIndex::default(),
             placement_controller: crate::placement::PlacementController::new(),
             atlases: Atlases::default(),
             found_tiles: Vec::new(),

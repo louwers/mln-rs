@@ -559,8 +559,8 @@ fn bindings_follow_from_the_packed_ids() {
     use mln_engine::layers::hillshade::programs::{HILLSHADE, HILLSHADE_PREPARE};
     use mln_engine::layers::line::programs::LINE;
     use mln_engine::layers::raster::programs::RASTER;
-    use mln_engine::layers::symbol::programs::SYMBOL_SDF;
     use mln_engine::shaders::programs::{ATMOSPHERE, SKY};
+    use mln_engine::symbol::programs::SYMBOL_SDF;
 
     assert_eq!(global_uniform_binding(PAINT_PARAMS_ID), Some(0));
 

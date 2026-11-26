@@ -1259,16 +1259,14 @@ fn assert_glyphs_draw_in_circles(dem: fn() -> Response, pitch_with_map: bool) {
     use mln_style::constants::{EXTENT, TILE_SIZE_D};
     use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 
-    use crate::buckets::symbol_bucket::{PlacedSymbol, PlacedSymbolPools, SymbolSizeBinder};
     use crate::camera::TileProjector;
-    use crate::layout::symbol_instance::WritingMode;
-    use crate::layout::symbol_projection::{
-        LabelPlaneProjector, LineLabelAlignment, SymbolHeights, reproject_line_labels,
-    };
     use crate::placement::collision_feature::{CollisionBox, CollisionFeature};
     use crate::placement::collision_grid::Shape;
     use crate::placement::collision_index::{CollisionIndex, LabelRun, OverlapMode, PartCollision};
     use crate::query::feature_index::IndexedSubfeature;
+    use crate::symbol::bucket::{PlacedSymbol, PlacedSymbolPools, SymbolSizeBinder};
+    use crate::symbol::instance::WritingMode;
+    use crate::symbol::projection::{LabelPlaneProjector, LineLabelAlignment, SymbolHeights, reproject_line_labels};
     use crate::util::pool::PoolRange;
 
     let mut load = TerrainLoad::new((0, 14), 100.0);

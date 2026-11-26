@@ -12,7 +12,6 @@ pub mod hillshade;
 pub mod line;
 mod pattern;
 pub mod raster;
-pub mod symbol;
 
 pub(crate) mod render_background_layer;
 pub(crate) mod render_circle_layer;
@@ -23,7 +22,6 @@ pub(crate) mod render_heatmap_layer; // dem-heatmap
 pub(crate) mod render_hillshade_layer; // dem-heatmap
 pub(crate) mod render_line_layer;
 pub(crate) mod render_raster_layer;
-pub(crate) mod render_symbol_layer;
 
 use crate::draw::objects::DrawObjects;
 use crate::draw::vertex_attribute::VertexAttributeArray;

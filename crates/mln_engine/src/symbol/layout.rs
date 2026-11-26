@@ -1,5 +1,5 @@
 // The layout keeps the tile's `SourceLayer` (shared tile data) and owned
-// `SymbolFeature`s (see symbol_feature.rs), so it can wait for glyphs and
+// `SymbolFeature`s (see feature.rs), so it can wait for glyphs and
 // images across worker messages.
 //
 
@@ -30,34 +30,34 @@ use mln_style::types::{
 use mln_style::{PropertyEvaluationParameters, StyleValue as _, i18n};
 use mln_vec_map::VecMap;
 
-use crate::buckets::symbol_bucket::{
-    Buffer, PaintProperties, PlacedSymbol, QuadCorner, SortKeyRange, SymbolBucket, SymbolBucketState,
-    SymbolBucketStyle, SymbolLayoutFlags, SymbolSizeBinder, max_height_offset,
-};
 use crate::draw::mesh::Indexed;
-use crate::geometry::anchor::Anchor;
 use crate::image::image_store::ImageType;
 use crate::layer::bucket_parameters::BucketParameters;
 use crate::layer::layer_type::EvaluatedLayer;
 use crate::layer::layout::{BuildParams, Layout, LayoutParameters, SourceLayer, layers_by_id};
 use crate::layer::tile_layout::Resolved;
-use crate::layout::clip_lines::clip_lines;
-use crate::layout::merge_lines::merge_lines;
-use crate::layout::symbol_feature::SymbolFeature;
-use crate::layout::symbol_instance::{
-    IconPart, Justification, LaidOutSymbol, ShapedTextOrientations, SymbolInstance, SymbolInstancePools, SymbolQuadSet,
-    TextPart, TextRuns, WritingMode,
-};
 use crate::map::MapMode;
 use crate::placement::collision_feature::{AlongLine, BoxLayout, CollisionBox, CollisionFeature};
 use crate::placement::collision_index::OverlapMode;
 use crate::query::feature_index::{FeatureIndexBuilder, IndexedSubfeature};
+use crate::symbol::anchor::Anchor;
+use crate::symbol::bucket::{
+    Buffer, PaintProperties, PlacedSymbol, QuadCorner, SortKeyRange, SymbolBucket, SymbolBucketState,
+    SymbolBucketStyle, SymbolLayoutFlags, SymbolSizeBinder, max_height_offset,
+};
+use crate::symbol::clip_lines::clip_lines;
+use crate::symbol::feature::SymbolFeature;
+use crate::symbol::get_anchors::{LineLabel, get_anchors, get_center_anchor};
+use crate::symbol::instance::{
+    IconPart, Justification, LaidOutSymbol, ShapedTextOrientations, SymbolInstance, SymbolInstancePools, SymbolQuadSet,
+    TextPart, TextRuns, WritingMode,
+};
+use crate::symbol::merge_lines::merge_lines;
+use crate::symbol::quads::{SymbolQuad, SymbolQuads, glyph_quads, icon_quads};
 use crate::text::atlas::ImagePositions;
 use crate::text::constants::ONE_EM;
-use crate::text::get_anchors::{LineLabel, get_anchors, get_center_anchor};
 use crate::text::glyph::{GlyphID, GlyphIDType, GlyphPositions, Shaping};
 use crate::text::glyph_store::ShapeResults;
-use crate::text::quads::{SymbolQuad, SymbolQuads, glyph_quads, icon_quads};
 use crate::text::shaping::{PositionedIcon, ShapingOptions, anchor_justification, shape_text};
 use crate::text::tagged_string::{SectionIndex, SectionOptions};
 use crate::text::{ShapedText, TaggedString, shape_arabic, starts_right_to_left};

@@ -12,12 +12,12 @@ use mln_style::types::{SymbolAnchorType, SymbolPlacementType};
 
 use super::context::PlacementContext;
 use super::{JointPlacement, PlacedSymbolData, Placement, PlacementInputs, PlacementKind, VariableOffset};
-use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::layer::render_layer::{BucketKey, SymbolBuckets};
-use crate::layout::symbol_instance::SymbolInstance;
 use crate::placement::collision_feature::CollisionBox;
 use crate::placement::collision_grid::Shape;
 use crate::placement::collision_index::{CollisionBoundaries, IntersectStatus, OverlapMode};
+use crate::symbol::bucket::SymbolBucket;
+use crate::symbol::instance::SymbolInstance;
 use crate::tile::UnwrappedTileID;
 
 /// What a tile placement keeps besides the placement's own state.

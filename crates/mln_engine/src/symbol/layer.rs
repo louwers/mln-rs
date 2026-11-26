@@ -24,10 +24,6 @@ use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolP
 use mln_style::types::{AlignmentType, IconTextFitType, SymbolPlacementType, TextRotationAlignmentType};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 
-use super::cast_matrix;
-use crate::buckets::symbol_bucket::{
-    Buffer, PaintProperties, SymbolBucket, SymbolDynamicLayoutVertex, SymbolOpacityVertex,
-};
 use crate::camera::{Projection, ProjectionData};
 use crate::draw::atlas_binding::AtlasBinding;
 use crate::draw::context::Context;
@@ -48,10 +44,7 @@ use crate::layer::render_layer::{
     Atlases, BucketKey, BucketPlacementData, LayerBucket, LayerUpdateParameters, LayerValues, Parts, PartsMut,
     PlacedTile, RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer,
 };
-use crate::layers::symbol::programs;
-use crate::layers::symbol::ubo::{SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO};
-use crate::layout::symbol_layout::SymbolLayout;
-use crate::layout::symbol_projection::{gl_coord_matrix, label_plane_matrix};
+use crate::layers::cast_matrix;
 use crate::query::feature_index::FeatureIndex;
 use crate::render::paint_parameters::PaintParameters;
 use crate::render::pass::RenderPass;
@@ -59,6 +52,11 @@ use crate::render::terrain::FrameGround;
 use crate::render::tile::{FrameTile, RenderTile};
 use crate::render::tile_matrix::{projection_data, to_projection_ubo};
 use crate::source::render_source::{RenderSource, TileOrder};
+use crate::symbol::bucket::{Buffer, PaintProperties, SymbolBucket, SymbolDynamicLayoutVertex, SymbolOpacityVertex};
+use crate::symbol::layout::SymbolLayout;
+use crate::symbol::programs;
+use crate::symbol::projection::{gl_coord_matrix, label_plane_matrix};
+use crate::symbol::ubo::{SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO};
 use crate::tile::{OverscaledTileID, UnwrappedTileID};
 
 /// The ids of the buffers that the draws bind.
@@ -185,7 +183,7 @@ fn set_binder_attributes(
 
 /// The attributes of the layout vertices.
 fn set_layout_attributes(geometry: &BucketGeometry, buffer: &Buffer, attribs: &mut VertexAttributeArray) {
-    let layout_size = size_of::<crate::buckets::symbol_bucket::SymbolLayoutVertex>() as u32;
+    let layout_size = size_of::<crate::symbol::bucket::SymbolLayoutVertex>() as u32;
     let Some(layout_data) = bucket_vertices(geometry, &buffer.attribute_data) else {
         return;
     };
@@ -206,7 +204,7 @@ fn set_layout_attributes(geometry: &BucketGeometry, buffer: &Buffer, attribs: &m
 /// Sets the symbols' heights to the layout vertices' `symbol-height-offset`s,
 /// of `layout_data`.
 fn set_height_offset_attribute(layout_data: SharedVertices, attribs: &mut VertexAttributeArray) {
-    let layout_size = size_of::<crate::buckets::symbol_bucket::SymbolLayoutVertex>() as u32;
+    let layout_size = size_of::<crate::symbol::bucket::SymbolLayoutVertex>() as u32;
     attribs.set_shared("height_offset", SharedAttribute::new(layout_data, AttributeDataType::Float, 28, layout_size));
 }
 

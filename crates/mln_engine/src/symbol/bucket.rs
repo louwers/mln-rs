@@ -25,9 +25,9 @@ use crate::layer::bucket::{Bucket, BucketBase, FeatureStates, UploadNeeds};
 use crate::layer::bucket_geometry::{GeometryUpload, GeometryVec};
 use crate::layer::layer_type::EvaluatedLayer;
 use crate::layer::paint_property_binder::PaintPropertyBinder;
-use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools, WritingMode};
+use crate::symbol::instance::{SymbolInstance, SymbolInstancePools, WritingMode};
+use crate::symbol::quads::SymbolQuad;
 use crate::text::atlas::ImagePositions;
-use crate::text::quads::SymbolQuad;
 use crate::tile::TileLayer;
 use crate::util::pool::PoolRange;
 

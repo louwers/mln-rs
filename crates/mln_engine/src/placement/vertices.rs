@@ -11,15 +11,15 @@ use mln_style::types::{AlignmentType, IconTextFitType, TextRotationAlignmentType
 
 use super::context::translation;
 use super::{JointOpacityState, Placement, VariableOffset};
-use crate::buckets::symbol_bucket::{Buffer, SymbolBucket, SymbolBucketState};
 use crate::camera::{TileProjector, View};
 use crate::layer::render_layer::BucketPlacementData;
-use crate::layout::symbol_instance::{Justification, SymbolInstance, TextPart};
-use crate::layout::symbol_projection::{
+use crate::placement::collision_index::OverlapMode;
+use crate::symbol::bucket::{Buffer, SymbolBucket, SymbolBucketState};
+use crate::symbol::instance::{Justification, SymbolInstance, TextPart};
+use crate::symbol::projection::{
     LabelPlaneProjector, LineLabelAlignment, SymbolHeights, add_dynamic_attributes, evaluate_size_for_feature,
     hide_glyphs, reproject_line_labels, tile_skew_vectors,
 };
-use crate::placement::collision_index::OverlapMode;
 use crate::text::constants::ONE_EM;
 
 /// Appends `n` copies of `value` to `v`.
@@ -258,7 +258,7 @@ impl Placement {
         } else {
             (Vec2::X, Vec2::Y)
         };
-        let shifted_anchor = |offset: &VariableOffset, run: &crate::buckets::symbol_bucket::PlacedSymbol| {
+        let shifted_anchor = |offset: &VariableOffset, run: &crate::symbol::bucket::PlacedSymbol| {
             let label_plane = label_plane.raised(run.height_offset);
             let tile_anchor = run.anchor_point;
             let projected = if pitch_with_map {
@@ -422,7 +422,7 @@ fn set_run_opacity(
     buffer: &mut Buffer,
     run: usize,
     hidden: bool,
-    vertex: crate::buckets::symbol_bucket::SymbolOpacityVertex,
+    vertex: crate::symbol::bucket::SymbolOpacityVertex,
     heights: SymbolHeights<'_>,
 ) {
     let run = &mut buffer.placed_symbols[run];

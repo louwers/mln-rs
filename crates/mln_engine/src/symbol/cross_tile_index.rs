@@ -32,12 +32,12 @@ use mln_style::hash::HashSet;
 use mln_style::tile_id::CanonicalTileID;
 use mln_vec_map::{VecMap, VecSet};
 
-use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::camera::{TileProjector, View};
 use crate::layer::render_layer::{RenderLayer, SymbolBuckets};
-use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools};
-use crate::layout::symbol_projection::SymbolHeights;
 use crate::render::terrain::TerrainElevation;
+use crate::symbol::bucket::SymbolBucket;
+use crate::symbol::instance::{SymbolInstance, SymbolInstancePools};
+use crate::symbol::projection::SymbolHeights;
 use crate::tile::OverscaledTileID;
 
 /// What adding a layer to the index changed.
@@ -410,8 +410,8 @@ mod tests {
     use mln_style::types::ProjectionDefinition;
 
     use super::*;
-    use crate::buckets::symbol_bucket::{SymbolBucketStyle, SymbolLayoutFlags};
-    use crate::geometry::anchor::Anchor;
+    use crate::symbol::anchor::Anchor;
+    use crate::symbol::bucket::{SymbolBucketStyle, SymbolLayoutFlags};
     use crate::util::pool::PoolRange;
 
     fn make_symbol_instance(x: f32, y: f32, key: &str, pools: &mut SymbolInstancePools) -> SymbolInstance {

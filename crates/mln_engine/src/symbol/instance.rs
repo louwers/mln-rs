@@ -8,11 +8,11 @@ use mln_style::feature::GeometryCoordinates;
 use mln_style::types::{SymbolAnchorType, TextJustifyType, TextWritingModeType, VariableAnchorOffsetCollection};
 use mln_wire::payload::pod;
 
-use crate::geometry::anchor::Anchor;
 use crate::placement::collision_feature::{CollisionBox, CollisionFeature};
+use crate::symbol::anchor::Anchor;
+use crate::symbol::quads::SymbolQuads;
 use crate::text::anchor_justification;
 use crate::text::glyph::Shaping;
-use crate::text::quads::SymbolQuads;
 use crate::util::pool::PoolRange;
 
 /// The writing modes that a symbol's text, or a run of its quads, shows in.

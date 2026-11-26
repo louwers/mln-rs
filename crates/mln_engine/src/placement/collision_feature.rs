@@ -3,8 +3,8 @@ use mln_style::feature::GeometryCoordinate;
 use mln_style::math::deg2radf;
 use mln_style::padding::Padding;
 
-use crate::geometry::anchor::{Anchor, segments, vertex_behind};
 use crate::query::feature_index::IndexedSubfeature;
+use crate::symbol::anchor::{Anchor, segments, vertex_behind};
 use crate::text::PositionedIcon;
 use crate::text::glyph::Shaping;
 use crate::util::pool::PoolRange;

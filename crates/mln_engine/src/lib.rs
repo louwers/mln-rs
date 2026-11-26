@@ -1,7 +1,7 @@
 //! The map engine: the renderer and its frames (`render`), sources
 //! (`source`), tiles and their workers (`tile_store`, `worker`), layers'
-//! layouts and buckets (`layer`), placement, queries, and what draws them
-//! (`draw`).
+//! layouts and buckets (`layer`), the symbol layer type (`symbol`),
+//! placement, queries, and what draws them (`draw`).
 
 #[cfg(feature = "bench")]
 #[doc(hidden)]
@@ -13,7 +13,6 @@ pub mod conformance;
 mod draw;
 pub mod exec;
 pub mod geo;
-mod geometry;
 pub mod gestures;
 mod gfx;
 pub mod image;
@@ -38,6 +37,10 @@ pub mod render;
 pub mod shaders;
 pub mod source;
 pub mod storage;
+// The symbol layer type's render half, with its programs, public for the
+// backends' tests, which compile them. Not API.
+#[doc(hidden)]
+pub mod symbol;
 pub mod text;
 pub mod tile;
 pub mod tile_store;

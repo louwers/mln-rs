@@ -15,7 +15,6 @@ use mln_style::error::Error;
 use mln_style::hash::{HashMap, HashSet};
 use mln_style::layers::Symbol;
 
-use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::draw::context::Context;
 use crate::draw::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::exec::pool::TaskGroup;
@@ -29,6 +28,7 @@ use crate::render::orchestrator::drop_on_workers;
 use crate::render::tile::RenderTile;
 use crate::source::source_state::SourceFeatureState;
 use crate::storage::FileSource;
+use crate::symbol::bucket::SymbolBucket;
 use crate::text::glyph_store::GlyphStore;
 use crate::tile::OverscaledTileID;
 use crate::tile_store::contents::{Answer, TileAtlases};

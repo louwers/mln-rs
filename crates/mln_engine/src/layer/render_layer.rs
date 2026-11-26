@@ -19,7 +19,6 @@ use mln_style::types::{TranslateAnchorType, VisibilityType};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use smallvec::SmallVec;
 
-use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::camera::{ProjectionData, View};
 use crate::draw::context::Context;
 use crate::draw::tile_render_data::TileAtlasTextures;
@@ -38,6 +37,7 @@ use crate::render::tile::{FoundTile, FrameTile, RenderTile, TileStamp, TileView,
 use crate::render::update_parameters::UpdateParameters;
 use crate::source::render_image_source::ImageSourceRenderData;
 use crate::source::render_source::{RenderSource, TileOrder};
+use crate::symbol::bucket::SymbolBucket;
 use crate::text::atlas::ImagePosition;
 use crate::tile::{OverscaledTileID, UnwrappedTileID};
 use crate::tile_store::contents::{Contents, GeometryContents};
@@ -202,7 +202,7 @@ pub(crate) struct BucketPlacementData {
     pub(crate) tile: PlacedTile,
     pub(crate) feature_index: Option<Arc<FeatureIndex>>,
     pub(crate) source_id: Arc<str>,
-    pub(crate) sort_key_range: Option<crate::buckets::symbol_bucket::SortKeyRange>,
+    pub(crate) sort_key_range: Option<crate::symbol::bucket::SortKeyRange>,
     pub(crate) text_translate: SymbolTranslate,
     pub(crate) icon_translate: SymbolTranslate,
 }

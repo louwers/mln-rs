@@ -32,13 +32,13 @@ use self::tile::TilePlacementState;
 use crate::camera::View;
 use crate::layer::layer_drawing::{BucketChanges, ChangedBuckets};
 use crate::layer::render_layer::{BucketKey, BucketPlacementData, RenderLayer, SymbolBuckets};
-use crate::layout::symbol_instance::SymbolInstance;
 use crate::map::MapMode;
 use crate::placement::collision_grid::Shape;
 use crate::placement::collision_index::CollisionIndex;
 use crate::query::feature_index::FeatureIndex;
 use crate::render::terrain::TerrainElevation;
 use crate::render::update_parameters::UpdateParameters;
+use crate::symbol::instance::SymbolInstance;
 use crate::tile::OverscaledTileID;
 use crate::worker::job::SourceKey;
 
@@ -514,7 +514,7 @@ impl Placement {
         &mut self,
         inputs: &'a PlacementInputs,
         data: &'a BucketPlacementData,
-        bucket: &'a crate::buckets::symbol_bucket::SymbolBucket,
+        bucket: &'a crate::symbol::bucket::SymbolBucket,
         reloaded_placed: &HashSet<BucketKey>,
     ) -> PlacementContext<'a> {
         let (tile_borders, avoid_edges) = self.tile_borders(bucket, &data.tile.matrix);
@@ -779,7 +779,7 @@ impl Placement {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buckets::symbol_bucket::SymbolBucket;
+    use crate::symbol::bucket::SymbolBucket;
 
     #[test]
     fn opacity_state() {

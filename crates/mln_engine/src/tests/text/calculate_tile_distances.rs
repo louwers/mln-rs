@@ -1,8 +1,8 @@
 use geometry::Point;
 use mln_style::feature::GeometryCoordinates;
 
-use crate::geometry::anchor::Anchor;
-use crate::layout::symbol_layout::SymbolLayout;
+use crate::symbol::anchor::Anchor;
+use crate::symbol::layout::SymbolLayout;
 
 // gtest: calculateTileDistances.Point
 #[test]

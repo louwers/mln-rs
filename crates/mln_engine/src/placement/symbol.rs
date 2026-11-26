@@ -8,10 +8,10 @@ use mln_style::types::{SymbolAnchorType, TextWritingModeType};
 
 use super::context::PlacementContext;
 use super::{JointPlacement, Placement, VariableOffset};
-use crate::layout::symbol_instance::{IconPart, SymbolInstance, TextPart};
-use crate::layout::symbol_projection::evaluate_size_for_feature;
 use crate::placement::collision_feature::CollisionFeature;
 use crate::placement::collision_index::{LabelRun, OverlapMode, PlacedFeatureResult};
+use crate::symbol::instance::{IconPart, SymbolInstance, TextPart};
+use crate::symbol::projection::evaluate_size_for_feature;
 use crate::text::anchor_alignment;
 
 impl VariableOffset {

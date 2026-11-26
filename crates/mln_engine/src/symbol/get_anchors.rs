@@ -1,8 +1,8 @@
 use mln_style::constants::EXTENT;
 use mln_style::feature::GeometryCoordinate;
 
-use crate::geometry::anchor::{Anchor, line_length, segments};
-use crate::text::check_max_angle::check_max_angle;
+use crate::symbol::anchor::{Anchor, line_length, segments};
+use crate::symbol::check_max_angle::check_max_angle;
 
 /// The size of a label placed along a line.
 #[derive(Clone, Copy, Debug, PartialEq)]

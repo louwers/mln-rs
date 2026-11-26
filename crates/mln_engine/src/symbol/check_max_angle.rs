@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use glam::Vec2;
 use mln_style::feature::GeometryCoordinate;
 
-use crate::geometry::anchor::{Anchor, segments, vertex_behind};
+use crate::symbol::anchor::{Anchor, segments, vertex_behind};
 
 /// Whether a label of `label_length` centered on `anchor` fits on `line`
 /// with the line turning by at most `max_angle` radians within any stretch

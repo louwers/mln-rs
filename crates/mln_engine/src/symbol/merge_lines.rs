@@ -1,7 +1,7 @@
 use mln_style::feature::GeometryCoordinate;
 use mln_style::hash::HashMap;
 
-use crate::layout::symbol_feature::SymbolFeature;
+use crate::symbol::feature::SymbolFeature;
 
 /// A line's end: the index of its feature's text among the distinct texts,
 /// and the end point.

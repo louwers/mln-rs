@@ -347,7 +347,7 @@ fn symbol_layouts_cross_with_their_glyphs_and_images() {
     };
     assert_eq!(output.deps.images.keys().collect::<Vec<_>>(), ["interstate_1"]);
     for (_, render_data) in output.result.layer_render_data.iter() {
-        let symbols = render_data.bucket.downcast_ref::<crate::buckets::symbol_bucket::SymbolBucket>().unwrap();
+        let symbols = render_data.bucket.downcast_ref::<crate::symbol::bucket::SymbolBucket>().unwrap();
         assert!(symbols.has_text_data() && symbols.has_icon_data());
         assert!(!symbols.state.symbol_instances.is_empty());
     }

@@ -9,13 +9,13 @@ use mln_style::types::{
 };
 use mln_vec_map::VecMap;
 
-use crate::buckets::symbol_bucket::{SymbolBucket, ZoomEvaluatedSize, symbols_by_viewport_y};
 use crate::camera::{ProjectionData, TileProjector, View};
 use crate::layer::render_layer::{BucketPlacementData, PlacedTile, SymbolTranslate};
-use crate::layout::symbol_projection::{LabelPlaneProjector, SymbolHeights};
 use crate::placement::collision_index::{CollisionBoundaries, OverlapMode, PartCollision};
 use crate::render::terrain::TerrainElevation;
 use crate::render::tile::RenderTile;
+use crate::symbol::bucket::{SymbolBucket, ZoomEvaluatedSize, symbols_by_viewport_y};
+use crate::symbol::projection::{LabelPlaneProjector, SymbolHeights};
 use crate::tile::UnwrappedTileID;
 
 /// The collision groups of the sources: with cross-source collisions, every
