@@ -108,13 +108,28 @@ jobs:
         run: |
           rustup toolchain install --profile minimal --no-self-update
 
-      # The version, and the packages to publish: all but the publish = false
-      # ones.
+      # The version, and the packages to publish, each after the ones it
+      # depends on: all but the publish = false ones. Cargo drops in-repo
+      # dev-dependencies from a published package, so they don't count.
       - name: Version
         run: |
           metadata=$(cargo metadata --no-deps --format-version 1 --locked)
           echo "VERSION=$(jq -r '.packages[] | select(.name == "mln-rs") | .version' <<< "$metadata")" >> "$GITHUB_ENV"
-          echo "PACKAGES=$(jq -r '[.packages[] | select(.publish == null) | .name] | join(" ")' <<< "$metadata")" >> "$GITHUB_ENV"
+          packages=$(python3 -I -c '
+          import json, sys
+          packages = {p["name"]: p for p in json.load(sys.stdin)["packages"] if p["publish"] is None}
+          order = []
+          def visit(name):
+              if name not in order:
+                  for dep in packages[name]["dependencies"]:
+                      if dep["kind"] != "dev" and dep["name"] in packages:
+                          visit(dep["name"])
+                  order.append(name)
+          for name in sorted(packages):
+              visit(name)
+          print(" ".join(order))
+          ' <<< "$metadata")
+          echo "PACKAGES=$packages" >> "$GITHUB_ENV"
 
       # Builds each package to publish from its packaged sources. Packages
       # resolve each other locally, so this works before any of them is on
@@ -129,32 +144,37 @@ jobs:
           cargo package --locked "${args[@]}"
 
       # Trusted Publishing: a crates.io token for the crates whose config
-      # names this workflow and environment. It lasts 30 minutes, and the
+      # names this workflow and environment (mise run
+      # release:setup-trusted-publishing). It lasts 30 minutes, and the
       # action's post step revokes it.
       - name: Authenticate with crates.io
         id: crates-io
         uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
 
-      # In dependency order, waiting for each to reach the index. Package
-      # verified these exact packages, so skip the second build. Trusted
-      # Publishing can't create a crate: a release that adds a library stops
-      # at it until an owner publishes it by hand (RELEASING.md).
+      # One at a time, each waiting for the last to reach the index. Package
+      # verified these exact packages, so skip the second build. A crate that
+      # requires Trusted Publishing gets its token. Any other, such as a new
+      # crate, which Trusted Publishing can't create, gets CARGO_REGISTRY_TOKEN.
       - name: Publish
         env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.crates-io.outputs.token }}
+          TRUSTED_PUBLISHING_TOKEN: ${{ steps.crates-io.outputs.token }}
+          ACCOUNT_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
           USER_AGENT: mln-rs-release (https://github.com/maplibre/mln-rs)
         run: |
-          skip=()
           for package in $PACKAGES; do
             if curl -sf -o /dev/null -A "$USER_AGENT" "https://crates.io/api/v1/crates/$package/$VERSION"; then
-              skip+=("--exclude=$package")
+              echo "crates.io has $package $VERSION."
+              continue
             fi
+            # null for a crate that isn't on crates.io yet.
+            trustpub_only=$(curl -sS -A "$USER_AGENT" "https://crates.io/api/v1/crates/$package" | jq .crate.trustpub_only)
+            if [[ $trustpub_only == true ]]; then
+              token=$TRUSTED_PUBLISHING_TOKEN
+            else
+              token=$ACCOUNT_TOKEN
+            fi
+            CARGO_REGISTRY_TOKEN=$token cargo publish --locked --no-verify --package "$package"
           done
-          if [[ ${#skip[@]} == $(wc -w <<< "$PACKAGES") ]]; then
-            echo "crates.io has every package at $VERSION."
-            exit 0
-          fi
-          cargo publish --workspace --locked --no-verify "${skip[@]}"
 
       # The release notes are the version's section of CHANGELOG.md, which
       # the release pull request wrote, or else a link to crates.io.

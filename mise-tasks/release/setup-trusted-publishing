@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+#MISE description="Give the crates a release publishes their Trusted Publishing config on crates.io, and require it (RELEASING.md)"
+# For each package the workspace publishes that is on crates.io: adds a GitHub
+# publisher for this repository's release.yml in the release environment, if
+# the crate doesn't have it, then requires Trusted Publishing for its new
+# versions. Crates not on crates.io yet are skipped: the release workflow
+# publishes them with CARGO_REGISTRY_TOKEN, and you run this again after.
+#
+# Takes a crates.io API token of a crate owner with the trusted-publishing
+# scope (https://crates.io/settings/tokens/new), from CRATES_IO_TOKEN or pasted
+# when asked.
+set -euo pipefail
+
+owner=maplibre
+repo=mln-rs
+workflow=release.yml
+environment=release
+api=https://crates.io/api/v1
+user_agent="mln-rs release:setup-trusted-publishing (https://github.com/maplibre/mln-rs)"
+
+token=${CRATES_IO_TOKEN:-}
+if [[ -z $token ]]; then
+    if [[ ! -t 0 ]]; then
+        echo "Set CRATES_IO_TOKEN, or run this in a terminal to paste the token." >&2
+        exit 1
+    fi
+    read -rsp "crates.io token: " token
+    echo
+fi
+
+# The token goes in through a file descriptor, not the command line, which
+# other processes can read.
+authorized() { curl -sS --fail-with-body -A "$user_agent" -H @<(printf 'Authorization: %s\n' "$token") "$@"; }
+
+crate_json=$(mktemp)
+trap 'rm -f "$crate_json"' EXIT
+failed=()
+while read -r crate; do
+    status=$(curl -sS -o "$crate_json" -w '%{http_code}' -A "$user_agent" "$api/crates/$crate")
+    if [[ $status == 404 ]]; then
+        echo "$crate isn't on crates.io yet."
+        continue
+    elif [[ $status != 200 ]]; then
+        echo "Looking up $crate failed with status $status." >&2
+        failed+=("$crate")
+        continue
+    fi
+
+    if ! configs=$(authorized "$api/trusted_publishing/github_configs?crate=$crate"); then
+        echo "Listing $crate's configs failed: $configs" >&2
+        failed+=("$crate")
+        continue
+    fi
+    matches=$(jq --arg owner "$owner" --arg repo "$repo" --arg workflow "$workflow" --arg env "$environment" '
+        [.github_configs[] | select(
+            (.repository_owner | ascii_downcase) == $owner
+            and (.repository_name | ascii_downcase) == $repo
+            and .workflow_filename == $workflow and .environment == $env)] | length' <<< "$configs")
+    if [[ $matches == 0 ]]; then
+        body=$(jq -n --arg crate "$crate" --arg owner "$owner" --arg repo "$repo" --arg workflow "$workflow" --arg env "$environment" \
+            '{github_config: {crate: $crate, repository_owner: $owner, repository_name: $repo, workflow_filename: $workflow, environment: $env}}')
+        if ! out=$(authorized -X POST -H 'Content-Type: application/json' -d "$body" "$api/trusted_publishing/github_configs"); then
+            echo "Adding $crate's config failed: $out" >&2
+            failed+=("$crate")
+            continue
+        fi
+        echo "Added $crate's config."
+    fi
+
+    # Only once the crate has the config: a crate that requires Trusted
+    # Publishing without one can't be published at all.
+    if [[ $(jq .crate.trustpub_only "$crate_json") != true ]]; then
+        if ! out=$(authorized -X PATCH -H 'Content-Type: application/json' -d '{"crate": {"trustpub_only": true}}' "$api/crates/$crate"); then
+            echo "Requiring Trusted Publishing for $crate failed: $out" >&2
+            failed+=("$crate")
+            continue
+        fi
+        echo "Required Trusted Publishing for $crate."
+    fi
+done < <(cargo metadata --no-deps --format-version 1 --locked | jq -r '.packages[] | select(.publish == null) | .name')
+
+if ((${#failed[@]} != 0)); then
+    echo "Failed for: ${failed[*]}" >&2
+    exit 1
+fi
