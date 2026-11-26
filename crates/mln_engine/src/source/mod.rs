@@ -390,7 +390,23 @@ pub struct OriginUpdate<'a, O: ?Sized> {
     pub(crate) origin: PhantomData<fn(&mut O)>,
 }
 
-impl<'a, O: DataOrigin> OriginUpdate<'a, O> {
+impl<'a, O: ?Sized> OriginUpdate<'a, O> {
+    /// This update as one of the origin `P`'s, for an origin that runs its
+    /// hooks through a non-generic core.
+    pub(crate) fn cast<P: ?Sized>(&mut self) -> OriginUpdate<'_, P> {
+        let parts = &mut self.parts;
+        OriginUpdate {
+            parts: UpdateParts {
+                source: parts.source,
+                tiles: &mut *parts.tiles,
+                ctx: &mut *parts.ctx,
+                map: parts.map,
+                needs_relayout: parts.needs_relayout,
+            },
+            origin: PhantomData,
+        }
+    }
+
     /// The source as the style has it now.
     #[must_use]
     pub fn source(&self) -> &'a Source {
@@ -428,7 +444,9 @@ impl<'a, O: DataOrigin> OriginUpdate<'a, O> {
     pub fn clear_cache(&mut self) {
         self.parts.tiles.reduce_memory_use(self.parts.ctx);
     }
+}
 
+impl<O: DataOrigin> OriginUpdate<'_, O> {
     /// Changes each tile of the cover, not of the cache, that `filter`
     /// picks, through `f`, which gets the origin's state of it.
     pub fn update_tiles(
@@ -466,9 +484,15 @@ pub struct LoadContext<'a, 't, O: ?Sized> {
     origin: PhantomData<fn(&O)>,
 }
 
-impl<'a, 't, O: DataOrigin + ?Sized> LoadContext<'a, 't, O> {
+impl<'a, 't, O: ?Sized> LoadContext<'a, 't, O> {
     pub(crate) fn new(tile: &'a mut TileMut<'t>) -> Self {
         LoadContext { tile, origin: PhantomData }
+    }
+
+    /// This context as one of the origin `P`'s, for an origin that runs its
+    /// hooks through a non-generic core.
+    pub(crate) fn cast<P: ?Sized>(&mut self) -> LoadContext<'_, 't, P> {
+        LoadContext { tile: &mut *self.tile, origin: PhantomData }
     }
 
     /// The tile's id, with its world copy and the zoom it draws at.
@@ -517,11 +541,8 @@ impl<'a, 't, O: DataOrigin + ?Sized> LoadContext<'a, 't, O> {
         self.tile.store().pool.pool()
     }
 
-    /// Starts a load, the tile's latest from now on, whose replies the
-    /// returned replier sends. Replies to the loads before go nowhere. A
-    /// load stays the latest until the next one begins, so an origin that
-    /// stops a load's work ignores the replies it sent before it stopped.
-    pub fn begin_load(&mut self) -> Replier<O::Reply> {
+    /// [`begin_load`](Self::begin_load) of a load whose replies are `R`.
+    pub(crate) fn begin_load_of<R>(&mut self) -> Replier<R> {
         let load = self.tile.next();
         let tile = self.tile.tile_mut();
         tile.load.current = Some(load);
@@ -530,11 +551,10 @@ impl<'a, 't, O: DataOrigin + ?Sized> LoadContext<'a, 't, O> {
         Replier { inbox: self.tile.store().inbox.clone(), tile, load, reply: PhantomData }
     }
 
-    /// Gives the tile what a load brought, which it lays out or decodes:
-    /// `None` for an empty tile, which shows nothing.
-    pub fn deliver(&mut self, item: Option<<O::Data as TileKind>::Item>) {
+    /// [`deliver`](Self::deliver) for tiles of the kind `K`.
+    pub(crate) fn deliver_of<K: TileKind>(&mut self, item: Option<K::Item>) {
         self.tile.tile_mut().load.failed = false;
-        <O::Data as kind::Deliver>::deliver(self.tile, item);
+        K::deliver(self.tile, item);
     }
 
     /// A load found that the source has no tile here: a tile of another
@@ -603,6 +623,22 @@ impl<'a, 't, O: DataOrigin + ?Sized> LoadContext<'a, 't, O> {
     }
 }
 
+impl<O: DataOrigin + ?Sized> LoadContext<'_, '_, O> {
+    /// Starts a load, the tile's latest from now on, whose replies the
+    /// returned replier sends. Replies to the loads before go nowhere. A
+    /// load stays the latest until the next one begins, so an origin that
+    /// stops a load's work ignores the replies it sent before it stopped.
+    pub fn begin_load(&mut self) -> Replier<O::Reply> {
+        self.begin_load_of()
+    }
+
+    /// Gives the tile what a load brought, which it lays out or decodes:
+    /// `None` for an empty tile, which shows nothing.
+    pub fn deliver(&mut self, item: Option<<O::Data as TileKind>::Item>) {
+        self.deliver_of::<O::Data>(item);
+    }
+}
+
 impl<O: DataOrigin<Data = GeometryTiles> + ?Sized> LoadContext<'_, '_, O> {
     /// Drops the tile's data and style, so that it lays out anew once it
     /// has both again.
@@ -632,6 +668,11 @@ impl<'a, T> WorldCopy<'a, T> {
     /// and changes nothing, if the copy has no data to give, as one whose
     /// decode is still pending.
     pub fn take<O: DataOrigin<Tile = T> + ?Sized>(self, cx: &mut LoadContext<'_, '_, O>) -> bool {
+        self.take_into(cx)
+    }
+
+    /// [`take`](Self::take) through a context of any origin's.
+    pub(crate) fn take_into<O: ?Sized>(self, cx: &mut LoadContext<'_, '_, O>) -> bool {
         let Some(answer) = self.answer else {
             return false;
         };
