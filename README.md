@@ -1,6 +1,8 @@
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/7ff2cda8-f564-4e70-a971-d34152f969f0#gh-light-mode-only" alt="MapLibre Logo" width="200">
-  <img src="https://github.com/user-attachments/assets/cee8376b-9812-40ff-91c6-2d53f9581b83#gh-dark-mode-only" alt="MapLibre Logo" width="200">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/cee8376b-9812-40ff-91c6-2d53f9581b83">
+    <img src="https://github.com/user-attachments/assets/7ff2cda8-f564-4e70-a971-d34152f969f0" alt="MapLibre Logo" width="200">
+  </picture>
 </p>
 
 # mln-rs
