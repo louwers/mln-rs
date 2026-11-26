@@ -1,5 +1,7 @@
-// The line atlas keys its textures by the dash arrays' values themselves
-// (their float bits) and the cap.
+//! The dash patterns of `line-dasharray`, as signed distance fields: the
+//! line layer's textures of its dash arrays, and the per-bucket atlas of
+//! dash arrays that differ by feature. Both find a pattern by the dash
+//! array's values themselves (their float bits) and its cap.
 
 use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_gfx::texture2d::SamplerState;
@@ -397,6 +399,8 @@ fn is_dash_key(key: &DashKey, from: &[f32], to: &[f32], cap: LinePatternCap) -> 
     key.2 == cap && same(&key.0, from) && same(&key.1, to)
 }
 
+/// A line layer's textures of the dash patterns of its constant dash
+/// arrays, each of two patterns that a frame cross-fades between.
 #[derive(Default)]
 pub(crate) struct LineAtlas {
     /// The textures, in the order they were made, with their keys.
@@ -406,11 +410,6 @@ pub(crate) struct LineAtlas {
 }
 
 impl LineAtlas {
-    #[must_use]
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
     /// The texture of the dash patterns `from` and `to` with `cap` ends,
     /// made if the atlas has none, which the next upload uploads.
     pub(crate) fn add(&mut self, from: &[f32], to: &[f32], cap: LinePatternCap) -> &DashPatternTexture {
@@ -435,12 +434,11 @@ impl LineAtlas {
             self.textures[index].1.upload(gpu, context);
         }
     }
-
-    #[must_use]
-    pub(crate) fn is_empty(&self) -> bool {
-        self.textures.is_empty()
-    }
 }
+
+// gtests-core: test/geometry/line_atlas.test.cpp.
+#[cfg(test)]
+mod gtest_line_atlas;
 
 #[cfg(test)]
 mod tests {

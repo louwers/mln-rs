@@ -4,7 +4,7 @@
 // standard; the distributions are libstdc++'s (x86-64 Linux, GCC 11 and
 // later), ported below so the atlas sees the same dash arrays as in C++.
 
-use crate::line_atlas::{LineAtlas, LinePatternCap};
+use super::{LineAtlas, LinePatternCap};
 
 struct Mt19937 {
     state: [u32; Self::N],
@@ -126,7 +126,7 @@ fn random() {
     let mut length_distribution = NormalDistribution::new(3.0, 5.0);
 
     for _it in 0..100 {
-        let mut atlas = LineAtlas::new();
+        let mut atlas = LineAtlas::default();
         let mut dasharray: Vec<f32> = Vec::with_capacity(8);
         for _j in 0..100 {
             dasharray.clear();

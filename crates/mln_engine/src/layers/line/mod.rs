@@ -1,6 +1,7 @@
 //! The lines' programs, the blocks they read, and their text in each
 //! language.
 
+pub(crate) mod dashes;
 #[rustfmt::skip]
 mod glsl;
 #[rustfmt::skip]

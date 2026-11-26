@@ -36,15 +36,15 @@ use crate::layer::layer_drawing::{DrawList, DrawObjectsMut, FrameDraw, TileDraws
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::layout::{LayoutParameters, SourceLayer};
 use crate::layer::render_layer::{
-    Atlases, LayerBucket, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+    LayerBucket, LayerUpdateParameters, LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
+use crate::layers::line::dashes::{LineAtlas, LinePatternCap};
 use crate::layers::line::programs;
 use crate::layers::line::ubo::{
     LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,
     LinePatternTilePropsUBO, LineSDFDrawableUBO, LineSDFTilePropsUBO, LineTilePropsUnionUBO,
 };
 use crate::layout::pattern_layout::{LineLayoutSpec, PatternLayout, uses_pattern};
-use crate::line_atlas::{LineAtlas, LinePatternCap};
 use crate::query::feature_index::QueryRegion;
 use crate::render::layer_composite::Composite;
 use crate::render::paint_parameters::PaintParameters;
@@ -84,7 +84,7 @@ pub(crate) struct LineTile {
     /// The passes the draw draws in.
     pass: RenderPass,
     /// The ends of the dashes of the bucket, which pick its pattern in the
-    /// line atlas.
+    /// layer's dash textures.
     dash_cap: LinePatternCap,
     /// Gives a pattern draw the texture of the tile's icon atlas.
     atlases: Option<AtlasBinding>,
@@ -225,6 +225,9 @@ pub(crate) struct RenderLineLayer {
     /// The color ramp's texture, from the first draw that reads it until
     /// the ramp changes. A draw that reads another is built again.
     color_ramp_texture: Option<SharedTexture>,
+    /// The textures of the dash patterns of the layer's tiles' dash arrays
+    /// that don't differ by feature, and of its own.
+    dashes: LineAtlas,
 }
 
 impl RenderLineLayer {
@@ -238,6 +241,7 @@ impl RenderLineLayer {
             color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
             color_ramp_global_state: None,
             color_ramp_texture: None,
+            dashes: LineAtlas::default(),
         }
     }
 
@@ -387,9 +391,9 @@ impl TypedLayer for RenderLineLayer {
         &mut self,
         gpu: &mut dyn Gpu,
         paint_parameters: &mut PaintParameters<'_>,
-        atlases: &Atlases,
         render_tiles: &[FrameTile<'_, Line>],
     ) {
+        self.dashes.upload(gpu, paint_parameters.context);
         let frame = self.drawing.frame_mut();
         let paint = &self.values.evaluated.paint;
         frame.set_composite(Composite::of(*paint.line_layer_opacity.uniform(), *paint.line_layer_blend.uniform()));
@@ -454,7 +458,7 @@ impl TypedLayer for RenderLineLayer {
                 binders,
                 cached,
                 paint_parameters,
-                &atlases.line,
+                &self.dashes,
             ) {
                 let draw = FrameDraw { pass: cached.pass, clip: true, ..FrameDraw::new(Some(tile_id), cached.id) };
                 self.draw_list.push(draw, uniforms);
@@ -467,10 +471,10 @@ impl TypedLayer for RenderLineLayer {
         });
     }
 
-    /// Adds the dash patterns of the tiles' buckets to the line atlas, then
-    /// the layer's own, which the encode draws a dashed tile with when its
-    /// bucket has no per-feature patterns.
-    fn update(&mut self, params: &mut LayerUpdateParameters<'_>, tiles: &[FrameTile<'_, Line>]) {
+    /// Adds the dash patterns of the tiles' buckets to the layer's dash
+    /// textures, then the layer's own, which the encode draws a dashed tile
+    /// with when its bucket has no per-feature patterns.
+    fn update(&mut self, _params: &mut LayerUpdateParameters<'_>, tiles: &[FrameTile<'_, Line>]) {
         for tile in tiles {
             let Some(bucket) = tile.bucket() else {
                 continue;
@@ -480,7 +484,7 @@ impl TypedLayer for RenderLineLayer {
                 continue;
             }
             let cap = dash_pattern_cap(bucket.bucket);
-            params.atlases.line.add(dasharray.from, dasharray.to, cap);
+            self.dashes.add(dasharray.from, dasharray.to, cap);
         }
         // A dashed draw asks for the layer's pattern even where it is empty.
         let layer_dasharray = self.values.evaluated.paint.line_dasharray.faded();
@@ -497,7 +501,7 @@ impl TypedLayer for RenderLineLayer {
                 .is_some_and(|binders| binders.line_dasharray.atlas().is_some());
             if dashed && !per_feature {
                 let cap = dash_pattern_cap(bucket.bucket);
-                params.atlases.line.add(layer_dasharray.from, layer_dasharray.to, cap);
+                self.dashes.add(layer_dasharray.from, layer_dasharray.to, cap);
             }
         }
     }
@@ -569,7 +573,7 @@ impl RenderLineLayer {
 
         let has_dasharray =
             !evaluated.line_dasharray.is_constant() || !evaluated.line_dasharray.faded().from.is_empty();
-        // A constant dash array's texture comes from the line atlas, with the
+        // A constant dash array's texture is the layer's, bound with the
         // draw's uniforms.
         let dash_texture = if evaluated.line_dasharray.is_constant() {
             None
@@ -670,8 +674,8 @@ impl RenderLineLayer {
     /// the tile `tile_id` of `tile_bucket`, whose binders are `binders`, with
     /// the layer's values
     /// `layer`: its matrix, the interpolation of the layer's values, and
-    /// where its patterns are. A dashed draw of the line atlas's pattern
-    /// takes the atlas's texture here; `None` where it has none yet, and
+    /// where its patterns are. A dashed draw of a constant dash array takes
+    /// the layer's texture of it here; `None` where it has none yet, and
     /// doesn't draw.
     fn uniforms(
         layer: &EvaluatedLayer<Line>,
