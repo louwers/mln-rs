@@ -1,21 +1,23 @@
-// A raster tile's bucket lives on the render thread, in its tile's
-// contents. Its layers each keep their own texture of its image, per bucket
-// id (see render_raster_layer.rs), since each samples it its own way.
+// The raster meshes: the quads that draw what a raster or raster-dem tile's
+// mask keeps, which each layer makes of the tiles it draws (`MaskQuads`),
+// and an image source's bucket, which the source keeps.
 
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
 use geometry::Point;
-use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
+use mln_util::hash::{HashMap, HashSet};
+use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
 
-use crate::bucket::BucketBase;
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{Indexes, SharedIndexes};
 use crate::gfx::mesh::Indexed;
 use crate::gfx::segment::SegmentBase;
 use crate::gfx::vertices::SharedVertices;
-use crate::tile_mask::TileMask;
+use crate::tile::raster::Masking;
+use crate::tile_mask::{TileMask, is_whole};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
@@ -31,257 +33,169 @@ impl RasterLayoutVertex {
     }
 }
 
-/// The quads a raster or raster-dem tile draws its image with, of the tiles
-/// its mask keeps, or none where the mask keeps the whole tile, which then
-/// draws the tile's quad. Its upload moves the quads' vertices and indices
-/// into the context's stores, which the draws of the tile's layers share.
-pub(crate) struct MaskedGeometry {
-    pub(crate) mask: TileMask,
-    quads: Quads,
-    /// Counts the changes of the quads, which the layers build their draws
-    /// of the tile again after.
-    generation: u64,
-}
-
-/// Where a mask's quads are.
-enum Quads {
-    /// There are none: the mask keeps the whole tile.
-    Whole,
-    /// Their vertices and indices, until their upload moves them.
-    Data { vertices: Vec<RasterLayoutVertex>, indices: Vec<u16>, segments: Vec<SegmentBase> },
-    /// In the context's stores.
-    Stored(StoredQuads),
-}
-
-/// The quads of a [`MaskedGeometry`] in the context's stores, and the
-/// segments that draw them.
+/// Quads in the context's stores, and the segments that draw them.
 pub(crate) struct StoredQuads {
     pub(crate) vertices: SharedVertices,
     pub(crate) indexes: SharedIndexes,
     pub(crate) segments: Vec<SegmentBase>,
 }
 
-fn full_mask() -> TileMask {
-    let mut mask = TileMask::new();
-    mask.insert(CanonicalTileID::new(0, 0, 0));
-    mask
-}
-
-impl Default for MaskedGeometry {
-    /// The geometry of the whole tile.
-    fn default() -> Self {
-        MaskedGeometry { mask: full_mask(), quads: Quads::Whole, generation: 0 }
+impl StoredQuads {
+    /// `vertices` and `indices` in `context`'s stores, drawn in `segments`.
+    fn new(
+        context: &mut Context,
+        vertices: Vec<RasterLayoutVertex>,
+        indices: Vec<u16>,
+        segments: Vec<SegmentBase>,
+    ) -> Self {
+        let vertices = context.add_vertices(vertices);
+        let indexes = context.add_indexes(Indexes::new(indices));
+        StoredQuads { vertices, indexes, segments }
     }
 }
 
-impl MaskedGeometry {
-    /// The quads' vertices, before their upload moves them.
-    #[cfg(test)]
-    pub(crate) fn vertices(&self) -> &[RasterLayoutVertex] {
-        match &self.quads {
-            Quads::Data { vertices, .. } => vertices,
-            Quads::Whole | Quads::Stored(_) => &[],
-        }
+/// The vertices, indices and segments of a quad for each tile of `mask`,
+/// none for a mask that keeps the whole tile, which draws the tile's quad.
+pub(crate) fn mask_quads(mask: &TileMask) -> (Vec<RasterLayoutVertex>, Vec<u16>, Vec<SegmentBase>) {
+    let mut vertices = Vec::new();
+    let (mut indices, mut segments) = (Vec::new(), Vec::new());
+    if is_whole(mask) {
+        return (vertices, indices, segments);
     }
-
-    /// The quads' indices, before their upload moves them.
-    #[cfg(test)]
-    pub(crate) fn indices(&self) -> &[u16] {
-        match &self.quads {
-            Quads::Data { indices, .. } => indices,
-            Quads::Whole | Quads::Stored(_) => &[],
+    for id in mask {
+        let extent = constants::EXTENT >> id.z;
+        let (left, top) = ((id.x as i32).wrapping_mul(extent), (id.y as i32).wrapping_mul(extent));
+        let first = vertices.len();
+        for (x, y) in [(left, top), (left + extent, top), (left, top + extent), (left + extent, top + extent)] {
+            vertices.push(RasterLayoutVertex::new(Point::new(x as i16, y as i16), Point::new(x as u16, y as u16)));
         }
+        let mut triangles = Indexed { indexes: &mut indices, segments: &mut segments };
+        triangles.add(&mut vertices, first, [[0, 1, 2], [1, 2, 3]]);
     }
+    (vertices, indices, segments)
+}
 
-    /// The segments that draw the quads, none for the whole tile.
-    #[cfg(test)]
-    pub(crate) fn segments(&self) -> &[SegmentBase] {
-        match &self.quads {
-            Quads::Whole => &[],
-            Quads::Data { segments, .. } | Quads::Stored(StoredQuads { segments, .. }) => segments,
+/// The quads of the masks of the raster or raster-dem tiles a layer draws,
+/// by the id of the tiles' contents, as the layer keeps their textures. The
+/// layer's draws of a tile, in the frame and in its drapes, share them.
+#[derive(Default)]
+pub(crate) struct MaskQuads {
+    /// The quads of each masked contents' mask, with the mask's generation;
+    /// `None` for a mask with none.
+    quads: HashMap<SimpleIdentity, (u64, Option<StoredQuads>)>,
+}
+
+impl MaskQuads {
+    /// The quads of `masking`, the mask of the contents `id`, in `context`'s
+    /// stores: those made before, or new ones if there were none or the mask
+    /// changed since. `None` where there are none to draw, and the tile draws
+    /// its quad.
+    pub(crate) fn get(&mut self, context: &mut Context, id: SimpleIdentity, masking: &Masking) -> Option<&StoredQuads> {
+        if !masking.is_masked() {
+            // The quads of a mask before go.
+            self.quads.remove(&id);
+            return None;
         }
-    }
-
-    /// The quads in the context's stores; `None` where there are none to
-    /// draw, and the tile draws its quad.
-    #[must_use]
-    pub(crate) fn quads(&self) -> Option<&StoredQuads> {
-        match &self.quads {
-            Quads::Stored(quads) => Some(quads),
-            Quads::Data { vertices, .. } => {
-                debug_assert!(vertices.is_empty(), "masked geometry drawn before its upload");
-                None
+        let generation = masking.generation();
+        let (_, quads) = match self.quads.entry(id) {
+            Entry::Occupied(entry) if entry.get().0 == generation => entry.into_mut(),
+            entry => {
+                let (vertices, indices, segments) = mask_quads(masking.mask());
+                let quads = (!vertices.is_empty()).then(|| StoredQuads::new(context, vertices, indices, segments));
+                entry.insert_entry((generation, quads)).into_mut()
             }
-            Quads::Whole => None,
-        }
+        };
+        quads.as_ref()
     }
 
-    /// The number of times the quads changed.
+    /// Drops the quads of the contents not in `live`.
+    pub(crate) fn retain(&mut self, live: &HashSet<SimpleIdentity>) {
+        self.quads.retain(|id, _| live.contains(id));
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.quads.clear();
+    }
+}
+
+/// Where an image source's mesh is.
+enum Mesh {
+    /// It has none yet.
+    None,
+    /// Its vertices and indices, until their upload moves them.
+    Data { vertices: Vec<RasterLayoutVertex>, indices: Vec<u16>, segments: Vec<SegmentBase> },
+    /// In the context's stores.
+    Stored(StoredQuads),
+}
+
+/// An image source's image, and the mesh that warps it onto the image's
+/// quad. The raster layers that draw the source share them.
+pub(crate) struct RasterBucket {
+    id: SimpleIdentity,
+    pub(crate) image: Arc<PremultipliedImage>,
+    mesh: Mesh,
+    /// Counts the changes of the mesh, after which the layers build their
+    /// draws of the image again.
+    generation: u64,
+}
+
+impl RasterBucket {
+    /// The bucket of `image`, which it shares, without a mesh.
+    #[must_use]
+    pub(crate) fn new(image: Arc<PremultipliedImage>) -> Self {
+        RasterBucket { id: SimpleIdentity::new(), image, mesh: Mesh::None, generation: 0 }
+    }
+
+    /// The bucket's identity, by which the layers keep the image's texture.
+    #[must_use]
+    pub(crate) fn id(&self) -> SimpleIdentity {
+        self.id
+    }
+
+    /// The number of times the mesh changed.
     #[must_use]
     pub(crate) fn generation(&self) -> u64 {
         self.generation
     }
 
-    /// Makes the geometry `vertices` and `indices` in `segments`.
-    pub(crate) fn set(&mut self, vertices: Vec<RasterLayoutVertex>, indices: Vec<u16>, segments: Vec<SegmentBase>) {
-        self.replace(Quads::Data { vertices, indices, segments });
-    }
-
-    fn replace(&mut self, quads: Quads) {
-        self.quads = quads;
-        self.generation += 1;
-    }
-
-    /// Makes `mask` the geometry's, with the quads of its tiles. Returns
-    /// whether it changed.
-    pub(crate) fn set_mask(&mut self, mask: TileMask) -> bool {
-        if self.mask == mask {
-            return false;
-        }
-        self.mask = mask;
-        if self.mask == full_mask() {
-            // The whole tile draws the tile's quad, which the layers share.
-            self.replace(Quads::Whole);
-            return true;
-        }
-
-        let mut vertices = Vec::new();
-        let (mut indices, mut segments) = (Vec::new(), Vec::new());
-        for id in &self.mask {
-            // A quad for each tile of the mask.
-            let extent = constants::EXTENT >> id.z;
-            let (left, top) = ((id.x as i32).wrapping_mul(extent), (id.y as i32).wrapping_mul(extent));
-            let first = vertices.len();
-            for (x, y) in [(left, top), (left + extent, top), (left, top + extent), (left + extent, top + extent)] {
-                vertices.push(RasterLayoutVertex::new(Point::new(x as i16, y as i16), Point::new(x as u16, y as u16)));
-            }
-            let mut triangles = Indexed { indexes: &mut indices, segments: &mut segments };
-            triangles.add(&mut vertices, first, [[0, 1, 2], [1, 2, 3]]);
-        }
-        self.set(vertices, indices, segments);
-        true
-    }
-
-    /// Whether the geometry has quads: an image's, or those of a mask that
-    /// keeps less than the whole tile.
+    /// Whether the bucket has a mesh.
     #[must_use]
-    pub(crate) fn has_quads(&self) -> bool {
-        !matches!(self.quads, Quads::Whole)
+    pub(crate) fn has_mesh(&self) -> bool {
+        !matches!(self.mesh, Mesh::None)
     }
 
-    /// Makes the whole tile the geometry's mask, unless it is.
-    pub(crate) fn unmask(&mut self) -> bool {
-        self.has_quads() && self.set_mask(full_mask())
-    }
-
-    /// Moves the quads into `context`'s stores, unless they are there or
-    /// there are none.
-    pub(crate) fn upload(&mut self, context: &mut Context) {
-        self.quads = match std::mem::replace(&mut self.quads, Quads::Whole) {
-            Quads::Data { vertices, indices, segments } if !vertices.is_empty() => {
-                let vertices = context.add_vertices(vertices);
-                let indexes = context.add_indexes(Indexes::new(indices));
-                Quads::Stored(StoredQuads { vertices, indexes, segments })
-            }
-            quads => quads,
-        };
-    }
-}
-
-/// A raster tile's image and the geometry that draws it, which the tile
-/// masks (`set_mask`).
-pub(crate) struct RasterBucket {
-    pub(crate) base: BucketBase,
-    pub(crate) image: Option<Arc<PremultipliedImage>>,
-    geometry: MaskedGeometry,
-}
-
-impl RasterBucket {
-    #[must_use]
-    pub(crate) fn new(image: PremultipliedImage) -> Self {
-        Self::with_shared_image(Some(Arc::new(image)))
-    }
-
-    #[must_use]
-    pub(crate) fn with_shared_image(image: Option<Arc<PremultipliedImage>>) -> Self {
-        RasterBucket { base: BucketBase::default(), image, geometry: MaskedGeometry::default() }
-    }
-
-    /// The masked geometry.
-    pub(crate) fn geometry(&self) -> &MaskedGeometry {
-        &self.geometry
-    }
-
-    /// Makes the geometry `vertices` and `indices` in `segments`, which an
-    /// image source warps its image with.
-    pub(crate) fn set_geometry(
+    /// Makes the mesh `vertices` and `indices` in `segments`.
+    pub(crate) fn set_mesh(
         &mut self,
         vertices: Vec<RasterLayoutVertex>,
         indices: Vec<u16>,
         segments: Vec<SegmentBase>,
     ) {
-        self.geometry.set(vertices, indices, segments);
-        self.base.uploaded = false;
+        self.mesh = Mesh::Data { vertices, indices, segments };
+        self.generation += 1;
     }
 
-    pub(crate) fn set_mask(&mut self, mask: TileMask) {
-        if self.geometry.set_mask(mask) {
-            self.base.uploaded = false;
-        }
-    }
-
-    /// [`MaskedGeometry::unmask`].
-    pub(crate) fn unmask(&mut self) {
-        if self.geometry.unmask() {
-            self.base.uploaded = false;
-        }
-    }
-
-    /// Whether the bucket has an image to draw.
+    /// The mesh in the context's stores, once its upload moved it.
     #[must_use]
-    pub(crate) fn has_data(&self) -> bool {
-        self.image.is_some()
-    }
-
-    /// Readies a bucket with an image for its draws, once and again after
-    /// its geometry changes: moves its geometry into `context`'s stores. The
-    /// layers make the image's texture.
-    pub(crate) fn upload(&mut self, context: &mut Context) {
-        if !self.base.uploaded && self.has_data() {
-            self.geometry.upload(context);
-            self.base.uploaded = true;
+    pub(crate) fn quads(&self) -> Option<&StoredQuads> {
+        match &self.mesh {
+            Mesh::Stored(quads) => Some(quads),
+            Mesh::Data { vertices, .. } => {
+                debug_assert!(vertices.is_empty(), "an image source's mesh drawn before its upload");
+                None
+            }
+            Mesh::None => None,
         }
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use mln_util::size::Size;
-
-    use super::*;
-
-    #[test]
-    fn full_mask_uses_the_static_geometry() {
-        let mut bucket = RasterBucket::new(PremultipliedImage::new(Size::new(1, 1)));
-        assert!(bucket.has_data());
-        bucket.set_mask(full_mask());
-        let geometry = bucket.geometry();
-        assert!(geometry.vertices().is_empty() && geometry.segments().is_empty());
-    }
-
-    #[test]
-    fn partial_mask_builds_quads() {
-        let mut bucket = RasterBucket::new(PremultipliedImage::new(Size::new(1, 1)));
-        let mut mask = TileMask::new();
-        mask.insert(CanonicalTileID::new(1, 0, 0));
-        mask.insert(CanonicalTileID::new(1, 1, 1));
-        bucket.set_mask(mask);
-        let geometry = bucket.geometry();
-        assert_eq!(geometry.vertices().len(), 8);
-        assert_eq!(geometry.indices(), [0, 1, 2, 1, 2, 3, 4, 5, 6, 5, 6, 7]);
-        assert_eq!(geometry.segments().len(), 1);
-        assert_eq!(geometry.segments()[0].index_length, 12);
-        assert_eq!(geometry.vertices()[7].a1, [8192, 8192]);
-        assert_eq!(geometry.vertices()[4].a2, [4096, 4096]);
+    /// Moves the mesh into `context`'s stores, unless it is there or there
+    /// is none.
+    pub(crate) fn upload(&mut self, context: &mut Context) {
+        self.mesh = match std::mem::replace(&mut self.mesh, Mesh::None) {
+            Mesh::Data { vertices, indices, segments } if !vertices.is_empty() => {
+                Mesh::Stored(StoredQuads::new(context, vertices, indices, segments))
+            }
+            mesh => mesh,
+        };
     }
 }

@@ -11,9 +11,9 @@ use mln_util::hash::{HashMap, HashSet};
 use mln_util::range::Range;
 use mln_util::tileset::Tileset;
 
-use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::geometry::dem_data::DEMData;
 use crate::tile::contents::Contents;
+use crate::tile::dem::DemContents;
 use crate::tile::loading::DataOrigin;
 use crate::tile::source_tiles::SourceTiles;
 use crate::tile::tile::Tile;
@@ -68,18 +68,18 @@ pub(crate) fn place_in(tile: CanonicalTileID, world: [f64; 2]) -> Option<[f64; 2
     ((0.0..1.0).contains(&u) && ((0.0..1.0).contains(&v) || (last_row && v == 1.0))).then_some([u, v])
 }
 
-/// The bucket of `tile`, a raster-dem source's tile, if it has one with DEM
+/// The contents of `tile`, a raster-dem source's tile, if it has a DEM with
 /// data.
-pub(crate) fn dem_bucket(tile: &Tile) -> Option<&HillshadeBucket> {
+pub(crate) fn dem_contents(tile: &Tile) -> Option<&DemContents> {
     match tile.contents()? {
-        Contents::Dem(bucket) if bucket.has_data() => Some(bucket),
+        Contents::Dem(dem) if dem.has_data() => Some(dem),
         _ => None,
     }
 }
 
 /// The DEM of `tile`, a raster-dem source's tile, if it has one with data.
 fn dem_data(tile: &Tile) -> Option<&DEMData> {
-    dem_bucket(tile).map(HillshadeBucket::dem_data)
+    dem_contents(tile).map(DemContents::dem)
 }
 
 /// How many DEM tiles' ranges [`ElevationRanges`] remembers before it

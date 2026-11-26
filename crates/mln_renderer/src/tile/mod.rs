@@ -11,6 +11,7 @@ pub(crate) mod inbox;
 pub(crate) mod job;
 pub(crate) mod loading;
 pub(crate) mod pipeline;
+pub(crate) mod raster;
 pub(crate) mod source_tiles;
 pub(crate) mod store;
 pub(crate) mod tile_mut;

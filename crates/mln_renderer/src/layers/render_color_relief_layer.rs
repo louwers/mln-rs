@@ -1,7 +1,7 @@
-// A tile's draw is built again only when the bucket's masked geometry
-// changed, and the layer keeps each bucket's DEM texture by its id. The
-// elevation stops texture is made anew when the ramp changes, since its size
-// changes with the ramp.
+// A tile's draw is built again only when the tile's mask changed, and the
+// layer keeps each DEM's texture and the quads of each mask by the id of the
+// tile's contents. The elevation stops texture is made anew when the ramp
+// changes, since its size changes with the ramp.
 
 use std::collections::hash_map::Entry;
 use std::mem::offset_of;
@@ -34,8 +34,7 @@ use mln_util::size::Size;
 use super::cast_matrix;
 use crate::bucket::NoBucket;
 use crate::bucket_geometry::copied_vertices;
-use crate::buckets::hillshade_bucket::HillshadeBucket;
-use crate::buckets::raster_bucket::RasterLayoutVertex;
+use crate::buckets::raster_bucket::{MaskQuads, RasterLayoutVertex};
 use crate::draw::{DrawGeometry, DrawObjects, Textures};
 use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::gfx::segment::SegmentBase;
@@ -55,6 +54,7 @@ use crate::render_layer::{
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tile::FrameTile;
+use crate::tile::dem::DemContents;
 use crate::tile_matrix::to_projection_ubo;
 
 /// The ids of the buffers that the draws bind.
@@ -67,9 +67,8 @@ const COLOR_STOPS_SLOT: usize = programs::COLOR_RELIEF.texture_slot("color_stops
 const ELEVATION_STOPS_SLOT: usize = programs::COLOR_RELIEF.texture_slot("elevation_stops");
 const IMAGE_SLOT: usize = programs::COLOR_RELIEF.texture_slot("image");
 
-/// What the layer keeps of a tile: the draw that colors its bucket's DEM,
-/// with the generation of the bucket's geometry and the DEM's properties it
-/// was built with.
+/// What the layer keeps of a tile: the draw that colors its DEM, with the
+/// generation of the tile's mask and the DEM's properties it was built with.
 pub(crate) struct ReliefTile {
     draw: KeptDraw,
     geometry_generation: u64,
@@ -98,7 +97,7 @@ struct ReliefUniforms {
 impl LayerType for ColorRelief {
     type Layout = NoLayout;
     type Bucket = NoBucket;
-    type TileBucket<'a> = &'a HillshadeBucket;
+    type TileBucket<'a> = &'a DemContents;
 
     fn render_layer(style: Arc<LayerStyle<ColorRelief>>) -> Box<dyn RenderLayer> {
         Box::new(RenderColorReliefLayer::new(style))
@@ -133,12 +132,14 @@ pub(crate) struct RenderColorReliefLayer {
     static_data_indices: Option<SharedIndexes>,
     globe_meshes: GlobeTileMeshCache<RasterLayoutVertex>,
 
-    /// The DEM texture of each bucket, made from its current, possibly
-    /// backfilled, DEM image, with the bucket's prepare generation it was
-    /// made at.
+    /// The texture of each tile's DEM, by the id of its contents, made from
+    /// its current, possibly backfilled, image, with the generation of the
+    /// DEM's border it was made at.
     dem_textures: HashMap<SimpleIdentity, (SharedTexture, u64)>,
-    /// The buckets of the frame's tiles, whose DEM textures stay.
-    live_buckets: HashSet<SimpleIdentity>,
+    /// The quads of each tile's mask, by the id of its contents.
+    mask_quads: MaskQuads,
+    /// The contents of the frame's tiles, whose DEM textures and quads stay.
+    live_dems: HashSet<SimpleIdentity>,
 }
 
 impl RenderColorReliefLayer {
@@ -163,7 +164,8 @@ impl RenderColorReliefLayer {
             static_data_indices: None,
             globe_meshes: GlobeTileMeshCache::new(),
             dem_textures: HashMap::default(),
-            live_buckets: HashSet::default(),
+            mask_quads: MaskQuads::default(),
+            live_dems: HashSet::default(),
         };
 
         // Initialize with default color ramp immediately to avoid
@@ -370,6 +372,7 @@ impl TypedLayer for RenderColorReliefLayer {
             static_data_indices,
             globe_meshes,
             dem_textures,
+            mask_quads,
             ..
         } = self;
 
@@ -440,17 +443,17 @@ impl TypedLayer for RenderColorReliefLayer {
                 continue;
             };
 
-            let Some(bucket) = tile.bucket().filter(|bucket| bucket.has_data()) else {
+            let Some(dem) = tile.bucket().filter(|dem| dem.has_data()) else {
                 *entry.value = None;
                 continue;
             };
-            let bucket_id = bucket.base.bucket_id;
-            // A draw built from another bucket goes.
-            entry.set_bucket(bucket_id);
+            let dem_id = dem.id();
+            // A draw built from other contents goes.
+            entry.set_bucket(dem_id);
 
-            let geometry = bucket.geometry();
-            let geometry_generation = geometry.generation();
-            let dem_data = bucket.dem_data();
+            let masking = &dem.masking;
+            let geometry_generation = masking.generation();
+            let dem_data = dem.dem();
             if dem_data.image().valid() {
                 let unpack = DemUnpack::of(dem_data.encoding);
                 let tile_props = ColorReliefTilePropsUBO {
@@ -461,9 +464,9 @@ impl TypedLayer for RenderColorReliefLayer {
                     color_ramp_size: *color_ramp_size as i32,
                     unpack_scale: unpack.scale,
                 };
-                let generation = bucket.render_target_generation();
+                let generation = dem.generation();
                 let context = &mut *paint_parameters.context;
-                let (dem_texture, _) = match dem_textures.entry(bucket_id) {
+                let (dem_texture, _) = match dem_textures.entry(dem_id) {
                     Entry::Occupied(entry) if entry.get().1 == generation => entry.into_mut(),
                     entry => {
                         let texture = context.add_texture_with(|texture| {
@@ -482,18 +485,18 @@ impl TypedLayer for RenderColorReliefLayer {
                 ];
 
                 if entry.value.as_ref().is_some_and(|cached| cached.geometry_generation != geometry_generation) {
-                    // The masked geometry changed (see the file comment).
+                    // The mask changed (see the file comment).
                     *entry.value = None;
                 }
                 if let Some(cached) = entry.value.as_mut() {
                     // The DEM and the ramps' textures change with the
-                    // bucket's generation and the ramps.
+                    // DEM's generation and the ramps.
                     for (slot, texture) in textures {
                         cached.draw.objects.set_texture(slot, Some(texture));
                     }
                 } else {
                     // The tile's geometry: the globe's mesh of its mask, the
-                    // mask's geometry, or the whole tile's quad.
+                    // mask's quads, or the whole tile's quad.
                     let (vertices, vertex_count, indices, segments): (
                         SharedVertices,
                         usize,
@@ -501,14 +504,14 @@ impl TypedLayer for RenderColorReliefLayer {
                         Vec<SegmentBase>,
                     ) = if base.projection_variant == ProjectionVariant::Globe {
                         let globe_mesh =
-                            globe_meshes.get(context, &tile_id.canonical, &geometry.mask, RasterLayoutVertex::new);
+                            globe_meshes.get(context, &tile_id.canonical, masking.mask(), RasterLayoutVertex::new);
                         (
                             globe_mesh.vertices.clone(),
                             globe_mesh.vertices.count(),
                             globe_mesh.indexes(),
                             globe_mesh.segments.iter().map(SegmentBase::copy).collect(),
                         )
-                    } else if let Some(quads) = geometry.quads() {
+                    } else if let Some(quads) = mask_quads.get(context, dem_id, masking) {
                         (
                             quads.vertices.clone(),
                             quads.vertices.count(),
@@ -573,17 +576,19 @@ impl TypedLayer for RenderColorReliefLayer {
         });
     }
 
-    /// Drops the DEM textures of the buckets of tiles the frame doesn't
-    /// draw, in every frame, including one the layer draws nothing in.
+    /// Drops the DEM textures and quads of the tiles the frame doesn't draw,
+    /// in every frame, including one the layer draws nothing in.
     fn update(&mut self, _params: &mut LayerUpdateParameters<'_>, tiles: &[FrameTile<'_, ColorRelief>]) {
-        let live_buckets = &mut self.live_buckets;
-        live_buckets.clear();
-        live_buckets.extend(tiles.iter().filter_map(|tile| Some(tile.bucket()?.base.bucket_id)));
-        self.dem_textures.retain(|id, _| live_buckets.contains(id));
+        let live_dems = &mut self.live_dems;
+        live_dems.clear();
+        live_dems.extend(tiles.iter().filter_map(|tile| Some(tile.bucket()?.id())));
+        self.dem_textures.retain(|id, _| live_dems.contains(id));
+        self.mask_quads.retain(live_dems);
     }
 
     fn release(&mut self) {
         self.dem_textures.clear();
+        self.mask_quads.clear();
     }
 }
 

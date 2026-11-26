@@ -1,5 +1,5 @@
-// The DEM shares its image, which textures copy (`image`): the DEM lives in
-// a bucket, which is Send, and textures live on the render thread. A
+// The DEM shares its image, which textures copy (`image`): the DEM crosses
+// from the workers, so it is Send, and textures live on the render thread. A
 // backfill copies the image first if anything else holds it.
 
 use std::sync::{Arc, OnceLock};

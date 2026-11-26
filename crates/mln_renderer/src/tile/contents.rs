@@ -25,8 +25,6 @@ use mln_vec_map::{VecMap, VecSet};
 
 use crate::bucket::{Bucket, LayerFeatureStates, UploadNeeds};
 use crate::bucket_geometry::{BucketGeometry, GeometryUpload};
-use crate::buckets::hillshade_bucket::HillshadeBucket;
-use crate::buckets::raster_bucket::RasterBucket;
 use crate::geometry::feature_index::{FeatureIndex, FeatureSelection, QueryLayers, QueryRegion, QueryResults};
 use crate::gfx::context::Context;
 use crate::gfx::dynamic_texture_atlas::{AtlasLease, BinUse, DynamicTextureAtlas};
@@ -40,6 +38,8 @@ use crate::render_orchestrator::drop_on_workers;
 use crate::render_tile::ViewPlace;
 use crate::source_state::SourceFeatureState;
 use crate::text::glyph_store::{GlyphRanges, ShapeResults};
+use crate::tile::dem::DemContents;
+use crate::tile::raster::{Masking, RasterContents};
 use crate::tile_mask::TileMask;
 use crate::tile_render_data::TileAtlasTextures;
 
@@ -549,9 +549,9 @@ impl GeometryContents {
 pub(crate) enum Contents {
     Geometry(GeometryContents),
     /// A raster tile's image.
-    Raster(RasterBucket),
+    Raster(RasterContents),
     /// A raster-dem tile's DEM.
-    Dem(HillshadeBucket),
+    Dem(DemContents),
     /// A raster tile without data: it draws nothing in its place.
     Empty,
 }
@@ -566,19 +566,16 @@ impl Contents {
         }
     }
 
-    /// The bucket that these contents show at `place`, with the generations
-    /// of its geometry and of what is prepared from it, its DEM's border.
+    /// The bucket or the raster or raster-dem contents that these contents
+    /// show at `place`, with the generations of their mask and of their
+    /// DEM's border.
     pub(crate) fn stamp(&self, place: ViewPlace) -> Option<(SimpleIdentity, [u64; 2])> {
         match (self, place) {
             (Contents::Geometry(contents), ViewPlace::Laid(index)) => {
                 Some((contents.result.layer_render_data.laid(index)?.bucket.id(), [0, 0]))
             }
-            (Contents::Raster(bucket), ViewPlace::Own) => {
-                Some((bucket.base.bucket_id, [bucket.geometry().generation(), 0]))
-            }
-            (Contents::Dem(bucket), ViewPlace::Own) => {
-                Some((bucket.base.bucket_id, [bucket.geometry().generation(), bucket.render_target_generation()]))
-            }
+            (Contents::Raster(raster), ViewPlace::Own) => Some((raster.id(), [raster.masking.generation(), 0])),
+            (Contents::Dem(dem), ViewPlace::Own) => Some((dem.id(), [dem.masking.generation(), dem.generation()])),
             _ => None,
         }
     }
@@ -597,31 +594,36 @@ impl Contents {
         }
     }
 
-    /// Whether a raster or raster-dem tile is masked: it draws quads of the
-    /// tiles its mask keeps rather than its whole extent.
+    /// The parts of a raster or raster-dem tile's extent that it draws.
+    fn masking_mut(&mut self) -> Option<&mut Masking> {
+        match self {
+            Contents::Raster(raster) => Some(&mut raster.masking),
+            Contents::Dem(dem) => Some(&mut dem.masking),
+            Contents::Geometry(_) | Contents::Empty => None,
+        }
+    }
+
+    /// Whether a raster or raster-dem tile is masked: it draws the tiles its
+    /// mask keeps rather than its whole extent.
     pub(crate) fn is_masked(&self) -> bool {
         match self {
-            Contents::Raster(bucket) => bucket.geometry().has_quads(),
-            Contents::Dem(bucket) => bucket.geometry().has_quads(),
+            Contents::Raster(raster) => raster.masking.is_masked(),
+            Contents::Dem(dem) => dem.masking.is_masked(),
             Contents::Geometry(_) | Contents::Empty => false,
         }
     }
 
-    /// Masks a raster or raster-dem tile's whole extent again, which drops
-    /// the quads of its last mask, for a tile that stops drawing.
+    /// Masks a raster or raster-dem tile's whole extent again, for a tile
+    /// that stops drawing, so that it draws whole until it is masked anew.
     pub(crate) fn unmask(&mut self) {
-        match self {
-            Contents::Raster(bucket) => bucket.unmask(),
-            Contents::Dem(bucket) => bucket.unmask(),
-            Contents::Geometry(_) | Contents::Empty => {}
+        if let Some(masking) = self.masking_mut() {
+            masking.unmask();
         }
     }
 
     pub(crate) fn set_mask(&mut self, mask: TileMask) {
-        match self {
-            Contents::Raster(bucket) => bucket.set_mask(mask),
-            Contents::Dem(bucket) => bucket.set_mask(mask),
-            Contents::Geometry(_) | Contents::Empty => {}
+        if let Some(masking) = self.masking_mut() {
+            masking.set(mask);
         }
     }
 

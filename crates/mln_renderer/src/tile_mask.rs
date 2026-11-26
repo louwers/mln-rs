@@ -9,3 +9,9 @@ use mln_tile_id::CanonicalTileID;
 /// rendered. `TileMasks` are typically generated with
 /// `algorithm::updateTileMasks()`.
 pub(crate) type TileMask = BTreeSet<CanonicalTileID>;
+
+/// Whether `mask` keeps a tile's whole extent: it is `{ 0, 0, 0 }`.
+#[must_use]
+pub(crate) fn is_whole(mask: &TileMask) -> bool {
+    mask.len() == 1 && mask.first() == Some(&CanonicalTileID::new(0, 0, 0))
+}

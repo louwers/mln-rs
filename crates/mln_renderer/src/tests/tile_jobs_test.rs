@@ -824,10 +824,10 @@ fn raster_tiles(pool: &TaskGroup, workers: Box<dyn TileWorkers>, kind: TileKind)
 
 /// The size of the image a raster tile shows.
 fn raster_size(tiles: &OneTile, x: u32) -> Option<Size> {
-    let Some(Contents::Raster(bucket)) = tiles.tile_at(&OverscaledTileID::from_zxy(1, x, 0)).contents() else {
+    let Some(Contents::Raster(raster)) = tiles.tile_at(&OverscaledTileID::from_zxy(1, x, 0)).contents() else {
         return None;
     };
-    bucket.image.as_ref().map(|image| image.size)
+    Some(raster.image.size)
 }
 
 /// Decodes come back in any order: each tile takes only the reply of its
@@ -891,10 +891,10 @@ fn a_worker_lost_during_a_decode() {
     instances.step(0);
     tiles.update();
     assert!(tiles.tile().is_complete() && tiles.tile().is_renderable());
-    let Some(Contents::Dem(bucket)) = tiles.tile().contents() else {
+    let Some(Contents::Dem(dem)) = tiles.tile().contents() else {
         panic!("a DEM");
     };
-    assert_eq!(bucket.dem_data().dim, 16);
+    assert_eq!(dem.dem().dim, 16);
     drop(tiles);
     pool.wait();
 }

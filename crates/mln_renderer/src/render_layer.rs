@@ -124,7 +124,7 @@ impl<'a, T: LayerType> TileView<'a> for LayerBucket<'a, T> {
 
     fn at(contents: &'a Contents, place: ViewPlace) -> Option<Self> {
         let ViewPlace::Laid(index) = place else {
-            debug_assert!(false, "a tile's own bucket's place for a laid-out layer");
+            debug_assert!(false, "a tile's own contents' place for a laid-out layer");
             return None;
         };
         LayerBucket::laid(contents.geometry()?, index)
@@ -1024,7 +1024,7 @@ impl<L: TypedLayer> LayerParts for L {
                 stamps.extend(source.stamps(found, drape, globe));
             }
             Some(LayerSource::Image(image)) => {
-                let bucket = image.bucket.map(|bucket| (bucket.base.bucket_id, bucket.geometry().generation()));
+                let bucket = image.bucket.map(|bucket| (bucket.id(), bucket.generation()));
                 stamps.extend(image.copies_over(&drape, globe).map(|copy| TileStamp {
                     tile: copy.overscale_to(copy.canonical.z),
                     bucket: bucket.map(|(id, _)| id),

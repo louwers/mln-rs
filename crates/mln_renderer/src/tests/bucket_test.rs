@@ -18,9 +18,8 @@ use mln_style::property::value::PropertyValue;
 use mln_text::atlas::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_util::geometry::FeatureType;
-use mln_util::image::PremultipliedImage;
+use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
-use mln_util::size::Size;
 use mln_vec_map::VecMap;
 use parking_lot::Mutex;
 
@@ -32,7 +31,7 @@ use crate::buckets::circle_bucket::CircleBucket;
 use crate::buckets::fill_bucket::FillBucket;
 use crate::buckets::fill_extrusion_bucket::{FillExtrusionBucket, tile_units_per_meter};
 use crate::buckets::line_bucket::LineBucket;
-use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
+use crate::buckets::raster_bucket::{MaskQuads, RasterLayoutVertex, mask_quads};
 use crate::buckets::symbol_bucket::{SymbolBucket, SymbolBucketStyle, SymbolLayoutFlags};
 use crate::gfx::context::Context;
 use crate::gfx::indexes::DrawIndexes;
@@ -41,6 +40,7 @@ use crate::gfx::segment::SegmentBase;
 use crate::layer_type::EvaluatedLayer;
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::layout::symbol_instance::SymbolInstancePools;
+use crate::tile::raster::Masking;
 use crate::tile_mask::TileMask;
 use crate::util::tessellator::Tessellator;
 
@@ -505,29 +505,25 @@ fn symbol_bucket() {
 
 // gtest: Buckets.RasterBucket
 #[test]
-fn a_raster_buckets_upload_moves_its_quads_into_the_stores_once_per_mask() {
-    let rgba = PremultipliedImage::new(Size::new(1, 1));
-    let mut bucket = RasterBucket::new(rgba);
-    assert!(bucket.has_data());
-    bucket.set_mask(mask(&[(1, 0, 0), (1, 1, 1)]));
+fn a_layers_mask_quads_go_into_the_stores_once_per_mask() {
+    let mut masking = Masking::default();
+    masking.set(mask(&[(1, 0, 0), (1, 1, 1)]));
+    let id = SimpleIdentity::new();
+    let mut quads = MaskQuads::default();
 
     with_context(|_, context| {
-        bucket.upload(context);
-        let geometry = bucket.geometry();
-        let quads = geometry.quads().expect("the mask's quads");
-        assert_eq!(context.vertices(&quads.vertices).expect("stored").count(), 8);
-        assert!(geometry.vertices().is_empty(), "the upload moves the vertices");
-        assert_eq!(quads.vertices.count(), 8);
+        let first = quads.get(context, id, &masking).expect("the mask's quads");
+        assert_eq!(context.vertices(&first.vertices).expect("stored").count(), 8);
+        let first = first.vertices.clone();
+        let again = quads.get(context, id, &masking).expect("the mask's quads");
+        assert!(again.vertices == first, "made once per mask");
 
-        bucket.set_mask(mask(&[(1, 0, 0)]));
-        assert!(!bucket.base.uploaded);
-        bucket.upload(context);
-        let quads = bucket.geometry().quads().expect("the new mask's quads");
-        assert_eq!(context.vertices(&quads.vertices).expect("stored").count(), 4);
+        masking.set(mask(&[(1, 0, 0)]));
+        let quads_of_new_mask = quads.get(context, id, &masking).expect("the new mask's quads");
+        assert_eq!(context.vertices(&quads_of_new_mask.vertices).expect("stored").count(), 4);
 
-        bucket.set_mask(mask(&[(0, 0, 0)]));
-        bucket.upload(context);
-        assert!(bucket.geometry().quads().is_none(), "the whole tile draws the tile's quad");
+        masking.set(mask(&[(0, 0, 0)]));
+        assert!(quads.get(context, id, &masking).is_none(), "the whole tile draws the tile's quad");
     });
 }
 
@@ -551,35 +547,27 @@ fn raster_vertex(p: (i16, i16), t: (u16, u16)) -> RasterLayoutVertex {
 // gtest: Buckets.RasterBucketMaskEmpty
 #[test]
 fn raster_bucket_mask_empty() {
-    let mut bucket = RasterBucket::with_shared_image(None);
-    bucket.set_mask(mask(&[]));
-    let geometry = bucket.geometry();
-    assert_eq!(Vec::<RasterLayoutVertex>::new(), geometry.vertices());
-    assert_eq!(Vec::<u16>::new(), geometry.indices());
-    assert_eq!(Vec::<(usize, usize, usize, usize)>::new(), segment_tuples(geometry.segments()));
+    let (vertices, indices, segments) = mask_quads(&mask(&[]));
+    assert_eq!(Vec::<RasterLayoutVertex>::new(), vertices);
+    assert_eq!(Vec::<u16>::new(), indices);
+    assert_eq!(Vec::<(usize, usize, usize, usize)>::new(), segment_tuples(&segments));
 }
 
 // gtest: Buckets.RasterBucketMaskNoChildren
 #[test]
 fn raster_bucket_mask_no_children() {
-    let mut bucket = RasterBucket::with_shared_image(None);
-    bucket.set_mask(mask(&[(0, 0, 0)]));
-
     // A mask of 0/0/0 doesn't produce buffers since we're instead using the
     // global shared buffers.
-    let geometry = bucket.geometry();
-    assert_eq!(Vec::<RasterLayoutVertex>::new(), geometry.vertices());
-    assert_eq!(Vec::<u16>::new(), geometry.indices());
-    assert_eq!(Vec::<(usize, usize, usize, usize)>::new(), segment_tuples(geometry.segments()));
+    let (vertices, indices, segments) = mask_quads(&mask(&[(0, 0, 0)]));
+    assert_eq!(Vec::<RasterLayoutVertex>::new(), vertices);
+    assert_eq!(Vec::<u16>::new(), indices);
+    assert_eq!(Vec::<(usize, usize, usize, usize)>::new(), segment_tuples(&segments));
 }
 
 // gtest: Buckets.RasterBucketMaskTwoChildren
 #[test]
 fn raster_bucket_mask_two_children() {
-    let mut bucket = RasterBucket::with_shared_image(None);
-    bucket.set_mask(mask(&[(1, 0, 0), (1, 1, 1)]));
-
-    let geometry = bucket.geometry();
+    let (vertices, indices, segments) = mask_quads(&mask(&[(1, 0, 0), (1, 1, 1)]));
     assert_eq!(
         vec![
             // 1/0/1
@@ -593,7 +581,7 @@ fn raster_bucket_mask_two_children() {
             raster_vertex((4096, 8192), (4096, 8192)),
             raster_vertex((8192, 8192), (8192, 8192)),
         ],
-        geometry.vertices()
+        vertices
     );
 
     assert_eq!(
@@ -603,19 +591,17 @@ fn raster_bucket_mask_two_children() {
             // 1/1/1
             4, 5, 6, 5, 6, 7,
         ],
-        geometry.indices()
+        indices
     );
 
-    assert_eq!(vec![(0, 0, 8, 12)], segment_tuples(geometry.segments()));
+    assert_eq!(vec![(0, 0, 8, 12)], segment_tuples(&segments));
 }
 
 // gtest: Buckets.RasterBucketMaskComplex
 #[test]
 fn raster_bucket_mask_complex() {
-    let mut bucket = RasterBucket::with_shared_image(None);
-    bucket.set_mask(mask(&[(1, 0, 1), (1, 1, 0), (2, 2, 3), (2, 3, 2), (3, 6, 7), (3, 7, 6)]));
-
-    let geometry = bucket.geometry();
+    let (vertices, indices, segments) =
+        mask_quads(&mask(&[(1, 0, 1), (1, 1, 0), (2, 2, 3), (2, 3, 2), (3, 6, 7), (3, 7, 6)]));
     assert_eq!(
         vec![
             // 1/0/1
@@ -649,7 +635,7 @@ fn raster_bucket_mask_complex() {
             raster_vertex((7168, 7168), (7168, 7168)),
             raster_vertex((8192, 7168), (8192, 7168)),
         ],
-        geometry.vertices()
+        vertices
     );
 
     assert_eq!(
@@ -667,10 +653,10 @@ fn raster_bucket_mask_complex() {
             // 3/7/6
             20, 21, 22, 21, 22, 23,
         ],
-        geometry.indices()
+        indices
     );
 
-    assert_eq!(vec![(0, 0, 24, 36)], segment_tuples(geometry.segments()));
+    assert_eq!(vec![(0, 0, 24, 36)], segment_tuples(&segments));
 }
 
 type Records = Arc<Mutex<Vec<(EventSeverity, Event, i64, String)>>>;

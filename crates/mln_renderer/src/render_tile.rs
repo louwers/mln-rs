@@ -12,12 +12,12 @@ use mln_style::types::TranslateAnchorType;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::identity::SimpleIdentity;
 
-use crate::buckets::hillshade_bucket::HillshadeBucket;
-use crate::buckets::raster_bucket::RasterBucket;
 use crate::layer_type::LayerType;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render_pass::RenderPass;
 use crate::tile::contents::Contents;
+use crate::tile::dem::DemContents;
+use crate::tile::raster::RasterContents;
 use crate::tile::tile::Tile;
 
 pub(crate) struct RenderTile {
@@ -103,13 +103,13 @@ impl RenderTile {
 pub(crate) enum ViewPlace {
     /// The layer's place among the layers of the tile's layout.
     Laid(usize),
-    /// The tile's own bucket, a raster or raster-dem tile's, which every
+    /// The tile's own contents, a raster or raster-dem tile's, which every
     /// layer of its source draws.
     Own,
 }
 
 /// What a frame's tile shows a layer of some type: its bucket in the tile's
-/// layout, or a raster or raster-dem tile's own bucket. A frame finds it by
+/// layout, or a raster or raster-dem tile's own contents. A frame finds it by
 /// the layer's id once ([`find`](Self::find)), in its update, and its encode
 /// takes it again from where it was found ([`at`](Self::at)).
 pub(crate) trait TileView<'a>: Copy {
@@ -134,29 +134,29 @@ pub(crate) trait TileView<'a>: Copy {
     }
 }
 
-impl<'a> TileView<'a> for &'a RasterBucket {
+impl<'a> TileView<'a> for &'a RasterContents {
     fn find(contents: &'a Contents, _layer_id: &str) -> Option<(Self, ViewPlace)> {
         Some((Self::at(contents, ViewPlace::Own)?, ViewPlace::Own))
     }
 
     fn at(contents: &'a Contents, place: ViewPlace) -> Option<Self> {
-        debug_assert_eq!(place, ViewPlace::Own, "a laid-out layer's place for a tile's own bucket");
+        debug_assert_eq!(place, ViewPlace::Own, "a laid-out layer's place for a tile's own contents");
         match contents {
-            Contents::Raster(bucket) => Some(bucket),
+            Contents::Raster(raster) => Some(raster),
             _ => None,
         }
     }
 }
 
-impl<'a> TileView<'a> for &'a HillshadeBucket {
+impl<'a> TileView<'a> for &'a DemContents {
     fn find(contents: &'a Contents, _layer_id: &str) -> Option<(Self, ViewPlace)> {
         Some((Self::at(contents, ViewPlace::Own)?, ViewPlace::Own))
     }
 
     fn at(contents: &'a Contents, place: ViewPlace) -> Option<Self> {
-        debug_assert_eq!(place, ViewPlace::Own, "a laid-out layer's place for a tile's own bucket");
+        debug_assert_eq!(place, ViewPlace::Own, "a laid-out layer's place for a tile's own contents");
         match contents {
-            Contents::Dem(bucket) => Some(bucket),
+            Contents::Dem(dem) => Some(dem),
             _ => None,
         }
     }
@@ -176,9 +176,9 @@ impl TileView<'_> for NoTileBucket {
     }
 }
 
-/// What a layer draws of a frame's tile: the tile, the bucket it shows the
-/// layer, and the generations of the bucket's geometry and of what is
-/// prepared from it. It changes whenever the layer's draws of the tile
+/// What a layer draws of a frame's tile: the tile, the bucket or contents
+/// it shows the layer, and the generations of their mask or mesh and of
+/// their DEM's border. It changes whenever the layer's draws of the tile
 /// would.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TileStamp {

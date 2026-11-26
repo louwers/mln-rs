@@ -733,8 +733,10 @@ fn the_ground_the_map_stands_on_is_the_height_rule_on_the_drawn_dem() {
         .expect("a tile at the center");
     let (dem, coords) = tile.dem.expect("its DEM");
     let source = load.store.source(load.render_source.tiles().unwrap()).unwrap();
-    let Some(Contents::Dem(bucket)) = source.tile(&dem).and_then(Tile::contents) else { panic!("the DEM tile {dem}") };
-    let data = bucket.dem_data();
+    let Some(Contents::Dem(contents)) = source.tile(&dem).and_then(Tile::contents) else {
+        panic!("the DEM tile {dem}")
+    };
+    let data = contents.dem();
     let (dim, stride) = (data.dim as u32, data.stride as usize);
     let unpack = DemUnpack::of(RasterEncoding::Terrarium);
     let texel = |x: u32, y: u32| {

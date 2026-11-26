@@ -20,7 +20,7 @@ fn tiles(test: &RasterTileTest) -> OneTile {
 /// The size of the image tile `id` shows.
 fn image_size(tiles: &OneTile, id: &OverscaledTileID) -> Option<Size> {
     match tiles.tile_at(id).contents() {
-        Some(Contents::Raster(bucket)) => bucket.image.as_ref().map(|image| image.size),
+        Some(Contents::Raster(raster)) => Some(raster.image.size),
         _ => None,
     }
 }

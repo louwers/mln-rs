@@ -40,7 +40,7 @@ pub(crate) trait LayerType: StyleLayerType {
     /// What a frame's tile shows a layer of the type, which its draws draw:
     /// its bucket in the tile's layout
     /// ([`LayerBucket`](crate::render_layer::LayerBucket)), a raster or
-    /// raster-dem tile's own bucket, or nothing for a type without a source
+    /// raster-dem tile's own contents, or nothing for a type without a source
     /// ([`NoTileBucket`](crate::render_tile::NoTileBucket)).
     type TileBucket<'a>: TileView<'a>;
 

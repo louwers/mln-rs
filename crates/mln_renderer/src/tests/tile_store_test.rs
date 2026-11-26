@@ -21,7 +21,7 @@ use parking_lot::Mutex;
 use serde_json::json;
 
 use super::tile_jobs_test::{Manual, icons, layer, points};
-use crate::buckets::hillshade_bucket::HillshadeBucket;
+use crate::geometry::dem_data::DEMData;
 use crate::layer_drawing::ChangedBuckets;
 use crate::layer_type::ErasedEvaluatedLayer;
 use crate::query::SourceQueryOptions;
@@ -729,9 +729,9 @@ fn dem_backfill_as_dems_arrive() {
 }
 
 /// The DEMs of tiles `left` and `right`, neighbours in a row.
-fn dems<'a>(tiles: &'a OneTile, left: &OverscaledTileID, right: &OverscaledTileID) -> [&'a HillshadeBucket; 2] {
+fn dems<'a>(tiles: &'a OneTile, left: &OverscaledTileID, right: &OverscaledTileID) -> [&'a DEMData; 2] {
     [left, right].map(|id| match tiles.tile_at(id).contents() {
-        Some(Contents::Dem(bucket)) => bucket,
+        Some(Contents::Dem(dem)) => dem.dem(),
         _ => panic!("a DEM"),
     })
 }
@@ -740,7 +740,6 @@ fn dems<'a>(tiles: &'a OneTile, left: &OverscaledTileID, right: &OverscaledTileI
 /// as its border.
 fn assert_borders_match(tiles: &OneTile, left: &OverscaledTileID, right: &OverscaledTileID) {
     let [left_dem, right_dem] = dems(tiles, left, right);
-    let (left_dem, right_dem) = (left_dem.dem_data(), right_dem.dem_data());
     for y in 0..16 {
         assert_eq!(left_dem.get(16, y), right_dem.get(0, y), "row {y} of the left tile's border");
         assert_eq!(right_dem.get(-1, y), left_dem.get(15, y), "row {y} of the right tile's border");
@@ -764,7 +763,7 @@ fn a_reloaded_dem_refills_both_borders() {
     assert_borders_match(&tiles, &left, &right);
     let edge = |tiles: &OneTile| -> Vec<f32> {
         let [_, right_dem] = dems(tiles, &left, &right);
-        (0..16).map(|y| right_dem.dem_data().get(0, y)).collect()
+        (0..16).map(|y| right_dem.get(0, y)).collect()
     };
     let before = edge(&tiles);
 

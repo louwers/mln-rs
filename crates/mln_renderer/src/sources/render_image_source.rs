@@ -191,7 +191,7 @@ fn build_image_mesh(bucket: &mut RasterBucket, cells: u32, from_top_left: bool) 
         }
     }
     let segments = vec![SegmentBase::with_lengths(0, 0, vertices.len(), indices.len())];
-    bucket.set_geometry(vertices, indices, segments);
+    bucket.set_mesh(vertices, indices, segments);
 }
 
 /// What a frame draws of an image source: its bucket, once the image has
@@ -448,8 +448,8 @@ impl RenderSource for RenderImageSource {
         // A changed image gets a new bucket, whose id tells the layers to
         // make its texture.
         let bucket = match &mut self.bucket {
-            Some(bucket) if bucket.image.as_ref().is_some_and(|i| Arc::ptr_eq(i, &image)) => bucket,
-            slot => slot.insert(RasterBucket::with_shared_image(Some(image))),
+            Some(bucket) if Arc::ptr_eq(&bucket.image, &image) => bucket,
+            slot => slot.insert(RasterBucket::new(image)),
         };
 
         // The globe bends the quad over the sphere with the tile mesh
@@ -468,7 +468,7 @@ impl RenderSource for RenderImageSource {
         } else {
             1
         };
-        if !bucket.geometry().has_quads() || geom_coords != self.mesh_corners || cells != self.mesh_cells {
+        if !bucket.has_mesh() || geom_coords != self.mesh_corners || cells != self.mesh_cells {
             build_image_mesh(bucket, cells, matches!(concave, Some(0 | 2)));
             self.quad = ImageQuad::new(&geom_coords, &warp);
             let mut bounds = [i32::MAX, i32::MAX, i32::MIN, i32::MIN];

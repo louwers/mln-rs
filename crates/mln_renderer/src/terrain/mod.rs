@@ -80,7 +80,7 @@ use crate::gfx::store::SharedTexture;
 use crate::layer_drawing::ChangedBuckets;
 use crate::paint_parameters::PaintParameters;
 use crate::renderer_event::RendererEvent;
-use crate::terrain::cover::dem_bucket;
+use crate::terrain::cover::dem_contents;
 use crate::terrain::dem_textures::DemTextures;
 use crate::terrain::draws::TerrainDraws;
 use crate::terrain::ground::GroundDepth;
@@ -354,9 +354,9 @@ impl RenderTerrain {
             if textures.contains_key(&id.canonical) {
                 continue;
             }
-            if let Some(bucket) = tiles.and_then(|tiles| dem_bucket(tiles.tile(&id)?)) {
-                let dim = u32::try_from(bucket.dem_data().dim).unwrap_or(0);
-                textures.insert(id.canonical, (self.dem_textures.texture(context, bucket), dim));
+            if let Some(dem) = tiles.and_then(|tiles| dem_contents(tiles.tile(&id)?)) {
+                let dim = u32::try_from(dem.dem().dim).unwrap_or(0);
+                textures.insert(id.canonical, (self.dem_textures.texture(context, dem), dim));
             }
         }
         self.dem_textures.finish_frame();

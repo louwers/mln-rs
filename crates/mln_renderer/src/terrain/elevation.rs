@@ -11,7 +11,7 @@ use mln_util::geo::LatLng;
 use mln_util::hash::HashMap;
 use mln_util::image::PremultipliedImage;
 
-use crate::terrain::cover::{TerrainCover, dem_bucket, place_in, world_copy};
+use crate::terrain::cover::{TerrainCover, dem_contents, place_in, world_copy};
 use crate::tile::source_tiles::SourceTiles;
 
 /// The DEM a terrain tile drew with.
@@ -72,7 +72,7 @@ impl fmt::Debug for TerrainElevation {
 /// tiles, hold it.
 fn drawn_dem(dem: Option<&SourceTiles>, bound: Option<(OverscaledTileID, DemCoords)>) -> Option<DrawnDem> {
     let (id, coords) = bound?;
-    let data = dem_bucket(dem?.tile(&id)?)?.dem_data();
+    let data = dem_contents(dem?.tile(&id)?)?.dem();
     let dim = u32::try_from(data.dim).ok()?;
     let (min, max) = data.range();
     Some(DrawnDem { id, image: Arc::clone(data.shared_image()), dim, coords, min, max })
