@@ -11,7 +11,6 @@ use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_style::StyleValue as _;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::color::Color;
-use mln_style::error::Error;
 use mln_style::expression::{Dependency, EvaluationContext, GlobalStateMap, global_state_refs_intersect};
 use mln_style::layer::LayerStyle;
 use mln_style::layers::Line;
@@ -34,7 +33,7 @@ use crate::gfx::line_mesh::LineLayoutVertex;
 use crate::layer::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::layer::layer_drawing::{DrawList, DrawObjectsMut, FrameDraw, TileDraws, TileObjects, UniformWriter};
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
-use crate::layer::layout::{LayoutParameters, SourceLayer};
+use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
     EvaluateCx, Evaluation, LayerBucket, LayerUpdateParameters, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer,
     RenderLayerBase, TypedLayer,
@@ -45,7 +44,7 @@ use crate::layers::line::ubo::{
     LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,
     LinePatternTilePropsUBO, LineSDFDrawableUBO, LineSDFTilePropsUBO, LineTilePropsUnionUBO,
 };
-use crate::layout::pattern_layout::{LineLayoutSpec, PatternLayout, uses_pattern};
+use crate::layout::pattern_layout::{LineLayoutSpec, PatternLayout};
 use crate::query::feature_index::QueryRegion;
 use crate::render::layer_composite::Composite;
 use crate::render::paint_parameters::PaintParameters;
@@ -186,22 +185,8 @@ fn dash_atlas_texture(gpu: &mut dyn Gpu, context: &mut Context, binders: &LineBi
 
 impl LayerType for Line {
     type Layout = PatternLayout<LineLayoutSpec>;
-    type Bucket = LineBucket;
     type TileBucket<'a> = LayerBucket<'a, Line>;
     const CROSSFADES: bool = true;
-
-    /// Whether a layer of the group has a pattern.
-    fn layout_can_need_dependencies(group: &[Arc<EvaluatedLayer<Line>>]) -> bool {
-        uses_pattern::<LineLayoutSpec>(group)
-    }
-
-    fn create_layout(
-        group: &[Arc<EvaluatedLayer<Line>>],
-        parameters: &mut LayoutParameters<'_>,
-        source_layer: SourceLayer,
-    ) -> Result<Option<PatternLayout<LineLayoutSpec>>, Error> {
-        PatternLayout::new(parameters, group, source_layer).map(Some)
-    }
 
     fn query_radius(bucket: &LineBucket, layer: &EvaluatedLayer<Line>) -> f32 {
         bucket.query_radius(layer)
@@ -418,7 +403,7 @@ impl TypedLayer for RenderLineLayer {
                 *entry.value = None;
             }
             // A draw built from another bucket goes.
-            entry.set_bucket(bucket.base.bucket_id);
+            entry.set_bucket(render_data.id);
 
             // The draw's attributes read the bucket's vertices in the
             // context's store, which upload again when they change.
