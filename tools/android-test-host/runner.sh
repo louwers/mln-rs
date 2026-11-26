@@ -28,7 +28,11 @@ else
     key=$(cat "$here/build.sh" "$here/launcher.sh" "$here/test-host.c" "$here/org/maplibre/mlnrs/TestHost.java" |
         cksum | cut -d ' ' -f 1)
     host=$out/$abi-$key
-    if [[ ! -e $host ]]; then
+    # A build is finished once it has its launcher, which build.sh writes
+    # last. A link to an unfinished one goes: rust-cache, in CI, keeps the
+    # link but empties the build it points to.
+    if [[ ! -e $host/launcher.sh ]]; then
+        rm -f "$host"
         build=$(mktemp -d "$out/build.XXXXXX")
         "$here/build.sh" "$abi" "$build"
         ln -sn "${build##*/}" "$host" 2> /dev/null || rm -rf "$build"
