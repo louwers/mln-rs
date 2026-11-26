@@ -33,13 +33,12 @@
 use std::mem::offset_of;
 use std::sync::Arc;
 
-use mln_gfx::gpu::{ClipDepthRange, Gpu, ShaderKey};
+use mln_gfx::gpu::{Caps, ClipDepthRange, Gpu, ShaderKey};
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_style::constants::TILE_SIZE_D;
-use mln_style::error::Error;
 use mln_style::layer::LayerStyle;
 use mln_style::layers::FillExtrusion;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionPaintProperties;
@@ -60,7 +59,6 @@ use crate::draw::segment::SegmentBase;
 use crate::draw::texture2d::Texture2D;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::SharedVertices;
-use crate::layer::bucket::Bucket;
 use crate::layer::bucket_geometry::{
     BucketGeometry, bucket_indexes, bucket_vertices, copied_vertices, derived_vertices, paint_vertices,
 };
@@ -68,14 +66,14 @@ use crate::layer::layer_drawing::{
     DrawDepth, DrawList, DrawObjectsMut, DrawPriority, FrameDraw, TileDraws, TileObjects, UniformWriter,
 };
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
-use crate::layer::layout::{LayoutParameters, SourceLayer};
+use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
     EvaluateCx, Evaluation, LayerBucket, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer, RenderLayerBase,
     TypedLayer,
 };
 use crate::layers::fill_extrusion::programs;
 use crate::layers::fill_extrusion::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
-use crate::layout::pattern_layout::{PatternLayout, uses_pattern};
+use crate::layout::pattern_layout::PatternLayout;
 use crate::query::feature_index::QueryRegion;
 use crate::render::frame_projection::zero_to_one_clip_z;
 use crate::render::layer_composite::Composite;
@@ -238,8 +236,8 @@ struct SharedGeometry<'a> {
 
 /// Whether the walls draw as instances of the static quad, rather than as
 /// quads of their own, which a device that rasterizes on the CPU draws.
-pub(crate) fn instanced_walls(context: &Context) -> bool {
-    !context.caps().cpu_rasterizer
+pub(crate) fn instanced_walls(caps: &Caps) -> bool {
+    !caps.cpu_rasterizer
 }
 
 /// How a layer's walls draw.
@@ -257,7 +255,7 @@ enum Walls {
 impl Walls {
     /// How the walls of a layer draw on `context`'s device.
     fn of(context: &Context, has_pattern: bool) -> Walls {
-        if !instanced_walls(context) {
+        if !instanced_walls(context.caps()) {
             Walls::Quads
         } else if context.caps().binds_vertex_buffers && !has_pattern {
             Walls::Pulled
@@ -360,22 +358,8 @@ fn extrusion_draw(
 
 impl LayerType for FillExtrusion {
     type Layout = PatternLayout<FillExtrusionLayoutSpec>;
-    type Bucket = FillExtrusionBucket;
     type TileBucket<'a> = LayerBucket<'a, FillExtrusion>;
     const CROSSFADES: bool = true;
-
-    /// Whether a layer of the group has a pattern.
-    fn layout_can_need_dependencies(group: &[Arc<EvaluatedLayer<FillExtrusion>>]) -> bool {
-        uses_pattern::<FillExtrusionLayoutSpec>(group)
-    }
-
-    fn create_layout(
-        group: &[Arc<EvaluatedLayer<FillExtrusion>>],
-        parameters: &mut LayoutParameters<'_>,
-        source_layer: SourceLayer,
-    ) -> Result<Option<PatternLayout<FillExtrusionLayoutSpec>>, Error> {
-        PatternLayout::new(parameters, group, source_layer).map(Some)
-    }
 
     fn query_radius(_bucket: &FillExtrusionBucket, layer: &EvaluatedLayer<FillExtrusion>) -> f32 {
         let translate = layer.paint.fill_extrusion_translate.uniform();
@@ -506,13 +490,13 @@ impl TypedLayer for RenderFillExtrusionLayer {
             };
 
             let render_data = tile.bucket_for_pass(RENDER_PASS);
-            let Some(render_data) = render_data.filter(|r| r.bucket.has_data()) else {
+            let Some(render_data) = render_data else {
                 *entry.value = None;
                 continue;
             };
             let bucket = render_data.bucket;
             // Draws built from another bucket go.
-            entry.set_bucket(bucket.base.bucket_id);
+            entry.set_bucket(render_data.id);
 
             let Some(binders) = bucket.paint_property_binders.get(self.base.style.base().id.as_str()) else {
                 continue;

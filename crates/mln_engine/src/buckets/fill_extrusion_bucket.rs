@@ -2,13 +2,12 @@
 // bucket's upload moves into the context's stores, which its draws read.
 
 use std::f64::consts::PI;
-use std::sync::Arc;
 
 use geometry::Point;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::color::Color;
 use mln_style::constants::EXTENT;
-use mln_style::expression::{Image, Value};
+use mln_style::expression::Image;
 use mln_style::feature::{GeometryCollection, GeometryCoordinates, GeometryTileFeature, classify_rings};
 use mln_style::layers::FillExtrusion;
 use mln_style::layers::fill_extrusion_layer_properties::{FillExtrusionLayoutProperties, FillExtrusionPaintProperties};
@@ -16,20 +15,22 @@ use mln_style::property::evaluated::Evaluated;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::LightAnchorType;
-use mln_vec_map::VecMap;
 
 use crate::camera::View;
 use crate::draw::mesh::Indexed;
 use crate::draw::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use crate::geo::constants::{EARTH_RADIUS_M, M2PI};
-use crate::layer::bucket::{Bucket, BucketBase, UploadNeeds};
-use crate::layer::bucket_geometry::{GeometryUpload, GeometryVec};
+use crate::layer::bucket::{Bucket, Upload};
+use crate::layer::bucket_geometry::GeometryVec;
 use crate::layer::layer_type::EvaluatedLayer;
-use crate::layer::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
+use crate::layer::layout::BuildCx;
+use crate::layer::paint_property_binder::{
+    CrossFadedPaintPropertyBinder, LayerBinders, PaintBinders, PaintPropertyBinder,
+};
+use crate::layers::render_fill_extrusion_layer::instanced_walls;
 use crate::layout::pattern_layout::{PatternLayerMap, PatternLayoutSpec};
 use crate::render::globe::subdivision::{SubdividedPolygon, subdivide_polygon, subdivide_vertex_line};
 use crate::render::static_data::RenderStaticData;
-use crate::text::atlas::ImagePositions;
 use crate::tile::geometry_tile_data::{is_boundary_edge, is_entirely_outside, limit_holes, round_polygon_corners};
 use crate::util::tessellator::Tessellator;
 
@@ -114,7 +115,6 @@ pub(crate) fn wall_quad_paint(paint: &[u8], stride: usize, walls: usize) -> Vec<
 
 #[derive(Clone, mln_wire::Wire)]
 pub(crate) struct FillExtrusionBucket {
-    pub(crate) base: BucketBase,
     pub(crate) layout: FillExtrusionLayoutProperties::PossiblyEvaluated,
 
     pub(crate) vertices: GeometryVec<FillExtrusionLayoutVertex>,
@@ -126,10 +126,8 @@ pub(crate) struct FillExtrusionBucket {
     pub(crate) triangle_segments: Vec<SegmentBase>,
     pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
 
-    pub(crate) paint_property_binders: VecMap<String, FillExtrusionBinders>,
+    pub(crate) paint_property_binders: LayerBinders<FillExtrusionBinders>,
 }
-
-static EMPTY_FORMATTED_SECTION: Value = Value::Null;
 
 /// The tile units in a meter at the center of `tile`, the scale that
 /// distances in meters on its features take.
@@ -203,32 +201,23 @@ fn dist_u16(a: Point<f64>, b: Point<f64>) -> u16 {
 
 impl FillExtrusionBucket {
     #[must_use]
+    /// A bucket with no features of the layers of `paint_property_binders`,
+    /// laid out as `layout` says and split as `subdivision_granularity`
+    /// says.
     pub(crate) fn new(
         layout: FillExtrusionLayoutProperties::PossiblyEvaluated,
-        layer_paint_properties: &VecMap<String, Arc<EvaluatedLayer<FillExtrusion>>>,
-        zoom: f32,
-        _overscaling: u32,
+        paint_property_binders: LayerBinders<FillExtrusionBinders>,
+        subdivision_granularity: SubdivisionGranularitySetting,
     ) -> Self {
-        let mut paint_property_binders = VecMap::new();
-        for (id, properties) in layer_paint_properties {
-            paint_property_binders
-                .entry(id.clone())
-                .or_insert_with(|| FillExtrusionBinders::new(&properties.paint, zoom));
-        }
         FillExtrusionBucket {
-            base: BucketBase::default(),
             layout,
             vertices: GeometryVec::default(),
             centroids: Vec::new(),
             triangles: GeometryVec::default(),
             triangle_segments: Vec::new(),
-            subdivision_granularity: SubdivisionGranularitySetting::none(),
+            subdivision_granularity,
             paint_property_binders,
         }
-    }
-
-    pub(crate) fn set_subdivision_granularity(&mut self, value: &SubdivisionGranularitySetting) {
-        self.subdivision_granularity = *value;
     }
 
     /// A vertex at `p`, whose wall to the next vertex is drawn unless
@@ -347,18 +336,18 @@ impl FillExtrusionBucket {
     }
 }
 
-impl Bucket for FillExtrusionBucket {
-    fn base(&self) -> &BucketBase {
-        &self.base
+impl FillExtrusionBucket {
+    /// Whether the bucket has anything to draw.
+    #[must_use]
+    pub(crate) fn has_data(&self) -> bool {
+        !self.triangle_segments.is_empty()
     }
 
-    fn add_feature(
+    /// Adds the extrusions of the polygons of `geometry`, a feature's in
+    /// the tile `canonical`.
+    pub(crate) fn add_geometry(
         &mut self,
-        feature: &dyn GeometryTileFeature,
         geometry: &GeometryCollection,
-        pattern_positions: &ImagePositions,
-        pattern_dependencies: &PatternLayerMap,
-        index: usize,
         canonical: &CanonicalTileID,
         tessellator: &mut Tessellator,
     ) {
@@ -393,63 +382,30 @@ impl Bucket for FillExtrusionBucket {
             }
             self.centroids.push((centroid, (self.vertices.len() - first) as u32));
         }
-
-        let length = self.vertices.len();
-        for (id, binders) in &mut self.paint_property_binders {
-            binders.populate_vertex_vectors(
-                feature,
-                length,
-                index,
-                pattern_positions,
-                pattern_dependencies.get(id),
-                canonical,
-                &EMPTY_FORMATTED_SECTION,
-            );
-        }
     }
+}
 
-    fn upload(&mut self, geometry: &mut GeometryUpload<'_>, needs: UploadNeeds) {
+impl Bucket for FillExtrusionBucket {
+    fn upload(&mut self, up: &mut Upload<'_>) {
         // Walls that aren't instances of the static quad are quads of their
         // own, made of the vertices and paint values before those move.
         let walls = self.vertices.len().saturating_sub(1);
-        if needs.wall_quads {
-            geometry.derive_vertices(&self.vertices, wall_quad_vertices);
+        let wall_quads = up.caps().is_some_and(|caps| !instanced_walls(caps));
+        if wall_quads {
+            up.derive(&self.vertices, wall_quad_vertices);
         }
-        geometry.move_vertices(&mut self.vertices);
-        geometry.move_indexes(&mut self.triangles);
-        for binders in self.paint_property_binders.values_mut() {
-            let depends_on_feature_state = binders.depends_on_feature_state();
-            let buffer = &mut binders.interleaved_vertex_buffer;
-            if needs.wall_quads && !depends_on_feature_state {
-                let stride = buffer.stride;
-                geometry.derive_vertices(&buffer.shared_vertex_vector, |paint| wall_quad_paint(paint, stride, walls));
+        up.vec(&mut self.vertices);
+        up.indexes(&mut self.triangles);
+        if wall_quads {
+            for binders in self.paint_property_binders.values() {
+                if !binders.depends_on_feature_state() {
+                    let buffer = &binders.interleaved_vertex_buffer;
+                    let stride = buffer.stride;
+                    up.derive(&buffer.shared_vertex_vector, |paint| wall_quad_paint(paint, stride, walls));
+                }
             }
-            geometry.move_paint(buffer, depends_on_feature_state);
         }
-        self.base.uploaded = true;
-    }
-
-    fn has_data(&self) -> bool {
-        !self.triangle_segments.is_empty()
-    }
-
-    fn write_wire(&self, w: &mut mln_wire::Writer) {
-        mln_wire::Wire::write(self, w);
-    }
-
-    fn update(
-        &mut self,
-        states: &crate::layer::bucket::FeatureStates,
-        layer: &crate::tile::TileLayer<'_>,
-        layer_id: &str,
-        image_positions: &ImagePositions,
-    ) -> bool {
-        let Some(binders) = self.paint_property_binders.get_mut(layer_id) else {
-            return false;
-        };
-        binders.update_vertex_vectors(states, layer, image_positions);
-        self.base.uploaded = false;
-        true
+        up.binders(&mut self.paint_property_binders);
     }
 }
 
@@ -491,16 +447,26 @@ impl PatternLayoutSpec for FillExtrusionLayoutSpec {
         None
     }
 
-    fn create_bucket(
-        layout: &Self::Layout,
-        layer_properties_map: &VecMap<String, Arc<EvaluatedLayer<FillExtrusion>>>,
-        zoom: f32,
-        overscaling: u32,
-    ) -> FillExtrusionBucket {
-        FillExtrusionBucket::new(layout.clone(), layer_properties_map, zoom, overscaling)
+    fn create_bucket(layout: &Self::Layout, cx: &BuildCx<'_, FillExtrusion>) -> FillExtrusionBucket {
+        FillExtrusionBucket::new(layout.clone(), cx.binders(), cx.subdivision_granularity())
     }
-    fn set_subdivision_granularity(bucket: &mut FillExtrusionBucket, value: &SubdivisionGranularitySetting) {
-        bucket.set_subdivision_granularity(value);
+
+    fn add_feature(
+        bucket: &mut FillExtrusionBucket,
+        cx: &BuildCx<'_, FillExtrusion>,
+        index: usize,
+        feature: &dyn GeometryTileFeature,
+        geometry: &GeometryCollection,
+        patterns: &PatternLayerMap,
+        tessellator: &mut Tessellator,
+    ) {
+        bucket.add_geometry(geometry, cx.canonical(), tessellator);
+        let length = bucket.vertices.len();
+        cx.populate(&mut bucket.paint_property_binders, index, feature, length, None, Some(patterns));
+    }
+
+    fn has_data(bucket: &FillExtrusionBucket) -> bool {
+        bucket.has_data()
     }
 }
 

@@ -1,28 +1,22 @@
-use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
-use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
 use mln_style::constants::EXTENT;
-use mln_style::feature::{GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileFeature};
-use mln_style::geometry::FeatureType;
+use mln_style::feature::{GeometryCollection, GeometryCoordinate, GeometryCoordinates};
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionLayoutProperties;
 use mln_style::subdivision_granularity::{SubdivisionGranularityExpression, SubdivisionGranularitySetting};
 use mln_style::tile_id::CanonicalTileID;
-use mln_vec_map::VecMap;
 
 use super::with_context;
 use crate::buckets::fill_extrusion_bucket::FillExtrusionBucket;
 use crate::draw::segment::MAX_SEGMENT_VERTICES;
-use crate::layer::bucket::Bucket;
-use crate::layout::pattern_layout::PatternLayerMap;
+use crate::layer::paint_property_binder::LayerBinders;
 use crate::render::globe::globe_tile_mesh::{GlobeTileMeshCache, globe_mesh_data};
 use crate::render::globe::subdivision::{
     NORTH_POLE_Y, SOUTH_POLE_Y, SubdividedPolygon, TILE_BORDER_STRIP_WIDTH, add_tile_border_strips, subdivide_polygon,
     subdivide_vertex_line,
 };
 use crate::render::globe::tile_mesh::{TileMeshOptions, create_tile_mesh};
-use crate::text::atlas::ImagePositions;
 use crate::tile_store::tile_mask::TileMask;
 use crate::util::tessellator::Tessellator;
 
@@ -182,48 +176,16 @@ fn expect_sound_mesh(r: &SubdividedPolygon, clipped_at_zoom_zero: bool) {
     assert_eq!(exposed, outline);
 }
 
-struct StubGeometryTileFeature {
-    properties: PropertyMap,
-    type_: FeatureType,
-    geometry: GeometryCollection,
-}
-
-impl GeometryTileFeature for StubGeometryTileFeature {
-    fn get_type(&self) -> FeatureType {
-        self.type_
-    }
-    fn get_value(&self, key: &str) -> Option<Value> {
-        self.properties.get(key).cloned()
-    }
-    fn get_id(&self) -> Identifier {
-        Identifier::Null
-    }
-    fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, mln_style::error::Error> {
-        Ok(Cow::Borrowed(&self.geometry))
-    }
-}
-
 // Extrudes a polygon on a globe tile and checks that every segment has
 // something to draw, stays within its 16-bit indices and keeps to its own
 // vertices.
 fn extrude_on_the_globe(polygon: &GeometryCollection, tile: &CanonicalTileID) -> FillExtrusionBucket {
-    let mut bucket =
-        FillExtrusionBucket::new(FillExtrusionLayoutProperties::PossiblyEvaluated::default(), &VecMap::new(), 0.0, 1);
-    bucket.set_subdivision_granularity(&SubdivisionGranularitySetting::globe());
-    let feature = StubGeometryTileFeature {
-        properties: PropertyMap::new(),
-        type_: FeatureType::Polygon,
-        geometry: polygon.clone(),
-    };
-    bucket.add_feature(
-        &feature,
-        polygon,
-        &ImagePositions::default(),
-        &PatternLayerMap::default(),
-        0,
-        tile,
-        &mut Tessellator::default(),
+    let mut bucket = FillExtrusionBucket::new(
+        FillExtrusionLayoutProperties::PossiblyEvaluated::default(),
+        LayerBinders::default(),
+        SubdivisionGranularitySetting::globe(),
     );
+    bucket.add_geometry(polygon, tile, &mut Tessellator::default());
     let mut segments_end = 0;
     let mut indices_outside_their_segment = 0;
     let triangles = bucket.triangles.data();
