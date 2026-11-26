@@ -1,0 +1,264 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use mln_util::chrono::now;
+
+use super::{Caught, LocalRequests, TestLoop, req, temp_path, watch};
+use crate::storage::database_file_source::{Cache, DatabaseFileSource};
+use crate::storage::file_source::FileSource;
+use crate::storage::offline_database::{DatabaseError, OfflineDatabase};
+use crate::storage::resource::{Kind, LoadingMethod, Resource, StoragePolicy};
+use crate::storage::response::{Reason, Response};
+
+fn dbfs() -> Arc<DatabaseFileSource> {
+    Arc::new(DatabaseFileSource::new(":memory:", None))
+}
+
+// gtest: DatabaseFileSource.VolatileResource
+#[test]
+fn volatile_resource() {
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
+
+    let dbfs = dbfs();
+
+    let resource = Rc::new(RefCell::new(Resource::with_tile_data(
+        Kind::Unknown,
+        "http://example.invalid/test",
+        None,
+        LoadingMethod::CacheOnly,
+    )));
+    let mut response = Response::new();
+    response.data = Some(Arc::new(b"Cached value".to_vec()));
+    let req = req();
+
+    let (r, fs, res, stop) = (Rc::clone(&req), Arc::clone(&dbfs), Rc::clone(&resource), run_loop.clone());
+    let forwarded = resource.borrow().clone();
+    dbfs.put_then(
+        &forwarded,
+        &response,
+        run_loop.dispatcher().callback(move || {
+            let (r1, fs1, res1) = (Rc::clone(&r), Arc::clone(&fs), Rc::clone(&res));
+            let request = res.borrow().clone();
+            let local1 = local.clone();
+            *r.borrow_mut() = Some(fs.request_local(
+                &local,
+                &request,
+                Box::new(move |res_1: Response| {
+                    assert_eq!(None, res_1.error);
+                    assert!(res_1.data.is_some());
+                    assert!(!res_1.no_content);
+                    assert_eq!(b"Cached value", res_1.data.unwrap().as_slice());
+                    res1.borrow_mut().storage_policy = StoragePolicy::Volatile;
+                    let r2 = Rc::clone(&r1);
+                    let stop = stop.clone();
+                    let request = res1.borrow().clone();
+                    *r1.borrow_mut() = Some(fs1.request_local(
+                        &local1,
+                        &request,
+                        Box::new(move |res_2: Response| {
+                            r2.borrow_mut().take();
+                            let error = res_2.error.as_ref().expect("error");
+                            assert!(res_2.no_content);
+                            assert_eq!(Reason::NotFound, error.reason);
+                            assert_eq!("Not found in offline database", error.message);
+                            stop.stop();
+                        }),
+                    ));
+                }),
+            ));
+        }),
+    );
+    run_loop.run();
+}
+
+// gtest: DatabaseFileSource.VolatileResourceIsNotStored
+#[test]
+fn volatile_resource_is_not_stored() {
+    let run_loop = TestLoop::new();
+    let local = run_loop.dispatcher();
+
+    let dbfs = dbfs();
+
+    let mut resource = Resource::with_tile_data(
+        Kind::Unknown,
+        "http://example.invalid/volatile-not-stored",
+        None,
+        LoadingMethod::CacheOnly,
+    );
+    resource.storage_policy = StoragePolicy::Volatile;
+    let mut response = Response::new();
+    response.data = Some(Arc::new(b"Volatile value".to_vec()));
+
+    // Forwarding a volatile response must not write it to the database, so
+    // a regular request for the same resource finds nothing.
+    dbfs.put(&resource, &response);
+    resource.storage_policy = StoragePolicy::Permanent;
+    let req = req();
+    let result: Rc<RefCell<Option<Response>>> = Rc::new(RefCell::new(None));
+    let (r, out, stop) = (Rc::clone(&req), Rc::clone(&result), run_loop.clone());
+    *req.borrow_mut() = Some(dbfs.request_local(
+        &local,
+        &resource,
+        Box::new(move |res: Response| {
+            r.borrow_mut().take();
+            stop.stop();
+            *out.borrow_mut() = Some(res);
+        }),
+    ));
+    run_loop.run();
+
+    let res = result.borrow_mut().take().expect("response");
+    assert!(res.no_content);
+    let error = res.error.expect("error");
+    assert_eq!(Reason::NotFound, error.reason);
+}
+
+// Not a C++ test: `canRequest`.
+#[test]
+fn can_request() {
+    let dbfs = DatabaseFileSource::new(":memory:", None);
+    let cache_only = |url: &str| Resource::with_tile_data(Kind::Unknown, url, None, LoadingMethod::CacheOnly);
+    assert!(dbfs.can_request(&cache_only("http://example.com")));
+    assert!(!dbfs.can_request(&cache_only("asset://example.json")));
+    assert!(!dbfs.can_request(&cache_only("file://example.json")));
+    assert!(!dbfs.can_request(&Resource::with_tile_data(
+        Kind::Unknown,
+        "http://example.com",
+        None,
+        LoadingMethod::NetworkOnly
+    )));
+}
+
+/// Whether `record` is a failed flush of `accessed` timestamps whose message
+/// contains `marker`.
+fn flush_failure(record: &Caught, marker: &str) -> bool {
+    record.target == crate::log_target::DATABASE
+        && record.msg.starts_with("Can't flush accessed timestamps")
+        && record.msg.contains(marker)
+}
+
+fn cached_request(run_loop: &TestLoop, source: &DatabaseFileSource, resource: &Resource) -> Response {
+    let result: Rc<RefCell<Option<Response>>> = Rc::new(RefCell::new(None));
+    let (out, stop) = (Rc::clone(&result), run_loop.clone());
+    let local = run_loop.dispatcher();
+    let _req = source.request_local(
+        &local,
+        resource,
+        Box::new(move |res: Response| {
+            *out.borrow_mut() = Some(res);
+            stop.stop();
+        }),
+    );
+    run_loop.run();
+    result.borrow_mut().take().expect("response")
+}
+
+fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !done() {
+        assert!(std::time::Instant::now() < deadline, "timed out waiting for {what}");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+// The real database thread and timer: a failed flush of cache hits'
+// `accessed` timestamps must not retry while idle, and the next cache hit
+// must retry it.
+// gtest: DatabaseFileSource.FailedAccessedFlushWaitsForNextRead
+#[test]
+fn failed_accessed_flush_waits_for_next_read() {
+    let run_loop = TestLoop::new();
+    let path = temp_path("maintenance.db");
+    let resource =
+        Resource::with_tile_data(Kind::Unknown, "https://example.com/maintenance", None, LoadingMethod::CacheOnly);
+    let mut response = Response::new();
+    response.data = Some(Arc::new(b"cached".to_vec()));
+    OfflineDatabase::new(&path).put(&resource, &response);
+
+    let marker = format!("accessed failure {path}");
+    let sql = rusqlite::Connection::open(&path).unwrap();
+    sql.execute_batch("UPDATE resources SET accessed = 0").unwrap();
+    sql.execute_batch(&format!(
+        "CREATE TRIGGER fail_accessed BEFORE UPDATE OF accessed ON resources \
+         BEGIN SELECT RAISE(ABORT, '{marker}'); END"
+    ))
+    .unwrap();
+    let failures = Arc::new(AtomicUsize::new(0));
+    let count = Arc::clone(&failures);
+    let _unwatch = watch(move |record| {
+        let failed = flush_failure(record, &marker);
+        if failed {
+            count.fetch_add(1, Ordering::SeqCst);
+        }
+        failed
+    });
+
+    let source = DatabaseFileSource::new(&String::from(&path), None);
+    let cached = cached_request(&run_loop, &source, &resource);
+    assert!(cached.error.is_none());
+    assert_eq!(response.data, cached.data);
+
+    wait_until("the failed flush", || failures.load(Ordering::SeqCst) > 0);
+    // Once the flush's task has ended, no retry waits for its time.
+    drop(source.pause());
+    assert_eq!(1, failures.load(Ordering::SeqCst), "failed flush retried while idle");
+    assert!(!source.has_timed_task(), "failed flush waits to retry while idle");
+
+    sql.execute_batch("DROP TRIGGER fail_accessed").unwrap();
+    let cached = cached_request(&run_loop, &source, &resource);
+    assert!(cached.error.is_none());
+    wait_until("the retried flush", || {
+        sql.query_row("SELECT accessed FROM resources", [], |row| row.get::<_, i64>(0)).unwrap() > 0
+    });
+    assert_eq!(1, failures.load(Ordering::SeqCst));
+}
+
+/// Runs a maintenance operation and waits for its callback on the database
+/// thread.
+fn maintain(operation: impl FnOnce(Box<dyn FnOnce(Result<(), DatabaseError>) + Send>)) -> Result<(), DatabaseError> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    operation(Box::new(move |result| tx.send(result).unwrap()));
+    rx.recv_timeout(std::time::Duration::from_secs(5)).expect("callback")
+}
+
+// Not a C++ test: the cache maintenance operations reach the database and
+// report its errors.
+#[test]
+fn cache_maintenance() {
+    let run_loop = TestLoop::new();
+    let path = temp_path("cache-maintenance.db");
+    let source = DatabaseFileSource::new(&String::from(&path), None);
+    let resource =
+        Resource::with_tile_data(Kind::Unknown, "https://example.com/maintained", None, LoadingMethod::CacheOnly);
+    let mut response = Response::new();
+    response.data = Some(Arc::new(b"cached".to_vec()));
+    let not_found = |res: Response| res.error.expect("error").reason == Reason::NotFound;
+
+    source.put(&resource, &response);
+    assert_eq!(response.data, cached_request(&run_loop, &source, &resource).data);
+    maintain(|done| source.invalidate_ambient_cache(done)).unwrap();
+    // Stale, but still usable.
+    let invalidated = cached_request(&run_loop, &source, &resource);
+    assert!(!invalidated.caching.is_fresh(now()) && invalidated.caching.is_usable(now()));
+
+    source.put(&resource, &response);
+    maintain(|done| source.clear_ambient_cache(done)).unwrap();
+    assert!(not_found(cached_request(&run_loop, &source, &resource)));
+
+    source.put(&resource, &response);
+    maintain(|done| source.reset_database(done)).unwrap();
+    assert!(not_found(cached_request(&run_loop, &source, &resource)));
+
+    maintain(|done| source.pack_database(done)).unwrap();
+
+    maintain(|done| source.set_maximum_ambient_cache_size(0, done)).unwrap();
+    source.put(&resource, &response);
+    assert!(not_found(cached_request(&run_loop, &source, &resource)));
+
+    let read_only = DatabaseFileSource::read_only(&String::from(&path), None);
+    let error = maintain(|done| read_only.clear_ambient_cache(done)).unwrap_err();
+    assert_eq!("Cannot modify database in read-only mode", error.to_string());
+}

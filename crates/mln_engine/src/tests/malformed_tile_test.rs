@@ -4,8 +4,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{FileSource, Kind, Response};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::geo::LatLng;
@@ -16,7 +14,6 @@ use mln_style::size::Size;
 use mln_style::sources::vector_source;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tileset::PartialTileset;
-use mln_tile_id::OverscaledTileID;
 use mln_util::pool::TaskGroup;
 use mln_util::queue::Queue;
 use proptest::prelude::*;
@@ -27,6 +24,9 @@ use crate::camera::transform::Transform;
 use crate::camera::{CameraOptions, ConstrainMode, ViewportMode};
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::map::MapMode;
+use crate::storage::stub_file_source::{ResponseType, StubFileSource};
+use crate::storage::{FileSource, Kind, Response};
+use crate::tile::OverscaledTileID;
 use crate::tile_store::TileLodMode;
 use crate::tile_store::store::StoreEvent;
 use crate::tile_store::tile_parameters::TileParameters;
@@ -330,7 +330,7 @@ proptest! {
 // querySourceFeatures returns the error of a feature it can't read.
 #[test]
 fn query_of_a_bad_value_is_an_error() {
-    let data = mln_tile::TileData::Mvt(mln_tile::MvtTile::new(Arc::new(tile_with_bad_value())));
+    let data = crate::tile::TileData::Mvt(crate::tile::MvtTile::new(Arc::new(tile_with_bad_value())));
     let layer = data.layer("l").unwrap().unwrap();
     let mut result = Vec::new();
     let error = crate::tile_store::contents::query_layer_source_features(

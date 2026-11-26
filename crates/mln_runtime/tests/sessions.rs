@@ -11,15 +11,15 @@ use std::sync::mpsc::channel;
 use mln_engine::TileOperation;
 use mln_engine::camera::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode};
 use mln_engine::map::{MapEvent, MapMode};
+use mln_engine::storage::resource::Kind;
+use mln_engine::storage::response::{Caching, Reason};
+use mln_engine::storage::{ResourceError, Response};
 use mln_runtime::{
     AttachOptions, DemandMode, Device, DeviceOptions, Driver, ErrorKind, EventMask, FrameDemand, FrameDisposition,
     FrameResult, LogicalExtent, Map, MapOptions, RenderSession, RenderSessionState, RenderTarget,
     RenderedQueryGeometry, RenderedQueryOptions, ResourceRequest, Runtime, RuntimeEvent, RuntimeEventKind,
     SourceQueryOptions,
 };
-use mln_storage::resource::Kind;
-use mln_storage::response::{Caching, Reason};
-use mln_storage::{ResourceError, Response};
 use mln_style::geo::LatLng;
 use mln_style::size::Size;
 use mln_style::unitbezier::UnitBezier;

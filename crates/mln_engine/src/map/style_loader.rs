@@ -19,8 +19,6 @@
 use std::sync::Arc;
 
 use mln_image::decoder;
-use mln_sprite::load_sprite;
-use mln_storage::{Data, FileSource, FileSourceExt, Request, Resource, ResourceError, Response};
 use mln_style::error::Error;
 use mln_style::hash::HashMap;
 use mln_style::source::{DescribeImageJob, Described, ErasedDescription, Fetch, Load, Respond};
@@ -30,7 +28,9 @@ use mln_text::glyph::{FontFaces, style_font_faces};
 use mln_util::event_queue::{EventQueue, Waker};
 use mln_util::pool::{Pool, TaskGroup};
 
+use crate::image::sprite::load_sprite;
 use crate::log_target;
+use crate::storage::{Data, FileSource, FileSourceExt, Request, Resource, ResourceError, Response};
 
 /// What a request or a job of the loader answers.
 pub(crate) enum Reply {

@@ -11,11 +11,9 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_storage::FileSource;
 use mln_style::error::Error;
 use mln_style::hash::{HashMap, HashSet};
 use mln_style::layers::Symbol;
-use mln_tile_id::OverscaledTileID;
 use mln_util::pool::TaskGroup;
 
 use crate::buckets::symbol_bucket::SymbolBucket;
@@ -30,7 +28,9 @@ use crate::render::events::RendererEvent;
 use crate::render::orchestrator::drop_on_workers;
 use crate::render::tile::RenderTile;
 use crate::source::source_state::SourceFeatureState;
+use crate::storage::FileSource;
 use crate::text::glyph_store::GlyphStore;
+use crate::tile::OverscaledTileID;
 use crate::tile_store::contents::{Answer, TileAtlases};
 use crate::tile_store::inbox::{Inbox, InboxSender, TileEvent, Waker};
 use crate::tile_store::loading::{DataOrigin, Load};

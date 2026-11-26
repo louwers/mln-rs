@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use mln_storage::FileSource;
 use mln_style::expression::GlobalStateMap;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_text::glyph::FontFaces;
@@ -8,6 +7,7 @@ use mln_text::glyph::FontFaces;
 use crate::camera::View;
 use crate::map::MapMode;
 use crate::render::terrain::TerrainCover;
+use crate::storage::FileSource;
 use crate::tile_store::TileLodMode;
 
 /// What a source's update gives its tiles.

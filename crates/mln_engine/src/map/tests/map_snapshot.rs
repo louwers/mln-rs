@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::error::ErrorKind;
 use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
 use mln_style::size::Size;
@@ -21,6 +20,7 @@ use crate::camera::{
 };
 use crate::map::snapshot::{CameraBounds, FreeCamera, TileSettings};
 use crate::map::{Map, MapMode, MapOptions};
+use crate::storage::stub_file_source::{ResponseType, StubFileSource};
 use crate::tile_store::TileLodMode;
 
 fn map(options: MapOptions, run_loop: &Queue<()>) -> Map {

@@ -23,16 +23,15 @@ use mln_style::tile_id::CanonicalTileID;
 use mln_style::tileset::RasterEncoding;
 use mln_style::time::Instant;
 use mln_text::glyph::FontFaces;
-use mln_tile::TileData;
-use mln_tile_id::OverscaledTileID;
 use mln_vec_map::VecSet;
 use mln_wire::payload::shared_bytes;
 use mln_wire::shared;
 use parking_lot::Mutex;
 
-use crate::geometry::dem_data::DEMData;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::layer::tile_layout::{Dependencies, Discovered, LayoutInput, LayoutParams, Resolved, build, discover};
+use crate::tile::dem_data::DEMData;
+use crate::tile::{OverscaledTileID, TileData};
 use crate::tile_store::contents::LayoutResult;
 use crate::worker::worker_codec::fields::{SharedAvailableImages, SharedSourceStyle};
 

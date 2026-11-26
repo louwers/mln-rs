@@ -162,8 +162,8 @@ fn second_background_layer_uses_the_drawable_path() {
 /// rotated does.
 #[test]
 fn a_viewport_lit_hillshade_turns_its_lights_with_the_map() {
-    use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-    use mln_storage::{Kind, Resource, Response};
+    use mln_engine::storage::stub_file_source::{ResponseType, StubFileSource};
+    use mln_engine::storage::{Kind, Resource, Response};
 
     // A DEM that rises to the east, in the Terrarium encoding.
     let mut dem = PremultipliedImage::new(Size::new(256, 256));
@@ -210,8 +210,8 @@ fn a_viewport_lit_hillshade_turns_its_lights_with_the_map() {
 /// same view draws the same image without the prepare draws.
 #[test]
 fn a_hillshade_prepares_its_slopes_once() {
-    use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-    use mln_storage::{Kind, Resource, Response};
+    use mln_engine::storage::stub_file_source::{ResponseType, StubFileSource};
+    use mln_engine::storage::{Kind, Resource, Response};
 
     // A DEM that rises to the east, in the Terrarium encoding.
     let mut dem = PremultipliedImage::new(Size::new(256, 256));
@@ -258,10 +258,10 @@ fn a_hillshade_prepares_its_slopes_once() {
 /// One DEM tile of 1000 m everywhere, in the Mapbox encoding:
 /// (1 · 65536 + 173 · 256 + 176) · 0.1 − 10000. With `found` false, the
 /// source has no tile.
-fn dem_source(found: bool) -> Arc<mln_storage::stub_file_source::StubFileSource> {
-    use mln_storage::response::{Reason, ResourceError};
-    use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-    use mln_storage::{Kind, Resource, Response};
+fn dem_source(found: bool) -> Arc<mln_engine::storage::stub_file_source::StubFileSource> {
+    use mln_engine::storage::response::{Reason, ResourceError};
+    use mln_engine::storage::stub_file_source::{ResponseType, StubFileSource};
+    use mln_engine::storage::{Kind, Resource, Response};
 
     let mut dem = PremultipliedImage::new(Size::new(4, 4));
     for pixel in dem.data.as_chunks_mut::<4>().0 {
@@ -453,11 +453,11 @@ const FAR_DEM_STYLE: &str = r#"{
 /// terrain tiles stand high; terrain tiles read only them there. Once one
 /// loads, its height range culls the terrain tiles that read it, so that
 /// the terrain no longer reads it.
-fn far_dem() -> (Arc<mln_storage::stub_file_source::StubFileSource>, Requests) {
+fn far_dem() -> (Arc<mln_engine::storage::stub_file_source::StubFileSource>, Requests) {
     use std::sync::atomic::Ordering;
 
-    use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-    use mln_storage::{Kind, Resource, Response};
+    use mln_engine::storage::stub_file_source::{ResponseType, StubFileSource};
+    use mln_engine::storage::{Kind, Resource, Response};
 
     // DEM tiles of 16 pixels a side, each `height` m in Terrarium.
     let terrarium = |height: u16| {

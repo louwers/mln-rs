@@ -5,22 +5,21 @@
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use mln_storage::resource::{Priority, TileFormat};
-use mln_storage::response::{Caching, Reason};
-use mln_storage::{Data, FileSource, LoadingMethod, Request, Resource, Response, StoragePolicy};
 use mln_style::error::Error;
 use mln_style::hash::HashMap;
 use mln_style::sources::custom::{CustomVectorTileData, TileDataFormat};
 use mln_style::sources::geojson::{GeoJSONData, TileFeatures};
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::tileset::Tileset;
-use mln_tile::TileData;
-use mln_tile::cut::{Ancestor, Cut, CutData};
-use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::Timestamp;
 use mln_util::pool::TaskGroup;
 use parking_lot::Mutex;
 
+use crate::storage::resource::{Priority, TileFormat};
+use crate::storage::response::{Caching, Reason};
+use crate::storage::{Data, FileSource, LoadingMethod, Request, Resource, Response, StoragePolicy};
+use crate::tile::cut::{Ancestor, Cut, CutData};
+use crate::tile::{OverscaledTileID, TileData};
 use crate::tile_store::custom_tile_loader::{CustomProvider, CustomTileSubscriber, SubscriberKey};
 use crate::tile_store::inbox::{InboxSender, SourceData, TileEvent};
 use crate::tile_store::tile::{TileInput, TileKind, TileLoadOrder, TileNecessity, TileUpdateParameters};
@@ -35,9 +34,9 @@ pub(crate) enum VectorTileEncoding {
 impl VectorTileEncoding {
     fn decode(self, data: Data) -> TileData {
         match self {
-            VectorTileEncoding::Mvt => TileData::Mvt(mln_tile::MvtTile::new(data)),
+            VectorTileEncoding::Mvt => TileData::Mvt(crate::tile::MvtTile::new(data)),
             VectorTileEncoding::Mlt { fast_pfor_enabled } => {
-                TileData::Mlt(mln_tile::MltTile::new(data, fast_pfor_enabled))
+                TileData::Mlt(crate::tile::MltTile::new(data, fast_pfor_enabled))
             }
         }
     }
@@ -253,8 +252,8 @@ impl CustomTileData for CustomVectorTileData {
     fn into_tile_data(self, fast_pfor_enabled: bool) -> Option<TileData> {
         let (data, format) = self;
         data.map(|data| match format {
-            TileDataFormat::Mvt => TileData::Mvt(mln_tile::MvtTile::new(data)),
-            TileDataFormat::Mlt => TileData::Mlt(mln_tile::MltTile::new(data, fast_pfor_enabled)),
+            TileDataFormat::Mvt => TileData::Mvt(crate::tile::MvtTile::new(data)),
+            TileDataFormat::Mlt => TileData::Mlt(crate::tile::MltTile::new(data, fast_pfor_enabled)),
         })
     }
 }

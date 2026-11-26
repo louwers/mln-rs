@@ -16,8 +16,8 @@ pub(crate) mod worker_codec;
 use std::sync::Arc;
 
 use mln_engine::bench::{LaidOut, TileLayout};
+use mln_engine::tile::{MltTile, MvtTile, TileData};
 use mln_style::{Edit, Style, StyleRegistry};
-use mln_tile::{MltTile, MvtTile, TileData};
 
 use crate::support::fixtures::{Fixtures, Tiles};
 
@@ -96,7 +96,7 @@ pub(crate) fn with_sprite(fixtures: &Fixtures, mut style: Style) -> Style {
     let path = asset_path(&sprite);
     let png = mln_image::decode_png(&fixtures.read(&format!("{path}.png"))).expect("the sprite's image");
     let index = fixtures.read(&format!("{path}.json"));
-    let images = mln_sprite::parse_sprite("default", &png, &index).expect("the sprite's index");
+    let images = mln_engine::image::sprite::parse_sprite("default", &png, &index).expect("the sprite's index");
     style.apply(Edit::AddImages(images)).expect("the sprite's images");
     style
 }

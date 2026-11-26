@@ -8,13 +8,13 @@
 
 use glam::{DMat4, Vec2};
 use mln_style::types::TranslateAnchorType;
-use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::identity::SimpleIdentity;
 
 use crate::camera::{ProjectionData, View};
 use crate::layer::layer_type::LayerType;
 use crate::render::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render::pass::RenderPass;
+use crate::tile::{OverscaledTileID, UnwrappedTileID};
 use crate::tile_store::contents::Contents;
 use crate::tile_store::dem::DemContents;
 use crate::tile_store::raster::RasterContents;

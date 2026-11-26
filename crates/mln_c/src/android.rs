@@ -33,7 +33,7 @@ pub(crate) unsafe extern "C" fn mln_android_init(
             // SAFETY: the caller's contract.
             unsafe { mln_system_fonts::android::init(jni_env) };
             // SAFETY: the caller's contract.
-            unsafe { mln_storage::android::init(jni_env, context) }.map_err(Error::from)
+            unsafe { mln_engine::storage::android::init(jni_env, context) }.map_err(Error::from)
         }
         #[cfg(not(target_os = "android"))]
         Err(Error::new(mln_style::error::ErrorKind::Unsupported, "Android initialization is not supported"))

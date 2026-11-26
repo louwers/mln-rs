@@ -4,10 +4,10 @@
 //! it and its renderable neighbours both ways, so a DEM that reloads refills
 //! its border and theirs.
 
-use mln_tile_id::OverscaledTileID;
 use mln_util::identity::SimpleIdentity;
 
-use crate::geometry::dem_data::DEMData;
+use crate::tile::OverscaledTileID;
+use crate::tile::dem_data::DEMData;
 use crate::tile_store::contents::Contents;
 use crate::tile_store::raster::Masking;
 

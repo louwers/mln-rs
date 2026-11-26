@@ -18,7 +18,6 @@ use mln_style::range::Range;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::LineCapType;
 use mln_text::atlas::ImagePositions;
-use mln_tile::TileLayer;
 use mln_util::feature::feature_id_to_string;
 use mln_vec_map::VecMap;
 
@@ -28,6 +27,7 @@ use crate::layer::bucket_geometry::GeometryVec;
 use crate::layer::paint_property_statistics::{PaintPropertyStatistics, StatisticValue};
 use crate::layout::pattern_layout::PatternDependency;
 use crate::line_atlas::{DashAtlas, LinePatternCap};
+use crate::tile::TileLayer;
 
 /// Maps vertex range to feature index.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, mln_wire::Wire)]
@@ -870,7 +870,7 @@ macro_rules! paint_property_binders {
             pub(crate) fn update_vertex_vectors(
                 &mut self,
                 states: &$crate::layer::bucket::FeatureStates,
-                layer: &mln_tile::TileLayer<'_>,
+                layer: &crate::tile::TileLayer<'_>,
                 _image_positions: &mln_text::atlas::ImagePositions,
             ) {
                 // Values that moved to the render thread don't depend on

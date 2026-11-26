@@ -7,13 +7,13 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use glam::DVec2;
-use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::Edit;
 use mln_style::geo::{LatLng, WrapMode};
 use mln_util::queue::Queue;
 
 use crate::camera::{AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, Elevation};
 use crate::map::{Map, MapEvent, MapMode, MapOptions};
+use crate::storage::stub_file_source::{ResponseType, StubFileSource};
 use crate::{RenderMode, RendererEvent};
 
 pub(super) const STYLE: &str = r#"{

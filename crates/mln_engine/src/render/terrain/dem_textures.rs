@@ -72,7 +72,7 @@ mod tests {
     use mln_style::tileset::RasterEncoding;
 
     use super::*;
-    use crate::geometry::dem_data::DEMData;
+    use crate::tile::dem_data::DEMData;
     use crate::tile_store::dem::Offset;
 
     fn context() -> Context {

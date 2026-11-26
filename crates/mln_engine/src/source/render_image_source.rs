@@ -12,7 +12,6 @@ use mln_style::source::SourceData;
 use mln_style::sources::ImageSourceType;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::{Source, constants};
-use mln_tile_id::UnwrappedTileID;
 
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
 use crate::camera::TileCoordinate;
@@ -23,6 +22,7 @@ use crate::layer::bucket::UploadNeeds;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::log_target;
 use crate::source::render_source::{RenderSource, RenderSourceBase, RenderTileParameters};
+use crate::tile::UnwrappedTileID;
 use crate::tile_store::store::TileStore;
 use crate::tile_store::tile_cover::{TileCoverParameters, tile_cover, tile_cover_bounds};
 use crate::tile_store::tile_parameters::TileParameters;

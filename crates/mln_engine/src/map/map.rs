@@ -8,9 +8,6 @@ use std::time::Duration;
 
 use geo_types::Geometry;
 use glam::{DMat4, DVec3};
-use mln_storage::FileSource;
-#[cfg(not(target_family = "wasm"))]
-use mln_storage::{Loader, ResourceOptions};
 use mln_style::conversion::Convertible;
 use mln_style::error::Error;
 use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
@@ -37,6 +34,9 @@ use crate::map::options::{MapOptions, UnusedStyleImagePolicy};
 use crate::map::snapshot::{CameraBounds, FreeCamera, MapSnapshot, TileSettings};
 use crate::map::style_loader::{LoadEvent, StyleLoader};
 use crate::map::{MapMode, TerrainOptions};
+use crate::storage::FileSource;
+#[cfg(not(target_family = "wasm"))]
+use crate::storage::{Loader, ResourceOptions};
 use crate::tile_store::TileLodMode;
 use crate::{
     Registry, RendererEvent, RendererEvents, RenderingStats, UpdateParameters, UpdateReader, UpdateSlot, log_target,

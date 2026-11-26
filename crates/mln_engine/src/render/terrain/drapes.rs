@@ -52,7 +52,6 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{Rgba, Size};
 use mln_style::layer::ErasedLayerStyle;
-use mln_tile_id::OverscaledTileID;
 use smallvec::SmallVec;
 
 use super::TerrainCover;
@@ -69,6 +68,7 @@ use crate::render::paint_parameters::{OpenPass, PaintParameters, TransformParame
 use crate::render::pass::RenderPass;
 use crate::render::tile::TileStamp;
 use crate::render::tile_matrix::to_projection_ubo;
+use crate::tile::OverscaledTileID;
 
 /// The format of a drape's texture.
 const COLOR: TextureFormat = TextureFormat::Rgba8Unorm;

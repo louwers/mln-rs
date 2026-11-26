@@ -1,7 +1,7 @@
 // C++ undefined behaviour kept out of the port: `static_cast<int32_t>` of a
 // double outside the int32 range (or NaN) saturates here (`as i32`); unsigned
 // `uint32_t` arithmetic on `tileY` wraps (`wrapping_*`); shifts by the zoom
-// mask the count like x86 does (`wrapping_shl`), as in mln_tile_id.
+// mask the count like x86 does (`wrapping_shl`), as in `tile::tile_id`.
 
 use std::collections::VecDeque;
 use std::convert::Infallible;
@@ -13,9 +13,10 @@ use mln_style::error::Error;
 use mln_style::geo::LatLng;
 use mln_style::geometry::{FeatureType, to_feature_type};
 use mln_style::math::clamp_f64;
-use mln_tile_id::UnwrappedTileID;
 use mln_util::projection::Projection;
 use mln_vec_map::VecMap;
+
+use crate::tile::UnwrappedTileID;
 
 pub(crate) type Bounds = Vec<Bound>;
 pub(crate) type BoundsMap = VecMap<u32, Bounds>;

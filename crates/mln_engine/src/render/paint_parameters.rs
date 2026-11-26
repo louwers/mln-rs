@@ -10,7 +10,6 @@ use mln_gfx::types::{CullFaceWindingType, DepthFunctionType, StencilOpType};
 use mln_gfx::{DepthMaskType, DepthMode, ScissorRect, Size, StencilMode};
 use mln_style::constants::EXTENT;
 use mln_style::tile_id::CanonicalTileID;
-use mln_tile_id::UnwrappedTileID;
 use mln_util::identity::SimpleIdentity;
 use mln_vec_map::VecMap;
 use smallvec::SmallVec;
@@ -23,6 +22,7 @@ use crate::render::layer_composite::LayerComposite;
 use crate::render::pass::RenderPass;
 use crate::render::static_data::RenderStaticData;
 use crate::render::terrain::FrameGround;
+use crate::tile::UnwrappedTileID;
 
 /// The tiles whose masks clear the stencil buffer: one per world copy in
 /// view, so usually one, and held inline, since every frame makes them.

@@ -5,10 +5,10 @@
 use std::hint::black_box;
 use std::sync::Arc;
 
+use mln_engine::tile::TileData;
 use mln_style::expression::EvaluationContext;
 use mln_style::filter::Filter;
 use mln_style::types::VisibilityType;
-use mln_tile::TileData;
 
 use super::{DENSE, SPARSE, StreetTile, parse_liberty, tile_bytes, tile_data};
 use crate::scenario::{Bench, Kind, Scenario};

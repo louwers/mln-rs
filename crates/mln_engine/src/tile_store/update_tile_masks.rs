@@ -1,6 +1,6 @@
 use mln_style::tile_id::CanonicalTileID;
-use mln_tile_id::UnwrappedTileID;
 
+use crate::tile::UnwrappedTileID;
 use crate::tile_store::tile_mask::TileMask;
 
 fn compute_tile_masks(

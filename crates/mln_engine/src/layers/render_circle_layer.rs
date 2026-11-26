@@ -14,7 +14,6 @@ use mln_style::geo::WrapMode;
 use mln_style::layer::LayerStyle;
 use mln_style::layers::Circle;
 use mln_style::types::{AlignmentType, CirclePitchScaleType};
-use mln_tile_id::OverscaledTileID;
 
 use super::{cast_matrix, refresh_paint_attributes};
 use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
@@ -39,6 +38,7 @@ use crate::render::pass::RenderPass;
 use crate::render::terrain::{FrameGround, StandingDraw, TileGround};
 use crate::render::tile::{FrameTile, RenderTile};
 use crate::render::tile_matrix::{globe_extrude_scale, projection_data, to_projection_ubo};
+use crate::tile::OverscaledTileID;
 
 /// The ids of the buffers that the draws bind.
 const DRAWABLE_ID: usize = programs::CIRCLE.buffer_id("drawableVector");

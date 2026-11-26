@@ -33,8 +33,9 @@ mln_gl = { package = "mln-rs-gl", path = "../../crates/mln_gl" }
 mln_headless = { package = "mln-rs-headless", path = "../../crates/mln_headless" }
 # The PNG files of the scenarios' last images (`mln-bench run --images`).
 mln_image = { package = "mln-rs-image", path = "../../crates/mln_image" }
-# The renderer's internal stages, through its `bench` entry points, and the
-# font-face shaper that the packages that render turn on.
+# The engine's internal stages, through its `bench` entry points (with the
+# online file source over the simulated network, support/network.rs), and
+# the font-face shaper that the packages that render turn on.
 mln_engine = { package = "mln-rs-engine", path = "../../crates/mln_engine", default-features = false, features = [
   "bench",
   "font-face-shaper",
@@ -46,19 +47,10 @@ mln_runtime = { package = "mln-rs-runtime", path = "../../crates/mln_runtime", f
   "default",
   "webgpu",
 ] }
-# The file source that reads the fixtures (support/fixtures.rs), and the
-# online file source over the simulated network (support/network.rs).
-mln_storage = { package = "mln-rs-storage", path = "../../crates/mln_storage", features = [
-  "bench",
-] }
-# The sprite whose images the layouts of symbols use.
-mln_sprite = { package = "mln-rs-sprite", path = "../../crates/mln_sprite" }
 # The style, and its edits.
 mln_style = { package = "mln-rs-style", path = "../../crates/mln_style" }
 # Glyphs and text shaping.
 mln_text = { package = "mln-rs-text", path = "../../crates/mln_text" }
-# The tiles that the decode and layout scenarios read.
-mln_tile = { package = "mln-rs-tile", path = "../../crates/mln_tile" }
 mln_util = { package = "mln-rs-util", path = "../../crates/mln_util" }
 # What the GPU's pipeline ran, where the device counts it (support/map.rs).
 mln_webgpu = { package = "mln-rs-webgpu", path = "../../crates/mln_webgpu", features = [

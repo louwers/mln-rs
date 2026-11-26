@@ -6,9 +6,9 @@
 //! (`mln_engine::bench`).
 
 use mln_engine::layer::bucket::LayerFeatureStates;
+use mln_engine::tile::TileData;
 use mln_style::Style;
 use mln_style::feature::GeometryTileFeature;
-use mln_tile::TileData;
 use mln_util::feature::feature_id_to_string;
 
 use super::{DENSE, SPARSE, StreetLayout, StreetTile, registry, with_sprite};

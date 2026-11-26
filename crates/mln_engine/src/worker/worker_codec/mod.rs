@@ -17,7 +17,7 @@
 //!   layout refers back to them (its buckets' binders hold the layers'
 //!   expressions, its render data the properties). Expressions cross as
 //!   their parsed node trees (`mln_style::wire`), and tile data as
-//!   what it is made from (`mln_tile::TileData`); an instance keeps the tile
+//!   what it is made from (`crate::tile::TileData`); an instance keeps the tile
 //!   data of its jobs in a cache of its own, so a later job can name it.
 //! - Trait objects cross as the types they can be (fields.rs): layers'
 //!   style data and evaluated properties, and compound expressions, as

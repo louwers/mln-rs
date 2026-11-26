@@ -10,9 +10,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use ::mln_runtime::{ResourceProvider, ResourceRequest};
-use mln_storage::resource::{Kind, Priority, Usage};
-use mln_storage::response::{Caching, Reason};
-use mln_storage::{LoadingMethod, Resource, ResourceError, Response, StoragePolicy};
+use mln_engine::storage::resource::{Kind, Priority, Usage};
+use mln_engine::storage::response::{Caching, Reason};
+use mln_engine::storage::{LoadingMethod, Resource, ResourceError, Response, StoragePolicy};
 use mln_util::chrono::Timestamp;
 
 use crate::buffer::LentText;
@@ -100,7 +100,7 @@ struct RequestInfo {
     prior_modified_unix_ms: i64,
     prior_expires_unix_ms: i64,
     prior_etag: LentText,
-    prior_data: Option<mln_storage::Data>,
+    prior_data: Option<mln_engine::storage::Data>,
 }
 
 impl RequestInfo {

@@ -45,8 +45,11 @@ geojson.workspace = true
 glam.workspace = true
 mln_image = { package = "mln-rs-image", path = "../mln_image" }
 # system_fonts_test shapes text with mln_text's Shaper in-process.
-mln_engine = { workspace = true, features = ["font-face-shaper"] }
-mln_storage = { workspace = true, features = ["sqlite", "stub-file-source"] }
+mln_engine = { workspace = true, features = [
+  "font-face-shaper",
+  "sqlite",
+  "stub-file-source",
+] }
 mln_style = { workspace = true, features = ["dsl"] }
 mln_text = { package = "mln-rs-text", path = "../mln_text" }
 pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }

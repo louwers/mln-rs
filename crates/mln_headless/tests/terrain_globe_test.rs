@@ -7,10 +7,10 @@ use std::sync::Arc;
 
 use mln_engine::camera::BoundOptions;
 use mln_engine::map::{Map, MapMode, MapOptions};
+use mln_engine::storage::resource::TileData;
+use mln_engine::storage::stub_file_source::{ResponseType, StubFileSource};
+use mln_engine::storage::{Kind, Resource, Response};
 use mln_headless::HeadlessFrontend;
-use mln_storage::resource::TileData;
-use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{Kind, Resource, Response};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::ErrorKind;
 use mln_style::size::Size;

@@ -658,7 +658,7 @@ pub(crate) mod tests {
         log::info!(target: "mln_gl::render", "bridge: render");
         log::error!(target: "mln_gl::graphics_backend", "bridge: {}", "backend");
         log::warn!(target: "mln_style::parse_style", "bridge: style");
-        log::error!(target: "mln_storage::database", code = 11; "bridge: database");
+        log::error!(target: "mln_engine::database", code = 11; "bridge: database");
         log::info!(target: "mln_gl::gpu", "bridge: general");
         log::warn!(target: "wgpu_hal::vulkan::instance", "bridge: wgpu");
         log::info!(target: "wgpu_core::device", "bridge: wgpu info");

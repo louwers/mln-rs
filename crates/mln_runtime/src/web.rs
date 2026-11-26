@@ -21,9 +21,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_engine::Registry;
+use mln_engine::storage::OnlineFileSource;
+use mln_engine::storage::network_status::NetworkStatus;
 use mln_engine::worker::worker_codec::RemoteWorkers;
-use mln_storage::OnlineFileSource;
-use mln_storage::network_status::NetworkStatus;
 use mln_style::hash::HashMap;
 use mln_util::pool::Pool;
 use mln_web_host::{pump, tile_workers};

@@ -4,11 +4,11 @@
 use geometry::Point;
 use mln_style::feature::{GeometryCollection, classify_rings, signed_area};
 use mln_style::tile_id::CanonicalTileID;
-use mln_tile::geometry_tile_data::limit_holes;
 
 use crate::buckets::fill_bucket::FillLayoutVertex;
 use crate::draw::mesh::Indexed;
 use crate::render::globe::subdivision::{TILE_BORDER_STRIP_WIDTH, add_tile_border_strips, subdivide_polygon};
+use crate::tile::geometry_tile_data::limit_holes;
 use crate::util::tessellator::Tessellator;
 
 /// The buffers of a fill bucket that its polygons' meshes go in.

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
 
 use ::mln_runtime::{CacheDatabaseOperation, MapId, Runtime, RuntimeEvent, RuntimeOptions};
-use mln_storage::network_status::{NetworkStatus, Status};
+use mln_engine::storage::network_status::{NetworkStatus, Status};
 use mln_style::hash::HashMap;
 use parking_lot::Mutex;
 

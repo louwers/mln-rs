@@ -23,7 +23,6 @@ use mln_style::layers::heatmap_layer_properties::{HeatmapPaintProperties, defaul
 use mln_style::size::Size;
 use mln_style::types::TranslateAnchorType;
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
-use mln_tile_id::OverscaledTileID;
 
 use super::render_line_layer::apply_color_ramp;
 use super::{cast_matrix, refresh_paint_attributes};
@@ -55,6 +54,7 @@ use crate::render::target::RenderTarget;
 use crate::render::terrain::StandingDraw;
 use crate::render::tile::FrameTile;
 use crate::render::tile_matrix::{bind_no_projection, globe_extrude_scale, projection_data, to_projection_ubo};
+use crate::tile::OverscaledTileID;
 
 /// The ids of the buffers that the draws bind.
 const DRAWABLE_ID: usize = programs::HEATMAP.buffer_id("drawableVector");

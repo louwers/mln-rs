@@ -12,9 +12,6 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicUsize, Ordering}
 use std::thread::ThreadId;
 use std::time::{Duration, Instant};
 
-use mln_storage::response::{Reason, ResourceError};
-use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{FileSource, Kind, Resource, Response};
 use mln_style::bitmap::AlphaImage;
 use mln_style::error::Error;
 use mln_style::i18n;
@@ -37,6 +34,9 @@ use parking_lot::Mutex;
 use super::glyph_store_bitmaps::{SDF_BITMAP, STUB_BITMAP};
 use super::read_file;
 use crate::render::events::RendererEvent;
+use crate::storage::response::{Reason, ResourceError};
+use crate::storage::stub_file_source::{ResponseType, StubFileSource};
+use crate::storage::{FileSource, Kind, Resource, Response};
 use crate::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
 use crate::text::glyph_store::{GlyphRanges, GlyphStore, GlyphWait, ShapeResults};
 use crate::tile_store::inbox::{Inbox, TileEvent};

@@ -11,7 +11,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use glam::{DMat4, DVec4};
-use mln_storage::Resource;
 use mln_style::Style;
 use mln_style::constants::EXTENT;
 use mln_style::error::Error;
@@ -21,8 +20,6 @@ use mln_style::types::VisibilityType;
 use mln_text::glyph::{GlyphMap, get_glyph_range, style_font_faces};
 use mln_text::glyph_pbf::parse_glyph_pbf;
 use mln_text::tagged_string::font_stack_hash;
-use mln_tile::TileData;
-use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_vec_map::VecSet;
 use parking_lot::Mutex;
 
@@ -40,8 +37,10 @@ use crate::placement::{Placement, PlacementInputs};
 use crate::render::paint_parameters::TransformParameters;
 use crate::render::tile::RenderTile;
 use crate::render::update_parameters::UpdateParameters;
+use crate::storage::Resource;
 use crate::text::cross_tile_symbol_index::CrossTileSymbolIndex;
 use crate::text::glyph_store::ShapeResults;
+use crate::tile::{OverscaledTileID, TileData, UnwrappedTileID};
 use crate::tile_store::contents::LayoutResult;
 use crate::tile_store::store::TileStore;
 use crate::worker::job::{

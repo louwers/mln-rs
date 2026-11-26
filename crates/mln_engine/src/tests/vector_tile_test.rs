@@ -1,10 +1,10 @@
 use mln_style::error::Error;
-use mln_tile_id::OverscaledTileID;
 use mln_util::pool::TaskGroup;
 
 use crate::map::MapMode;
 use crate::query::SourceQueryOptions;
 use crate::tests::OneTile;
+use crate::tile::OverscaledTileID;
 use crate::tile_store::tile::TileKind;
 use crate::worker::tile_workers::InlineWorkers;
 

@@ -11,7 +11,7 @@
 
 use std::fmt::Write as _;
 
-use mln_storage::resource::Kind;
+use mln_engine::storage::resource::Kind;
 
 use crate::buffer;
 use crate::error::Error;

@@ -19,7 +19,6 @@ use mln_style::hash::{HashMap, HashSet};
 use mln_style::layer::LayerStyle;
 use mln_style::layers::Raster;
 use mln_style::types::{LayerBlendType, RasterResamplingType, ResamplingType, TranslateAnchorType};
-use mln_tile_id::UnwrappedTileID;
 use mln_util::identity::SimpleIdentity;
 
 use super::cast_matrix;
@@ -52,6 +51,7 @@ use crate::render::static_data::RenderStaticData;
 use crate::render::tile::FrameTile;
 use crate::render::tile_matrix::{projection_data, to_projection_ubo};
 use crate::source::render_image_source::{ImageQuad, ImageSourceRenderData};
+use crate::tile::UnwrappedTileID;
 use crate::tile_store::raster::RasterContents;
 
 /// The ids of the buffers that the draws bind.

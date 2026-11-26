@@ -10,7 +10,6 @@
 use std::marker::PhantomData;
 use std::sync::{Arc, Weak};
 
-use mln_storage::FileSource;
 use mln_style::error::Error;
 use mln_style::geo::LatLngBounds;
 use mln_style::layer::SourceKind;
@@ -28,6 +27,7 @@ use crate::query::FeatureExtensionValue;
 use crate::source::render_image_source::RenderImageSource;
 use crate::source::render_source::RenderSource;
 use crate::source::render_tile_source::RenderTileSource;
+use crate::storage::FileSource;
 use crate::tile_store::custom_tile_loader::{CustomGeometryProvider, CustomVectorProvider};
 use crate::tile_store::loading::{Ancestors, CustomLoader, DataOrigin, VectorTileEncoding};
 use crate::tile_store::source_tiles::SourceTiles;

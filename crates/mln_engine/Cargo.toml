@@ -18,7 +18,7 @@ name = "mln_engine"
 doctest = false
 
 [features]
-default = ["font-face-shaper"]
+default = ["font-face-shaper", "sqlite"]
 # The style's font faces shaped in-process with mln_text's Shaper
 # (HarfRust), the default FontFaceEngine (src/text/font_face_engine.rs). The
 # workspace's packages depend on this crate without its default features,
@@ -27,51 +27,113 @@ default = ["font-face-shaper"]
 # off: HarfRust, skrifa and the glyph rasterizer go into its second module,
 # crates/mln_web_shaper, which its map loads only for styles with font faces.
 font-face-shaper = []
+# SQLite: OfflineDatabase, the Database file source (the ambient cache and
+# offline regions, under ResourceOptions::cache_path), the MBTiles file
+# source and offline downloads (`offline`). examples/web leaves it out and
+# relies on the browser's HTTP cache, like MapLibre GL JS. Without it, the
+# ResourceLoader has neither file source, so it serves no cache-only
+# requests and no mbtiles:// URLs (as the C++ MainResourceLoader without
+# them).
+sqlite = ["dep:rusqlite"]
 # `bench`, the entry points to internal stages that the benchmarks
-# (tools/bench) measure. Not API: hidden from the documentation.
-bench = []
+# (tools/bench) measure, and `storage::simulated_network`, the online file
+# source over a transport and a clock of the caller's. The crate's own tests
+# build the latter without the feature. Not API: hidden from the
+# documentation.
+bench = ["mln_util/bench"]
 # `conformance`, the frames that the backends' tests draw through their
 # `Gpu`.
-gpu-conformance = ["dep:js-sys"]
+gpu-conformance = []
+# StubFileSource, the file source that the tests of this crate's dependents
+# answer requests with.
+stub-file-source = []
 
 [dependencies]
 bytemuck = { workspace = true, features = ["extern_crate_alloc"] }
+bytes.workspace = true
 earcut.workspace = true
 etagere.workspace = true
+fast-mvt.workspace = true
 feature.workspace = true
 geo-types.workspace = true
 geo-index.workspace = true
 geojson.workspace = true
 geometry.workspace = true
-log.workspace = true
+glam.workspace = true
+i_overlay.workspace = true
+log = { workspace = true, features = ["kv"] }
 mln_gfx.workspace = true
 mln_image.workspace = true
-mln_sprite.workspace = true
-glam.workspace = true
-mln_storage.workspace = true
 mln_style.workspace = true
 mln_text.workspace = true
-mln_tile.workspace = true
-mln_tile_id.workspace = true
 mln_util.workspace = true
 mln_vec_map.workspace = true
+mln_wire = { workspace = true, features = ["geo-types", "glam", "parking_lot"] }
+mlt-core.workspace = true
 parking_lot.workspace = true
+percent-encoding.workspace = true
+pmtiles.workspace = true
 polylabel.workspace = true
+rusqlite = { workspace = true, optional = true }
 serde_json.workspace = true
 smallvec.workspace = true
 thiserror.workspace = true
-mln_wire = { workspace = true, features = ["geo-types", "glam", "parking_lot"] }
 
+# Apple's platforms come with SQLite, and an app that links its own copy uses
+# its filesystem probes, which Apple counts as disk-space APIs whose use an
+# app's privacy manifest must give a reason for. Elsewhere SQLite is built in.
+[target.'cfg(not(target_vendor = "apple"))'.dependencies]
+rusqlite = { workspace = true, optional = true, features = ["bundled"] }
+
+# The HTTP transport: the platform's HTTP stack where it has one (NSURLSession
+# on Apple platforms, HttpURLConnection on Android, the browser's fetch on
+# wasm), else ureq, with the system's trust store.
+[target.'cfg(target_vendor = "apple")'.dependencies]
+block2.workspace = true
+objc2.workspace = true
+objc2-foundation.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+ureq = { workspace = true, features = ["gzip", "native-tls-no-default"] }
+
+[target.'cfg(not(any(target_family = "wasm", target_vendor = "apple", target_os = "windows", target_os = "android")))'.dependencies]
+rustls.workspace = true
+ureq = { workspace = true, features = [
+  "gzip",
+  "platform-verifier",
+  "rustls-no-provider",
+] }
+
+# HttpURLConnection and the app's assets, through the app's Java VM.
+[target.'cfg(target_os = "android")'.dependencies]
+jni.workspace = true
+
+# The browser's fetch, and `conformance::host_writes`'s bytes in a JS array.
 [target.'cfg(target_family = "wasm")'.dependencies]
-# `conformance::host_writes`: bytes in a JS array.
-js-sys = { workspace = true, optional = true }
+js-sys.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+web-sys.workspace = true
 
 [dev-dependencies]
-mln_storage = { workspace = true, features = ["stub-file-source"] }
+# Serves the styles of the DatabaseFileSource region tests, and the
+# responses of the network tests.
+httpmock.workspace = true
+mln_headless = { package = "mln-rs-headless", path = "../mln_headless" }
+# `Queue::run_once_at`, which `simulated_network` runs its queue with.
+mln_util = { workspace = true, features = ["bench"] }
 mln_webgpu = { package = "mln-rs-webgpu", path = "../mln_webgpu" }
-mlt-core.workspace = true
 pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }
 proptest.workspace = true
+tempfile.workspace = true
+
+# OfflineDownload.ResourceOfflineUsageUnset renders a map after the
+# download.
+[[test]]
+name = "offline_download_map_test"
+path = "tests/offline_download_map.rs"
+# StubFileSource answers the download.
+required-features = ["sqlite", "stub-file-source"]
 
 [lints]
 workspace = true

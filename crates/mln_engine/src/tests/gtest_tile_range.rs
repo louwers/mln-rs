@@ -1,6 +1,7 @@
 use mln_style::geo::{LatLng, LatLngBounds};
 use mln_style::tile_id::CanonicalTileID;
-use mln_tile_id::tile_range::TileRange;
+
+use crate::tile::tile_range::TileRange;
 
 fn ll(lat: f64, lon: f64) -> LatLng {
     LatLng::new(lat, lon).unwrap()

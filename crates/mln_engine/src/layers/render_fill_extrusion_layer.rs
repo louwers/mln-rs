@@ -44,7 +44,6 @@ use mln_style::layer::LayerStyle;
 use mln_style::layers::FillExtrusion;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionPaintProperties;
 use mln_style::types::{AlignmentType, LayerBlendType};
-use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::identity::SimpleIdentity;
 
 use super::cast_matrix;
@@ -86,6 +85,7 @@ use crate::render::static_data::RenderStaticData;
 use crate::render::terrain::{FrameGround, GroundHeights, height_attribute};
 use crate::render::tile::FrameTile;
 use crate::render::tile_matrix::{projection_data, to_projection_ubo};
+use crate::tile::{OverscaledTileID, UnwrappedTileID};
 
 /// The ids of the buffers that the draws bind.
 const DRAWABLE_ID: usize = programs::FILL_EXTRUSION.buffer_id("drawableVector");

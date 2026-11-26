@@ -23,7 +23,6 @@ use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
 use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
 use mln_style::types::{AlignmentType, IconTextFitType, SymbolPlacementType, TextRotationAlignmentType};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
-use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::identity::SimpleIdentity;
 
 use super::cast_matrix;
@@ -60,6 +59,7 @@ use crate::render::terrain::FrameGround;
 use crate::render::tile::{FrameTile, RenderTile};
 use crate::render::tile_matrix::{projection_data, to_projection_ubo};
 use crate::source::render_source::{RenderSource, TileOrder};
+use crate::tile::{OverscaledTileID, UnwrappedTileID};
 
 /// The ids of the buffers that the draws bind.
 const DRAWABLE_ID: usize = programs::SYMBOL_SDF.buffer_id("drawableVector");

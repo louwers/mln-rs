@@ -6,7 +6,8 @@ use mln_style::expression::{EvaluationContext, Expr, Value};
 use mln_style::feature::GeometryTileFeature;
 use mln_style::filter::Filter;
 use mln_style::hash::HashMap;
-use mln_tile::{FeatureGroups, TileLayer};
+
+use crate::tile::{FeatureGroups, TileLayer};
 
 /// A scalar value that an equality filter compares, as a key that equal
 /// values share.
@@ -171,12 +172,12 @@ mod tests {
     use mln_style::filter::convert_filter;
     use mln_style::hash::HashMap;
     use mln_style::tile_id::CanonicalTileID;
-    use mln_tile::{MltTile, MvtTile, TileData};
     use mlt_core::encoder::{EncoderConfig, Network, Profile};
     use mlt_core::geo_types::Coord;
     use mlt_core::{GeometryType, LayerWriter, PropKind};
 
     use super::*;
+    use crate::tile::{MltTile, MvtTile, TileData};
 
     fn varint(out: &mut Vec<u8>, mut value: u64) {
         while value >= 0x80 {

@@ -8,7 +8,7 @@ use mln_engine::RenderMode;
 use mln_engine::bench::Coverage;
 use mln_engine::camera::CameraOptions;
 use mln_engine::map::{MapMode, RenderFrameStatus};
-use mln_storage::Cache;
+use mln_engine::storage::Cache;
 
 use super::cache::DiskCache;
 use super::map::{Frontend, HeadlessMap};

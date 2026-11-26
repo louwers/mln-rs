@@ -8,11 +8,11 @@ use mln_style::range::Range;
 use mln_style::size::Size;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::ProjectionDefinition;
-use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::geo::EdgeInsets;
 
 use crate::camera::transform::Transform;
 use crate::camera::{CameraLimits, CameraOptions, ConstrainMode, ViewportMode};
+use crate::tile::{OverscaledTileID, UnwrappedTileID};
 use crate::tile_store::TileLodMode;
 use crate::tile_store::tile_cover::{
     TileCover, TileCoverParameters, covering_zoom_level, tile_count_bounds, tile_cover, tile_cover_bounds,

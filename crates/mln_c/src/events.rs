@@ -4,8 +4,8 @@
 use ::mln_engine::map::{CameraChange, CameraChangeMode, CameraChangeSource, MapEvent};
 use ::mln_engine::{RenderMode, TileOperation};
 use ::mln_runtime::{EventSource, MapId, RuntimeEvent, RuntimeEventKind};
-use mln_storage::offline::{OfflineRegionDownloadState, OfflineRegionStatus};
-use mln_storage::response::Reason;
+use mln_engine::storage::offline::{OfflineRegionDownloadState, OfflineRegionStatus};
+use mln_engine::storage::response::Reason;
 use mln_style::StyleLoadError;
 use mln_style::sprite::Sprite;
 use mln_text::glyph::{GlyphIDType, GlyphRange};
@@ -315,9 +315,9 @@ mod tests {
 
     use ::mln_engine::RenderingStats;
     use ::mln_engine::map::RenderFrameStatus;
+    use ::mln_engine::tile::OverscaledTileID;
     use ::mln_style::tile_id::CanonicalTileID;
-    use ::mln_tile_id::OverscaledTileID;
-    use mln_storage::ResourceError;
+    use mln_engine::storage::ResourceError;
 
     use super::*;
     use crate::generated::types::{

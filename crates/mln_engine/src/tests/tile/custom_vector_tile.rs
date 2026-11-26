@@ -10,7 +10,6 @@ use mln_style::layer::{Layer, LayerStyle};
 use mln_style::layers::Fill;
 use mln_style::sources::custom_vector_source::{CustomVectorTileData, TileDataFormat};
 use mln_style::tile_id::CanonicalTileID;
-use mln_tile_id::OverscaledTileID;
 use parking_lot::Mutex;
 
 use super::RasterTileTest;
@@ -18,6 +17,7 @@ use crate::Registry;
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::query::SourceQueryOptions;
 use crate::tests::OneTile;
+use crate::tile::OverscaledTileID;
 use crate::tile_store::contents::Contents;
 use crate::tile_store::custom_tile_loader::{CustomProvider, CustomTileSubscriber, CustomVectorProvider, HostFunction};
 use crate::tile_store::loading::DataOrigin;

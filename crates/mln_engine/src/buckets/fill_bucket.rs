@@ -207,7 +207,7 @@ impl Bucket for FillBucket {
     fn update(
         &mut self,
         states: &crate::layer::bucket::FeatureStates,
-        layer: &mln_tile::TileLayer<'_>,
+        layer: &crate::tile::TileLayer<'_>,
         layer_id: &str,
         image_positions: &ImagePositions,
     ) -> bool {

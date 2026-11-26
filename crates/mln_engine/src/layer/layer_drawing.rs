@@ -23,7 +23,6 @@ use mln_gfx::gpu::Gpu;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthMaskType;
 use mln_style::hash::HashMap;
-use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::identity::SimpleIdentity;
 
 use crate::draw::atlas_binding::AtlasBinding;
@@ -33,6 +32,7 @@ use crate::draw::uniform_buffer::UniformBufferArray;
 use crate::render::layer_composite::Composite;
 use crate::render::paint_parameters::{Composited, PaintParameters, StencilClear};
 use crate::render::pass::RenderPass;
+use crate::tile::{OverscaledTileID, UnwrappedTileID};
 
 /// The order of a layer's draws that its draws' ids don't give: lower
 /// priorities draw first.
@@ -1388,10 +1388,10 @@ impl DrapeDrawing {
 
 #[cfg(test)]
 mod tests {
-    use mln_tile_id::OverscaledTileID;
     use mln_util::identity::SimpleIdentity;
 
     use super::{BucketChanges, ChangedBuckets, TileMap};
+    use crate::tile::OverscaledTileID;
 
     /// Sets what `tiles` keeps of `tile_id` to `value`, if the tile is one
     /// of the map's; returns whether it is.

@@ -30,7 +30,6 @@ use glam::{I64Vec2, Vec2};
 use mln_style::constants::EXTENT;
 use mln_style::hash::HashSet;
 use mln_style::tile_id::CanonicalTileID;
-use mln_tile_id::OverscaledTileID;
 use mln_vec_map::{VecMap, VecSet};
 
 use crate::buckets::symbol_bucket::SymbolBucket;
@@ -39,6 +38,7 @@ use crate::layer::render_layer::{RenderLayer, SymbolBuckets};
 use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools};
 use crate::layout::symbol_projection::SymbolHeights;
 use crate::render::terrain::TerrainElevation;
+use crate::tile::OverscaledTileID;
 
 /// What adding a layer to the index changed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

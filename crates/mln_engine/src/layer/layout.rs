@@ -9,7 +9,6 @@ use mln_style::error::Error;
 use mln_style::expression::UnavailableImages;
 use mln_style::tile_id::CanonicalTileID;
 use mln_text::glyph::GlyphDependencies;
-use mln_tile::{TileData, TileLayer};
 use mln_vec_map::{VecMap, VecSet};
 
 use crate::image::image_store::ImageDependencies;
@@ -18,6 +17,7 @@ use crate::layer::filter_groups::FilterGroups;
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::tile_layout::Resolved;
 use crate::query::feature_index::FeatureIndexBuilder;
+use crate::tile::{TileData, TileLayer};
 
 /// The layer a layout reads: its tile data and its name.
 #[derive(Clone)]

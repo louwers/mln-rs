@@ -8,14 +8,14 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use httpmock::MockServer;
+use mln_engine::storage::offline::{OfflineRegionDownloadState, OfflineTilePyramidRegionDefinition};
+use mln_engine::storage::resource::Kind;
+use mln_engine::storage::response::Caching;
+use mln_engine::storage::{ResourceError, Response};
 use mln_runtime::{
     CacheDatabaseOperation, ErrorKind, EventMask, EventSource, ResourceProvider, ResourceRequest, Runtime,
     RuntimeEventKind, RuntimeOptions,
 };
-use mln_storage::offline::{OfflineRegionDownloadState, OfflineTilePyramidRegionDefinition};
-use mln_storage::resource::Kind;
-use mln_storage::response::Caching;
-use mln_storage::{ResourceError, Response};
 use mln_style::geo::{LatLng, LatLngBounds};
 
 use crate::support::{EMPTY_STYLE, EventLog, TempDir, map, runtime, wait, wait_err};
@@ -244,7 +244,7 @@ fn a_resource_transform_rewrites_or_fails_requests() {
     let base = server.base_url();
     wait(runtime.set_resource_transform(move |kind, url, done| {
         if url.contains("blocked") {
-            done(Err(ResourceError::new(mln_storage::response::Reason::Other, "blocked by the transform")));
+            done(Err(ResourceError::new(mln_engine::storage::response::Reason::Other, "blocked by the transform")));
         } else {
             assert_eq!(Kind::Style, kind);
             done(Ok(url.replace("http://nowhere.invalid", &base)));
@@ -487,7 +487,7 @@ fn an_offline_region_downloads_and_reports_its_progress() {
 
     wait(offline.invalidate_region(id));
     wait(offline.delete_region(id));
-    assert_eq!(wait(offline.regions()), Vec::<mln_storage::offline::OfflineRegion>::new());
+    assert_eq!(wait(offline.regions()), Vec::<mln_engine::storage::offline::OfflineRegion>::new());
     assert_eq!(ErrorKind::NotFound, wait_err(offline.region_status(id)).kind);
     assert_eq!(ErrorKind::NotFound, wait_err(offline.region_expiry(id)).kind);
     assert_eq!(ErrorKind::NotFound, wait_err(offline.delete_region(id)).kind);

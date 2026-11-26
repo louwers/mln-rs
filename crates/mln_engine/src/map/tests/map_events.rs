@@ -5,8 +5,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{Kind, Response};
 use mln_style::Edit;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::{Error, ErrorKind};
@@ -19,6 +17,8 @@ use crate::RendererEvent;
 use crate::camera::{AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode};
 use crate::map::options::UnusedStyleImagePolicy;
 use crate::map::{CameraChange, CameraChangeMode, CameraChangeSource, Map, MapEvent, MapMode, MapOptions};
+use crate::storage::stub_file_source::{ResponseType, StubFileSource};
+use crate::storage::{Kind, Response};
 
 fn map(options: MapOptions, run_loop: &Queue<()>) -> Map {
     Map::with_file_source(

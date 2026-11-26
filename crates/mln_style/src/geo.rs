@@ -3,7 +3,7 @@
 // The C++ tile-ID constructors (`LatLng(CanonicalTileID)`,
 // `LatLng(UnwrappedTileID)`, `LatLngBounds(CanonicalTileID)`) take the IDs'
 // fields, `LatLng::from_canonical_tile(z, x, y)` etc., since the unwrapped
-// tile ID is mln_tile_id's, which depends on this crate.
+// tile ID is mln_engine's, which depends on this crate.
 
 use crate::constants;
 use crate::error::Error;

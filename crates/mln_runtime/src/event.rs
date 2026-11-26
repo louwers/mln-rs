@@ -4,8 +4,8 @@ use std::ops::{BitOr, BitOrAssign};
 use std::sync::Arc;
 
 use mln_engine::map::MapEvent;
-use mln_storage::ResourceError;
-use mln_storage::offline::OfflineRegionStatus;
+use mln_engine::storage::ResourceError;
+use mln_engine::storage::offline::OfflineRegionStatus;
 
 use crate::map::MapId;
 

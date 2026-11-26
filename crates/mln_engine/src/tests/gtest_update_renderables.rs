@@ -7,8 +7,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mln_style::range::Range;
-use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 
+use crate::tile::{OverscaledTileID, UnwrappedTileID};
 use crate::tile_store::tile::TileNecessity;
 use crate::tile_store::update_renderables::{PrefetchedTile, RenderablesContext, update_renderables};
 

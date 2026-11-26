@@ -4,7 +4,7 @@
 
 use std::sync::{Arc, mpsc};
 
-use mln_storage::{Cache, DatabaseFileSource, FileSource, Resource, Responder, Response};
+use mln_engine::storage::{Cache, DatabaseFileSource, FileSource, Resource, Responder, Response};
 
 /// A database file source in memory. It runs on a thread of its own, as an
 /// application's does, and each load and store returns once the database

@@ -5,14 +5,14 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use mln_storage::Data;
 use mln_style::tileset::RasterEncoding;
-use mln_tile::TileData;
 use mln_vec_map::VecSet;
 
 use crate::image::image_store::ImageWait;
 use crate::layer::tile_layout::{Dependencies, LayoutParams};
+use crate::storage::Data;
 use crate::text::glyph_store::GlyphWait;
+use crate::tile::TileData;
 use crate::tile_store::contents::Answer;
 use crate::tile_store::tile::TileKind;
 use crate::worker::job::{DataKey, JobId, JobResult, SourceStyle};

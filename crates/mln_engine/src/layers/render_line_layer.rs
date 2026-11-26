@@ -18,7 +18,6 @@ use mln_style::layers::line_layer_properties::LinePaintProperties;
 use mln_style::size::Size;
 use mln_style::types::{AlignmentType, LayerBlendType, LineCapType, TranslateAnchorType};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
-use mln_tile_id::UnwrappedTileID;
 use mln_util::identity::SimpleIdentity;
 
 use super::{cast_matrix, refresh_paint_attributes};
@@ -52,6 +51,7 @@ use crate::render::paint_parameters::PaintParameters;
 use crate::render::pass::RenderPass;
 use crate::render::tile::FrameTile;
 use crate::render::tile_matrix::{projection_data, to_projection_ubo};
+use crate::tile::UnwrappedTileID;
 
 /// The ids of the buffers that the draws bind.
 const DRAWABLE_ID: usize = programs::LINE.buffer_id("drawableVector");

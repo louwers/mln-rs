@@ -3,9 +3,9 @@ use std::sync::Arc;
 use mln_engine::Registry;
 use mln_engine::camera::{BoundOptions, ProjectionMode};
 use mln_engine::map::{Map, MapOptions};
+use mln_engine::storage::{FileSource, FileSourceExt};
 use mln_engine::worker::worker_codec::{RemoteWorkers, ThreadWorkerInstances};
 use mln_headless::HeadlessFrontend;
-use mln_storage::{FileSource, FileSourceExt};
 use mln_style::Edit;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::time::Instant;
@@ -56,9 +56,9 @@ impl Impl {
     ) -> Result<Impl, String> {
         let assets = (!resource_options.asset_path.is_empty())
             .then_some(Assets { path: resource_options.asset_path.as_str(), only: resource_options.assets_only });
-        let resource_options = mln_storage::ResourceOptions {
+        let resource_options = mln_engine::storage::ResourceOptions {
             cache_path: resource_options.cache_path.clone(),
-            ..mln_storage::ResourceOptions::default()
+            ..mln_engine::storage::ResourceOptions::default()
         };
         let registry = Registry::with_builtins();
         let mut frontend =
@@ -386,8 +386,8 @@ impl TestRunnerImpl for Impl {
         let (sender, responses) = std::sync::mpsc::channel();
         let wake = self.frontend.waker();
         let _req = file_source.request(
-            &mln_storage::Resource::image(&format!("mapbox://render-tests/{image_path}")),
-            move |response: mln_storage::Response| {
+            &mln_engine::storage::Resource::image(&format!("mapbox://render-tests/{image_path}")),
+            move |response: mln_engine::storage::Response| {
                 let _ = sender.send(response.data);
                 wake();
             },

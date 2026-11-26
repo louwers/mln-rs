@@ -5,7 +5,7 @@
 # Web Worker, each with its own memory) needs the target, which
 # rust-toolchain.toml installs. Clippy, so that examples/web, which only builds
 # there, is linted too. Three runs, since one would unify their features: the
-# libraries as published (mln_storage's `sqlite` feature on, its SQLite built
+# libraries as published (mln_engine's `sqlite` feature on, its SQLite built
 # through sqlite-wasm-rs, which needs a C compiler that targets wasm32, and the
 # in-process font-face shaper), the browser build's two modules as `mise run
 # web:build` builds them, which leave both out, with mln_web_host, the glue they

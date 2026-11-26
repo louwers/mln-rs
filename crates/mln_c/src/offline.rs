@@ -3,7 +3,7 @@
 
 use ::mln_runtime::{EventMask, Offline};
 use geo_types::Geometry;
-use mln_storage::offline::{
+use mln_engine::storage::offline::{
     OfflineGeometryRegionDefinition, OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState,
     OfflineRegionExpiry, OfflineRegionStatus, OfflineTilePyramidRegionDefinition,
 };

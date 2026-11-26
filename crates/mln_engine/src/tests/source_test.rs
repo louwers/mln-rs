@@ -5,9 +5,6 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use geojson::GeoJson;
-use mln_storage::response::{Reason, ResourceError};
-use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{FileSource, FileSourceExt, Kind, RequestOrder, Resource, Responder, Response};
 use mln_style::error::Error;
 use mln_style::geo::LatLng;
 use mln_style::layer::{Layer, LayerStyle};
@@ -26,7 +23,6 @@ use mln_style::tile_id::CanonicalTileID;
 use mln_style::tileset::{PartialTileset, Tileset};
 use mln_style::types::ProjectionDefinition;
 use mln_style::{Edit, Source, Style};
-use mln_tile_id::OverscaledTileID;
 use mln_util::pool::{Pool, TaskGroup};
 use mln_util::queue::Queue;
 use parking_lot::Mutex;
@@ -37,7 +33,11 @@ use crate::camera::{CameraOptions, ConstrainMode, TransformState, ViewportMode};
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::map::MapMode;
 use crate::source::render_source::RenderSource;
+use crate::storage::response::{Reason, ResourceError};
+use crate::storage::stub_file_source::{ResponseType, StubFileSource};
+use crate::storage::{FileSource, FileSourceExt, Kind, RequestOrder, Resource, Responder, Response};
 use crate::tests::fixture_log::FixtureLog;
+use crate::tile::OverscaledTileID;
 use crate::tile_store::TileLodMode;
 use crate::tile_store::source_tiles::SourceTiles;
 use crate::tile_store::store::{StoreEvent, TileStore};
@@ -1543,7 +1543,7 @@ fn globe_base_level_is_not_kept_where_it_is_large_or_out_of_reach() {
 }
 
 /// The DEM of `tile`, a raster-dem tile.
-fn dem(tile: &crate::tile_store::tile::Tile) -> &crate::geometry::dem_data::DEMData {
+fn dem(tile: &crate::tile_store::tile::Tile) -> &crate::tile::dem_data::DEMData {
     match tile.contents() {
         Some(crate::tile_store::contents::Contents::Dem(dem)) => dem.dem(),
         _ => panic!("a DEM"),

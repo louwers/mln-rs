@@ -51,7 +51,7 @@ fn make_image(id: &str, image: PremultipliedImage, pixel_ratio: f32, sdf: bool) 
 fn basic() {
     let mut pattern_atlas = PatternAtlas::new();
 
-    let images = mln_sprite::parse_sprite(
+    let images = crate::image::sprite::parse_sprite(
         "default",
         &decode_image(&read_file("test/fixtures/annotations/emerald.png")).unwrap(),
         &read_file("test/fixtures/annotations/emerald.json"),

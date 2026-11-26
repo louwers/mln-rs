@@ -16,7 +16,6 @@ use mln_style::layer::ErasedLayerStyle;
 use mln_text::atlas::ImagePositions;
 use mln_text::glyph::{GlyphID, GlyphPositions};
 use mln_text::tagged_string::font_stack_hash;
-use mln_tile_id::OverscaledTileID;
 use mln_util::feature::Feature;
 use mln_util::identity::SimpleIdentity;
 use mln_util::pool::TaskGroup;
@@ -39,6 +38,7 @@ use crate::render::orchestrator::drop_on_workers;
 use crate::render::tile::ViewPlace;
 use crate::source::source_state::SourceFeatureState;
 use crate::text::glyph_store::{GlyphRanges, ShapeResults};
+use crate::tile::OverscaledTileID;
 use crate::tile_store::dem::DemContents;
 use crate::tile_store::raster::{Masking, RasterContents};
 use crate::tile_store::tile_mask::TileMask;
@@ -673,7 +673,7 @@ pub(crate) fn release(contents: Contents, pool: &TaskGroup) {
 
 /// The feature loop of a tile's source query.
 pub(crate) fn query_layer_source_features(
-    layer: &mln_tile::TileLayer<'_>,
+    layer: &crate::tile::TileLayer<'_>,
     result: &mut Vec<Feature>,
     options: &SourceQueryOptions,
     global_state: Option<&GlobalStateMap>,
@@ -692,7 +692,7 @@ pub(crate) fn query_layer_source_features(
             }
         }
 
-        let converted = mln_tile::convert_feature(&feature, &feature.geometry()?, &id.canonical)?;
+        let converted = crate::tile::convert_feature(&feature, &feature.geometry()?, &id.canonical)?;
         result.push(Feature::from(converted));
     }
     Ok(())

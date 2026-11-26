@@ -3,7 +3,7 @@
 //! with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind), as offline.rs's
 //! would on a runtime without a database.
 
-use mln_storage::offline::{
+use mln_engine::storage::offline::{
     OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionExpiry, OfflineRegionMetadata,
     OfflineRegionStatus,
 };

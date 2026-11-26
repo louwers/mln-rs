@@ -12,7 +12,6 @@ use mln_style::size::Size;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_text::atlas::{ImagePosition, ImagePositions, RectU16};
 use mln_text::glyph::GlyphDependencies;
-use mln_tile_id::OverscaledTileID;
 use mln_vec_map::VecSet;
 use serde_json::json;
 
@@ -30,6 +29,7 @@ use crate::layer::layout::{BuildParams, LayoutParameters, SourceLayer};
 use crate::layer::tile_layout::{Built, Resolved};
 use crate::map::MapMode;
 use crate::query::feature_index::FeatureIndexBuilder;
+use crate::tile::OverscaledTileID;
 use crate::tile_store::contents::LayoutBuckets;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -111,7 +111,7 @@ fn create_bucket(properties: &Arc<dyn ErasedEvaluatedLayer>, shape: Shape) -> Bo
             }
         })
         .collect();
-    let data = mln_tile::TileData::Features(Arc::new(features));
+    let data = crate::tile::TileData::Features(Arc::new(features));
     let bucket_parameters = BucketParameters {
         tile_id: OverscaledTileID::from_zxy(0, 0, 0),
         mode: MapMode::Continuous,

@@ -304,7 +304,8 @@ fn carried_triangles(tile: &[u8]) -> Vec<Vec<Triangle>> {
 #[test]
 fn mlt_polygons_fill_with_the_triangles_the_tile_carries() {
     use geo_types::{Geometry, LineString, MultiPolygon, Polygon};
-    use mln_tile::{MltTile, TileData};
+
+    use crate::tile::{MltTile, TileData};
 
     let ring =
         |coords: &[(i32, i32)]| LineString::from(coords.iter().map(|&(x, y)| (x * 20, y * 20)).collect::<Vec<_>>());

@@ -43,7 +43,7 @@ import type { Terrain } from "./styles.ts";
 // Every URL this worker fetched, and how many times, and how many fetches
 // are still transferring: the map's fetches look the global `fetch` up at
 // each call, and so do the preloads below. A fetch is pending until it fails
-// or its body is read (mln_storage reads each with `arrayBuffer()`); a
+// or its body is read (mln_engine reads each with `arrayBuffer()`); a
 // preload, which the map may never claim, until a copy of its body is
 // (`settle`).
 const fetches = new Map<string, number>();
@@ -65,7 +65,7 @@ globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
   return globalFetch(input, init).then(
     (response) => {
       if (response.type === "opaqueredirect") {
-        done(); // mln_storage reads no body from it
+        done(); // mln_engine reads no body from it
         return response;
       }
       const read = response.arrayBuffer.bind(response);
@@ -248,7 +248,7 @@ function preloadParts(
           )
         : [];
   for (const sprite of sprites) {
-    // mln_storage's `Resource::sprite_json` and `sprite_image`.
+    // mln_engine's `Resource::sprite_json` and `sprite_image`.
     if (typeof sprite !== "string" || sprite.includes("#")) continue;
     const query = sprite.includes("?") ? sprite.indexOf("?") : sprite.length;
     const scale = ratio > 1 ? "@2x" : "";
@@ -261,7 +261,7 @@ function preloadParts(
   const glyphs = style.glyphs;
   if (typeof glyphs === "string") {
     for (const stack of firstFontStacks(style, zoom)) {
-      // mln_storage's `Resource::glyphs`, for the first range.
+      // mln_engine's `Resource::glyphs`, for the first range.
       preload(
         glyphs
           .replaceAll("{fontstack}", percentEncode(stack))

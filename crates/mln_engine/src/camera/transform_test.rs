@@ -19,7 +19,6 @@ use mln_style::tile_id::CanonicalTileID;
 use mln_style::time::Instant;
 use mln_style::types::ProjectionType;
 use mln_style::unitbezier::UnitBezier;
-use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::MAX_ZOOM;
 
 use super::momentum::GlidePlan;
@@ -30,6 +29,7 @@ use crate::camera::{
     TransitionOutcome,
 };
 use crate::map::events::CameraChangeMode;
+use crate::tile::UnwrappedTileID;
 
 fn new_transform() -> Transform {
     Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default)

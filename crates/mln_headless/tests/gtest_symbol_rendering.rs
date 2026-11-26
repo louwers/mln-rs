@@ -9,10 +9,10 @@ use std::time::{Duration, Instant};
 
 use mln_engine::camera::CameraOptions;
 use mln_engine::map::{Map, MapMode, MapOptions};
+use mln_engine::storage::Kind;
+use mln_engine::storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_engine::{Registry, RenderMode};
 use mln_headless::{HeadlessFrontend, RenderResult};
-use mln_storage::Kind;
-use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::Edit;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::conversion::Convertible;

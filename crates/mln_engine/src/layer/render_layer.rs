@@ -18,7 +18,6 @@ use mln_style::layer::{ErasedLayerStyle, LayerStyle, PaintSet, SourceKind, Style
 use mln_style::types::{TranslateAnchorType, VisibilityType};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use mln_text::atlas::ImagePosition;
-use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use smallvec::SmallVec;
 
 use crate::buckets::symbol_bucket::SymbolBucket;
@@ -40,6 +39,7 @@ use crate::render::tile::{FoundTile, FrameTile, RenderTile, TileStamp, TileView,
 use crate::render::update_parameters::UpdateParameters;
 use crate::source::render_image_source::ImageSourceRenderData;
 use crate::source::render_source::{RenderSource, TileOrder};
+use crate::tile::{OverscaledTileID, UnwrappedTileID};
 use crate::tile_store::contents::{Contents, GeometryContents};
 use crate::worker::job::SourceKey;
 

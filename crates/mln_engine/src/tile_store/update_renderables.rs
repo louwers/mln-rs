@@ -4,8 +4,8 @@
 
 use mln_style::hash::HashSet;
 use mln_style::range::Range;
-use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 
+use crate::tile::{OverscaledTileID, UnwrappedTileID};
 use crate::tile_store::tile::TileNecessity;
 
 /// The tile storage and the calls `update_renderables` works with.

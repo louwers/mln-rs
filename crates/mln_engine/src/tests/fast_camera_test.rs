@@ -13,8 +13,6 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
-use mln_storage::response::{Reason, ResourceError};
-use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::Source;
 use mln_style::geo::LatLng;
 use mln_style::layer::{Layer, LayerStyle};
@@ -35,6 +33,8 @@ use crate::camera::{CameraOptions, ConstrainMode, ViewportMode};
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::map::MapMode;
 use crate::source::render_source::RenderSource;
+use crate::storage::response::{Reason, ResourceError};
+use crate::storage::{FileSource, Resource, Responder, Response};
 use crate::tile_store::TileLodMode;
 use crate::tile_store::source_tiles::SourceTiles;
 use crate::tile_store::store::TileStore;

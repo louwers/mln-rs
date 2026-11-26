@@ -740,9 +740,9 @@ fn center_pixel_after(driver: &DriverWork, session: &RenderSession, token: &mut 
 // finishes with a result.
 #[test]
 fn each_still_image_ends_its_own_demand() {
+    use mln_engine::storage::response::Reason;
+    use mln_engine::storage::{ResourceError, Response};
     use mln_runtime::ResourceRequest;
-    use mln_storage::response::Reason;
-    use mln_storage::{ResourceError, Response};
 
     let runtime = runtime();
     // The first tile fails, and every later one is empty.

@@ -18,7 +18,6 @@ use mln_style::property::value::PropertyValue;
 use mln_style::range::Range;
 use mln_style::types::TextWritingModeType;
 use mln_text::atlas::ImagePositions;
-use mln_tile::TileLayer;
 use mln_vec_map::VecMap;
 use mln_wire::payload::pod;
 
@@ -29,6 +28,7 @@ use crate::layer::layer_type::EvaluatedLayer;
 use crate::layer::paint_property_binder::PaintPropertyBinder;
 use crate::layout::symbol_instance::{SymbolInstance, SymbolInstancePools, WritingMode};
 use crate::text::quads::SymbolQuad;
+use crate::tile::TileLayer;
 use crate::util::pool::PoolRange;
 
 crate::paint_property_binders!(

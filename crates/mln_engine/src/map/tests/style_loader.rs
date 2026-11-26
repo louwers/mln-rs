@@ -3,13 +3,13 @@
 
 use std::sync::Arc;
 
-use mln_storage::response::{Reason, ResourceError};
-use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{Kind, Resource, Response};
 use mln_style::{Edit, StyleLoadError};
 use mln_util::queue::Queue;
 
 use crate::map::{Map, MapEvent, MapOptions};
+use crate::storage::response::{Reason, ResourceError};
+use crate::storage::stub_file_source::{ResponseType, StubFileSource};
+use crate::storage::{Kind, Resource, Response};
 
 /// A path of this crate's test data.
 fn testdata(relative: &str) -> String {

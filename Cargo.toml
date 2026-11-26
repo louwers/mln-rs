@@ -51,8 +51,10 @@ feature = { package = "mln-rs-feature", path = "vendor/feature", version = "=0.0
 geometry = { package = "mln-rs-geometry", path = "vendor/geometry", version = "=0.0.17" }
 mln_d3d12 = { package = "mln-rs-d3d12", path = "crates/mln_d3d12", version = "=0.0.17" }
 mln_bench_workload = { package = "mln-rs-bench-workload", path = "tools/bench/workload" }
-# Without its default feature, the in-process font-face shaper: the packages
-# that render turn it on (crates/mln_engine/Cargo.toml).
+# Without its default features, the in-process font-face shaper and SQLite:
+# the packages that render turn the shaper on, and those that cache or keep
+# offline regions SQLite, so that examples/web leaves both out
+# (crates/mln_engine/Cargo.toml).
 mln_engine = { package = "mln-rs-engine", path = "crates/mln_engine", version = "=0.0.17", default-features = false }
 mln_frame_pacer = { package = "mln-rs-frame-pacer", path = "crates/mln_frame_pacer", version = "=0.0.17" }
 mln_gestures = { package = "mln-rs-gestures", path = "crates/mln_gestures", version = "=0.0.17" }
@@ -66,16 +68,9 @@ mln_mtl = { package = "mln-rs-mtl", path = "crates/mln_mtl", version = "=0.0.17"
 # Without its backends (its default features) unless a package asks for
 # them, so that a browser build of mln_c carries one.
 mln_runtime = { package = "mln-rs-runtime", path = "crates/mln_runtime", version = "=0.0.17", default-features = false }
-mln_sprite = { package = "mln-rs-sprite", path = "crates/mln_sprite", version = "=0.0.17" }
-# Without SQLite (its `sqlite` feature) unless a package asks for it, so
-# that examples/web leaves it out.
-mln_storage = { package = "mln-rs-storage", path = "crates/mln_storage", version = "=0.0.17", default-features = false }
-mln_storage_offline = { package = "mln-rs-storage-offline", path = "crates/mln_storage_offline", version = "=0.0.17" }
 mln_style = { package = "mln-rs-style", path = "crates/mln_style", version = "=0.0.17" }
 mln_system_fonts = { package = "mln-rs-system-fonts", path = "crates/mln_system_fonts", version = "=0.0.17" }
 mln_text = { package = "mln-rs-text", path = "crates/mln_text", version = "=0.0.17" }
-mln_tile = { package = "mln-rs-tile", path = "crates/mln_tile", version = "=0.0.17" }
-mln_tile_id = { package = "mln-rs-tile-id", path = "crates/mln_tile_id", version = "=0.0.17" }
 mln_util = { package = "mln-rs-util", path = "crates/mln_util", version = "=0.0.17" }
 mln_vec_map = { package = "mln-rs-vec-map", path = "crates/mln_vec_map", version = "=0.0.17" }
 mln_vulkan = { package = "mln-rs-vulkan", path = "crates/mln_vulkan", version = "=0.0.17" }
@@ -106,7 +101,7 @@ glow = { version = "0.17.0" }
 harfrust = { version = "0.15.0" }
 # HTTP dates (Expires, Last-Modified, Retry-After): mln_util's parse_http_date.
 httpdate = { version = "1.0.3" }
-# Percent-decoding (mln_storage's file sources).
+# Percent-decoding (mln_engine's file sources).
 percent-encoding = { version = "2.3.1" }
 # A local HTTP server, for the tests that load over HTTP.
 httpmock = { version = "0.9.0", default-features = false }
@@ -172,7 +167,7 @@ buffa = { version = "0.9.2", default-features = false }
 cheap-ruler = { version = "0.4.0" }
 # Packs the glyph, icon and pattern atlases (mln_engine).
 etagere = { version = "0.3.0", default-features = false }
-# PMTiles archives (mln_storage's PMTilesFileSource): their header,
+# PMTiles archives (mln_engine's PMTilesFileSource): their header,
 # directories and tile IDs, in place of a port of the C++ core's vendored
 # pmtiles.hpp. The archive reading stays the port's.
 pmtiles = { version = "0.28.1", default-features = false }
@@ -185,18 +180,18 @@ foldhash = { version = "0.2.0" }
 parking_lot = { version = "0.12.5" }
 png = { version = "0.18.1" }
 pollster = { version = "1.0.1" }
-# The property tests that decode malformed tiles (mln_tile, mln_engine).
+# The property tests that decode malformed tiles (mln_engine).
 proptest = { version = "1.12.0" }
 # The windows of window targets (mln_gfx::Window), as winit and others hand them out.
 # `alloc`: an `Arc` of a window is one too.
 raw-window-handle = { version = "0.6.2", features = ["alloc"] }
 regex = { version = "1.13.1" }
-# tools/render-test's JSON (with serde_json), mln_sprite's sprite index, and
+# tools/render-test's JSON (with serde_json), mln_engine's sprite index, and
 # the types that cross to a tile worker in another wasm instance (rc: the
 # values behind their `Arc`s).
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 # The same engine as the C++ core's vendored SQLite, built from source like it
-# where the platform has none (crates/mln_storage). A range, because an app
+# where the platform has none (crates/mln_engine). A range, because an app
 # links only one sqlite3 and picks the rusqlite version for all its crates.
 rusqlite = ">=0.39.0, <0.44"
 # preserve_order: objects keep their members in document order, which the
@@ -266,7 +261,7 @@ wuff = { version = "0.2.10", default-features = false, features = ["brotli"] }
 # Rust. The browser build decodes JPEG with the browser instead.
 zune-jpeg = { version = "0.5.15" }
 # HTTP for the online file source where the platform has no HTTP stack of
-# its own (the C++ default platform uses curl). mln_storage picks the TLS
+# its own (the C++ default platform uses curl). mln_engine picks the TLS
 # features per target.
 ureq = { version = "3.5.1", default-features = false }
 # ureq's rustls, with ring's cryptography (ureq's own `rustls` feature would
@@ -551,17 +546,13 @@ mln_gfx.workspace = true
 mln_gl = { workspace = true, optional = true }
 mln_image.workspace = true
 mln_mtl = { workspace = true, optional = true }
-mln_engine = { workspace = true, features = ["font-face-shaper"] }
+# SQLite: the ambient cache, offline regions and mbtiles:// sources, as in
+# C++.
+mln_engine = { workspace = true, features = ["font-face-shaper", "sqlite"] }
 mln_runtime.workspace = true
-mln_sprite.workspace = true
-# The ambient cache, offline regions and mbtiles:// sources, as in C++.
-mln_storage = { workspace = true, features = ["sqlite"] }
-mln_storage_offline.workspace = true
 mln_style.workspace = true
 mln_system_fonts.workspace = true
 mln_text.workspace = true
-mln_tile.workspace = true
-mln_tile_id.workspace = true
 mln_util.workspace = true
 mln_vec_map.workspace = true
 mln_vulkan = { workspace = true, optional = true }

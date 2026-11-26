@@ -86,7 +86,7 @@ static EMPTY_PROPERTIES: PropertyMap = PropertyMap::new();
 static EMPTY_GEOMETRIES: GeometryCollection = GeometryCollection::new();
 
 /// A feature as expressions and buckets read it: a view of a tile's
-/// feature (`mln_tile::Feature`), or a feature made for evaluating an
+/// feature (`mln_engine::tile::Feature`), or a feature made for evaluating an
 /// expression. Reading a value never fails: a reader whose data can be
 /// malformed checks it when it makes the view.
 pub trait GeometryTileFeature {

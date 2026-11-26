@@ -4,10 +4,10 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use mln_storage::http_header_transform::HttpHeaders;
-use mln_storage::resource::Kind;
-use mln_storage::response::Reason;
-use mln_storage::{FileSource, OnlineFileSource, Resource, ResourceError, Responder, Response};
+use mln_engine::storage::http_header_transform::HttpHeaders;
+use mln_engine::storage::resource::Kind;
+use mln_engine::storage::response::Reason;
+use mln_engine::storage::{FileSource, OnlineFileSource, Resource, ResourceError, Responder, Response};
 use mln_style::error::Error;
 use parking_lot::{Mutex, RwLock};
 
@@ -107,7 +107,7 @@ impl ProviderFileSource {
 
     /// Who loads `resource`, when `provider` is the runtime's provider.
     fn route<'a>(resource: &Resource, provider: Option<&'a dyn ResourceProvider>) -> Route<'a> {
-        if !resource.has_loading_method(mln_storage::LoadingMethod::Network) {
+        if !resource.has_loading_method(mln_engine::storage::LoadingMethod::Network) {
             return Route::Native { declined: false };
         }
         let Some(provider) = provider else {

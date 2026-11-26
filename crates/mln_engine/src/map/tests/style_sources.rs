@@ -2,9 +2,6 @@
 
 use std::sync::Arc;
 
-use mln_storage::response::{Reason, ResourceError};
-use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{Kind, Response};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::ErrorKind;
 use mln_style::geo::LatLng;
@@ -19,6 +16,9 @@ use mln_util::pool::Pool;
 use mln_util::queue::Queue;
 
 use crate::map::{Map, MapEvent, MapOptions};
+use crate::storage::response::{Reason, ResourceError};
+use crate::storage::stub_file_source::{ResponseType, StubFileSource};
+use crate::storage::{Kind, Response};
 
 const EMPTY_GEOJSON_SOURCE: &str = r#"{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}"#;
 
@@ -118,7 +118,7 @@ fn a_source_json_needs_a_loaded_style() {
 /// A map over `file_source` whose style has no sources, and whose
 /// background work runs when the test runs its pool.
 fn map_over(file_source: &Arc<StubFileSource>) -> Map {
-    let file_source: Arc<dyn mln_storage::FileSource> = Arc::<StubFileSource>::clone(file_source);
+    let file_source: Arc<dyn crate::storage::FileSource> = Arc::<StubFileSource>::clone(file_source);
     let mut map = Map::with_file_source(file_source, MapOptions::default(), &Pool::local()).expect("map");
     map.load_style_json(r#"{"version":8,"sources":{},"layers":[]}"#);
     map

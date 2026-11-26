@@ -6,7 +6,7 @@
 //! The online file source runs as an application's does, its limit on
 //! transfers in flight, their priorities, cancellation, retries after
 //! errors and revalidations included, through
-//! `mln_storage::simulated_network`: its transfers come to [`Simulator`], and
+//! `mln_engine::storage::simulated_network`: its transfers come to [`Simulator`], and
 //! its deadlines go by the network's clock, one 60 Hz frame per
 //! [`Network::advance`].
 
@@ -15,8 +15,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use mln_storage::simulated_network::{Clock, OnlineDriver, Transfer, Transport, online_file_source};
-use mln_storage::{Cache, FileSource, Loader, Resource};
+use mln_engine::storage::simulated_network::{Clock, OnlineDriver, Transfer, Transport, online_file_source};
+use mln_engine::storage::{Cache, FileSource, Loader, Resource};
 use mln_style::hash::{HashMap, HashSet};
 use mln_util::pool::Pool;
 use parking_lot::Mutex;
@@ -675,7 +675,7 @@ impl Network {
 
 #[cfg(test)]
 mod tests {
-    use mln_storage::{Request, Response};
+    use mln_engine::storage::{Request, Response};
 
     use super::*;
 

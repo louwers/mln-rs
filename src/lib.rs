@@ -13,7 +13,7 @@
 //! The library logs through the `log` crate and installs no logger: install
 //! a `log` backend to read its records. A record's target is
 //! `<crate>::<event>`, where the event says what logged it, as the C API's
-//! log events do: `mln_style::parse_style`, `mln_storage::database`,
+//! log events do: `mln_style::parse_style`, `mln_engine::database`,
 //! `mln_vulkan::render`. The offline database's errors carry their SQLite or
 //! I/O error code as a `code` key-value.
 //!
@@ -48,14 +48,9 @@ pub use mln_mtl;
 // Every runtime type is at the root, so the root can't miss one that a
 // root type's methods take or return.
 pub use mln_runtime::{self, *};
-pub use mln_sprite;
-pub use mln_storage;
-pub use mln_storage_offline;
 pub use mln_style;
 pub use mln_system_fonts;
 pub use mln_text;
-pub use mln_tile;
-pub use mln_tile_id;
 pub use mln_util;
 pub use mln_vec_map;
 /// Empty on Apple platforms and in the browser build.

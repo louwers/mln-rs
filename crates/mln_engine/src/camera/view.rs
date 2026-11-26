@@ -11,7 +11,6 @@ use mln_style::error::Error;
 use mln_style::geo::{LatLng, WrapMode};
 use mln_style::size::Size;
 use mln_style::types::ProjectionDefinition;
-use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::{DEFAULT_FOV, M2PI};
 pub use mln_util::geo::NorthOrientation;
 use mln_util::geo::{EdgeInsets, ScreenCoordinate};
@@ -25,6 +24,7 @@ use crate::camera::projection::{ProjectionData, mercator_tile_matrix};
 use crate::camera::projection_mode::{AxonometricMode, ProjectionMode};
 use crate::camera::tile_coordinate::TileCoordinate;
 use crate::camera::vertical_perspective_projection::VerticalPerspectiveProjection;
+use crate::tile::UnwrappedTileID;
 
 /// The largest pitch the Mercator horizon is computed for, in radians. Past
 /// it the distance to the horizon grows without bound, and with it the tiles

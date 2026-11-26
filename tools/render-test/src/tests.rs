@@ -797,7 +797,7 @@ fn argument_parsing() {
 // waited for.
 #[test]
 fn pending_requests_leave_when_answered_or_cancelled() {
-    use mln_storage::{FileSource, FileSourceExt, Resource, Responder};
+    use mln_engine::storage::{FileSource, FileSourceExt, Resource, Responder};
 
     use crate::file_source::{ProxyFileSource, answered, track};
     /// Never answers.
@@ -906,20 +906,20 @@ fn the_ports_expectations_are_of_tests() {
 /// A file source that records the URLs it is asked for.
 struct Recording(std::sync::Arc<parking_lot::Mutex<Vec<String>>>);
 
-impl mln_storage::FileSource for Recording {
-    fn load(&self, resource: &mln_storage::Resource, responder: mln_storage::Responder) {
+impl mln_engine::storage::FileSource for Recording {
+    fn load(&self, resource: &mln_engine::storage::Resource, responder: mln_engine::storage::Responder) {
         self.0.lock().push(resource.url.clone());
         std::mem::forget(responder);
     }
 
-    fn can_request(&self, _resource: &mln_storage::Resource) -> bool {
+    fn can_request(&self, _resource: &mln_engine::storage::Resource) -> bool {
         true
     }
 }
 
 #[test]
 fn asset_files_stand_in_for_the_caches_local_resources() {
-    use mln_storage::{FileSourceExt, Resource};
+    use mln_engine::storage::{FileSourceExt, Resource};
 
     use crate::file_source::{AssetDir, ProxyFileSource};
 
@@ -944,7 +944,7 @@ fn asset_files_stand_in_for_the_caches_local_resources() {
 
 #[test]
 fn a_suite_whose_assets_hold_a_directory_loads_it_only_from_them() {
-    use mln_storage::{FileSourceExt, Resource};
+    use mln_engine::storage::{FileSourceExt, Resource};
 
     use crate::file_source::{AssetDir, ProxyFileSource};
 

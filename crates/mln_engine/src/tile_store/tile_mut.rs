@@ -8,8 +8,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use mln_storage::response::Reason;
-use mln_storage::{Request, Response};
 use mln_style::error::Error;
 use mln_style::hash::{HashSet, hash_bytes};
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
@@ -19,6 +17,8 @@ use crate::layer::layer_drawing::ChangedBuckets;
 use crate::layer::tile_layout::{Dependencies, LayoutParams};
 use crate::log_target;
 use crate::render::orchestrator::drop_on_workers;
+use crate::storage::response::Reason;
+use crate::storage::{Request, Response};
 use crate::text::glyph_store::GlyphRanges;
 use crate::tile_store::contents::{Contents, GeometryContents, LayoutResult, release};
 use crate::tile_store::custom_tile_loader::SubscriberKey;

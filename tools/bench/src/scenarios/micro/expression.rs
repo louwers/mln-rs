@@ -7,12 +7,12 @@ use std::hint::black_box;
 use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap, Value};
+use mln_engine::tile::TileData;
 use mln_style::conversion::Convertible;
 use mln_style::error::Error;
 use mln_style::expression::{EvaluationContext, Expr, Functions, ParsingContext, Type, is_expression};
 use mln_style::feature::{GeometryCollection, GeometryTileFeature};
 use mln_style::geometry::FeatureType;
-use mln_tile::TileData;
 
 use super::{DENSE, tile_bytes, tile_data};
 use crate::scenario::{Bench, Kind, Scenario};

@@ -12,7 +12,6 @@ use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::StencilOpType;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMode, DrawModeType, StencilMode};
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_tile_id::UnwrappedTileID;
 
 use crate::draw::buffer::Buffer;
 use crate::draw::context::Context;
@@ -24,6 +23,7 @@ use crate::render::globe::globe_tile_mesh::raw_globe_tile_mesh;
 use crate::render::paint_parameters::DrawTarget;
 use crate::render::static_data::RenderStaticData;
 use crate::shaders::programs;
+use crate::tile::UnwrappedTileID;
 
 /// The vertex layout of the masks' meshes: a tile position of two shorts.
 fn layout() -> VertexBufferLayout {

@@ -6,7 +6,6 @@
 use std::sync::Arc;
 
 use mln_style::wire::{SharedExpression, SharedLayer};
-use mln_tile::cut::SharedAncestor;
 use mln_vec_map::VecSet;
 use mln_wire::shared::{self, ErasedTable, Role, Table};
 use mln_wire::{Context, Reader, Request, Wire, Writer};
@@ -15,6 +14,7 @@ use crate::Registry;
 use crate::layer::bucket::Bucket;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::query::feature_index::FeatureIndex;
+use crate::tile::cut::SharedAncestor;
 use crate::tile_store::contents::{LayoutBuckets, LayoutResult};
 use crate::worker::job::SourceStyle;
 

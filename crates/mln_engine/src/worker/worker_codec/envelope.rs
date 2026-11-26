@@ -10,10 +10,10 @@
 use std::time::Duration;
 
 use mln_style::tile_id::CanonicalTileID;
-use mln_tile_id::OverscaledTileID;
 use mln_wire::payload::Payload;
 use mln_wire::{Context, Reader, Wire, Writer};
 
+use crate::tile::OverscaledTileID;
 use crate::worker::job::{JobId, JobTimes, SourceKey, TileKey};
 
 /// A frame as it crosses between instances: its bytes, and the byte arrays

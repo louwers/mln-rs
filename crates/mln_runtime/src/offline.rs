@@ -2,12 +2,12 @@
 
 use std::path::Path;
 
-use mln_storage::ResourceError;
-use mln_storage::offline::{
+use mln_engine::offline::DatabaseFileSourceExt;
+use mln_engine::storage::ResourceError;
+use mln_engine::storage::offline::{
     OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionExpiry, OfflineRegionMetadata,
     OfflineRegionObserver, OfflineRegionStatus,
 };
-use mln_storage_offline::DatabaseFileSourceExt;
 use mln_style::error::Error;
 
 use crate::completion::Completion;

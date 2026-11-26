@@ -17,13 +17,13 @@ use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
 use mln_style::math::{fmax, fmin};
 use mln_style::range::Range;
 use mln_style::tile_id::CanonicalTileID;
-use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::bounding_volumes::{AABB, Frustum, IntersectionResult};
 use mln_util::geo::ScreenCoordinate;
 use mln_util::projection::Projection;
 
 use crate::camera::{TileCoordinate, View, ViewportMode};
 use crate::render::terrain::ElevationRanges;
+use crate::tile::{OverscaledTileID, UnwrappedTileID};
 use crate::tile_store::TileLodMode;
 use crate::tile_store::tile_cover_impl::Impl;
 use crate::tile_store::tile_lod::{TileZoomFunction, elevation_for_tile_culling};
@@ -285,13 +285,13 @@ mod globe {
     use mln_style::constants;
     use mln_style::range::Range;
     use mln_style::tile_id::CanonicalTileID;
-    use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
     use mln_util::bounding_volumes::{Frustum, IntersectionResult};
     use mln_util::projection::Projection;
 
     use super::TileCoverParameters;
     use crate::camera::VerticalPerspectiveProjection;
     use crate::render::terrain::ElevationRanges;
+    use crate::tile::{OverscaledTileID, UnwrappedTileID};
     use crate::tile_store::tile_lod::{TileZoomFunction, elevation_for_tile_culling};
 
     /// A tile's bounding volume in unit-sphere space: a box at zoom 0 and 1,

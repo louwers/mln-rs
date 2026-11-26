@@ -494,9 +494,9 @@ behind it a module `bench` (`src/bench.rs`) that is hidden from the
 documentation: `mln_engine::bench::TileLayout` runs a tile's layout job, for
 instance. Macro scenarios reach internals the same way:
 `mln_engine::bench::take_coverage` reports what an update's tiles drew, and
-`mln_storage::bench::online_file_source` makes the online file source that the
-simulated network carries. The harness turns the feature on in its `Cargo.toml`,
-so builds without the harness leave the module out.
+`mln_engine::storage::simulated_network::online_file_source` makes the online
+file source that the simulated network carries. The harness turns the feature on
+in its `Cargo.toml`, so builds without the harness leave the module out.
 
 The `bench` modules are part of the harness: they count in its id, and a
 comparison lays this checkout's over the ref's. An entry point takes and returns
@@ -541,9 +541,10 @@ the scenario drives it, so that it does the same work on every run:
 `support::network` simulates a network under the real online file source, as an
 application runs it: its limit of 20 transfers in flight, their priorities,
 cancellation, retries after errors with their backoff, and revalidation of
-expired data. `mln_storage`'s `bench` module hands the source's transfers to the
-simulation, has its deadlines go by the simulation's clock, which moves one 60
-Hz frame per frame, and runs its core on the scenario's thread.
+expired data. `mln_engine`'s `simulated_network` module hands the source's
+transfers to the simulation, has its deadlines go by the simulation's clock,
+which moves one 60 Hz frame per frame, and runs its core on the scenario's
+thread.
 
 A server answers from the fixtures: a style, such as Liberty, its sprite and
 glyphs, and the tile sets of its sources, either as a TileJSON and a URL per

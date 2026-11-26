@@ -26,7 +26,6 @@ use mln_style::constants::DEFAULT_TRANSITION_DURATION;
 use mln_style::hash::{HashMap, HashSet};
 use mln_style::time::Instant;
 use mln_style::types::{SymbolAnchorType, TextWritingModeType};
-use mln_tile_id::OverscaledTileID;
 
 use self::context::{BucketOptions, CollisionGroups, PlacementContext};
 use self::tile::TilePlacementState;
@@ -40,6 +39,7 @@ use crate::placement::collision_index::CollisionIndex;
 use crate::query::feature_index::FeatureIndex;
 use crate::render::terrain::TerrainElevation;
 use crate::render::update_parameters::UpdateParameters;
+use crate::tile::OverscaledTileID;
 use crate::worker::job::SourceKey;
 
 /// The opacity of a symbol's text or icon, and whether it fades in or out.

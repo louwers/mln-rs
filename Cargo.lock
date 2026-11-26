@@ -2487,14 +2487,9 @@ dependencies = [
  "mln-rs-mtl",
  "mln-rs-polylabel",
  "mln-rs-runtime",
- "mln-rs-sprite",
- "mln-rs-storage",
- "mln-rs-storage-offline",
  "mln-rs-style",
  "mln-rs-system-fonts",
  "mln-rs-text",
- "mln-rs-tile",
- "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
  "mln-rs-vulkan",
@@ -2517,11 +2512,8 @@ dependencies = [
  "mln-rs-image",
  "mln-rs-mtl",
  "mln-rs-runtime",
- "mln-rs-sprite",
- "mln-rs-storage",
  "mln-rs-style",
  "mln-rs-text",
- "mln-rs-tile",
  "mln-rs-util",
  "mln-rs-vulkan",
  "mln-rs-webgpu",
@@ -2577,11 +2569,9 @@ dependencies = [
  "mln-rs-gl",
  "mln-rs-mtl",
  "mln-rs-runtime",
- "mln-rs-storage",
  "mln-rs-style",
  "mln-rs-system-fonts",
  "mln-rs-text",
- "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
  "mln-rs-vulkan",
@@ -2652,7 +2642,6 @@ dependencies = [
  "mln-rs-image",
  "mln-rs-mtl",
  "mln-rs-runtime",
- "mln-rs-storage",
  "mln-rs-style",
  "mln-rs-util",
  "mln-rs-vulkan",
@@ -2673,37 +2662,51 @@ dependencies = [
 name = "mln-rs-engine"
 version = "0.0.17"
 dependencies = [
+ "block2 0.6.2",
  "bytemuck",
+ "bytes",
  "earcut",
  "etagere",
+ "fast-mvt 0.7.3",
  "geo-index",
  "geo-types",
  "geojson",
  "glam",
+ "httpmock",
+ "i_overlay",
+ "jni",
  "js-sys",
  "log",
  "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-gfx",
+ "mln-rs-headless",
  "mln-rs-image",
  "mln-rs-pixelmatch",
  "mln-rs-polylabel",
- "mln-rs-sprite",
- "mln-rs-storage",
  "mln-rs-style",
  "mln-rs-text",
- "mln-rs-tile",
- "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
  "mln-rs-webgpu",
  "mln-rs-wire",
  "mlt-core",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
  "parking_lot",
+ "percent-encoding",
+ "pmtiles",
  "proptest",
+ "rusqlite",
+ "rustls",
  "serde_json",
  "smallvec",
+ "tempfile",
  "thiserror 2.0.21",
+ "ureq",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
@@ -2837,7 +2840,6 @@ dependencies = [
  "mln-rs-mtl",
  "mln-rs-pixelmatch",
  "mln-rs-runtime",
- "mln-rs-storage",
  "mln-rs-style",
  "mln-rs-text",
  "mln-rs-util",
@@ -2922,7 +2924,6 @@ dependencies = [
  "mln-rs-headless",
  "mln-rs-image",
  "mln-rs-pixelmatch",
- "mln-rs-storage",
  "mln-rs-style",
  "mln-rs-util",
  "mln-rs-wire",
@@ -2955,8 +2956,6 @@ dependencies = [
  "mln-rs-gl",
  "mln-rs-image",
  "mln-rs-mtl",
- "mln-rs-storage",
- "mln-rs-storage-offline",
  "mln-rs-style",
  "mln-rs-system-fonts",
  "mln-rs-text",
@@ -2973,68 +2972,6 @@ dependencies = [
  "wgpu",
  "windows",
  "winit",
-]
-
-[[package]]
-name = "mln-rs-sprite"
-version = "0.0.17"
-dependencies = [
- "log",
- "mln-rs-geometry",
- "mln-rs-image",
- "mln-rs-storage",
- "mln-rs-style",
- "mln-rs-util",
- "parking_lot",
- "serde_json",
-]
-
-[[package]]
-name = "mln-rs-storage"
-version = "0.0.17"
-dependencies = [
- "block2 0.6.2",
- "bytes",
- "geo-types",
- "geojson",
- "httpmock",
- "jni",
- "js-sys",
- "log",
- "mln-rs-feature",
- "mln-rs-style",
- "mln-rs-util",
- "mln-rs-vec-map",
- "objc2 0.6.5",
- "objc2-foundation 0.3.2",
- "parking_lot",
- "percent-encoding",
- "pmtiles",
- "rusqlite",
- "rustls",
- "serde_json",
- "thiserror 2.0.21",
- "ureq",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
-name = "mln-rs-storage-offline"
-version = "0.0.17"
-dependencies = [
- "httpmock",
- "mln-rs-engine",
- "mln-rs-feature",
- "mln-rs-headless",
- "mln-rs-storage",
- "mln-rs-style",
- "mln-rs-text",
- "mln-rs-util",
- "mln-rs-vec-map",
- "parking_lot",
- "tempfile",
 ]
 
 [[package]]
@@ -3132,34 +3069,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mln-rs-tile"
-version = "0.0.17"
-dependencies = [
- "fast-mvt 0.7.3",
- "geo-types",
- "i_overlay",
- "log",
- "mln-rs-feature",
- "mln-rs-geometry",
- "mln-rs-style",
- "mln-rs-wire",
- "mlt-core",
- "parking_lot",
- "proptest",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "mln-rs-tile-id"
-version = "0.0.17"
-dependencies = [
- "mln-rs-geometry",
- "mln-rs-style",
- "mln-rs-util",
- "mln-rs-wire",
-]
-
-[[package]]
 name = "mln-rs-unicode-tables"
 version = "0.0.17"
 dependencies = [
@@ -3224,7 +3133,6 @@ dependencies = [
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-runtime",
- "mln-rs-storage",
  "mln-rs-style",
  "mln-rs-util",
  "mln-rs-web-host",

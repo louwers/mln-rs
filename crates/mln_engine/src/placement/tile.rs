@@ -9,7 +9,6 @@ use glam::{DMat4, Vec2};
 use mln_style::constants::EXTENT;
 use mln_style::hash::HashSet;
 use mln_style::types::{SymbolAnchorType, SymbolPlacementType};
-use mln_tile_id::UnwrappedTileID;
 
 use super::context::PlacementContext;
 use super::{JointPlacement, PlacedSymbolData, Placement, PlacementInputs, PlacementKind, VariableOffset};
@@ -19,6 +18,7 @@ use crate::layout::symbol_instance::SymbolInstance;
 use crate::placement::collision_feature::CollisionBox;
 use crate::placement::collision_grid::Shape;
 use crate::placement::collision_index::{CollisionBoundaries, IntersectStatus, OverlapMode};
+use crate::tile::UnwrappedTileID;
 
 /// What a tile placement keeps besides the placement's own state.
 #[derive(Default)]

@@ -8,7 +8,6 @@ use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_style::constants::EXTENT;
 use mln_style::types::TranslateAnchorType;
-use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::M2PI;
 
 use crate::camera::{ProjectionData, View};
@@ -17,6 +16,7 @@ use crate::draw::uniform_buffer::UniformBufferArray;
 use crate::layers::cast_matrix;
 use crate::render::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render::tile::RenderTile;
+use crate::tile::UnwrappedTileID;
 
 /// Gives `layer_uniforms`, of a layer whose draws draw without a
 /// projection, a projection block of zeros if they have none. GL's programs

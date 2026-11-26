@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use mln_engine::camera::CameraOptions;
 use mln_engine::map::{Map, MapMode, MapOptions, TileSettings};
+use mln_engine::storage::Resource;
+use mln_engine::storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_headless::HeadlessFrontend;
-use mln_storage::Resource;
-use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::geo::LatLng;
 use mln_style::size::Size;
 use mln_util::pool::Pool;
@@ -68,7 +68,7 @@ fn prefetch_tiles() {
             let zoom = stoi(&res.url);
             tiles.lock().push(zoom);
 
-            let mut response = mln_storage::Response::new();
+            let mut response = mln_engine::storage::Response::new();
             response.data = Some(Arc::new((*tile).clone()));
             // Expired, so that reloading the style requests the tiles again.
             response.caching.expires = Some(mln_util::chrono::Timestamp::from_secs(0));

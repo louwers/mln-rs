@@ -1,4 +1,4 @@
-// In mln_engine rather than mln_text: it requests through mln_storage
+// In mln_engine rather than mln_text: it requests through `storage`
 // (mln_text stays free of it).
 //
 // The store lives on the render thread, owned by the tile store. Tiles
@@ -50,7 +50,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_storage::{FileSource, Request, Resource, Response};
 use mln_style::error::Error;
 use mln_style::hash::HashMap;
 use mln_style::i18n;
@@ -72,6 +71,7 @@ use parking_lot::Mutex;
 
 use crate::log_target;
 use crate::render::events::RendererEvent;
+use crate::storage::{FileSource, Request, Resource, Response};
 use crate::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
 use crate::tile_store::inbox::{InboxSender, TileEvent, Waker};
 

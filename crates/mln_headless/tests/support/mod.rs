@@ -26,10 +26,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_engine::map::{Map, MapEvent, MapMode, MapOptions, RenderFrameStatus};
-use mln_engine::{FontStack, GlyphRange, OverscaledTileID, TileOperation, UpdateReader};
+use mln_engine::storage::stub_file_source::{ResponseType, StubFileSource};
+use mln_engine::storage::{FileSource, Kind, Resource, Responder, Response};
+use mln_engine::tile::OverscaledTileID;
+use mln_engine::{FontStack, GlyphRange, TileOperation, UpdateReader};
 use mln_headless::{HeadlessFrontend, RenderResult};
-use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{FileSource, Kind, Resource, Responder, Response};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::Error;
 use mln_style::sources::custom::TileFunction;

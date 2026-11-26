@@ -16,15 +16,16 @@ use mln_engine::camera::{
     ProjectionMode, Viewport, ViewportMode,
 };
 use mln_engine::map::{Map, MapMode, MapOptions, RenderFrameStatus, TileSettings};
-use mln_engine::tile_store::TileLodMode;
-use mln_engine::{OverscaledTileID, Registry, RenderMode, TileOperation, UpdateParameters, UpdateReader};
-use mln_headless::HeadlessFrontend;
-use mln_storage::response::{Reason, ResourceError};
-use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{
+use mln_engine::storage::response::{Reason, ResourceError};
+use mln_engine::storage::stub_file_source::{ResponseType, StubFileSource};
+use mln_engine::storage::{
     Cache, DatabaseFileSource, FileSource, Kind, Loader, LoadingMethod, Resource, ResourceOptions, Response,
     StoragePolicy, TileFormat,
 };
+use mln_engine::tile::OverscaledTileID;
+use mln_engine::tile_store::TileLodMode;
+use mln_engine::{Registry, RenderMode, TileOperation, UpdateParameters, UpdateReader};
+use mln_headless::HeadlessFrontend;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::color::Color;
 use mln_style::conversion::{Convertible, Error as ConversionError};

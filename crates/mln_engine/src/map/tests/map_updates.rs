@@ -5,8 +5,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use feature::Value;
-use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{Kind, Response};
 use mln_style::error::ErrorKind;
 use mln_style::feature::FeatureState;
 use mln_style::size::Size;
@@ -17,6 +15,8 @@ use parking_lot::Mutex;
 use crate::camera::CameraOptions;
 use crate::map::{Map, MapOptions, TerrainOptions, TerrainSkirtLength, TileSettings};
 use crate::render::update_slot::Update;
+use crate::storage::stub_file_source::{ResponseType, StubFileSource};
+use crate::storage::{Kind, Response};
 use crate::{RendererEvent, UpdateReader};
 
 fn map(run_loop: &Queue<()>) -> Map {

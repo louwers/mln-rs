@@ -7,7 +7,6 @@ use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::types::{
     AlignmentType, IconTextFitType, SymbolPlacementType, SymbolZOrderType, TextRotationAlignmentType,
 };
-use mln_tile_id::UnwrappedTileID;
 use mln_vec_map::VecMap;
 
 use crate::buckets::symbol_bucket::{SymbolBucket, ZoomEvaluatedSize, symbols_by_viewport_y};
@@ -17,6 +16,7 @@ use crate::layout::symbol_projection::{LabelPlaneProjector, SymbolHeights};
 use crate::placement::collision_index::{CollisionBoundaries, OverlapMode, PartCollision};
 use crate::render::terrain::TerrainElevation;
 use crate::render::tile::RenderTile;
+use crate::tile::UnwrappedTileID;
 
 /// The collision groups of the sources: with cross-source collisions, every
 /// symbol collides with every other; without, only with its own source's.

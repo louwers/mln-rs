@@ -102,7 +102,7 @@ pub(crate) fn update(store: &mut crate::tile_store::store::TileStore) -> bool {
 pub(crate) struct OneTile {
     pub(crate) store: crate::tile_store::store::TileStore,
     pub(crate) key: crate::worker::job::SourceKey,
-    pub(crate) id: mln_tile_id::OverscaledTileID,
+    pub(crate) id: crate::tile::OverscaledTileID,
     mode: crate::map::MapMode,
 }
 
@@ -111,7 +111,7 @@ impl OneTile {
     pub(crate) fn new(
         mut store: crate::tile_store::store::TileStore,
         kind: crate::tile_store::tile::TileKind,
-        id: mln_tile_id::OverscaledTileID,
+        id: crate::tile::OverscaledTileID,
         mode: crate::map::MapMode,
     ) -> Self {
         let key = store.add_source("s".to_owned(), kind, false);
@@ -137,7 +137,7 @@ impl OneTile {
         kind: crate::tile_store::tile::TileKind,
         single_layer: bool,
         origin: crate::tile_store::loading::DataOrigin,
-        ids: &[mln_tile_id::OverscaledTileID],
+        ids: &[crate::tile::OverscaledTileID],
         mode: crate::map::MapMode,
     ) -> Self {
         let key = store.add_source("source".to_owned(), kind, single_layer);
@@ -158,14 +158,14 @@ impl OneTile {
     /// Sets how much tile `id` is needed.
     pub(crate) fn set_necessity(
         &mut self,
-        id: &mln_tile_id::OverscaledTileID,
+        id: &crate::tile::OverscaledTileID,
         necessity: crate::tile_store::tile::TileNecessity,
     ) {
         self.with_at(id, |tile| tile.set_necessity(necessity));
     }
 
     /// Moves tile `from` to id `to`, as a wrap jump does.
-    pub(crate) fn rekey(&mut self, from: &mln_tile_id::OverscaledTileID, to: mln_tile_id::OverscaledTileID) {
+    pub(crate) fn rekey(&mut self, from: &crate::tile::OverscaledTileID, to: crate::tile::OverscaledTileID) {
         let (source, ctx) = self.store.source_mut(self.key).expect("the source");
         assert!(source.tile(from).is_some(), "the tile");
         source.rekey(from, to, ctx);
@@ -186,7 +186,7 @@ impl OneTile {
     }
 
     /// Adds another tile, `id`, to the source, which loads nothing itself.
-    pub(crate) fn add(&mut self, id: mln_tile_id::OverscaledTileID) {
+    pub(crate) fn add(&mut self, id: crate::tile::OverscaledTileID) {
         let params = self.params();
         let (source, _) = self.store.source_mut(self.key).expect("the source");
         let generation = source.info.next();
@@ -213,7 +213,7 @@ impl OneTile {
         self.tile().pipeline.layout().expect("a geometry tile")
     }
 
-    pub(crate) fn tile_at(&self, id: &mln_tile_id::OverscaledTileID) -> &crate::tile_store::tile::Tile {
+    pub(crate) fn tile_at(&self, id: &crate::tile::OverscaledTileID) -> &crate::tile_store::tile::Tile {
         self.store.source(self.key).and_then(|source| source.tile(id)).expect("the tile")
     }
 
@@ -226,7 +226,7 @@ impl OneTile {
     /// Changes tile `id` through `f`.
     pub(crate) fn with_at<R>(
         &mut self,
-        id: &mln_tile_id::OverscaledTileID,
+        id: &crate::tile::OverscaledTileID,
         f: impl FnOnce(&mut crate::tile_store::tile_mut::TileMut<'_>) -> R,
     ) -> R {
         let (source, ctx) = self.store.source_mut(self.key).expect("the source");
@@ -239,18 +239,18 @@ impl OneTile {
     }
 
     /// Gives a geometry tile `data`, as a load of its own.
-    pub(crate) fn set_data(&mut self, data: Option<mln_tile::TileData>) {
+    pub(crate) fn set_data(&mut self, data: Option<crate::tile::TileData>) {
         self.with(|tile| tile.take_input(crate::tile_store::tile::TileInput::Geometry { data, missing: false }));
     }
 
     /// Gives raster tile `id` the image `data`, as a load of its own.
-    pub(crate) fn set_image(&mut self, id: &mln_tile_id::OverscaledTileID, data: Option<mln_storage::Data>) {
+    pub(crate) fn set_image(&mut self, id: &crate::tile::OverscaledTileID, data: Option<crate::storage::Data>) {
         self.with_at(id, |tile| tile.take_input(crate::tile_store::tile::TileInput::Image { data, missing: false }));
     }
 
     /// Gives tile `id` no data, as a load that finds the tileset has no
     /// tile there.
-    pub(crate) fn set_missing(&mut self, id: &mln_tile_id::OverscaledTileID) {
+    pub(crate) fn set_missing(&mut self, id: &crate::tile::OverscaledTileID) {
         let input = match self.store.source(self.key).expect("the source").info.kind {
             crate::tile_store::tile::TileKind::Geometry => {
                 crate::tile_store::tile::TileInput::Geometry { data: None, missing: true }
@@ -301,7 +301,7 @@ impl OneTile {
     /// # Panics
     ///
     /// If they don't complete within 30 seconds.
-    pub(crate) fn settle(&mut self, ids: &[mln_tile_id::OverscaledTileID]) {
+    pub(crate) fn settle(&mut self, ids: &[crate::tile::OverscaledTileID]) {
         let deadline = mln_style::time::Instant::now() + std::time::Duration::from_secs(30);
         loop {
             self.update();
@@ -325,7 +325,7 @@ impl OneTile {
     }
 
     /// Lets go of tile `id`.
-    pub(crate) fn drop_tile_at(&mut self, id: &mln_tile_id::OverscaledTileID) {
+    pub(crate) fn drop_tile_at(&mut self, id: &crate::tile::OverscaledTileID) {
         let (source, ctx) = self.store.source_mut(self.key).expect("the source");
         source.release(id, ctx);
     }

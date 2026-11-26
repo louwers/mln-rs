@@ -18,8 +18,6 @@ use mln_style::feature::{
 };
 use mln_style::hash::{HashMap, HashSet};
 use mln_style::types::TranslateAnchorType;
-use mln_tile::TileData;
-use mln_tile_id::OverscaledTileID;
 use mln_util::feature::{Feature, feature_id_to_string};
 use mln_util::geo::ScreenCoordinate;
 use mln_vec_map::VecMap;
@@ -29,6 +27,7 @@ use crate::layer::render_layer::RenderLayer;
 use crate::placement::collision_index::OverlapMode;
 use crate::query::RenderedQueryOptions;
 use crate::source::source_state::SourceFeatureState;
+use crate::tile::{OverscaledTileID, TileData};
 
 /// The render layers a query looks at, by id.
 pub(crate) type QueryLayers<'a> = HashMap<String, &'a dyn RenderLayer>;
@@ -470,7 +469,7 @@ impl FeatureIndex {
                 }
             }
 
-            let converted = mln_tile::convert_feature(&feature, &geometry, &tile_id.canonical)?;
+            let converted = crate::tile::convert_feature(&feature, &geometry, &tile_id.canonical)?;
             let mut converted = Feature::from(converted);
             converted.source = render_layer.base().style.base().source.clone();
             converted.source_layer = source_layer_id.clone();

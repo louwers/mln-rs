@@ -13,8 +13,6 @@ use mln_style::tile_id::CanonicalTileID;
 use mln_text::glyph::{GlyphIDType, GlyphMap, GlyphRange};
 use mln_text::glyph_pbf::parse_glyph_pbf;
 use mln_text::tagged_string::font_stack_hash;
-use mln_tile::{MltTile, MvtTile, TileData};
-use mln_tile_id::OverscaledTileID;
 use mln_vec_map::VecSet;
 
 use super::map_side::MapCodec;
@@ -27,6 +25,7 @@ use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::layer::tile_layout::{Dependencies, LayoutParams, Resolved};
 use crate::map::MapMode;
 use crate::text::glyph_store::ShapeResults;
+use crate::tile::{MltTile, MvtTile, OverscaledTileID, TileData};
 use crate::tile_store::contents::LayoutResult;
 use crate::worker::job::{
     DataCache, DataInput, DataKey, Job, JobId, JobResult, LayoutJob, LayoutOutput, Run, SourceKey, SourceStyle,
@@ -118,7 +117,7 @@ fn answer(dependencies: &Dependencies) -> Resolved {
             font_glyphs.insert(*id, glyph);
         }
     }
-    let sprite = mln_sprite::sprite_parser::parse_sprite(
+    let sprite = crate::image::sprite::sprite_parser::parse_sprite(
         "default",
         &mln_image::decode_image(&fixture("test/fixtures/annotations/emerald.png")).unwrap(),
         &fixture("test/fixtures/annotations/emerald.json"),
@@ -720,7 +719,7 @@ fn evicted_data_needs_sending_again() {
 /// once for them all, and goes when nothing on the map side holds it.
 #[test]
 fn an_ancestor_crosses_once_for_its_cut_tiles() {
-    use mln_tile::cut::{Ancestor, Cut, CutData};
+    use crate::tile::cut::{Ancestor, Cut, CutData};
 
     let mut map = MapCodec::new(Registry::with_builtins());
     let style = style(&layers(&[FILL]));

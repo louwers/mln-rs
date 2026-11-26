@@ -14,7 +14,6 @@ use mln_style::layers::Background;
 use mln_style::range::Range;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::types::TranslateAnchorType;
-use mln_tile_id::OverscaledTileID;
 
 use super::cast_matrix;
 use crate::draw::indexes::DrawIndexes;
@@ -39,6 +38,7 @@ use crate::render::pass::RenderPass;
 use crate::render::static_data::RenderStaticData;
 use crate::render::tile::NoTileBucket;
 use crate::render::tile_matrix::{projection_data, to_projection_ubo};
+use crate::tile::OverscaledTileID;
 use crate::tile_store::tile_cover::{TileCoverParameters, tile_cover};
 
 /// The ids of the buffers that the draws bind.

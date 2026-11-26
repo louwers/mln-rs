@@ -6,8 +6,8 @@ use mln_engine::Registry;
 use mln_engine::camera::CameraOptions;
 use mln_engine::map::MapMode;
 use mln_engine::query::{FeatureExtensionValue, RenderedQueryOptions, SourceQueryOptions};
-use mln_storage::Kind;
-use mln_storage::stub_file_source::{ResponseType, StubFileSource};
+use mln_engine::storage::Kind;
+use mln_engine::storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::conversion::{Convertible, Error};
 use mln_style::error::ErrorKind;
 use mln_style::expression::dsl::{eq, get_str, gt, id, literal, literal_str, ne, number};
@@ -497,7 +497,7 @@ const TWO_LAYER_TILE: &[u8] = &[
 fn query_source_features_source_layer() {
     let test = MapTest::new();
     test.file_source.set_response(Kind::Tile, |_| {
-        let mut response = mln_storage::Response::new();
+        let mut response = mln_engine::storage::Response::new();
         response.data = Some(Arc::new(TWO_LAYER_TILE.to_vec()));
         Some(response)
     });

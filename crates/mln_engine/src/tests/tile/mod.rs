@@ -1,8 +1,8 @@
 // Ported gtests of test/tile/*.test.cpp that need the renderer's tiles or
 // the camera's transform, one module per C++ file. The
 // other test/tile files are ported elsewhere: geojson_tile (geojson_tile_test),
-// vector_tile (vector_tile_test, mln_tile), geometry_tile_data (mln_tile),
-// tile_cache (source_test), tile_id (mln_tile_id), tile_lod (render_test,
+// vector_tile (vector_tile_test, `tile`), geometry_tile_data (`tile`),
+// tile_cache (source_test), tile_id (`tile::tile_id`), tile_lod (render_test,
 // which has the HeadlessFrontend).
 
 mod custom_geometry_tile;
@@ -13,11 +13,11 @@ mod tile_coordinate;
 
 use std::sync::Arc;
 
-use mln_tile_id::OverscaledTileID;
 use mln_util::pool::{Pool, TaskGroup};
 
 use crate::map::MapMode;
 use crate::tests::OneTile;
+use crate::tile::OverscaledTileID;
 use crate::tile_store::tile::TileKind;
 use crate::worker::tile_workers::TileWorkers;
 
@@ -77,7 +77,7 @@ pub(crate) fn remote_workers(count: usize) -> crate::worker::worker_codec::Remot
 
 /// Port-only: an opaque PNG whose pixels differ from their neighbours.
 #[must_use]
-pub(crate) fn png(width: u32, height: u32) -> mln_storage::Data {
+pub(crate) fn png(width: u32, height: u32) -> crate::storage::Data {
     let mut image = mln_style::bitmap::PremultipliedImage::new(mln_style::size::Size::new(width, height));
     for (i, pixel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
         pixel.copy_from_slice(&[(i % 251) as u8, (i / 7 % 253) as u8, (i * 3 % 255) as u8, 255]);
@@ -88,7 +88,7 @@ pub(crate) fn png(width: u32, height: u32) -> mln_storage::Data {
 /// Port-only: a 16 by 16 DEM image whose pixels differ from their
 /// neighbours and from those of other `seed`s.
 #[must_use]
-pub(crate) fn dem_png(seed: u32) -> mln_storage::Data {
+pub(crate) fn dem_png(seed: u32) -> crate::storage::Data {
     let mut image = mln_style::bitmap::PremultipliedImage::new(mln_style::size::Size::new(16, 16));
     for (i, pixel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
         let i = i as u32;

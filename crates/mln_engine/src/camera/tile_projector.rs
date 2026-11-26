@@ -1,8 +1,8 @@
 use geometry::Point;
-use mln_tile_id::UnwrappedTileID;
 
 use crate::camera::projection::{ProjectedTilePoint, ProjectionData};
 use crate::camera::view::View;
+use crate::tile::UnwrappedTileID;
 
 /// Projects the points of one tile through the current projection, the way
 /// the vertex shaders do it.

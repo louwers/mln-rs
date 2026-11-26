@@ -1,7 +1,7 @@
 // C++ constructors that throw std::domain_error return `Err(message)`;
 // `LatLng(CanonicalTileID)` / `LatLng(UnwrappedTileID)` /
 // `LatLngBounds(CanonicalTileID)` are the `from_*_tile` functions, called
-// with the tile ids' fields. An unwrapped tile id (mln_tile_id's, above this
+// with the tile ids' fields. An unwrapped tile id (mln_engine's, above this
 // crate) is its wrap and canonical id here.
 
 use crate::constants::{LATITUDE_MAX, LONGITUDE_MAX};

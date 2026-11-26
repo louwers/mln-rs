@@ -38,7 +38,7 @@ pub struct UpdateParameters {
     /// of what it held.
     pub feature_states: Arc<crate::source::source_state::FeatureStatesBySource>,
 
-    pub file_source: Option<Arc<dyn mln_storage::FileSource>>,
+    pub file_source: Option<Arc<dyn crate::storage::FileSource>>,
     pub prefetch_zoom_delta: u8,
 
     /// For still image requests, render requested.

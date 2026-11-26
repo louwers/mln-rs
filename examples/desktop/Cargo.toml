@@ -36,7 +36,6 @@ mln_image.workspace = true
 mln_engine = { workspace = true, features = ["font-face-shaper"] }
 mln_runtime = { workspace = true, features = ["default", "webgpu"] }
 # The responses of the offline mode's resource provider.
-mln_storage.workspace = true
 mln_style.workspace = true
 mln_util.workspace = true
 mln_webgpu.workspace = true

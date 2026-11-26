@@ -1,4 +1,3 @@
-//! Renderer-side geometry: symbol anchors and DEM data.
+//! Renderer-side geometry: symbol anchors.
 
 pub(crate) mod anchor;
-pub(crate) mod dem_data; // dem-heatmap

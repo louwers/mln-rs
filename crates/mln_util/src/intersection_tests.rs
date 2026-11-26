@@ -1,5 +1,5 @@
 // `GeometryCoordinates` is `&[Point<i16>]` here and `GeometryCollection` is
-// `&[Vec<Point<i16>>]` (mln_tile_id's GeometryCollection derefs to it), so
+// `&[Vec<Point<i16>>]` (`mln_style::feature`'s GeometryCollection derefs to it), so
 // this util file needs no tile types. Integer arithmetic is C++ `int`
 // arithmetic on promoted `int16_t`s; products that overflow `int` wrap, as
 // they do on the platforms C++ runs on.

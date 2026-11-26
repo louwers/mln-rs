@@ -8,13 +8,13 @@
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use mln_storage::Response;
 use mln_style::error::Error;
 use mln_text::glyph::{FontFace, GlyphRange};
-use mln_tile::TileData;
 use mln_util::font_stack::FontStack;
 
+use crate::storage::Response;
 use crate::text::glyph_store::GlyphResult;
+use crate::tile::TileData;
 use crate::worker::job::{JobId, JobTimes, TileKey};
 use crate::worker::tile_workers::{Lane, ReplyBody};
 use crate::worker::worker_codec::RemoteEvent;

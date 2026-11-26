@@ -8,11 +8,11 @@ use mln_style::bitmap::PremultipliedImage;
 use mln_style::geo::LatLng;
 use mln_style::hash::HashMap;
 use mln_style::tile_id::CanonicalTileID;
-use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::dem::{self, DemCoords, DemUnpack};
 
 use crate::camera::{Elevation, TileCoordinate};
 use crate::render::terrain::cover::{TerrainCover, dem_contents, place_in, world_copy};
+use crate::tile::{OverscaledTileID, UnwrappedTileID};
 use crate::tile_store::source_tiles::SourceTiles;
 
 /// The DEM a terrain tile drew with.

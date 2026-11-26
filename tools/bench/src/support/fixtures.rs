@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use mln_bench_workload::Snapshot;
 pub(crate) use mln_bench_workload::Tiles;
-use mln_storage::{FileSource, Loader};
+use mln_engine::storage::{FileSource, Loader};
 use mln_util::pool::Pool;
 
 use crate::scenario::Bench;

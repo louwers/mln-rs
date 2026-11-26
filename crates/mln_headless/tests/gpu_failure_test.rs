@@ -11,6 +11,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use mln_engine::map::{Map, MapEvent, MapMode, MapOptions};
+use mln_engine::storage::stub_file_source::{ResponseType, StubFileSource};
+use mln_engine::storage::{Kind, Resource, Response};
 use mln_engine::{Renderer, RendererEvent};
 use mln_gfx::RendererBackend as _;
 use mln_gfx::frame::FrameTarget as _;
@@ -21,8 +23,6 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::offscreen_target::OffscreenTarget;
 use mln_headless::HeadlessFrontend;
-use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{Kind, Resource, Response};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::{Error, ErrorKind};
 use mln_style::size::Size;

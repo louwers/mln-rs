@@ -3,11 +3,11 @@ use std::sync::Arc;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::Error;
 use mln_style::size::Size;
-use mln_tile_id::OverscaledTileID;
 
 use super::{RasterTileTest, png};
 use crate::tests::OneTile;
 use crate::tests::tile_jobs_test::Manual;
+use crate::tile::OverscaledTileID;
 use crate::tile_store::contents::Contents;
 use crate::tile_store::tile::TileKind;
 use crate::worker::job::JobResult;

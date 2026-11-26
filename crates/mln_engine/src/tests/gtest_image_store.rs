@@ -82,7 +82,7 @@ fn basic() {
     let _log = FixtureLog::new();
     let mut store = ImageStore::default();
 
-    let images = mln_sprite::sprite_parser::parse_sprite(
+    let images = crate::image::sprite::sprite_parser::parse_sprite(
         "default",
         &mln_image::decode_image(&read_file("test/fixtures/annotations/emerald.png")).unwrap(),
         &read_file("test/fixtures/annotations/emerald.json"),

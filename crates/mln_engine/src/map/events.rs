@@ -8,7 +8,8 @@ use mln_style::StyleLoadError;
 use mln_style::error::Error;
 use mln_style::sprite::Sprite;
 
-use crate::{FontStack, GlyphRange, OverscaledTileID, RenderMode, RenderingStats, TileOperation};
+use crate::tile::OverscaledTileID;
+use crate::{FontStack, GlyphRange, RenderMode, RenderingStats, TileOperation};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[repr(u32)]

@@ -30,7 +30,6 @@ use mln_style::layers::Hillshade;
 use mln_style::layers::hillshade_layer_properties::HillshadePaintProperties;
 use mln_style::math::deg2radf;
 use mln_style::types::{HillshadeIlluminationAnchorType, HillshadeMethodType, ResamplingType, TranslateAnchorType};
-use mln_tile_id::UnwrappedTileID;
 use mln_util::constants;
 use mln_util::dem::DemUnpack;
 use mln_util::identity::SimpleIdentity;
@@ -64,6 +63,7 @@ use crate::render::terrain::ubo::{HillshadeEvaluatedPropsUBO, HillshadeTileProps
 use crate::render::tile::FrameTile;
 use crate::render::tile_matrix::{bind_no_projection, projection_data, to_projection_ubo};
 use crate::source::render_source::RenderSource;
+use crate::tile::UnwrappedTileID;
 use crate::tile_store::dem::DemContents;
 
 /// The ids of the buffers that the draws bind.

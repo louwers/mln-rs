@@ -9,14 +9,14 @@ use std::sync::{Arc, OnceLock};
 use std::thread::ThreadId;
 
 use mln_engine::Registry;
-use mln_engine::text::font_face_engine::FontFaceEngine;
-use mln_storage::http_header_transform::{HttpHeaderTransform, HttpHeaders};
-use mln_storage::network_status::NetworkStatus;
-use mln_storage::resource::Kind;
-use mln_storage::resource_transform::{FinishedCallback, ResourceTransform};
-use mln_storage::{FileSource, Loader, OnlineFileSource, ResourceOptions};
 #[cfg(not(target_family = "wasm"))]
-use mln_storage_offline::RegionDatabase;
+use mln_engine::offline::RegionDatabase;
+use mln_engine::storage::http_header_transform::{HttpHeaderTransform, HttpHeaders};
+use mln_engine::storage::network_status::NetworkStatus;
+use mln_engine::storage::resource::Kind;
+use mln_engine::storage::resource_transform::{FinishedCallback, ResourceTransform};
+use mln_engine::storage::{FileSource, Loader, OnlineFileSource, ResourceOptions};
+use mln_engine::text::font_face_engine::FontFaceEngine;
 use mln_style::error::Error;
 use mln_style::time::Instant;
 use mln_text::GlyphCache;
@@ -38,7 +38,7 @@ use crate::resources::{CacheDatabaseOperation, ProviderFileSource, ResourceHooks
 pub struct RuntimeOptions {
     /// The directory that `asset://` URLs load from. `None` uses the working
     /// directory, or on Android the app's assets, which
-    /// `mln_storage::android::init` gives the library.
+    /// `mln_engine::storage::android::init` gives the library.
     pub asset_path: Option<PathBuf>,
     /// The cache database file, which holds the ambient cache and the offline
     /// regions. Its directory must be writable. `None` keeps the cache in
@@ -572,7 +572,7 @@ impl RuntimeCore {
     #[cfg(not(target_family = "wasm"))]
     pub(crate) fn database(&self) -> &Arc<RegionDatabase> {
         self.database.get_or_init(|| {
-            Arc::new(mln_storage_offline::region_database(
+            Arc::new(mln_engine::offline::region_database(
                 &self.resource_options.cache_path,
                 Some(Arc::clone(self.network())),
                 Arc::clone(self.registry.style()),
@@ -605,7 +605,7 @@ fn resource_options(options: &RuntimeOptions) -> Result<ResourceOptions, Error> 
     }
     #[cfg(target_os = "android")]
     if options.asset_path.is_none() {
-        resource_options.asset_path = mln_storage::android::APP_ASSETS.to_owned();
+        resource_options.asset_path = mln_engine::storage::android::APP_ASSETS.to_owned();
     }
     if options.cache_path.is_some() && cfg!(target_family = "wasm") {
         return Err(Error::unsupported("the browser build has no cache database: the browser caches the requests"));

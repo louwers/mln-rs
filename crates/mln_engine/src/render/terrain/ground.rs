@@ -10,7 +10,6 @@ use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, LoadOp, TargetF
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, Rgba, Size};
-use mln_tile_id::UnwrappedTileID;
 
 use super::{TerrainElevation, TileGround};
 use crate::draw::context::Context;
@@ -21,6 +20,7 @@ use crate::draw::vertex_attribute::SharedAttribute;
 use crate::draw::vertices::{SharedVertices, TypedVertices};
 use crate::layer::layer_drawing::{DrawObjectsMut, TileObjects};
 use crate::render::paint_parameters::OpenPass;
+use crate::tile::UnwrappedTileID;
 
 /// The texel format of the ground's depth: an `f32`'s bits in RGBA8, which
 /// every backend draws into and reads in a vertex stage.

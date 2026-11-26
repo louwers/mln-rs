@@ -10,7 +10,6 @@ use glam::DVec4;
 use mln_gfx::frame::FrameTarget;
 use mln_gfx::offscreen_target::OffscreenTarget;
 use mln_gfx::{RendererBackend as _, ScissorRect};
-use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::constants::EXTENT;
 use mln_style::geo::LatLng;
@@ -19,7 +18,6 @@ use mln_style::size::Size;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::{Edit, Style};
-use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 
 use super::with_context;
 use crate::camera::transform::Transform;
@@ -34,6 +32,8 @@ use crate::render::static_data::RenderStaticData;
 use crate::render::tile::{FoundTile, RenderTile};
 use crate::render::update_parameters::UpdateParameters;
 use crate::source::render_image_source::{ImageQuad, ImageSourceRenderData};
+use crate::storage::{FileSource, Resource, Responder, Response};
+use crate::tile::{OverscaledTileID, UnwrappedTileID};
 use crate::tile_store::TileLodMode;
 use crate::{Registry, RenderMode, Renderer, RendererEvent, RendererEvents};
 
