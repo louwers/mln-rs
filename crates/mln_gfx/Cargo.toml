@@ -21,7 +21,6 @@ doctest = false
 bytemuck.workspace = true
 foldhash.workspace = true
 log.workspace = true
-mln_util.workspace = true
 # The windows of window targets (`Window`).
 raw-window-handle.workspace = true
 slotmap.workspace = true

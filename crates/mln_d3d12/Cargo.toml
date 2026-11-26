@@ -28,7 +28,6 @@ mln_glsl.workspace = true
 gpu-allocator = { workspace = true, features = ["d3d12"] }
 log.workspace = true
 naga = { workspace = true, features = ["hlsl-out"] }
-mln_util.workspace = true
 parking_lot.workspace = true
 windows = { workspace = true, features = [
   "Win32_Graphics_Direct3D12",

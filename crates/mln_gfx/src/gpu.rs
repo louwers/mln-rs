@@ -24,8 +24,6 @@ pub mod validation;
 use std::any::Any;
 use std::sync::Arc;
 
-pub use mln_util::clip_depth::ClipDepthRange;
-
 pub use self::ids::{
     BindingsId, BufferId, GeometryId, Id, IdData, PipelineId, ReadbackId, ResourceId, SamplerId, ShaderId, SlotMap,
     TextureId,
@@ -91,6 +89,15 @@ pub struct Caps {
     /// of fill extrusions there as quads whose vertex shader reads the
     /// bucket's vertices by vertex index, rather than as instances.
     pub binds_vertex_buffers: bool,
+}
+
+/// How a graphics API's clip space holds depth.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ClipDepthRange {
+    /// Clip z from 0 to w: Metal, Vulkan, D3D12 and WebGPU.
+    ZeroToOne,
+    /// Clip z from -w to w: OpenGL.
+    NegativeOneToOne,
 }
 
 /// How a buffer is bound.

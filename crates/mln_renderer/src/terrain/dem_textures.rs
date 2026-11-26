@@ -68,8 +68,7 @@ impl DemTextures {
 
 #[cfg(test)]
 mod tests {
-    use mln_gfx::gpu::Caps;
-    use mln_util::clip_depth::ClipDepthRange;
+    use mln_gfx::gpu::{Caps, ClipDepthRange};
     use mln_util::tileset::RasterEncoding;
 
     use super::*;

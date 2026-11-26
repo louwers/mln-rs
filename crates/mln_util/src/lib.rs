@@ -22,7 +22,6 @@ pub use padding::Padding;
 pub use unitbezier::UnitBezier;
 pub mod bounding_volumes;
 pub mod chrono;
-pub mod clip_depth;
 pub mod error;
 pub mod event_queue;
 pub mod feature;

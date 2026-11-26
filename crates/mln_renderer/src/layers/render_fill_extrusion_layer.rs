@@ -33,7 +33,7 @@
 use std::mem::offset_of;
 use std::sync::Arc;
 
-use mln_gfx::gpu::{Gpu, ShaderKey};
+use mln_gfx::gpu::{ClipDepthRange, Gpu, ShaderKey};
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
@@ -44,7 +44,6 @@ use mln_style::layers::FillExtrusion;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionPaintProperties;
 use mln_style::types::{AlignmentType, LayerBlendType};
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
-use mln_util::clip_depth::ClipDepthRange;
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
