@@ -8,12 +8,12 @@ use mln_style::expression::UnavailableImages;
 use mln_style::image::Impl as ImageImpl;
 use mln_style::layer::{LayerStyle, convert_layer};
 use mln_style::layers::{Circle, Fill, Line, Symbol};
+use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_text::atlas::{ImagePosition, ImagePositions, RectU16};
 use mln_text::glyph::GlyphDependencies;
 use mln_tile_id::OverscaledTileID;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 use serde_json::json;
 

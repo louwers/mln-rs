@@ -9,6 +9,7 @@
 // u16s), so the buffer is the GPU vertex data as it uploads.
 
 use mln_gfx::gfx_types::AttributeDataType;
+use mln_style::color::Color;
 use mln_style::expression::{Dependency, EvaluationContext, Image, Value, ValueConverter};
 use mln_style::feature::GeometryTileFeature;
 use mln_style::property::evaluated::{Evaluated, Faded};
@@ -17,7 +18,6 @@ use mln_style::types::LineCapType;
 use mln_text::atlas::ImagePositions;
 use mln_tile::TileLayer;
 use mln_tile_id::CanonicalTileID;
-use mln_util::Color;
 use mln_util::feature::feature_id_to_string;
 use mln_util::range::Range;
 use mln_vec_map::VecMap;

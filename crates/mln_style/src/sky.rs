@@ -16,7 +16,7 @@ crate::properties!(
             Color::new(136.0_f32 / 255.0_f32, 198.0_f32 / 255.0_f32, 252.0_f32 / 255.0_f32, 1.0_f32),
         sky_horizon_blend: constant f32 = 0.8_f32,
     }
-    use mln_util::Color;
+    use crate::color::Color;
 );
 
 /// The style's sky.

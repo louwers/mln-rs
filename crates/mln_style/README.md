@@ -10,8 +10,9 @@ Ports the style (`src/mln/style`, `include/mln/style`): `Style`, the style
 parser, layers, sources, the property system, the expression language
 (`src/mln/style/expression`), the feature interface that expressions read, the
 spec's value types and the conversions (`mln::style::conversion`, on serde_json
-instead of RapidJSON). It doesn't need the renderer, the text engine or the tile
-decoders.
+instead of RapidJSON), and the utilities that the style shares with the engine,
+such as colors and padding (`src/mln/util`). It doesn't need the renderer, the
+text engine or the tile decoders.
 
 Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering

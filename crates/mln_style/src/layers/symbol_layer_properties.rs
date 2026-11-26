@@ -57,7 +57,7 @@ crate::properties!(
         text_variable_anchor_offset: data_driven VariableAnchorOffsetCollection = VariableAnchorOffsetCollection::default(),
         text_writing_mode: constant Vec<TextWritingModeType> = Vec::new(),
     }
-    use crate::expression::Formatted, crate::expression::Image, crate::types::AlignmentType, crate::types::IconOverlapType, crate::types::IconTextFitType, crate::types::SymbolAnchorType, crate::types::SymbolHeightAnchorType, crate::types::SymbolPlacementType, crate::types::SymbolZOrderType, crate::types::TextJustifyType, crate::types::TextOverlapType, crate::types::TextRotationAlignmentType, crate::types::TextTransformType, crate::types::TextVariableAnchorType, crate::types::TextWritingModeType, crate::types::VariableAnchorOffsetCollection, mln_util::Padding;
+    use crate::expression::Formatted, crate::expression::Image, crate::padding::Padding, crate::types::AlignmentType, crate::types::IconOverlapType, crate::types::IconTextFitType, crate::types::SymbolAnchorType, crate::types::SymbolHeightAnchorType, crate::types::SymbolPlacementType, crate::types::SymbolZOrderType, crate::types::TextJustifyType, crate::types::TextOverlapType, crate::types::TextRotationAlignmentType, crate::types::TextTransformType, crate::types::TextVariableAnchorType, crate::types::TextWritingModeType, crate::types::VariableAnchorOffsetCollection;
 );
 
 crate::properties!(
@@ -79,7 +79,7 @@ crate::properties!(
         text_translate: constant [f32; 2] = [0.0_f32, 0.0_f32],
         text_translate_anchor: constant TranslateAnchorType = TranslateAnchorType::Map,
     }
-    use crate::types::TranslateAnchorType, mln_util::Color;
+    use crate::color::Color, crate::types::TranslateAnchorType;
 );
 
 /// The properties, by slot.

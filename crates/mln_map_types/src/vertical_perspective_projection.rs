@@ -3,10 +3,10 @@ use std::f64::consts::PI;
 use geometry::Point;
 use glam::dcamera::rh::proj::opengl::perspective;
 use glam::{DMat3, DMat4, DQuat, DVec3, DVec4, EulerRot, Vec3Swizzles, Vec4Swizzles};
+use mln_style::interpolate::interpolate;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::constants::{EXTENT, LATITUDE_MAX, TILE_SIZE_D};
 use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
-use mln_util::interpolate::interpolate;
 use mln_util::projection::Projection;
 
 use crate::projection::{ProjectedTilePoint, ProjectionData, mercator_tile_coords};

@@ -4,10 +4,9 @@ use std::borrow::Cow;
 
 use feature::{Identifier as FeatureIdentifier, Value as MbglValue};
 use mln_math::{fmax, fmin};
-use mln_util::geometry::FeatureType;
-use mln_util::{Color, i18n};
 
 use super::{Eval, Functions, OverloadSpec, Params, RegisterError, Role};
+use crate::color::Color;
 use crate::expression::forms::coercion::rgba;
 use crate::expression::forms::length::get_unicode_character_offset_on_validated_utf8;
 use crate::expression::type_::{self, Type};
@@ -16,6 +15,8 @@ use crate::expression::{
     Dependency, EvalResult, EvaluationContext, EvaluationError, EvaluationResult, Expr, mbgl_to_expression_value,
 };
 use crate::feature::GeometryTileFeature;
+use crate::geometry::FeatureType;
+use crate::i18n;
 
 /// Adds the style specification's functions to `functions`, each name's
 /// overloads in the order parsing tries them. Fails if `functions` already

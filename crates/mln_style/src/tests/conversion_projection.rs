@@ -1,5 +1,4 @@
 use feature::Value;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use super::assert_near;
 use super::util::parse_json;
@@ -8,6 +7,7 @@ use crate::expression::Functions;
 use crate::projection::convert_projection;
 use crate::property::table::Kind;
 use crate::property::value::StyleValue as _;
+use crate::subdivision_granularity::SubdivisionGranularitySetting;
 use crate::types::ProjectionDefinition;
 
 /// gtest's `FloatingPoint<T>::AlmostEquals` distance: sign-and-magnitude

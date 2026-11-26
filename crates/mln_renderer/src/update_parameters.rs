@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use mln_map_types::{Elevation, MapMode, TerrainOptions, TileLodMode, View};
 use mln_style::Style;
+use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_text::glyph::FontFaces;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::time::Instant;
 
 #[derive(Clone)]

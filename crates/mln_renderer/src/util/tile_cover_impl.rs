@@ -10,10 +10,10 @@ use std::iter::Peekable;
 use geo_types::{Coord, Geometry, Polygon};
 use geometry::Point;
 use mln_math::clamp_f64;
+use mln_style::geometry::{FeatureType, to_feature_type};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::error::Error;
 use mln_util::geo::LatLng;
-use mln_util::geometry::{FeatureType, to_feature_type};
 use mln_util::projection::Projection;
 use mln_vec_map::VecMap;
 

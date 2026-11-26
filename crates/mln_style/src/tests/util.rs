@@ -117,7 +117,7 @@ pub(super) use crate::conversion::value_to_json;
 pub(crate) struct StubGeometryTileFeature {
     pub(crate) properties: feature::PropertyMap,
     pub(crate) id: feature::Identifier,
-    pub(crate) type_: mln_util::geometry::FeatureType,
+    pub(crate) type_: crate::geometry::FeatureType,
     pub(crate) geometry: crate::feature::GeometryCollection,
 }
 
@@ -126,13 +126,13 @@ impl StubGeometryTileFeature {
         StubGeometryTileFeature {
             properties,
             id: feature::Identifier::Null,
-            type_: mln_util::geometry::FeatureType::Point,
+            type_: crate::geometry::FeatureType::Point,
             geometry: crate::feature::GeometryCollection::default(),
         }
     }
 
     pub(crate) fn with_geometry(
-        type_: mln_util::geometry::FeatureType,
+        type_: crate::geometry::FeatureType,
         geometry: crate::feature::GeometryCollection,
     ) -> Self {
         StubGeometryTileFeature {
@@ -146,7 +146,7 @@ impl StubGeometryTileFeature {
     /// A feature with an id, a type and properties, and no geometry.
     pub(crate) fn with_id_type(
         id: feature::Identifier,
-        type_: mln_util::geometry::FeatureType,
+        type_: crate::geometry::FeatureType,
         properties: feature::PropertyMap,
     ) -> Self {
         StubGeometryTileFeature { properties, id, type_, geometry: crate::feature::GeometryCollection::default() }
@@ -154,7 +154,7 @@ impl StubGeometryTileFeature {
 }
 
 impl crate::feature::GeometryTileFeature for StubGeometryTileFeature {
-    fn get_type(&self) -> mln_util::geometry::FeatureType {
+    fn get_type(&self) -> crate::geometry::FeatureType {
         self.type_
     }
 

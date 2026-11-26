@@ -79,7 +79,7 @@ pub unsafe fn init(jni_env: *mut c_void, context: *mut c_void) -> Result<(), Err
             let context = unsafe { JObject::from_raw(env, context.cast()) };
             let initialized = (|| {
                 retain_assets(env, &context)?;
-                // Records the VM as jni's, for mln_util::android::java_vm.
+                // Records the VM as jni's, for mln_style::android::java_vm.
                 env.get_java_vm()?;
                 Ok(())
             })();

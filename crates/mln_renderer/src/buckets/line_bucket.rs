@@ -1,16 +1,16 @@
 use std::sync::{Arc, Once};
 
 use geometry::Point;
+use mln_style::color::Color;
 use mln_style::expression::{EvaluationContext, Image, Value};
 use mln_style::feature::{GeometryCollection, GeometryTileFeature};
+use mln_style::geometry::FeatureType;
 use mln_style::layers::Line;
 use mln_style::layers::line_layer_properties::{LineLayoutProperties, LinePaintProperties};
+use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_text::atlas::ImagePositions;
 use mln_tile_id::CanonicalTileID;
-use mln_util::Color;
 use mln_util::feature::numeric_value_f64;
-use mln_util::geometry::FeatureType;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketBase, UploadNeeds};

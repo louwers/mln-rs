@@ -99,9 +99,9 @@ mod tests {
     use feature::Value;
     use geometry::Point;
     use mln_style::feature::{GeometryCollection, GeometryCoordinates, GeometryTileFeature};
+    use mln_style::geometry::FeatureType;
     use mln_text::glyph::GlyphIDType;
     use mln_text::{SectionOptions, TaggedString};
-    use mln_util::geometry::FeatureType;
 
     use super::*;
 

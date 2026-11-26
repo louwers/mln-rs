@@ -11,8 +11,8 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::StencilOpType;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMode, DrawModeType, StencilMode};
+use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_tile_id::UnwrappedTileID;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::draw::Entries;
 use crate::gfx::buffer::Buffer;

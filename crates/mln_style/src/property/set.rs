@@ -10,10 +10,10 @@ use std::fmt::Debug;
 use std::time::Duration;
 
 use mln_util::constants::DEFAULT_TRANSITION_EASE;
-use mln_util::interpolate::Interpolate;
 use mln_util::time::Instant;
 
 use crate::expression::{Dependency, global_state_refs_intersect};
+use crate::interpolate::Interpolate;
 use crate::property::evaluated::{Evaluated, Evaluation};
 use crate::property::evaluation::PropertyEvaluationParameters;
 use crate::property::transition::{GlobalStateChange, TransitionOptions, TransitionParameters};
@@ -247,7 +247,7 @@ pub(crate) use __property_data_driven;
 ///         fill_antialias: constant bool = true,
 ///         fill_color: data_driven Color = Color::black(),
 ///     }
-///     use mln_util::Color;
+///     use crate::color::Color;
 /// );
 /// ```
 ///

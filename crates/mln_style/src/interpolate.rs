@@ -4,10 +4,10 @@
 // through C++'s implicit conversion of `t`, and so do the impls here.
 
 use geometry::Point;
+use mln_util::range::Range;
 
 use crate::color::Color;
 use crate::padding::Padding;
-use crate::range::Range;
 
 pub trait Interpolate: Sized {
     #[must_use]

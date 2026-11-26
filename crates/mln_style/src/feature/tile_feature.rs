@@ -5,7 +5,8 @@ use std::sync::Arc;
 use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
 use mln_util::error::Error;
-use mln_util::geometry::FeatureType;
+
+use crate::geometry::FeatureType;
 
 /// Normalized vector tile coordinates. Each geometry coordinate represents a
 /// point in a bidimensional space, varying from -V...0...+V, where V is the

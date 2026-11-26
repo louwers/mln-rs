@@ -137,7 +137,7 @@ fn function_color_space() {
     ] {
         let json = format!(r#"{{"stops": [[0, "red"], [1, "blue"]], "colorSpace": "{color_space}"}}"#);
         let mut error = Error::default();
-        let function = convert_json::<mln_util::Color>(&json, &mut error, false).expect("color function");
+        let function = convert_json::<crate::color::Color>(&json, &mut error, false).expect("color function");
         let feature::Value::Array(serialized) = function.as_expression().unwrap().get_expression().serialize() else {
             panic!("{color_space}: not an expression array");
         };

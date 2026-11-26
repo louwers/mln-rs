@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use mln_util::Color;
+use mln_style::color::Color;
 
 /// The value types a binder keeps statistics for: only `float` tracks a
 /// maximum (the C++ `PaintPropertyStatistics<float>` specialization).

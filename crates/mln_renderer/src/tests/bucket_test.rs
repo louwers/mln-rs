@@ -7,6 +7,7 @@ use mln_map_types::MapMode;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::feature::{GeometryCollection, GeometryTileFeature};
+use mln_style::geometry::FeatureType;
 use mln_style::layer::{LayerStyle, convert_layer};
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionLayoutProperties;
 use mln_style::layers::fill_layer_properties::{FillLayoutProperties, FillPaintProperties};
@@ -17,7 +18,6 @@ use mln_style::property::evaluated::Evaluated;
 use mln_style::property::value::PropertyValue;
 use mln_text::atlas::ImagePositions;
 use mln_tile_id::CanonicalTileID;
-use mln_util::geometry::FeatureType;
 use mln_util::identity::SimpleIdentity;
 use mln_vec_map::VecMap;
 

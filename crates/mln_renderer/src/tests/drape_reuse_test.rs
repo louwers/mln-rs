@@ -17,12 +17,12 @@ use mln_map_types::{CameraOptions, ConstrainMode, Elevation, MapMode, TerrainOpt
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::feature::FeatureState;
 use mln_style::sources::{GeoJSONOptions, GeoJsonSourceType};
+use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::{Edit, Style};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use parking_lot::Mutex;
 
 use crate::Registry;

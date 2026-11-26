@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
 use geometry::Point;
+use mln_style::subdivision_granularity::{SubdivisionGranularityExpression, SubdivisionGranularitySetting};
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants::EXTENT;
-use mln_util::subdivision_granularity::{SubdivisionGranularityExpression, SubdivisionGranularitySetting};
 
 use crate::gfx::context::Context;
 use crate::gfx::indexes::{DrawIndexes, Indexes, SharedIndexes};

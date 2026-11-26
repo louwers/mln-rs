@@ -12,8 +12,9 @@ pub use convert::{
 // Tile ids stay with the tile pyramid, which the backends and the camera
 // read without the style.
 pub use mln_tile_id::CanonicalTileID;
-pub use mln_util::geometry::FeatureType;
 pub use tile_feature::{GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileFeature};
+
+pub use crate::geometry::FeatureType;
 
 /// A feature's state, as `feature-state` expressions read it.
 pub type FeatureState = feature::ValueObject;

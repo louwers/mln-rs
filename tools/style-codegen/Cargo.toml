@@ -21,7 +21,7 @@ name = "style-codegen"
 path = "src/main.rs"
 
 [dependencies]
-mln_util.workspace = true
+mln_style.workspace = true
 mln_vec_map.workspace = true
 serde_json.workspace = true
 

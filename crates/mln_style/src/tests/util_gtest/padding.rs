@@ -1,20 +1,20 @@
-// A separate target from `mln_util_gtest`: the expression and function
-// cases need `mln_style` (`PropertyExpression` and the style conversions),
-// which sits far above `mln_util`.
+// The Padding cases of test/util/padding.test.cpp, with its expression and
+// function cases.
 
 use std::borrow::Cow;
 use std::sync::Arc;
 
 use feature::{PropertyMap, Value as MbglValue};
-use mln_style::conversion::{Convertible, Error};
-use mln_style::expression::dsl::{interpolate, linear, literal, zoom};
-use mln_style::expression::{EvaluationContext, Functions, create_expression_from_str};
-use mln_style::feature::GeometryTileFeature;
-use mln_style::property::convert::convert_property_value;
-use mln_style::property::expression::PropertyExpression;
-use mln_style::property::value::PropertyValue;
-use mln_util::Padding;
-use mln_util::geometry::FeatureType;
+
+use crate::conversion::{Convertible, Error};
+use crate::expression::dsl::{interpolate, linear, literal, zoom};
+use crate::expression::{EvaluationContext, Functions, create_expression_from_str};
+use crate::feature::GeometryTileFeature;
+use crate::geometry::FeatureType;
+use crate::padding::Padding;
+use crate::property::convert::convert_property_value;
+use crate::property::expression::PropertyExpression;
+use crate::property::value::PropertyValue;
 
 struct StubGeometryTileFeature {
     properties: PropertyMap,

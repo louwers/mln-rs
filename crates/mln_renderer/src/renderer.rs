@@ -5,9 +5,9 @@ use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, LoadOp, TargetF
 use mln_gfx::rendering_stats::{RenderingStats, TerrainStats};
 use mln_gfx::shaders::bindings::PAINT_PARAMS_ID;
 use mln_gfx::{FrameImage, Handoff, Rgba, ScissorRect};
+use mln_style::color::Color;
 use mln_text::GlyphCache;
 use mln_text::local_fonts::LocalGlyphs;
-use mln_util::Color;
 use mln_util::error::Error;
 use mln_util::event_queue::Waker;
 use mln_util::pool::Pool;

@@ -3066,6 +3066,7 @@ dependencies = [
  "js-sys",
  "log",
  "mln-rs-feature",
+ "mln-rs-style",
  "mln-rs-util",
  "mln-rs-vec-map",
  "objc2 0.6.5",
@@ -3119,6 +3120,7 @@ dependencies = [
  "icu_provider",
  "jni",
  "js-sys",
+ "libc",
  "log",
  "mln-rs-feature",
  "mln-rs-geojson",
@@ -3136,6 +3138,7 @@ dependencies = [
  "serde_json_borrow",
  "smallvec",
  "thiserror 2.0.21",
+ "unicode-properties",
  "wasm-bindgen",
  "writeable",
 ]
@@ -3144,7 +3147,7 @@ dependencies = [
 name = "mln-rs-style-codegen"
 version = "0.0.17"
 dependencies = [
- "mln-rs-util",
+ "mln-rs-style",
  "mln-rs-vec-map",
  "serde_json",
 ]
@@ -3157,6 +3160,7 @@ dependencies = [
  "libloading",
  "log",
  "memmap2",
+ "mln-rs-style",
  "mln-rs-text",
  "mln-rs-util",
  "objc2-core-foundation",
@@ -3243,19 +3247,15 @@ dependencies = [
  "geo-types",
  "glam",
  "httpdate",
- "jni",
- "libc",
  "log",
  "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-math",
- "mln-rs-style",
  "mln-rs-tile-id",
  "mln-rs-wire",
  "parking_lot",
  "serde_json",
  "thiserror 2.0.21",
- "unicode-properties",
  "web-time",
 ]
 

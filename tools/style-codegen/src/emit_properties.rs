@@ -48,7 +48,7 @@ fn emit_set(w: &mut Writer, layer_type: &str, class: &str, scope: &str, properti
     }
     let mut imports = imports_for(properties.iter(), false);
     if properties.iter().any(is_color_ramp) {
-        imports.push("mln_util::Color".into());
+        imports.push("crate::color::Color".into());
     }
     imports.sort();
     imports.dedup();

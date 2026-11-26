@@ -116,7 +116,8 @@ fn format_number(evaluated: &EvaluatedType, property_type: &str, num: Option<&Va
 
 /// Parses a CSS color, premultiplied in JS doubles.
 fn parse_css_color(s: &str) -> [f64; 4] {
-    let [r, g, b, a] = mln_util::Color::parse_straight(s).unwrap_or_else(|| panic!("Could not parse CSS color {s:?}"));
+    let [r, g, b, a] =
+        mln_style::color::Color::parse_straight(s).unwrap_or_else(|| panic!("Could not parse CSS color {s:?}"));
     [r * a, g * a, b * a, a]
 }
 

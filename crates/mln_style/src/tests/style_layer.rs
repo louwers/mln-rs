@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
-use mln_util::Color;
-
 use super::util::{new_layer, parse_json, style_of};
+use crate::color::Color;
 use crate::conversion::{Convertible, Error};
 use crate::expression::{Functions, Image};
 use crate::filter::{Filter, convert_filter};

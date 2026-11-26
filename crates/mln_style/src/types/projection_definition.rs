@@ -1,5 +1,6 @@
 use feature::Value;
-use mln_util::interpolate::{Interpolate, interpolate};
+
+use crate::interpolate::{Interpolate, interpolate};
 
 /// The names the style's `projection.type` accepts.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, mln_wire::Wire)]

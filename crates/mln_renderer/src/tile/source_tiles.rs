@@ -9,6 +9,7 @@ use std::sync::Arc;
 use mln_map_types::{MapMode, TileLodMode, VerticalPerspectiveProjection};
 use mln_style::Source;
 use mln_style::property::value::PropertyValue;
+use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_tile_id::tile_range::TileRange;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
@@ -16,7 +17,6 @@ use mln_util::geo::{LatLngBounds, WrapMode};
 use mln_util::hash::HashSet;
 use mln_util::projection::Projection;
 use mln_util::range::Range;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecMap;
 use smallvec::SmallVec;
 

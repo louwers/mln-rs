@@ -5,9 +5,9 @@ use geo_types::Geometry;
 use mln_map::{
     AnimationOptions, CameraOptions, CameraUpdateMode, ConstrainMode, NorthOrientation, TileLodMode, ViewportMode,
 };
+use mln_style::geometry::for_each_point;
 use mln_util::error::Error;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds};
-use mln_util::geometry::for_each_point;
 
 /// An area for a camera to fit in the map's view.
 #[derive(Clone, Debug, PartialEq)]

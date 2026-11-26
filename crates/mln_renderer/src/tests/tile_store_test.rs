@@ -1002,7 +1002,7 @@ fn a_tile_lays_out_again_once_a_failed_glyph_range_loads() {
     assert!(!has_glyph(&tiles, &first), "laid out without the glyph");
 
     tiles.with_at(&second, |tile| {
-        tile.set_style(&labels, 1.0, mln_util::subdivision_granularity::SubdivisionGranularitySetting::none());
+        tile.set_style(&labels, 1.0, mln_style::subdivision_granularity::SubdivisionGranularitySetting::none());
         tile.take_input(TileInput::Geometry { data: Some(points()), missing: false });
     });
     tiles.update();

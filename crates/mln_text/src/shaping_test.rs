@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
+use mln_style::i18n;
 use mln_style::image::{ImageContent, Impl, TextFit};
 use mln_style::types::{IconTextFitType, SymbolAnchorType, TextJustifyType, TextWritingModeType, VerticalAlign};
 use mln_util::constants::ONE_EM;
 use mln_util::font_stack::FontStack;
-use mln_util::i18n;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 

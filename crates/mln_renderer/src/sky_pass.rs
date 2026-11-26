@@ -7,8 +7,8 @@ use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_map_types::View;
+use mln_style::color::Color;
 use mln_style::types::LightAnchorType;
-use mln_util::Color;
 use mln_util::geo::WrapMode;
 use mln_util::identity::SimpleIdentity;
 

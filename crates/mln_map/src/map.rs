@@ -19,17 +19,17 @@ use mln_storage::FileSource;
 #[cfg(not(target_family = "wasm"))]
 use mln_storage::{Loader, ResourceOptions};
 use mln_style::conversion::Convertible;
+use mln_style::geometry::for_each_point;
 use mln_style::source::convert_source;
+use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::types::{ProjectionDefinition, ProjectionType};
 use mln_style::{Edit, Source, Style, StyleRegistry};
 use mln_text::glyph::{FontFace, FontFaces};
 use mln_util::error::Error;
 use mln_util::event_queue::{EventQueue, Waker};
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
-use mln_util::geometry::for_each_point;
 use mln_util::pool::Pool;
 use mln_util::size::Size;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::time::Instant;
 
 use crate::feature_state::FeatureStateStore;

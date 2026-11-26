@@ -5,8 +5,8 @@
 use std::sync::Arc;
 
 use feature::Value as MbglValue;
-use mln_util::Color;
 
+use crate::color::Color;
 use crate::expression::value::Value;
 use crate::expression::{EvalResult, EvaluationContext, Expr, GlobalStateMap, Node, Output, SharedExpr};
 

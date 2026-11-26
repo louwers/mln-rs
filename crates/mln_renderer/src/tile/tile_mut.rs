@@ -10,9 +10,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use mln_storage::response::Reason;
 use mln_storage::{Request, Response};
+use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::error::Error;
 use mln_util::hash::{HashSet, hash_bytes};
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 
 use crate::layer_drawing::ChangedBuckets;

@@ -2,7 +2,7 @@
 //! level 24), with the system's locale data, through JNI in the app's Java VM.
 //! The default locale is the app's (`ULocale.getDefault()`).
 //!
-//! The Java VM is [`mln_util::android::java_vm`]'s. Without one, a collator
+//! The Java VM is [`crate::android::java_vm`]'s. Without one, a collator
 //! or number format fails. Each thread that evaluates an expression attaches
 //! to the VM and stays attached.
 //!
@@ -62,7 +62,7 @@ impl Failure {
 /// Runs `f` on this thread attached to the app's Java VM, in a frame of local
 /// references of its own. A Java exception that `f` leaves fails it.
 fn with_java<T>(f: impl FnOnce(&mut Env<'_>) -> Result<T, Failure>) -> Result<T, String> {
-    let vm = mln_util::android::java_vm().ok_or_else(|| "Locale services need Android initialization".to_owned())?;
+    let vm = crate::android::java_vm().ok_or_else(|| "Locale services need Android initialization".to_owned())?;
     vm.attach_current_thread(f).map_err(Failure::into_message)
 }
 

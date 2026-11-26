@@ -16,13 +16,13 @@ use mln_map_types::{
 };
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::layers::Raster;
+use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::{Edit, Style};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
 use mln_util::constants::EXTENT;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use super::with_context;
 use crate::clip_masks::ClipMasks;

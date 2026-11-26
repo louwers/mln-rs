@@ -6,8 +6,8 @@ use std::time::Duration;
 use mln_map_types::{
     AnimationOptions, CameraOptions, TransformState, TransitionOutcome, VerticalPerspectiveProjection,
 };
+use mln_style::interpolate::interpolate;
 use mln_util::geo::{EdgeInsets, LatLngBounds, WrapMode};
-use mln_util::interpolate::interpolate;
 use mln_util::projection::Projection;
 
 use super::transition::{AlongFn, FrameFn};

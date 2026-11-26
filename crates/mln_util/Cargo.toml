@@ -9,8 +9,6 @@ repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
 include.workspace = true
-# The [[test]]s below; tests/ also holds their modules.
-autotests = false
 
 [lib]
 name = "mln_util"
@@ -30,7 +28,6 @@ mln_math.workspace = true
 parking_lot.workspace = true
 mln_wire.workspace = true
 thiserror.workspace = true
-unicode-properties.workspace = true
 web-time.workspace = true
 
 [features]
@@ -39,20 +36,7 @@ web-time.workspace = true
 # hidden from the documentation.
 bench = []
 
-# android: the Java VM of the crates' Android services.
-[target.'cfg(target_os = "android")'.dependencies]
-jni.workspace = true
-libc.workspace = true
-
-# Ports test/util/padding.test.cpp: its expression cases need mln_style.
-[[test]]
-name = "gtest_padding"
-path = "tests/gtest_padding.rs"
-
 [dev-dependencies]
-mln_style = { package = "mln-rs-style", path = "../mln_style", features = [
-  "dsl",
-] }
 mln_tile_id = { package = "mln-rs-tile-id", path = "../mln_tile_id" }
 serde_json.workspace = true
 

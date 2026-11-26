@@ -12,10 +12,10 @@ use ::mln_map::{
     TransitionEnd, TransitionOutcome, ViewportMode,
 };
 use mln_runtime::{Applied, CameraFitArea, CameraFitOptions, CameraFitUpdate, TileOptions, ViewportOptions};
+use mln_style::geometry::for_each_point;
 use mln_util::UnitBezier;
 use mln_util::constants::{MAX_ZOOM, MIN_ZOOM, TILE_SIZE_D, TILE_SIZE_I};
 use mln_util::geo::{EdgeInsets, LatLngBounds, ScreenCoordinate, WrapMode};
-use mln_util::geometry::for_each_point;
 use mln_util::projection::Projection;
 use parking_lot::Mutex;
 

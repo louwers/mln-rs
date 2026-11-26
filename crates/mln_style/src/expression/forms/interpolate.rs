@@ -1,7 +1,7 @@
 use feature::Value as MbglValue;
 use mln_util::range::Range;
-use mln_util::{Color, ColorSpace, Padding};
 
+use crate::color::{Color, ColorSpace};
 use crate::conversion::Convertible;
 use crate::expression::interpolator::{CubicBezierInterpolator, ExponentialInterpolator, Interpolator};
 use crate::expression::parse::{ParseResult, ParsingContext};
@@ -9,6 +9,7 @@ use crate::expression::stops::{Stops, get_covering_stops};
 use crate::expression::type_::{self, Type};
 use crate::expression::value::{Value, type_of};
 use crate::expression::{EvalResult, EvaluationContext, EvaluationError, EvaluationResult, Expr, Node};
+use crate::padding::Padding;
 use crate::types::VariableAnchorOffsetCollection;
 
 /// The `T` of `InterpolateImpl<T>`.
@@ -207,7 +208,7 @@ impl Interpolate {
                 interpolate_float(a.left, b.left, t),
             )),
             (Value::ProjectionDefinition(a), Value::ProjectionDefinition(b)) => {
-                Value::ProjectionDefinition(mln_util::interpolate::interpolate(a, b, t))
+                Value::ProjectionDefinition(crate::interpolate::interpolate(a, b, t))
             }
             (Value::VariableAnchorOffsetCollection(a), Value::VariableAnchorOffsetCollection(b)) => {
                 // Interpolator<VariableAnchorOffsetCollection> only has a

@@ -8,13 +8,13 @@ use cheap_ruler::{CheapRuler, DistanceUnit};
 use feature::Value as MbglValue;
 use geojson::GeoJson;
 use geometry::Point;
-use mln_util::geometry::{FeatureType, to_feature_type};
 
 use super::within::BoundaryMode;
 use crate::conversion::{Convertible, Error};
 use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::{EvalResult, EvaluationContext, EvaluationError, Expr, Node};
 use crate::feature::{CanonicalTileID, GeometryTileFeature, convert_geometry};
+use crate::geometry::{FeatureType, to_feature_type};
 use crate::log_target;
 
 // The algorithms work on `mapbox::geometry`'s shapes, as in C++: a polygon

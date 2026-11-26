@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use feature::Identifier;
 use mln_style::feature::GeometryTileFeature;
-use mln_util::geometry::FeatureType;
+use mln_style::geometry::FeatureType;
 
 use crate::{MltTile, MvtTile, TileData, TileError};
 

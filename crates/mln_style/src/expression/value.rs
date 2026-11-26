@@ -2,15 +2,16 @@ use std::hash::{Hash, Hasher};
 
 use feature::{Value as MbglValue, ValueObject};
 use mln_util::string::to_string_double;
-use mln_util::{Color, Padding};
 use serde::Serialize;
 
+use crate::color::Color;
 use crate::conversion::value_to_json;
 use crate::expression::formatted::Formatted;
 use crate::expression::image::Image;
 use crate::expression::locale::collator::Collator;
 use crate::expression::type_::Type;
 use crate::expression::{EvaluationContext, Expr};
+use crate::padding::Padding;
 use crate::types::{
     AlignmentType, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType, IconOverlapType,
     IconTextFitType, LayerBlendType, LightAnchorType, LineCapType, LineJoinType, Position, ProjectionDefinition,

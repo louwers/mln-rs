@@ -1,6 +1,6 @@
 use feature::{Value as MbglValue, ValueObject};
-use mln_util::Color;
 
+use crate::color::Color;
 use crate::conversion::Convertible;
 use crate::expression::formatted::{
     FontStack, Formatted, FormattedSection, K_FORMATTED_SECTION_FONT_SCALE, K_FORMATTED_SECTION_TEXT_COLOR,

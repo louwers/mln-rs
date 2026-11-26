@@ -1,7 +1,7 @@
 //! The fog over the terrain's surface, from the style's `sky`.
 
 use mln_map_types::View;
-use mln_util::Color;
+use mln_style::color::Color;
 
 use crate::render_sky::EvaluatedSky;
 use crate::terrain::ubo::TerrainFog;

@@ -1023,7 +1023,7 @@ fn globe_radius_px(view: &crate::View) -> f64 {
 /// The unit-sphere point of a point of [`crate::View::eye_position`]'s
 /// units: a Web Mercator point at zoom 0 and a height.
 fn on_sphere(point: DVec3) -> DVec3 {
-    let world = mln_util::geometry::Point::new(point.x, point.y);
+    let world = mln_style::geometry::Point::new(point.x, point.y);
     let location =
         Projection::unproject(&world, 1.0 / mln_util::constants::TILE_SIZE_D, mln_util::geo::WrapMode::Unwrapped)
             .unwrap();

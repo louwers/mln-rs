@@ -332,9 +332,9 @@ pub(crate) const fn entry<T: LayerType>() -> &'static dyn ErasedLayerType {
 #[cfg(test)]
 mod tests {
     use mln_map_types::MapMode;
+    use mln_style::color::Color;
     use mln_style::layers::{Background, BackgroundPaintProperties, Circle, Symbol};
     use mln_style::property::evaluated::Evaluated;
-    use mln_util::Color;
     use mln_vec_map::VecMap;
 
     use super::*;

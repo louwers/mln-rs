@@ -10,12 +10,12 @@ use geo_types::{Coord, Geometry, Polygon};
 use geojson::GeoJson;
 use geometry::Point;
 use mln_util::constants::{DEGREES_MAX, EXTENT, LONGITUDE_MAX};
-use mln_util::geometry::{FeatureType, to_feature_type};
 
 use crate::conversion::{Convertible, Error};
 use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::{EvaluationContext, Expr, Node};
 use crate::feature::{CanonicalTileID, GeometryCoordinates, GeometryTileFeature};
+use crate::geometry::{FeatureType, to_feature_type};
 use crate::log_target;
 
 // --- util/geometry_util ---

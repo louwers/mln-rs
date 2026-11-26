@@ -6,9 +6,9 @@ use std::f64::consts::PI;
 use geo_types::{Coord, CoordNum, Geometry, LineString, MultiLineString, MultiPolygon, Polygon};
 use geometry::Point;
 use mln_util::constants::EXTENT;
-use mln_util::geometry::FeatureType;
 
 use super::{CanonicalTileID, GeometryCollection};
+use crate::geometry::FeatureType;
 
 /// An index past the end of a vector, with the message libstdc++'s
 /// `std::vector::at` throws.

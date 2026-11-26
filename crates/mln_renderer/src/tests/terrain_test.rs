@@ -12,6 +12,7 @@ use mln_map_types::{
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::sources::raster_dem_source;
+use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::terrain::Terrain;
 use mln_style::types::ProjectionDefinition;
 use mln_style::{Edit, Source, Style};
@@ -21,7 +22,6 @@ use mln_util::geo::{LatLng, WrapMode};
 use mln_util::image::PremultipliedImage;
 use mln_util::pool::TaskGroup;
 use mln_util::size::Size;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::{PartialTileset, RasterEncoding};
 use parking_lot::Mutex;
 
@@ -846,7 +846,7 @@ fn snapshot(load: &TerrainLoad, exaggeration: f32) -> TerrainElevation {
 
 /// The location of `world`, a Web Mercator point at zoom 0.
 fn location_of(world: DVec2) -> LatLng {
-    let point = mln_util::geometry::Point::new(world.x, world.y);
+    let point = mln_style::geometry::Point::new(world.x, world.y);
     mln_util::projection::Projection::unproject(&point, 1.0 / mln_util::constants::TILE_SIZE_D, WrapMode::Unwrapped)
         .unwrap()
 }

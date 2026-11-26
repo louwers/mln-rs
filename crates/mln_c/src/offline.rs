@@ -7,9 +7,9 @@ use mln_storage::offline::{
     OfflineGeometryRegionDefinition, OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState,
     OfflineRegionExpiry, OfflineRegionStatus, OfflineTilePyramidRegionDefinition,
 };
+use mln_style::geometry::for_each_point;
 use mln_util::chrono::Timestamp;
 use mln_util::geo::LatLngBounds;
-use mln_util::geometry::for_each_point;
 
 use crate::buffer::LentText;
 use crate::completion::{self, CompletionValue, Generations, PendingCompletion};

@@ -11,11 +11,11 @@ use mln_style::Source;
 use mln_style::feature::GeometryCoordinates;
 use mln_style::source::SourceData;
 use mln_style::sources::ImageSourceType;
+use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::constants;
 use mln_util::geo::LatLngBounds;
 use mln_util::range::Range;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::bucket::UploadNeeds;
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};

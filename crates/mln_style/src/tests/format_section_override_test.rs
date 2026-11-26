@@ -7,10 +7,9 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use feature::{PropertyMap, Value as MbglValue};
-use mln_util::Color;
-use mln_util::geometry::FeatureType;
 use mln_vec_map::{VecMap, VecSet};
 
+use crate::color::Color;
 use crate::conversion::Convertible;
 use crate::expression::dsl::{format_str, get_str, literal_str, string, to_color};
 use crate::expression::formatted::{Formatted, FormattedSection};
@@ -21,6 +20,7 @@ use crate::expression::type_::Type;
 use crate::expression::value::{ObjectType, Value};
 use crate::expression::{Dependency, EvaluationContext, Expr, Functions, GlobalStateMap};
 use crate::feature::GeometryTileFeature;
+use crate::geometry::FeatureType;
 use crate::layer::LayerStyle;
 use crate::layers::symbol_layer::{
     SymbolLayerPaintPropertyOverrides as MockOverrides, format_section_override as new_override, set_overrides,

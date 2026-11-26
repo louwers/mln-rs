@@ -20,6 +20,7 @@ use mln_style::sources::{
     CustomGeometrySourceHandle, CustomVectorSourceHandle, VectorSourceType, raster_dem_source, raster_source,
     vector_source,
 };
+use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::types::ProjectionDefinition;
 use mln_style::{Edit, Source, Style};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
@@ -28,7 +29,6 @@ use mln_util::geo::LatLng;
 use mln_util::pool::{Pool, TaskGroup};
 use mln_util::queue::Queue;
 use mln_util::size::Size;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::{PartialTileset, Tileset};
 use parking_lot::Mutex;
 

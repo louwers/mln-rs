@@ -39,7 +39,7 @@ crate::properties!(
     derived {
         line_floor_width: integer_zoom f32 = 1.0_f32 => line_width,
     }
-    use crate::expression::Image, crate::types::LayerBlendType, crate::types::TranslateAnchorType, mln_util::Color;
+    use crate::color::Color, crate::expression::Image, crate::types::LayerBlendType, crate::types::TranslateAnchorType;
 );
 
 /// The properties, by slot.

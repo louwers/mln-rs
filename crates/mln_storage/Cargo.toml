@@ -75,6 +75,7 @@ ureq = { workspace = true, features = [
 # HttpURLConnection and the app's assets, through the app's Java VM.
 [target.'cfg(target_os = "android")'.dependencies]
 jni.workspace = true
+mln_style.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 js-sys.workspace = true

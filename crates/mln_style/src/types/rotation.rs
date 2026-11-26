@@ -1,4 +1,4 @@
-use mln_util::interpolate::Interpolate;
+use crate::interpolate::Interpolate;
 
 // Could be made a template class if needed
 // template <size_t Period>

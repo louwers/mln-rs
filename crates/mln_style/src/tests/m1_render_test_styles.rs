@@ -11,10 +11,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use mln_util::UnitBezier;
 use mln_util::time::Instant;
-use mln_util::{Color, UnitBezier};
 
 use super::util::FixtureLog;
+use crate::color::Color;
 use crate::expression::Functions;
 use crate::layer::LayerStyle;
 use crate::layers::{Background, BackgroundPaintProperties};

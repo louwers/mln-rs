@@ -4,7 +4,7 @@
 //! break. Of those places, the breaker picks the set whose lines come out
 //! closest to an even width.
 
-use mln_util::i18n;
+use mln_style::i18n;
 use mln_vec_map::VecSet;
 use unicode_linebreak::{BreakOpportunity, linebreaks};
 

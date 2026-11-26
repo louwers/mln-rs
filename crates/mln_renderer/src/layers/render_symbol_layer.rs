@@ -14,6 +14,7 @@ use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::{Projection, ProjectionData};
+use mln_style::color::Color;
 use mln_style::layer::{ErasedLayerStyle as _, LayerStyle};
 use mln_style::layers::Symbol;
 use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
@@ -21,7 +22,6 @@ use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolP
 use mln_style::types::{AlignmentType, IconTextFitType, SymbolPlacementType, TextRotationAlignmentType};
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
-use mln_util::Color;
 use mln_util::constants::EXTENT;
 use mln_util::error::Error;
 use mln_util::hash::HashMap;

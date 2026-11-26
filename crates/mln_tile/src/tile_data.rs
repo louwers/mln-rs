@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap, Value};
 use mln_style::feature::{GeometryCollection, GeometryTileFeature, to_geometry_collection};
-use mln_util::geometry::{FeatureType, to_feature_type};
+use mln_style::geometry::{FeatureType, to_feature_type};
 use mln_wire::{Reader, Wire, Writer, payload};
 
 use crate::TileError;

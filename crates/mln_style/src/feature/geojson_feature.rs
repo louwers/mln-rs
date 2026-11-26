@@ -2,9 +2,9 @@ use std::borrow::Cow;
 
 use feature::{Feature, Identifier, PropertyMap, Value};
 use mln_util::error::Error;
-use mln_util::geometry::{FeatureType, to_feature_type};
 
 use super::{CanonicalTileID, GeometryCollection, GeometryTileFeature, convert_geometry_to_tile};
+use crate::geometry::{FeatureType, to_feature_type};
 
 /// A `GeometryTileFeature` view of a GeoJSON feature, with its geometry in
 /// the coordinates of a tile, or none.

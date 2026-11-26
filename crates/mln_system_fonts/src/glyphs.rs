@@ -11,13 +11,13 @@
 
 use std::sync::Arc;
 
+use mln_style::i18n;
 use mln_text::FontFile;
 use mln_text::font_name::{self, FontName};
 use mln_text::glyph::FontFace;
 use mln_text::local_fonts::FontChooser;
 use mln_util::font_stack::FontStack;
 use mln_util::hash::{HashMap, HashSet};
-use mln_util::i18n;
 
 use crate::source::{self, Source};
 use crate::{Finder, Query, languages, system};

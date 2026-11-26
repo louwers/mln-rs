@@ -1,6 +1,5 @@
-use mln_util::Color;
-
 use super::util::parse_json;
+use crate::color::Color;
 use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
 use crate::light::convert_light;

@@ -15,6 +15,7 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
+use mln_style::color::Color;
 use mln_style::expression::{
     Dependency, EvaluationContext, GlobalStateMap, from_expression_value, global_state_refs_intersect,
 };
@@ -23,7 +24,6 @@ use mln_style::layers::ColorRelief;
 use mln_style::property::color_ramp::ColorRampPropertyValue;
 use mln_style::types::ResamplingType;
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
-use mln_util::Color;
 use mln_util::dem::DemUnpack;
 use mln_util::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;

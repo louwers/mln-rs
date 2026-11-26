@@ -1,6 +1,5 @@
 use feature::{Value as MbglValue, geojson};
 use geo_types::{Geometry, LineString, MultiLineString, MultiPoint, Point, Polygon};
-use mln_util::geometry::FeatureType;
 use mln_vec_map::VecSet;
 
 use super::util::{StubGeometryTileFeature, property_map};
@@ -8,6 +7,7 @@ use crate::expression::dsl::{self, get, get_str, image, linear, literal, literal
 use crate::expression::parse::create_expression_from_str;
 use crate::expression::{Dependency, EvaluationContext, Functions, Image, Value};
 use crate::feature::{CanonicalTileID, GeometryCollection};
+use crate::geometry::FeatureType;
 use crate::property::evaluated::Evaluated;
 use crate::property::evaluation::PropertyEvaluationParameters;
 use crate::property::expression::PropertyExpression;

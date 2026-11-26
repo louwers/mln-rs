@@ -215,7 +215,7 @@ impl SymbolLayerPaintPropertyOverrides {
 
 /// A `format-section-override` of the color property `property_name`, whose
 /// value is `default_value` where no section overrides it.
-pub(crate) fn format_section_override(default_value: Evaluated<mln_util::Color>, property_name: String) -> Expr {
+pub(crate) fn format_section_override(default_value: Evaluated<crate::color::Color>, property_name: String) -> Expr {
     let default_value = match default_value {
         Evaluated::Constant(color) => OverrideDefault::Constant(color),
         Evaluated::CrossFaded(faded) => OverrideDefault::Constant(faded.to),

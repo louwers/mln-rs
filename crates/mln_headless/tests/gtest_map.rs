@@ -24,6 +24,7 @@ use mln_storage::{
     Cache, DatabaseFileSource, FileSource, Kind, Loader, LoadingMethod, Resource, ResourceOptions, Response,
     StoragePolicy, TileFormat,
 };
+use mln_style::color::Color;
 use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::expression::{Formatted, FormattedSection, Functions, Image};
 use mln_style::layer::{Layer, LayerStyle, convert_layer};
@@ -43,7 +44,6 @@ use mln_style::types::{ProjectionDefinition, ProjectionType, VisibilityType};
 use mln_style::{Edit, PropertyValue, Source, TransitionOptions};
 use mln_text::glyph::{GlyphIDType, GlyphRange};
 use mln_tile_id::CanonicalTileID;
-use mln_util::Color;
 use mln_util::chrono::Timestamp;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::hash::HashSet;

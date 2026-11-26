@@ -10,9 +10,9 @@ use feature::{Identifier, PropertyMap, Value};
 use mln_style::conversion::Convertible;
 use mln_style::expression::{EvaluationContext, Expr, Functions, ParsingContext, Type, is_expression};
 use mln_style::feature::{GeometryCollection, GeometryTileFeature};
+use mln_style::geometry::FeatureType;
 use mln_tile::TileData;
 use mln_util::error::Error;
-use mln_util::geometry::FeatureType;
 
 use super::{DENSE, tile_bytes, tile_data};
 use crate::scenario::{Bench, Kind, Scenario};

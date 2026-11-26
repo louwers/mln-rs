@@ -9,10 +9,10 @@ use mln_map_types::MapMode;
 use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::layer::convert_layer;
 use mln_style::property::evaluation::PropertyEvaluationParameters;
+use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_text::glyph::GlyphID;
 use mln_tile::TileData;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 use serde_json::json;
 

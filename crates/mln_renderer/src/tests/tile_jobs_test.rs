@@ -18,6 +18,7 @@ use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::image::Impl as ImageImpl;
 use mln_style::layer::convert_layer;
 use mln_style::property::evaluation::PropertyEvaluationParameters;
+use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_tile::TileData;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::hash::HashSet;
@@ -25,7 +26,6 @@ use mln_util::image::PremultipliedImage;
 use mln_util::pool::TaskGroup;
 use mln_util::queue::Queue;
 use mln_util::size::Size;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use parking_lot::Mutex;
 use serde_json::json;
 

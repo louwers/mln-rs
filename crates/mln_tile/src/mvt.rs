@@ -16,8 +16,8 @@ use fast_mvt::{MvtLazyFeature, MvtLazyLayer, MvtLazyReader, MvtResult, MvtValueR
 use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
 use mln_style::feature::GeometryCollection;
+use mln_style::geometry::FeatureType;
 use mln_util::constants::EXTENT;
-use mln_util::geometry::FeatureType;
 use mln_util::hash::HashMap;
 
 use crate::TileError;

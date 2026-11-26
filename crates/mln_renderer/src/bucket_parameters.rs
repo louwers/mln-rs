@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use mln_map_types::MapMode;
 use mln_style::expression::GlobalStateMap;
+use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_tile_id::OverscaledTileID;
-use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 #[derive(Clone, Debug)]
 pub(crate) struct BucketParameters {

@@ -9,7 +9,7 @@ the locale-sensitive expressions (`android.icu`). A test executable that
 Android starts an app's process, and runs `TestHost.java`. Its native half,
 `test-host.c`, loads the test executable into the process and calls its `main`,
 which the target-android environment's builds export. The library finds the
-process's Java VM (`mln_util::android::java_vm`). Each test still runs in a
+process's Java VM (`mln_style::android::java_vm`). Each test still runs in a
 process of its own, so nextest runs them in parallel.
 
 - `build.sh` builds the test host for an ABI, in the target-android environment:
