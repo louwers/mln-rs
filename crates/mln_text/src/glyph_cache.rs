@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, Weak};
 
-use mln_util::hash::HashMap;
+use mln_style::hash::HashMap;
 use parking_lot::Mutex;
 
 use crate::glyph::{Glyph, GlyphID};

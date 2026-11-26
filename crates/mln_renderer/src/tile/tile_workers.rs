@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use mln_util::hash::HashMap;
+use mln_style::hash::HashMap;
 use mln_util::pool::TaskGroup;
 
 use crate::log_target;
@@ -61,7 +61,7 @@ pub(crate) trait TileWorkers {
     fn decode(&mut self, _lane: Lane, body: ReplyBody) -> Option<JobResult> {
         match body {
             ReplyBody::Result(result) => Some(result),
-            ReplyBody::Encoded { .. } => Some(JobResult::Failed(mln_util::error::Error::native("an encoded reply"))),
+            ReplyBody::Encoded { .. } => Some(JobResult::Failed(mln_style::error::Error::native("an encoded reply"))),
         }
     }
     /// The bytes sent to the workers and received from them so far.
@@ -106,7 +106,7 @@ impl TileWorkers for PoolWorkers {
                 inbox.send(TileEvent::Reply { lane, id, body: ReplyBody::Result(result), times });
             };
             if run.superseded.load(Ordering::Relaxed) {
-                let result = JobResult::Failed(mln_util::error::Error::native("superseded"));
+                let result = JobResult::Failed(mln_style::error::Error::native("superseded"));
                 return done(Reply { id: run.id, result }, JobTimes::default());
             }
             run_job(run, None, Some(&memo), done);
@@ -131,7 +131,7 @@ impl InlineWorkers {
         });
         reply
             .try_recv()
-            .unwrap_or_else(|_| Reply { id, result: JobResult::Failed(mln_util::error::Error::native("no reply")) })
+            .unwrap_or_else(|_| Reply { id, result: JobResult::Failed(mln_style::error::Error::native("no reply")) })
     }
 }
 

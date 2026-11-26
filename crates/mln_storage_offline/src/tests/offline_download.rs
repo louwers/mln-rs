@@ -18,12 +18,12 @@ use mln_storage::resource::{Priority, Usage};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, LoadingMethod, Resource, Responder, Response, TileFormat};
+use mln_style::geo::{LatLng, LatLngBounds};
+use mln_style::tileset::Scheme;
 use mln_text::glyph::NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK;
 use mln_util::chrono::{Timestamp, now};
 use mln_util::compression::compress;
-use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::queue::Queue;
-use mln_util::tileset::Scheme;
 use parking_lot::{Mutex, MutexGuard};
 
 use super::cpp_path;

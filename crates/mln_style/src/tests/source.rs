@@ -4,8 +4,6 @@
 
 use std::sync::Arc;
 
-use mln_util::tileset::{PartialTileset, RasterEncoding, Tileset, VectorEncoding};
-
 use super::util::parse_json;
 use crate::conversion::{Convertible, Error};
 use crate::source::{Described, ErasedDescription, Fetch, Load, Source, SourceData, convert_source};
@@ -14,6 +12,7 @@ use crate::sources::tileset::{
     RasterDemKind, RasterKind, TilesetKind, TilesetSourceType, VectorKind, raster_dem_source, raster_source,
     vector_source,
 };
+use crate::tileset::{PartialTileset, RasterEncoding, Tileset, VectorEncoding};
 use crate::{Edit, Style, StyleRegistry};
 
 /// What `source`'s type describes `data`, its fetched resource, as.

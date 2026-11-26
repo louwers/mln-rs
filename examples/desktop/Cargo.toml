@@ -32,13 +32,13 @@ mln_frame_pacer.workspace = true
 mln_gestures.workspace = true
 mln_image.workspace = true
 mln_map.workspace = true
-mln_math.workspace = true
 # Only for its feature: the sessions shape the style's font faces, and the
 # system's fonts that the map falls back to, in-process.
 mln_renderer = { workspace = true, features = ["font-face-shaper"] }
 mln_runtime = { workspace = true, features = ["default", "webgpu"] }
 # The responses of the offline mode's resource provider.
 mln_storage.workspace = true
+mln_style.workspace = true
 mln_util.workspace = true
 mln_webgpu.workspace = true
 parking_lot.workspace = true

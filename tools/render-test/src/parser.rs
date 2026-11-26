@@ -11,9 +11,9 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use feature::Value;
-use mln_util::ParseEnumError;
-use mln_util::geo::LatLng;
-use mln_util::size::Size;
+use mln_style::error::ParseEnumError;
+use mln_style::geo::LatLng;
+use mln_style::size::Size;
 use regex::Regex;
 use serde::de::{Deserialize, Deserializer, MapAccess, Visitor};
 
@@ -335,7 +335,7 @@ pub(crate) fn parse_test_metadata(paths: &TestPaths) -> TestMetadata {
         if map_mode_str == "tile" {
             metadata.map_mode = MapMode::Tile;
             // In the tile mode, map is showing exactly one tile.
-            let tile_size = mln_util::constants::TILE_SIZE as u32;
+            let tile_size = mln_style::constants::TILE_SIZE as u32;
             metadata.size = Size::new(tile_size, tile_size);
         } else if map_mode_str == "continuous" {
             metadata.map_mode = MapMode::Continuous;
@@ -1174,7 +1174,7 @@ pub(crate) fn create_result_item(metadata: &TestMetadata) -> String {
             let _ = writeln!(
                 html,
                 "<p class=\"diff\"><strong>Diff:</strong> {}</p>",
-                mln_util::string::to_string_double(metadata.difference)
+                mln_style::string::to_string_double(metadata.difference)
             );
         } else {
             let _ = writeln!(

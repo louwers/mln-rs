@@ -6,11 +6,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use feature::Value;
-use mln_util::constants::DEFAULT_TRANSITION_DURATION;
-use mln_util::error::Error;
 
+use crate::constants::DEFAULT_TRANSITION_DURATION;
 use crate::conversion::borrowed::{Json, borrowed_json_to_value, member, members};
 use crate::conversion::{Converter, Convertible, value_to_json};
+use crate::error::Error;
 use crate::expression::GlobalStateMap;
 use crate::layer::{Layer, SourceKind, convert_layer};
 use crate::light::{Light, convert_light};
@@ -27,7 +27,7 @@ impl Style {
     /// that `json` describes, below the layer named `before_layer_id`, or
     /// above every layer when it is `None`.
     ///
-    /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) if the style has no layer named
+    /// Fails with [`ErrorKind::NotFound`](crate::error::ErrorKind) if the style has no layer named
     /// `before_layer_id` or no source with the ID that the layer uses, with
     /// `AlreadyExists` if the style has a layer with the new layer's ID, and
     /// with `InvalidArgument` if `json` isn't a valid layer or its source
@@ -89,7 +89,7 @@ impl Style {
     /// or above every layer when it is `None`. A move below itself changes
     /// nothing.
     ///
-    /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) if the style has no layer
+    /// Fails with [`ErrorKind::NotFound`](crate::error::ErrorKind) if the style has no layer
     /// named `id` or `before_layer_id`.
     pub fn move_layer(&mut self, id: &str, before_layer_id: Option<&str>) -> Result<(), Error> {
         if self.get_layer(id).is_none() {
@@ -123,7 +123,7 @@ impl Style {
     /// `filter`, `minzoom`, `maxzoom`, `source` or `source-layer`. A `null`
     /// resets any of these but `source` and `source-layer` to its default.
     ///
-    /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) if the style has no layer named
+    /// Fails with [`ErrorKind::NotFound`](crate::error::ErrorKind) if the style has no layer named
     /// `layer_id`, and with `InvalidArgument` if `json` isn't valid JSON,
     /// the layer has no property `name` or the value doesn't fit it.
     pub fn set_layer_property_json(&mut self, layer_id: &str, name: &str, json: &str) -> Result<(), Error> {
@@ -138,7 +138,7 @@ impl Style {
     /// value can differ in form from the value that was set: a color set as
     /// `"#ff0000"` reads back as `["rgba",255.0,0.0,0.0,1.0]`.
     ///
-    /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) if the style
+    /// Fails with [`ErrorKind::NotFound`](crate::error::ErrorKind) if the style
     /// has no layer named `layer_id`.
     pub fn layer_property_json(&self, layer_id: &str, name: &str) -> Result<Option<String>, Error> {
         let Some(layer) = self.get_layer(layer_id) else {
@@ -178,7 +178,7 @@ impl Style {
     /// `transition` keeps whether placements fade, which the style spec's
     /// transition doesn't hold.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if
+    /// Fails with [`ErrorKind::InvalidArgument`](crate::error::ErrorKind) if
     /// `name` isn't a root property, or is `sources` or `layers`, or if
     /// `json` isn't a valid value for it; and with `Unsupported` for the root properties that only
     /// take effect as a style loads (the default camera, the sprite, the
@@ -258,7 +258,7 @@ impl Style {
     /// style holds it: with its default exaggeration filled in, and absent if
     /// the style dropped it as it loaded.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if
+    /// Fails with [`ErrorKind::InvalidArgument`](crate::error::ErrorKind) if
     /// `name` isn't a root property, or is `sources` or `layers`.
     pub fn root_property_json(&self, name: &str) -> Result<Option<String>, Error> {
         require_root_property(name)?;
@@ -299,7 +299,7 @@ impl Style {
     /// Sets the property `name` of the style's light to the JSON value
     /// `json`. A `null` resets it to its default.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if `json` isn't valid
+    /// Fails with [`ErrorKind::InvalidArgument`](crate::error::ErrorKind) if `json` isn't valid
     /// JSON, the light has no property `name` or the value doesn't fit it.
     pub fn set_light_property_json(&mut self, name: &str, json: &str) -> Result<(), Error> {
         let context = format!("style light property {}", quote(name));
@@ -321,7 +321,7 @@ impl Style {
     /// read to the JSON value `json`. A `null` resets it to the default that
     /// the style's `state` gives it.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if `json` isn't valid
+    /// Fails with [`ErrorKind::InvalidArgument`](crate::error::ErrorKind) if `json` isn't valid
     /// JSON.
     pub fn set_global_state_property_json(&mut self, name: &str, json: &str) -> Result<(), Error> {
         let value = parse(json, &format!("global state property {}", quote(name)))?;

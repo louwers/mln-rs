@@ -532,7 +532,7 @@ mod tests {
     }
 
     fn tile_of(format: TileFormat) -> Resource {
-        let scheme = mln_util::tileset::Scheme::XYZ;
+        let scheme = mln_style::tileset::Scheme::XYZ;
         Resource::tile("https://example.com/{z}/{x}/{y}", 1.0, 0, 0, 0, scheme, format, crate::LoadingMethod::All)
     }
 

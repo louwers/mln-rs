@@ -6,21 +6,20 @@ use std::sync::{Arc, OnceLock};
 use feature::{Feature, PropertyMap, Value};
 use geojson::GeoJson;
 use mln_geojson::{cluster, tile};
-use mln_util::constants;
-use mln_util::error::Error;
-use mln_util::range::Range;
 use mln_vec_map::VecMap;
 
 use crate::conversion::geojson::convert_json_geojson;
 use crate::conversion::{Convertible, Error as ConversionError};
+use crate::error::Error;
 use crate::expression::{Expr, Functions, evaluate_accumulated, from_expression_value};
 use crate::layer::SourceKind;
+use crate::range::Range;
 use crate::source::{
     Data, Described, Fetch, Load, OfflineResources, Respond, Source, SourceData, SourceSummary, SourceTypeInfo,
     StyleSourceType,
 };
 use crate::tile_id::CanonicalTileID;
-use crate::{Edit, log_target};
+use crate::{Edit, constants, log_target};
 
 /// The features of tile `id`. A tile past the maximum zoom or the last row
 /// is logged, and empty.
@@ -262,7 +261,7 @@ pub trait GeoJSONData: Send + Sync {
 /// Prepares GeoJSON for tiling. GeoJSON whose geometry `geo_types` can't
 /// hold (a position of fewer than two numbers), or that can't be clustered,
 /// such as a non-point feature, fails with
-/// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind).
+/// [`ErrorKind::InvalidArgument`](crate::error::ErrorKind).
 pub fn create_geojson_data(geojson: GeoJson, options: &Arc<GeoJSONOptions>) -> Result<Arc<dyn GeoJSONData>, Error> {
     let collection = matches!(geojson, GeoJson::FeatureCollection(_));
     let features = feature::geojson::features(geojson).map_err(|e| Error::invalid_argument(e.to_string()))?;

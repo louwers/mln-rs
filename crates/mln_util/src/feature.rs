@@ -1,6 +1,5 @@
 use feature::{Identifier, Value};
-
-use crate::string::to_string_double;
+use mln_style::string::to_string_double;
 
 #[must_use]
 pub fn numeric_value_f64(value: &Value) -> Option<f64> {

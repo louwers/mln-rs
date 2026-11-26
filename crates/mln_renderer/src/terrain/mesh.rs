@@ -2,7 +2,7 @@
 //! between neighbors at different zooms, and on the globe the caps that
 //! close the poles.
 
-use mln_util::constants::EXTENT;
+use mln_style::constants::EXTENT;
 
 /// The quads along each side of a tile's grid (GL JS's terrain `meshSize`).
 pub(crate) const MESH_SIZE: u16 = 128;

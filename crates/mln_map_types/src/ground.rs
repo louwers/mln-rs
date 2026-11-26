@@ -2,9 +2,10 @@
 
 use geometry::Point;
 use glam::{DVec2, DVec3};
-use mln_util::constants::{LATITUDE_MAX, TILE_SIZE_D};
-use mln_util::error::Error;
-use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
+use mln_style::constants::{LATITUDE_MAX, TILE_SIZE_D};
+use mln_style::error::Error;
+use mln_style::geo::{LatLng, WrapMode};
+use mln_util::geo::ScreenCoordinate;
 use mln_util::projection::Projection;
 
 use crate::vertical_perspective_projection::VerticalPerspectiveProjection;

@@ -19,7 +19,7 @@
 
 use std::sync::{Arc, mpsc};
 
-use mln_util::hash::HashSet;
+use mln_style::hash::HashSet;
 use mln_util::thread::Joined;
 use mln_wire::payload::Payload;
 
@@ -218,7 +218,7 @@ impl TileWorkers for RemoteWorkers {
             }
             // As a worker reports a job it can't decode.
             Err(error) => {
-                let body = ReplyBody::Result(JobResult::Failed(mln_util::error::Error::native(error)));
+                let body = ReplyBody::Result(JobResult::Failed(mln_style::error::Error::native(error)));
                 inbox.send(TileEvent::Reply { lane, id: run.id, body, times: JobTimes::default() });
             }
         }

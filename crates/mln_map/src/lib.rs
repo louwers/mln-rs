@@ -29,8 +29,8 @@ pub use mln_renderer::{
     OverscaledTileID, RenderMode, RendererEvents, RenderingStats, TileOperation, Update, UpdateReader,
 };
 pub use mln_style::StyleLoadError;
+pub use mln_style::error::{Error, ErrorKind};
 pub use mln_util::event_queue::Waker;
-pub use mln_util::{Error, ErrorKind};
 pub use transform::{CameraCommandId, CommandEnd, FrameClock};
 
 /// The `log` targets of this crate's records. Each names the event that

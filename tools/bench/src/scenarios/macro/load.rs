@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use mln_map::{CameraOptions, CameraUpdate, MapMode};
 use mln_runtime::{AttachOptions, MapOptions, RenderTarget, Runtime, RuntimeOptions};
-use mln_util::geo::LatLng;
-use mln_util::size::Size;
+use mln_style::geo::LatLng;
+use mln_style::size::Size;
 
 use super::VIEW;
 use crate::meter;

@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use geometry::Point;
+use mln_style::constants::EXTENT;
 use mln_style::feature::{GeometryCollection, GeometryCoordinate, GeometryCoordinates};
 use mln_style::tile_id::CanonicalTileID;
-use mln_util::constants::EXTENT;
 
 use crate::buckets::fill_bucket::FillLayoutVertex;
 use crate::gfx::fill_mesh::FillBuffers;

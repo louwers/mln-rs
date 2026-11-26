@@ -4,8 +4,8 @@
 use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_util::image::AlphaImage;
-use mln_util::size::Size;
+use mln_style::bitmap::AlphaImage;
+use mln_style::size::Size;
 
 use crate::gfx::context::Context;
 use crate::gfx::store::SharedTexture;

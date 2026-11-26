@@ -5,6 +5,9 @@
 
 use std::sync::{Arc, Weak};
 
+use mln_style::error::Error;
+use mln_style::geo::LatLngBounds;
+use mln_style::hash::HashMap;
 use mln_style::sources::custom::{
     CustomGeometrySourceOptions, CustomSourceHandle, CustomTileResponder, CustomVectorSourceOptions,
     CustomVectorTileData, TileFunction, TileFunctions,
@@ -14,9 +17,6 @@ use mln_style::sources::geojson::TileFeatures;
 use mln_style::tile_id::CanonicalTileID;
 use mln_tile_id::OverscaledTileID;
 use mln_tile_id::tile_range::TileRange;
-use mln_util::error::Error;
-use mln_util::geo::LatLngBounds;
-use mln_util::hash::HashMap;
 use mln_util::pool::{Pool, TaskGroup};
 use parking_lot::Mutex;
 

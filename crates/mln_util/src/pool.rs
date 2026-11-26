@@ -14,12 +14,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::ThreadId;
 
+use mln_style::time::Instant;
 use parking_lot::{Condvar, Mutex};
 
 #[cfg(not(target_family = "wasm"))]
 #[cfg(not(target_family = "wasm"))]
 use crate::thread::Joined;
-use crate::time::Instant;
 
 /// A task that runs on a pool.
 pub type Task = Box<dyn FnOnce() + Send + 'static>;

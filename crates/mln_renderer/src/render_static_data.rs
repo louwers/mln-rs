@@ -1,6 +1,6 @@
 use std::cell::Cell;
 
-use mln_util::constants;
+use mln_style::constants;
 
 use crate::buckets::fill_extrusion_bucket::FillExtrusionStaticVertex;
 use crate::buckets::raster_bucket::RasterLayoutVertex;

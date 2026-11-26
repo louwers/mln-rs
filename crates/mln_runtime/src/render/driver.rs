@@ -4,7 +4,7 @@ use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use mln_util::error::Error;
+use mln_style::error::Error;
 
 use super::session::{Abandoner, RenderSessionState, SessionShared};
 use super::target::SurfaceOverlay;
@@ -63,7 +63,7 @@ impl DriverWork {
     /// [`set_surface`](crate::RenderSession::set_surface) gives it. A
     /// later call replaces an overlay that no surface took yet. Only the
     /// backend whose overlay it is draws it: a surface of another backend's
-    /// fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind), as its
+    /// fails with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind), as its
     /// attach or `set_surface` reports.
     pub fn set_overlay(&self, overlay: SurfaceOverlay) {
         self.overlay.set(Some(overlay));
@@ -78,9 +78,9 @@ impl DriverWork {
     /// that comes while it runs. Work that is ready after it runs the wake
     /// again.
     ///
-    /// Fails with [`ErrorKind::Busy`](mln_util::ErrorKind) inside a service
+    /// Fails with [`ErrorKind::Busy`](mln_style::error::ErrorKind) inside a service
     /// that is running, which takes the work instead, and with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) once the session
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) once the session
     /// ended before the call: its detach or release completed, or it was
     /// abandoned. A service of an abandoned session lets go of its graphics
     /// objects before it fails.

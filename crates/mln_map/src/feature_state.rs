@@ -154,7 +154,7 @@ impl FeatureStateStore {
                 }
             }
         };
-        if source.states.get(source_layer_id).is_some_and(mln_util::hash::HashMap::is_empty) {
+        if source.states.get(source_layer_id).is_some_and(mln_style::hash::HashMap::is_empty) {
             source.states.remove(source_layer_id);
         }
         source.features -= removed.len();

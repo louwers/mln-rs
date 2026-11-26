@@ -30,12 +30,12 @@ use mln_map::{Map, MapEvent, MapMode, MapOptions, RenderFrameStatus};
 use mln_renderer::{FontStack, GlyphRange, OverscaledTileID, TileOperation, UpdateReader};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Resource, Responder, Response};
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::error::Error;
 use mln_style::sources::custom::TileFunction;
 use mln_style::sources::custom_geometry_source::CustomGeometrySourceHandle;
 use mln_style::sprite::Sprite;
 use mln_style::tile_id::CanonicalTileID;
-use mln_util::Error;
-use mln_util::image::PremultipliedImage;
 use mln_util::pool::Pool;
 use mln_util::queue::Queue;
 use parking_lot::{Mutex, MutexGuard};
@@ -328,7 +328,7 @@ impl StubMapObserver {
                         && let Ok(mut map) = map.try_borrow_mut()
                         && let Some(at) = map.repaint_at()
                     {
-                        if mln_util::time::Instant::now() >= at {
+                        if mln_style::time::Instant::now() >= at {
                             map.trigger_repaint();
                         } else if woken_at.replace(Some(at)) != Some(at) {
                             queue.post_at(at, |()| {});

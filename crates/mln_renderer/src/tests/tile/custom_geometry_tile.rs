@@ -8,11 +8,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use feature::Feature;
 use geo_types::Point;
+use mln_style::error::Error;
 use mln_style::layer::{Layer, LayerStyle};
 use mln_style::layers::Circle;
 use mln_style::tile_id::CanonicalTileID;
 use mln_tile_id::OverscaledTileID;
-use mln_util::error::Error;
 use parking_lot::Mutex;
 
 use super::RasterTileTest;

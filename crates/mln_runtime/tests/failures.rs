@@ -16,7 +16,7 @@ use mln_runtime::{
     AttachOptions, BackendType, DemandMode, Device, DeviceOptions, ErrorKind, FrameDemand, FrameDisposition,
     FrameResult, LogicalExtent, Map, MapOptions, RenderSession, RenderTarget, Runtime, RuntimeEventKind,
 };
-use mln_util::size::Size;
+use mln_style::size::Size;
 
 use crate::support::{EventLog, eventually, result_of, runtime, wait};
 

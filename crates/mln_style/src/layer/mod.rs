@@ -75,12 +75,14 @@ impl Layer {
     /// When `registry` has no layer type named `type_`, or one whose layers
     /// can't be made by name, such as a type whose style data needs an
     /// object from the caller.
-    pub fn new(registry: &StyleRegistry, type_: &str, id: &str, source: &str) -> Result<Layer, mln_util::Error> {
+    pub fn new(registry: &StyleRegistry, type_: &str, id: &str, source: &str) -> Result<Layer, crate::error::Error> {
         let Some(layer_type) = registry.layer_type(type_) else {
-            return Err(mln_util::Error::invalid_argument(format!("unknown layer type '{type_}'")));
+            return Err(crate::error::Error::invalid_argument(format!("unknown layer type '{type_}'")));
         };
         if !layer_type.info().from_json {
-            return Err(mln_util::Error::invalid_argument(format!("layer type '{type_}' can't be created by name")));
+            return Err(crate::error::Error::invalid_argument(format!(
+                "layer type '{type_}' can't be created by name"
+            )));
         }
         Ok(Layer::from_style(layer_type.create(id, source), Arc::clone(registry.functions())))
     }

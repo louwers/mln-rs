@@ -8,8 +8,8 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_map_types::View;
 use mln_style::color::Color;
+use mln_style::geo::WrapMode;
 use mln_style::types::LightAnchorType;
-use mln_util::geo::WrapMode;
 use mln_util::identity::SimpleIdentity;
 
 use crate::draw::{DrawGeometry, DrawObjects, Textures, raw_vertices};
@@ -178,9 +178,9 @@ impl SkyPass {
 #[cfg(test)]
 mod tests {
     use mln_map_types::{NorthOrientation, TransformState};
+    use mln_style::geo::LatLng;
     use mln_style::property::evaluated::Evaluated;
     use mln_style::types::Position;
-    use mln_util::geo::LatLng;
 
     use super::*;
 
@@ -194,7 +194,7 @@ mod tests {
 
     fn camera(latitude: f64, longitude: f64, bearing: f64) -> TransformState {
         let mut state = TransformState::default();
-        state.set_size(mln_util::size::Size::new(512, 512));
+        state.set_size(mln_style::size::Size::new(512, 512));
         state.set_lat_lng_zoom(&LatLng::new(latitude, longitude).unwrap(), 1.0);
         state.set_angle(bearing);
         state

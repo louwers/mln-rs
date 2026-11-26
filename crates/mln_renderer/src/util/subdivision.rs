@@ -4,10 +4,10 @@
 
 use geometry::Point;
 use glam::DVec2;
+use mln_style::constants::EXTENT;
 use mln_style::feature::{GeometryCollection, GeometryCoordinates};
+use mln_style::hash::HashMap;
 use mln_style::tile_id::CanonicalTileID;
-use mln_util::constants::EXTENT;
-use mln_util::hash::HashMap;
 
 use crate::util::tessellator::Tessellator;
 

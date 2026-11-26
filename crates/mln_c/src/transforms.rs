@@ -12,8 +12,8 @@ use mln_storage::http_header_transform::HttpHeaders;
 use mln_storage::resource::Kind;
 use mln_storage::resource_transform::{FinishedCallback, TransformResult};
 use mln_storage::response::Reason;
+use mln_style::hash::HashMap;
 use mln_util::chrono::Timestamp;
-use mln_util::hash::HashMap;
 use parking_lot::Mutex;
 
 use crate::buffer::LentText;

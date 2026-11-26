@@ -19,7 +19,7 @@ use mln_runtime::{
     AttachOptions, BackendType, DemandMode, Device, DeviceOptions, ErrorKind, FrameDemand, FrameDisposition,
     FrameResult, Map, MapOptions, RenderSession, RenderTarget, Runtime, Surface,
 };
-use mln_util::size::Size;
+use mln_style::size::Size;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{

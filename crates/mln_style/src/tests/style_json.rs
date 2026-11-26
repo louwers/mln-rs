@@ -2,9 +2,8 @@
 //! style ABI tests (`tests/native/abi/style`), which reach them through the C
 //! layer.
 
-use mln_util::{Error, ErrorKind};
-
 use crate::StyleRegistry;
+use crate::error::{Error, ErrorKind};
 use crate::style::Style;
 
 const EMPTY_GEOJSON_SOURCE: &str = r#"{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}"#;

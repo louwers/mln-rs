@@ -12,10 +12,12 @@ use ::mln_map::{
     TransitionEnd, TransitionOutcome, ViewportMode,
 };
 use mln_runtime::{Applied, CameraFitArea, CameraFitOptions, CameraFitUpdate, TileOptions, ViewportOptions};
+use mln_style::constants::{TILE_SIZE_D, TILE_SIZE_I};
+use mln_style::geo::{LatLngBounds, WrapMode};
 use mln_style::geometry::for_each_point;
-use mln_util::UnitBezier;
-use mln_util::constants::{MAX_ZOOM, MIN_ZOOM, TILE_SIZE_D, TILE_SIZE_I};
-use mln_util::geo::{EdgeInsets, LatLngBounds, ScreenCoordinate, WrapMode};
+use mln_style::unitbezier::UnitBezier;
+use mln_util::constants::{MAX_ZOOM, MIN_ZOOM};
+use mln_util::geo::{EdgeInsets, ScreenCoordinate};
 use mln_util::projection::Projection;
 use parking_lot::Mutex;
 
@@ -326,8 +328,8 @@ impl Animation {
 /// given. A send that fails gives the user data back to the caller.
 fn send_with(
     handler: Option<EndHandler>,
-    send: impl FnOnce(EndCallbackFn) -> Result<mln_runtime::Completion<Applied>, mln_util::Error>,
-) -> Result<mln_runtime::Completion<Applied>, mln_util::Error> {
+    send: impl FnOnce(EndCallbackFn) -> Result<mln_runtime::Completion<Applied>, mln_style::error::Error>,
+) -> Result<mln_runtime::Completion<Applied>, mln_style::error::Error> {
     let handler = handler.map(Arc::new);
     if let Some(handler) = &handler {
         handler.set_accepted(true);
@@ -347,7 +349,7 @@ fn send_with(
 }
 
 /// What [`send_with`] gives the command to call with its end.
-type EndCallbackFn = Box<dyn FnOnce(Result<TransitionEnd, mln_util::Error>) + Send>;
+type EndCallbackFn = Box<dyn FnOnce(Result<TransitionEnd, mln_style::error::Error>) + Send>;
 
 fn update_mode(mode: u32) -> Option<CameraUpdateMode> {
     match mode {

@@ -18,10 +18,11 @@ use mln_runtime::{
 use mln_storage::resource::Kind;
 use mln_storage::response::{Caching, Reason};
 use mln_storage::{ResourceError, Response};
-use mln_util::UnitBezier;
+use mln_style::geo::LatLng;
+use mln_style::size::Size;
+use mln_style::unitbezier::UnitBezier;
 use mln_util::chrono::Timestamp;
-use mln_util::geo::{LatLng, ScreenCoordinate};
-use mln_util::size::Size;
+use mln_util::geo::ScreenCoordinate;
 use parking_lot::Mutex;
 
 use crate::support::{EventLog, TIMEOUT, eventually, result_of, runtime, wait, wait_err};

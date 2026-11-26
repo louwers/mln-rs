@@ -1120,7 +1120,7 @@ mod tests {
             Identifier::Null
         }
 
-        fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, mln_util::error::Error> {
+        fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, crate::error::Error> {
             Ok(Cow::Borrowed(&self.geometry))
         }
     }

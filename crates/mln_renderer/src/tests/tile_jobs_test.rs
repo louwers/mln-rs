@@ -14,19 +14,19 @@ use geo_types::{Geometry, Point};
 use mln_map_types::MapMode;
 use mln_storage::FileSource;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
+use mln_style::bitmap::PremultipliedImage;
 use mln_style::conversion::{Convertible, Error as ConversionError};
+use mln_style::hash::HashSet;
 use mln_style::image::Impl as ImageImpl;
 use mln_style::layer::convert_layer;
 use mln_style::property::evaluation::PropertyEvaluationParameters;
+use mln_style::size::Size;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
-use mln_util::hash::HashSet;
-use mln_util::image::PremultipliedImage;
 use mln_util::pool::TaskGroup;
 use mln_util::queue::Queue;
-use mln_util::size::Size;
 use parking_lot::Mutex;
 use serde_json::json;
 
@@ -593,12 +593,12 @@ fn a_panicking_native_job_fails() {
         resolved: Arc::default(),
     };
     workers.submit(Lane(0), Run { id, job: Job::Layout(job), superseded: Arc::default() }, inbox.sender());
-    let deadline = mln_util::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = mln_style::time::Instant::now() + std::time::Duration::from_secs(10);
     let event = loop {
         if let Some(event) = inbox.next() {
             break event;
         }
-        assert!(mln_util::time::Instant::now() < deadline, "no reply");
+        assert!(mln_style::time::Instant::now() < deadline, "no reply");
         std::thread::yield_now();
     };
     let TileEvent::Reply { id: replied, body: ReplyBody::Result(JobResult::Failed(error)), .. } = event else {
@@ -877,7 +877,7 @@ fn raster_decodes_apply_in_any_order() {
 fn a_worker_lost_during_a_decode() {
     let pool = TaskGroup::new(&crate::tests::pool());
     let instances = Instances::new(1);
-    let kind = TileKind::Dem(mln_util::tileset::RasterEncoding::Mapbox);
+    let kind = TileKind::Dem(mln_style::tileset::RasterEncoding::Mapbox);
     let mut tiles = raster_tiles(&pool, instances.workers(), kind);
     let id = tiles.id;
     tiles.set_image(&id, Some(png(16, 16)));

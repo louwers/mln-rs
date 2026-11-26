@@ -5,12 +5,12 @@ use std::sync::Arc;
 
 use glam::DVec2;
 use mln_map_types::{Elevation, TileCoordinate};
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::geo::LatLng;
+use mln_style::hash::HashMap;
 use mln_style::tile_id::CanonicalTileID;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::dem::{self, DemCoords, DemUnpack};
-use mln_util::geo::LatLng;
-use mln_util::hash::HashMap;
-use mln_util::image::PremultipliedImage;
 
 use crate::terrain::cover::{TerrainCover, dem_contents, place_in, world_copy};
 use crate::tile::source_tiles::SourceTiles;
@@ -260,7 +260,7 @@ impl<'a> TileGround<'a> {
     /// point past the tile's edges reads the ground there.
     pub(crate) fn height(&self, point: glam::Vec2) -> f32 {
         let tiles = f64::from(1u32 << self.tile.canonical.z);
-        let extent = f64::from(mln_util::constants::EXTENT);
+        let extent = f64::from(mln_style::constants::EXTENT);
         let tile = DVec2::new(f64::from(self.tile.canonical.x), f64::from(self.tile.canonical.y));
         let world = (tile + point.as_dvec2() / extent) / tiles + DVec2::new(f64::from(self.tile.wrap), 0.0);
         self.ground.surface_at(world).unwrap_or(0.0) as f32
@@ -293,7 +293,7 @@ impl Elevation for TerrainElevation {
 
 #[cfg(test)]
 mod tests {
-    use mln_util::tileset::RasterEncoding;
+    use mln_style::tileset::RasterEncoding;
 
     use super::*;
     use crate::terrain::cover::{ElevationRanges, TerrainTile};

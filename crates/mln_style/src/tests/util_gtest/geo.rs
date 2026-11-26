@@ -1,15 +1,14 @@
 // C++ constructors that throw std::domain_error return `Err(message)`;
 // `LatLng(CanonicalTileID)` / `LatLng(UnwrappedTileID)` /
-// `LatLngBounds(CanonicalTileID)` are the `from_*_tile` functions (mln_util
-// sits below mln_tile_id), called with the tile ids' fields.
+// `LatLngBounds(CanonicalTileID)` are the `from_*_tile` functions, called
+// with the tile ids' fields. An unwrapped tile id (mln_tile_id's, above this
+// crate) is its wrap and canonical id here.
 
-use mln_style::tile_id::CanonicalTileID;
-use mln_tile_id::UnwrappedTileID;
-
-use crate::Error;
 use crate::constants::{LATITUDE_MAX, LONGITUDE_MAX};
+use crate::error::Error;
 use crate::geo::{LatLng, LatLngBounds, WrapMode};
-use crate::tests::gtest::assert_double_eq;
+use crate::tests::util_gtest::assert_double_eq;
+use crate::tile_id::CanonicalTileID;
 
 fn ll(lat: f64, lon: f64) -> LatLng {
     LatLng::new(lat, lon).unwrap()
@@ -19,8 +18,8 @@ fn from_canonical(id: CanonicalTileID) -> LatLng {
     LatLng::from_canonical_tile(id.z, id.x, id.y)
 }
 
-fn from_unwrapped(id: UnwrappedTileID) -> LatLng {
-    LatLng::from_unwrapped_tile(id.canonical.z, id.canonical.x, id.canonical.y, id.wrap)
+fn from_unwrapped(wrap: i16, id: CanonicalTileID) -> LatLng {
+    LatLng::from_unwrapped_tile(id.z, id.x, id.y, wrap)
 }
 
 fn bounds_from_canonical(id: CanonicalTileID) -> LatLngBounds {
@@ -143,13 +142,15 @@ fn from_tile_id() {
     }
 
     {
-        let ll = from_unwrapped(UnwrappedTileID::new(0, 1, 0));
+        // UnwrappedTileID(0, 1, 0)
+        let ll = from_unwrapped(1, CanonicalTileID::new(0, 0, 0));
         assert_double_eq(LONGITUDE_MAX, ll.longitude());
         assert_double_eq(LATITUDE_MAX, ll.latitude());
     }
 
     {
-        let ll = from_unwrapped(UnwrappedTileID::new(0, -1, 0));
+        // UnwrappedTileID(0, -1, 0)
+        let ll = from_unwrapped(-1, CanonicalTileID::new(0, 0, 0));
         assert_double_eq(-540.0, ll.longitude());
         assert_double_eq(LATITUDE_MAX, ll.latitude());
     }

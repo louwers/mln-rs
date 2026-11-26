@@ -7,7 +7,7 @@
 
 use mln_bench_workload::paths::{VIEW, tile_center};
 use mln_map::{CameraOptions, MapMode};
-use mln_util::geo::LatLng;
+use mln_style::geo::LatLng;
 use serde_json::{Value, json};
 
 use crate::scenario::{Bench, Kind, Scenario};

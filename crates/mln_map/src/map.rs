@@ -19,18 +19,19 @@ use mln_storage::FileSource;
 #[cfg(not(target_family = "wasm"))]
 use mln_storage::{Loader, ResourceOptions};
 use mln_style::conversion::Convertible;
+use mln_style::error::Error;
+use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
 use mln_style::geometry::for_each_point;
+use mln_style::size::Size;
 use mln_style::source::convert_source;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_style::time::Instant;
 use mln_style::types::{ProjectionDefinition, ProjectionType};
 use mln_style::{Edit, Source, Style, StyleRegistry};
 use mln_text::glyph::{FontFace, FontFaces};
-use mln_util::error::Error;
 use mln_util::event_queue::{EventQueue, Waker};
-use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
+use mln_util::geo::{EdgeInsets, ScreenCoordinate};
 use mln_util::pool::Pool;
-use mln_util::size::Size;
-use mln_util::time::Instant;
 
 use crate::feature_state::FeatureStateStore;
 use crate::log_target;
@@ -156,7 +157,7 @@ impl Map {
     /// A map with a [`Loader`] of its own for the default
     /// `ResourceOptions`, whose background work runs on `pool`.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty `map_options.size`.
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for an empty `map_options.size`.
     #[cfg(not(target_family = "wasm"))]
     pub fn new(map_options: MapOptions, pool: &Pool) -> Result<Map, Error> {
         Self::with_resource_options(map_options, &ResourceOptions::default(), pool)
@@ -279,7 +280,7 @@ impl Map {
     }
 
     /// Ends the group that [`begin_command_group`](Self::begin_command_group)
-    /// began. Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind)
+    /// began. Fails with [`ErrorKind::InvalidState`](mln_style::error::ErrorKind)
     /// when no group is open.
     pub fn end_command_group(&mut self) -> Result<(), Error> {
         self.updates.end_group()
@@ -761,7 +762,7 @@ impl Map {
     /// Asks for a still image: the map's renderer draws frames until one
     /// has everything loaded, and [`take_still_image`](Self::take_still_image)
     /// then reports it. Fails with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) for a continuous map
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) for a continuous map
     /// and while another still image is on its way, and with the style's
     /// error when it failed to load.
     pub fn render_still(&mut self) -> Result<(), Error> {
@@ -914,7 +915,7 @@ impl Map {
     }
 
     /// As [`edit_style`](Self::edit_style), but fails with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) ("style is not
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) ("style is not
     /// loaded") until a style document parsed, and from the start of each
     /// [`load_style_url`](Self::load_style_url) until its document parses:
     /// the parse replaces the whole style, so an edit made before it would
@@ -972,7 +973,7 @@ impl Map {
     // MARK: - Sources
 
     /// Adds `source` to the style, last, and starts loading its description.
-    /// Fails with [`ErrorKind::AlreadyExists`](mln_util::ErrorKind) if the
+    /// Fails with [`ErrorKind::AlreadyExists`](mln_style::error::ErrorKind) if the
     /// style has a source with its id, and with `InvalidArgument` if a layer
     /// that names its id can't draw a source of its kind.
     pub fn add_source(&mut self, source: Source) -> Result<(), Error> {
@@ -982,7 +983,7 @@ impl Map {
     /// Adds the [source](https://maplibre.org/maplibre-style-spec/sources/)
     /// that `json` describes, with the ID `id`.
     ///
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) while the
+    /// Fails with [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) while the
     /// style isn't loaded, with `AlreadyExists` if the style has a source
     /// named `id`, and with `InvalidArgument` if `json` isn't a valid source
     /// or a layer that names `id` can't draw it.
@@ -1056,7 +1057,7 @@ impl Map {
     ///
     /// `json` is an array of font files, each an object with a `url` and an
     /// optional `unicode-range`, as in a font face of a style's `font-faces`.
-    /// It fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if
+    /// It fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) if
     /// `json` isn't such an array. Without a font-face shaper, the map ignores
     /// them, as it ignores a style's `font-faces`.
     pub fn set_fallback_font_faces(&mut self, json: &str) -> Result<(), Error> {
@@ -1186,7 +1187,7 @@ impl Map {
 
     // query: the render-test runner's tile mode uses it.
     /// The bounds of the area the map shows from `camera`.
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a camera whose
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a camera whose
     /// corners have no `LatLng`.
     ///
     /// Over terrain, the area is where the view meets the plane through the
@@ -1208,7 +1209,7 @@ impl Map {
         ))
     }
 
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN or infinite
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a NaN or infinite
     /// point.
     pub fn move_by(&mut self, point: &ScreenCoordinate, animation: &AnimationOptions) -> Result<(), Error> {
         self.camera_mutated = true;
@@ -1221,7 +1222,7 @@ impl Map {
     // latLngBoundsForCameraUnwrapped (test/map/map.test.cpp).
     /// The camera that fits `bounds` in the view, inset by `padding`, at
     /// `bearing` and `pitch` (the current ones for `None`). Fails with
-    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a center that has no
+    /// [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a center that has no
     /// `LatLng` (padding that pushes it to infinity).
     pub fn camera_for_lat_lng_bounds(
         &self,
@@ -1262,8 +1263,8 @@ impl Map {
         }
 
         Ok(CameraOptions {
-            bearing: Some(mln_math::rad2deg(-transform.view().angle())),
-            pitch: Some(mln_math::rad2deg(transform.view().pitch())),
+            bearing: Some(mln_style::math::rad2deg(-transform.view().angle())),
+            pitch: Some(mln_style::math::rad2deg(transform.view().pitch())),
             ..camera_for_lat_lngs(lat_lngs, &transform, padding)?
         })
     }
@@ -1271,7 +1272,7 @@ impl Map {
     /// The camera that fits every point of `geometry` (x longitude, y
     /// latitude), as [`camera_for_lat_lngs`](Self::camera_for_lat_lngs) fits
     /// them. Fails as that does, and with
-    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a point with no
+    /// [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a point with no
     /// `LatLng` (an infinite or NaN coordinate, or a latitude beyond ±90°).
     pub fn camera_for_geometry(
         &self,
@@ -1370,11 +1371,11 @@ impl Map {
         }
         if options.max_pitch.is_some() && view.pitch() > limits.max_pitch {
             change_camera = true;
-            camera_options.pitch = Some(mln_math::rad2deg(limits.max_pitch));
+            camera_options.pitch = Some(mln_style::math::rad2deg(limits.max_pitch));
         }
         if options.min_pitch.is_some() && view.pitch() < limits.min_pitch {
             change_camera = true;
-            camera_options.pitch = Some(mln_math::rad2deg(limits.min_pitch));
+            camera_options.pitch = Some(mln_style::math::rad2deg(limits.min_pitch));
         }
 
         if change_camera {
@@ -1416,7 +1417,7 @@ impl Map {
         self.on_update();
     }
 
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty size.
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for an empty size.
     pub fn set_size(&mut self, size: Size) -> Result<(), Error> {
         self.transform.resize(size)?;
         self.on_update();
@@ -1428,7 +1429,7 @@ impl Map {
     /// tiles out again without loading them, and the style loads its sprites
     /// again where the ratio picks their other resolution.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a
     /// ratio that isn't finite and positive.
     pub fn set_pixel_ratio(&mut self, pixel_ratio: f32) -> Result<(), Error> {
         if !pixel_ratio.is_finite() || pixel_ratio <= 0.0 {
@@ -1492,7 +1493,7 @@ impl Map {
     /// [`pixel_for_lat_lng`](Self::pixel_for_lat_lng) takes the location
     /// back to the pixel, but above the horizon of the plane, which the line
     /// of sight doesn't meet. Fails with
-    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN or
+    /// [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a NaN or
     /// infinite pixel.
     pub fn lat_lng_for_pixel(&self, pixel: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {
         crate::map_projection::lat_lng_for_pixel(self.transform.view(), self.ground().as_deref(), pixel, wrap_mode)
@@ -1647,8 +1648,8 @@ impl Map {
                 bounds: (bounds != LatLngBounds::infinite()).then_some(bounds),
                 min_zoom: state.min_zoom(),
                 max_zoom: state.limits().max_zoom,
-                min_pitch: mln_math::rad2deg(state.limits().min_pitch),
-                max_pitch: mln_math::rad2deg(state.limits().max_pitch),
+                min_pitch: mln_style::math::rad2deg(state.limits().min_pitch),
+                max_pitch: mln_style::math::rad2deg(state.limits().max_pitch),
             },
             free_camera: FreeCamera {
                 position: free_camera.position.unwrap_or_default(),
@@ -1740,12 +1741,12 @@ fn camera_for_lat_lngs_on_screen(
         let mut scale_y = f64::from(size.height) / height;
         scale_x -= (padding.left() + padding.right()) / width;
         scale_y -= (padding.top() + padding.bottom()) / height;
-        min_scale = mln_math::fmin(scale_x, scale_y);
+        min_scale = mln_style::math::fmin(scale_x, scale_y);
     }
 
     let mut zoom = transform.view().zoom();
     if min_scale > 0.0 {
-        zoom = mln_math::clamp_f64(
+        zoom = mln_style::math::clamp_f64(
             zoom + min_scale.log2(),
             transform.state().min_zoom(),
             transform.state().limits().max_zoom,

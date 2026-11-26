@@ -3,11 +3,12 @@ use mln_map::transform::{Transform, TransformEvent};
 use mln_map::{CameraChange, CameraChangeMode};
 use mln_map_types::tile_coordinate::TileCoordinate;
 use mln_map_types::{ConstrainMode, ViewportMode};
+use mln_style::constants;
+use mln_style::geo::LatLng;
+use mln_style::size::Size;
 use mln_style::tile_id::CanonicalTileID;
 use mln_tile_id::UnwrappedTileID;
-use mln_util::constants;
-use mln_util::geo::{LatLng, ScreenCoordinate};
-use mln_util::size::Size;
+use mln_util::geo::ScreenCoordinate;
 
 /// gtest's `ASSERT_DOUBLE_EQ`: equal within 4 ULPs.
 fn assert_double_eq(actual: f64, expected: f64) {

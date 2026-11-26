@@ -1,7 +1,7 @@
 //! `texture.h`: reading back the pixels that a session rendered. Borrowed
 //! textures and texture rings aren't built.
 
-use mln_util::image::PremultipliedImage;
+use mln_style::bitmap::PremultipliedImage;
 
 use crate::completion::CompletionValue;
 use crate::generated::types::{

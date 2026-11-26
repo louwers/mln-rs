@@ -6,14 +6,14 @@ use std::sync::Arc;
 
 use geometry::Point;
 use mln_map_types::MapMode;
+use mln_style::constants::EXTENT;
+use mln_style::error::Error;
 use mln_style::expression::{EvaluationContext, Value};
 use mln_style::feature::{GeometryCollection, GeometryTileFeature};
 use mln_style::layers::{Circle, CircleLayoutProperties};
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_text::atlas::ImagePositions;
-use mln_util::constants::EXTENT;
-use mln_util::error::Error;
 use mln_vec_map::VecMap;
 
 use crate::bucket_parameters::BucketParameters;

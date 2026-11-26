@@ -1,6 +1,5 @@
-use mln_math::deg2radf;
-
 use crate::interpolate::Interpolate;
+use crate::math::deg2radf;
 
 /// A spherical position (radial, azimuthal, polar) with its cached cartesian
 /// form.

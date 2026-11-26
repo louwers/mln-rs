@@ -12,11 +12,11 @@ use mln_map_types::MapMode;
 use mln_storage::resource::{Priority, TileFormat};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{FileSource, LoadingMethod, Resource, Responder, Response};
+use mln_style::tileset::{RasterEncoding, Tileset};
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::Timestamp;
 use mln_util::pool::TaskGroup;
-use mln_util::tileset::{RasterEncoding, Tileset};
 use parking_lot::Mutex;
 use serde_json::json;
 
@@ -341,7 +341,7 @@ fn a_cut_tile_takes_a_fresh_ancestor_from_memory() {
         let origin = DataOrigin::Tileset {
             tileset: Tileset {
                 tiles: vec!["tiles".to_owned()],
-                zoom_range: mln_util::range::Range::new(0, 0),
+                zoom_range: mln_style::range::Range::new(0, 0),
                 ..Default::default()
             },
             encoding: VectorTileEncoding::Mvt,
@@ -384,7 +384,7 @@ fn a_tile_at_the_last_zoom_and_its_cut_tiles_share_their_data() {
         let origin = DataOrigin::Tileset {
             tileset: Tileset {
                 tiles: vec!["tiles".to_owned()],
-                zoom_range: mln_util::range::Range::new(0, 0),
+                zoom_range: mln_style::range::Range::new(0, 0),
                 ..Default::default()
             },
             encoding: VectorTileEncoding::Mvt,
@@ -422,7 +422,7 @@ fn a_cut_tile_takes_no_ancestor_of_another_url() {
     let origin = DataOrigin::Tileset {
         tileset: Tileset {
             tiles: vec!["tiles{ratio}".to_owned()],
-            zoom_range: mln_util::range::Range::new(0, 0),
+            zoom_range: mln_style::range::Range::new(0, 0),
             ..Default::default()
         },
         encoding: VectorTileEncoding::Mvt,

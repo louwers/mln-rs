@@ -1,13 +1,13 @@
 //! The offline regions of the browser build, which has none: it has no cache
 //! database, and the browser caches the runtime's requests. Each call fails
-//! with [`ErrorKind::Unsupported`](mln_util::ErrorKind), as offline.rs's
+//! with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind), as offline.rs's
 //! would on a runtime without a database.
 
 use mln_storage::offline::{
     OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionExpiry, OfflineRegionMetadata,
     OfflineRegionStatus,
 };
-use mln_util::error::Error;
+use mln_style::error::Error;
 
 use crate::completion::Completion;
 use crate::event::EventMask;

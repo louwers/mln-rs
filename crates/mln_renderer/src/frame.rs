@@ -2,7 +2,7 @@
 
 use mln_map_types::View;
 use mln_style::color::Color;
-use mln_util::time::Instant;
+use mln_style::time::Instant;
 use mln_vec_map::VecMap;
 
 use crate::paint_parameters::TransformParameters;

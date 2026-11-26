@@ -4,7 +4,7 @@ use core::ffi::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use ::mln_runtime::{Adapter, BackendType, Device, DeviceOptions, GlApi, SurfaceType, SyncKind, SyncKinds};
-use mln_util::ErrorKind;
+use mln_style::error::ErrorKind;
 
 use crate::abi::{self, Fields};
 use crate::buffer;

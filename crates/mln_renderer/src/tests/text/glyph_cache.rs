@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
+use mln_style::bitmap::AlphaImage;
+use mln_style::size::Size;
 use mln_text::glyph::{Glyph, GlyphID, GlyphIDType, GlyphMetrics, GlyphRange};
 use mln_text::glyph_cache::{GlyphCache, GlyphCacheRange};
 use mln_text::glyph_pbf::parse_glyph_pbf;
-use mln_util::image::AlphaImage;
-use mln_util::size::Size;
 
 use super::read_file;
 

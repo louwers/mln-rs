@@ -10,11 +10,11 @@ use std::sync::Arc;
 use feature::Value;
 use mln_map::{CameraOptions, MapMode};
 use mln_style::Edit;
+use mln_style::bitmap::PremultipliedImage;
 use mln_style::feature::FeatureState;
+use mln_style::geo::LatLngBounds;
 use mln_style::image::Impl as StyleImage;
-use mln_util::geo::LatLngBounds;
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
+use mln_style::size::Size;
 use serde_json::json;
 
 use super::VIEW;

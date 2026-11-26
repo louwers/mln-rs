@@ -38,7 +38,7 @@ panic = "unwind"
 codegen-units = 1
 
 # `mln_bench_fixed_hash` gives the libraries' hash maps a fixed seed
-# (mln_util::hash), so that a scenario hashes the same way in every process:
+# (mln_style::hash), so that a scenario hashes the same way in every process:
 # with a seed from the clock, the order of a map's entries changes the work
 # of every run. The harness refuses to run without it, as when a RUSTFLAGS
 # environment variable replaces these flags.

@@ -17,12 +17,12 @@ use mln_storage::resource_transform::{FinishedCallback, ResourceTransform};
 use mln_storage::{FileSource, Loader, OnlineFileSource, ResourceOptions};
 #[cfg(not(target_family = "wasm"))]
 use mln_storage_offline::RegionDatabase;
+use mln_style::error::Error;
+use mln_style::time::Instant;
 use mln_text::GlyphCache;
-use mln_util::error::Error;
 use mln_util::pool::Pool;
 use mln_util::queue::{Queue, TimedTask};
 use mln_util::thread::Joined;
-use mln_util::time::Instant;
 use parking_lot::Mutex;
 
 use crate::completion::{Completion, Resolver};
@@ -82,7 +82,7 @@ pub struct RuntimeOptions {
 /// A panic in the work of the runtime or its maps is a bug in the library,
 /// and stops the runtime instead of the process. It logs the panic, the
 /// command that panicked fails with
-/// [`ErrorKind::Native`](mln_util::ErrorKind), those that waited are
+/// [`ErrorKind::Native`](mln_style::error::ErrorKind), those that waited are
 /// cancelled, and the commands sent to the runtime and its maps after fail
 /// with `ErrorKind::Native`. Release its maps and the runtime then.
 #[derive(Clone)]
@@ -636,9 +636,9 @@ impl Runtime {
     /// commands run in tasks of their own on the browser's event loop
     /// (`mln_web_host::pump`), never inside the call that sends them.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) when the
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) when the
     /// cache database file can't be opened or created, and in the browser
-    /// with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a cache path.
+    /// with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) for a cache path.
     pub fn new(options: &RuntimeOptions) -> Result<Runtime, Error> {
         Self::with_registry(options, Registry::with_builtins())
     }
@@ -786,9 +786,9 @@ impl Runtime {
     /// The map's handle is ready at once, and the commands sent to it wait
     /// for the map to be built. If building fails, the completion reports
     /// why and those commands fail with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind).
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind).
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for an
     /// empty size or a pixel ratio that isn't finite and positive.
     pub fn create_map(&self, options: MapOptions) -> Result<(Map, Completion<Applied>), Error> {
         let size = options.map.size;
@@ -894,7 +894,7 @@ impl Runtime {
     /// `Accept` replaces the one the library sends for tiles and images. It
     /// replaces the transform before.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) in the
+    /// Fails with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) in the
     /// browser, where the browser sends the requests.
     pub fn set_http_header_transform(
         &self,
@@ -922,7 +922,7 @@ impl Runtime {
 
     /// Runs a maintenance action on the cache database.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) in the
+    /// Fails with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) in the
     /// browser, which has no cache database.
     #[cfg(target_family = "wasm")]
     pub fn run_cache_database_operation(&self, operation: CacheDatabaseOperation) -> Result<Completion<()>, Error> {
@@ -948,7 +948,7 @@ impl Runtime {
     /// Limits the ambient cache to `size` bytes. Offline regions don't count
     /// toward it.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) in the
+    /// Fails with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) in the
     /// browser, which has no cache database.
     #[cfg(target_family = "wasm")]
     pub fn set_maximum_ambient_cache_size(&self, size: u64) -> Result<Completion<()>, Error> {
@@ -975,7 +975,7 @@ impl Runtime {
     /// let go of its maps' resources and its file sources, and nothing waits
     /// for the thread to end after that.
     ///
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) while the
+    /// Fails with [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) while the
     /// runtime has maps that aren't released, or when the runtime was
     /// released already. Every call on the runtime fails the same way after.
     pub fn release(&self) -> Result<Completion<()>, Error> {
@@ -999,7 +999,7 @@ impl Runtime {
     /// Releases the runtime whatever its state, without waiting: it shuts
     /// down once its last map is released, and nothing waits for its thread
     /// to end. Every call on the runtime fails with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) after.
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) after.
     pub fn dispose(&self) -> Result<(), Error> {
         let shut_down = {
             let mut lifecycle = self.shared.lifecycle.lock();

@@ -9,15 +9,14 @@
 use std::fmt::Debug;
 use std::time::Duration;
 
-use mln_util::constants::DEFAULT_TRANSITION_EASE;
-use mln_util::time::Instant;
-
+use crate::constants::DEFAULT_TRANSITION_EASE;
 use crate::expression::{Dependency, global_state_refs_intersect};
 use crate::interpolate::Interpolate;
 use crate::property::evaluated::{Evaluated, Evaluation};
 use crate::property::evaluation::PropertyEvaluationParameters;
 use crate::property::transition::{GlobalStateChange, TransitionOptions, TransitionParameters};
 use crate::property::value::StyleValue;
+use crate::time::Instant;
 
 /// A value, and the values it transitions from.
 #[derive(Clone, Debug, Default)]

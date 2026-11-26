@@ -23,8 +23,8 @@ impl TileError {
     }
 }
 
-impl From<TileError> for mln_util::error::Error {
+impl From<TileError> for mln_style::error::Error {
     fn from(error: TileError) -> Self {
-        mln_util::error::Error::native(error.to_string())
+        mln_style::error::Error::native(error.to_string())
     }
 }

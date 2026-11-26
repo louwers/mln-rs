@@ -3,7 +3,7 @@
 //! `bench` feature, and hidden from the documentation: they aren't API.
 
 use geojson::GeoJson;
-use mln_util::error::Error;
+use mln_style::error::Error;
 
 /// Parses GeoJSON text as [`Map::set_geojson_source_data`](crate::Map::set_geojson_source_data)
 /// does, before the source builds its data from it.

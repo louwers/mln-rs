@@ -24,7 +24,7 @@ use mln_renderer::Registry;
 use mln_renderer::tile::worker_codec::RemoteWorkers;
 use mln_storage::OnlineFileSource;
 use mln_storage::network_status::NetworkStatus;
-use mln_util::hash::HashMap;
+use mln_style::hash::HashMap;
 use mln_util::pool::Pool;
 use mln_web_host::{pump, tile_workers};
 

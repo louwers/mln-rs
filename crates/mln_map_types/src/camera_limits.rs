@@ -1,8 +1,9 @@
 //! Where a map's camera may go: its bounds and the zoom and pitch it may take.
 
-use mln_util::constants::{DEFAULT_MAX_ZOOM, DEFAULT_PITCH_MAX, MAX_ZOOM, MIN_ZOOM, PITCH_MAX, PITCH_MIN};
-use mln_util::error::Error;
-use mln_util::geo::LatLngBounds;
+use mln_style::constants::DEFAULT_MAX_ZOOM;
+use mln_style::error::Error;
+use mln_style::geo::LatLngBounds;
+use mln_util::constants::{DEFAULT_PITCH_MAX, MAX_ZOOM, MIN_ZOOM, PITCH_MAX, PITCH_MIN};
 
 /// The narrowest field of view a camera may take, in radians.
 pub const MIN_FIELD_OF_VIEW: f64 = 0.1 * std::f64::consts::PI / 180.0;

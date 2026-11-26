@@ -6,9 +6,9 @@ use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapMode, MapOptions, TileSettings};
 use mln_storage::Resource;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_util::geo::LatLng;
+use mln_style::geo::LatLng;
+use mln_style::size::Size;
 use mln_util::pool::Pool;
-use mln_util::size::Size;
 use parking_lot::Mutex;
 
 use crate::support::*;

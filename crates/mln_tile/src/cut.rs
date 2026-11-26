@@ -10,11 +10,11 @@ use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
+use mln_style::constants::EXTENT;
 use mln_style::feature::{GeometryCollection, GeometryCoordinates, GeometryTileFeature};
 use mln_style::geometry::FeatureType;
+use mln_style::hash::HashMap;
 use mln_style::tile_id::CanonicalTileID;
-use mln_util::constants::EXTENT;
-use mln_util::hash::HashMap;
 use mln_wire::{Reader, Wire, Writer, shared};
 use parking_lot::Mutex;
 
@@ -338,7 +338,7 @@ impl GeometryTileFeature for CutFeature {
         self.id.clone()
     }
 
-    fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, mln_util::error::Error> {
+    fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, mln_style::error::Error> {
         Ok(Cow::Borrowed(&self.geometry))
     }
 }

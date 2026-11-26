@@ -12,10 +12,10 @@ use std::time::Duration;
 use mln_frame_pacer::{FramePacer, RefreshWaiter};
 use mln_map::LogicalExtent;
 use mln_renderer::query::{RenderedQueryOptions, SourceQueryOptions};
-use mln_util::error::Error;
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::error::Error;
+use mln_style::size::Size;
 use mln_util::feature::Feature;
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
 use mln_util::thread::Joined;
 use parking_lot::Mutex;
 
@@ -764,7 +764,7 @@ pub(crate) fn physical_size(size: Size, pixel_ratio: f32) -> Size {
 /// [`release`](Self::release), [`dispose`](Self::dispose) or
 /// [`abandon`](Self::abandon), or until its last handle drops, and it holds
 /// its map until then. A call that sends work to a session that no longer
-/// takes it fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind), or
+/// takes it fails with [`ErrorKind::InvalidState`](mln_style::error::ErrorKind), or
 /// with the failure of a session that failed.
 ///
 /// Unless the session was released or disposed, the last drop of its
@@ -1115,7 +1115,7 @@ impl RenderSession {
     /// Sends `task` to the session's thread, after the work sent before,
     /// resizes included, and completes with its result. A session that lost
     /// its graphics objects before the task runs completes it with
-    /// [`ErrorKind::TargetLost`](mln_util::ErrorKind).
+    /// [`ErrorKind::TargetLost`](mln_style::error::ErrorKind).
     fn operation<T: Send + 'static>(
         &self,
         task: impl FnOnce(&mut Worker, &mut Outbox) -> Result<T, Error> + Send + 'static,
@@ -1148,9 +1148,9 @@ impl RenderSession {
     /// attach itself completes in a service. It stays available after a
     /// release, which the host services to its end.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) for a
     /// session on a core worker, and with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) once it was taken.
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) once it was taken.
     pub fn take_driver_work(&self) -> Result<DriverWork, Error> {
         let shared = self.shared();
         if shared.driver != Driver::CallerThread {
@@ -1164,7 +1164,7 @@ impl RenderSession {
     }
 
     /// What the session can do. Fails with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) once it is released.
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) once it is released.
     pub fn capabilities(&self) -> Result<RenderSessionCapabilities, Error> {
         let state = self.shared().state.lock();
         if state.released {
@@ -1174,7 +1174,7 @@ impl RenderSession {
     }
 
     /// The session's state now. Fails with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) once it is released.
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) once it is released.
     pub fn snapshot(&self) -> Result<RenderSessionSnapshot, Error> {
         let state = self.shared().state.lock();
         if state.released {
@@ -1196,7 +1196,7 @@ impl RenderSession {
     /// session may render into their textures again. While the host holds a
     /// frame in every texture, demands wait for a release.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) for a
     /// session without a ring, and as a call that sends work does once the
     /// session no longer takes work.
     pub fn acquire_frame(&self) -> Result<Option<AcquiredFrame>, Error> {
@@ -1240,12 +1240,12 @@ impl RenderSession {
     /// the sync after which the host may use the old textures that the new
     /// ring doesn't have, as [`release_target`](Self::release_target) says.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) for a
     /// session without a borrowed ring, with
-    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for another number
-    /// of textures, and with [`ErrorKind::InvalidState`](mln_util::ErrorKind)
+    /// [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for another number
+    /// of textures, and with [`ErrorKind::InvalidState`](mln_style::error::ErrorKind)
     /// while the host holds one of the ring's frames. Completes with
-    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for textures of
+    /// [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) for textures of
     /// another format or kind.
     pub fn set_ring(&self, size: Size, ring: BorrowedRing) -> Result<Completion<(Applied, GpuSync)>, Error> {
         let shared = Arc::clone(self.shared());
@@ -1304,7 +1304,7 @@ impl RenderSession {
     /// [`DemandMode::IfChanged`](super::DemandMode::IfChanged) with token 0,
     /// unless a demand came first. One pacer can pace many sessions.
     ///
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) for a
     /// session with a redraw wake.
     pub fn set_frame_pacer(&self, pacer: Option<Arc<FramePacer>>) -> Result<(), Error> {
         let shared = self.shared();
@@ -1332,7 +1332,7 @@ impl RenderSession {
     }
 
     /// Takes the frame results that wait, oldest first. Fails with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) once the session is
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) once the session is
     /// released.
     pub fn drain_frame_results(&self) -> Result<Vec<FrameResult>, Error> {
         let mut state = self.shared().state.lock();
@@ -1353,9 +1353,9 @@ impl RenderSession {
     ///
     /// Fails first as a call that sends work does once the session no
     /// longer takes work. Then fails with
-    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a borrowed ring,
+    /// [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) for a borrowed ring,
     /// which [`set_ring`](Self::set_ring) resizes, and with
-    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty size,
+    /// [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for an empty size,
     /// or a scale factor that isn't finite and positive.
     pub fn resize(&self, extent: LogicalExtent) -> Result<Completion<Applied>, Error> {
         check_usable(&self.shared().state.lock())?;
@@ -1430,9 +1430,9 @@ impl RenderSession {
     /// the released textures: one that a later ring has again starts fresh,
     /// even one that the host gave up.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for an
+    /// Fails with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) for an
     /// offscreen session or an exported ring, whose targets are their own.
-    /// Completes with [`ErrorKind::Native`](mln_util::ErrorKind) when a ring
+    /// Completes with [`ErrorKind::Native`](mln_style::error::ErrorKind) when a ring
     /// can't submit its work on the textures, which it keeps then.
     pub fn release_target(&self) -> Result<Completion<Option<GpuSync>>, Error> {
         if self.shared().capabilities.export_kind.is_some() {
@@ -1473,15 +1473,15 @@ impl RenderSession {
     /// the new one, as OpenGL ES's context can't to another window, the
     /// session makes its backend and renderer again.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an
-    /// empty size, with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for an
+    /// empty size, with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) for
     /// an offscreen session, and with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) for a window that is
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) for a window that is
     /// minimized or has no client area. Completes with
-    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the session's
+    /// [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) when the session's
     /// device can't present to the surface in the format that the session
     /// renders in: attach a new session instead. Completes with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) when the window had no
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) when the window had no
     /// area to present to by then. The session then keeps the surface it had,
     /// at the new size.
     pub fn set_surface(&self, size: Size, surface: Surface) -> Result<Completion<Applied>, Error> {
@@ -1532,9 +1532,9 @@ impl RenderSession {
     /// premultiplied RGBA, in rows from top to bottom, at the target's size
     /// in pixels.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) for a
     /// surface session. Completes with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) when the session
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) when the session
     /// hasn't rendered a frame since it attached or resized.
     pub fn read_texture(&self) -> Result<Completion<PremultipliedImage>, Error> {
         check_usable(&self.shared().state.lock())?;
@@ -1550,7 +1550,7 @@ impl RenderSession {
     /// A box covers only its part inside the target, so one past every edge
     /// covers the whole target.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a
     /// point that isn't finite or a line string without points.
     pub fn query_rendered_features(
         &self,
@@ -1568,7 +1568,7 @@ impl RenderSession {
     /// for the current view. A source loads tiles only while a visible layer
     /// uses it.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for an
     /// empty `source_id`.
     pub fn query_source_features(
         &self,
@@ -1587,9 +1587,9 @@ impl RenderSession {
     /// attempt had it. A cluster ID belongs to one version of the source's
     /// data, so query the features again after the data changes.
     ///
-    /// Completes with [`ErrorKind::NotFound`](mln_util::ErrorKind) when that
+    /// Completes with [`ErrorKind::NotFound`](mln_style::error::ErrorKind) when that
     /// render had no source `source_id`, or the source has no cluster
-    /// `cluster_id`, and with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind)
+    /// `cluster_id`, and with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind)
     /// when the source isn't a clustered GeoJSON source.
     pub fn cluster_children(
         &self,
@@ -1654,7 +1654,7 @@ impl RenderSession {
     }
 
     /// Stops the session at once, without its pending graphics work: that
-    /// work completes with [`ErrorKind::TargetLost`](mln_util::ErrorKind)
+    /// work completes with [`ErrorKind::TargetLost`](mln_style::error::ErrorKind)
     /// before this returns, and the demands on their way finish as
     /// [`FrameDisposition::TargetNotReady`](super::FrameDisposition). Once it
     /// returns, the session renders no more, and another session can attach
@@ -1668,10 +1668,10 @@ impl RenderSession {
     ///
     /// It waits for a core worker's driver call on another thread, such as a
     /// frame that it renders. Fails with
-    /// [`ErrorKind::Busy`](mln_util::ErrorKind) inside a driver call on the
+    /// [`ErrorKind::Busy`](mln_style::error::ErrorKind) inside a driver call on the
     /// session's own thread, such as from a completion that the session
     /// delivers, and while a caller-driven session's service runs on another
-    /// thread. Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind)
+    /// thread. Fails with [`ErrorKind::InvalidState`](mln_style::error::ErrorKind)
     /// once the session is detached, abandoned or released.
     pub fn abandon(&self) -> Result<u32, Error> {
         self.shared().abandon(Abandoner::Host)
@@ -1692,7 +1692,7 @@ impl RenderSession {
     /// completion reports when the session has let go of its map and its
     /// graphics objects, and nothing waits for its thread to end after
     /// that. Every call on the session fails with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) after.
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) after.
     ///
     /// A caller-driven session detaches at the host's next service, so keep
     /// servicing it until the release completes. One that isn't attached,
@@ -1809,7 +1809,7 @@ impl AcquiredFrame {
     /// dispose of the session keeps them until the last view ends. Keep the
     /// frame until its views end.
     ///
-    /// Fails with [`ErrorKind::TargetLost`](mln_util::ErrorKind) once the
+    /// Fails with [`ErrorKind::TargetLost`](mln_style::error::ErrorKind) once the
     /// session can no longer render.
     pub fn view(&self) -> Result<FrameView, Error> {
         let mut state = self.shared.state.lock();
@@ -1837,7 +1837,7 @@ impl AcquiredFrame {
     /// `consumer`: the session waits for it before it renders into the
     /// texture again, and takes the sync file or GL fence that it names.
     ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind), handing
+    /// Fails with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind), handing
     /// back the frame and `consumer`, for a kind that the session's
     /// [`consumer_sync_kinds`](RenderSessionCapabilities::consumer_sync_kinds)
     /// lacks.

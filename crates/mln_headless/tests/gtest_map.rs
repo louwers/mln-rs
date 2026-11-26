@@ -24,13 +24,17 @@ use mln_storage::{
     Cache, DatabaseFileSource, FileSource, Kind, Loader, LoadingMethod, Resource, ResourceOptions, Response,
     StoragePolicy, TileFormat,
 };
+use mln_style::bitmap::PremultipliedImage;
 use mln_style::color::Color;
 use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::expression::{Formatted, FormattedSection, Functions, Image};
+use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
+use mln_style::hash::HashSet;
 use mln_style::layer::{Layer, LayerStyle, convert_layer};
 use mln_style::layers::symbol_layer::Symbol;
 use mln_style::projection::Projection;
 use mln_style::property::table::Kind as StylePropertyKind;
+use mln_style::size::Size;
 use mln_style::source::SourceData;
 use mln_style::sources::custom::TileFunction;
 use mln_style::sources::custom_geometry_source::{
@@ -41,16 +45,13 @@ use mln_style::sources::image::ImageSourceOptions;
 use mln_style::sources::{ImageSourceType, image_source};
 use mln_style::sprite::Sprite;
 use mln_style::tile_id::CanonicalTileID;
+use mln_style::tileset::{PartialTileset, Scheme};
 use mln_style::types::{ProjectionDefinition, ProjectionType, VisibilityType};
 use mln_style::{Edit, PropertyValue, Source, TransitionOptions};
 use mln_text::glyph::{GlyphIDType, GlyphRange};
 use mln_util::chrono::Timestamp;
-use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
-use mln_util::hash::HashSet;
-use mln_util::image::PremultipliedImage;
+use mln_util::geo::{EdgeInsets, ScreenCoordinate};
 use mln_util::pool::Pool;
-use mln_util::size::Size;
-use mln_util::tileset::{PartialTileset, Scheme};
 use parking_lot::Mutex;
 use serde_json::json;
 
@@ -766,7 +767,7 @@ fn default_bound_options() {
     let bounds = test.map().snapshot().bounds;
 
     assert_eq!(bounds.min_zoom, mln_util::constants::MIN_ZOOM);
-    assert_eq!(bounds.max_zoom, f64::from(mln_util::constants::DEFAULT_MAX_ZOOM));
+    assert_eq!(bounds.max_zoom, f64::from(mln_style::constants::DEFAULT_MAX_ZOOM));
     // A snapshot reports the default, unlimited bounds as none.
     assert_eq!(bounds.bounds, None);
     assert_eq!(BoundOptions::from(bounds).bounds, Some(LatLngBounds::default()));
@@ -2916,7 +2917,7 @@ fn stencil_overflow() {
         handle.set_tile_data(*tile_id, GeoJson::from(Vec::<geojson::Feature>::new()));
     });
     let mut options = CustomGeometrySourceOptions { fetch_tile_function: Some(fetch), ..Default::default() };
-    options.tile_options.tile_size = mln_util::constants::TILE_SIZE_I / 32;
+    options.tile_options.tile_size = mln_style::constants::TILE_SIZE_I / 32;
     let custom = custom_geometry_source::create("custom", options).unwrap();
 
     test.map().add_source(custom).unwrap();
@@ -4573,7 +4574,7 @@ fn tile_selection_options_publish_updates() {
     check(&mut map, &updates, set(|t, v| t.lod_min_radius = v), |p| p.tile_lod_min_radius, 4.0);
     check(&mut map, &updates, set(|t, v| t.lod_scale = v), |p| p.tile_lod_scale, 2.0);
     // 45° converts to radians and back exactly.
-    let degrees = |p: &UpdateParameters| mln_math::rad2deg(p.tile_lod_pitch_threshold);
+    let degrees = |p: &UpdateParameters| mln_style::math::rad2deg(p.tile_lod_pitch_threshold);
     check(&mut map, &updates, set(|t, v| t.lod_pitch_threshold = v), degrees, 45.0);
     check(&mut map, &updates, set(|t, v| t.lod_zoom_shift = v), |p| p.tile_lod_zoom_shift, 1.0);
     check(&mut map, &updates, set(|t, v| t.lod_mode = v), |p| p.tile_lod_mode, TileLodMode::Distance);
@@ -4885,7 +4886,7 @@ fn empty_size_is_an_error() {
         );
         assert_eq!(
             result.err().map(|e| (e.kind, e.message)),
-            Some((mln_util::ErrorKind::InvalidArgument, "failed to resize: size is empty".to_owned()))
+            Some((mln_style::error::ErrorKind::InvalidArgument, "failed to resize: size is empty".to_owned()))
         );
     }
 }

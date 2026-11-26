@@ -1,10 +1,10 @@
 use geometry::Point;
-use mln_math::{clamp_f64, wrap};
+use mln_style::constants;
+use mln_style::geo::{LatLng, LatLngBounds};
+use mln_style::math::{clamp_f64, wrap};
+use mln_style::range::Range;
 use mln_style::tile_id::CanonicalTileID;
-use mln_util::constants;
-use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::projection::Projection;
-use mln_util::range::Range;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TileRange {

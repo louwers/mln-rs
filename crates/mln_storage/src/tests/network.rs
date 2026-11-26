@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use mln_util::time::Instant;
+use mln_style::time::Instant;
 use parking_lot::Mutex;
 
 use super::TestLoop;

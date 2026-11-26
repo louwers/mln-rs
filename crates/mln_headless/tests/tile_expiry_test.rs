@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 
 use mln_map::MapMode;
 use mln_storage::{Kind, Response};
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::size::Size;
 
 use crate::support::*;
 

@@ -14,13 +14,13 @@ pub(crate) use serde_json_borrow::{Map as JsonObject, Value as Json};
 use super::convertible::{ConversionTraits, Convertible, Error};
 
 /// foldhash's hasher, with a fixed seed in the benchmarks' builds, as
-/// `mln_util::hash`'s.
+/// `crate::hash`'s.
 #[cfg(not(mln_bench_fixed_hash))]
 type Hasher = foldhash::fast::RandomState;
 #[cfg(mln_bench_fixed_hash)]
 type Hasher = foldhash::fast::FixedState;
 
-#[expect(clippy::disallowed_types, reason = "mln_util::hash's set, which this crate can't depend on")]
+#[expect(clippy::disallowed_types, reason = "crate::hash's set, which this crate can't depend on")]
 type HashSet<T> = std::collections::HashSet<T, Hasher>;
 
 /// What a member past the end of an array reads as, as in the other front

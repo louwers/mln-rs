@@ -35,7 +35,7 @@ impl Default for Settings {
             bearing: 0.0,
             pitch: 0.0,
             roll: 0.0,
-            fov: mln_math::rad2deg(DEFAULT_FOV),
+            fov: mln_style::math::rad2deg(DEFAULT_FOV),
             // Past the map's default of 60°, to look across terrain.
             max_pitch: 85.0,
             network: Network::Online,

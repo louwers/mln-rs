@@ -7,6 +7,7 @@
 use std::sync::Arc;
 
 use mln_map_types::MapMode;
+use mln_style::error::Error;
 use mln_style::expression::{GlobalStateMap, UnavailableImages};
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_text::atlas::ImagePositions;
@@ -14,7 +15,6 @@ use mln_text::glyph::{FontFaces, GlyphDependencies, GlyphPositions};
 use mln_text::tagged_string::font_stack_hash;
 use mln_tile::TileData;
 use mln_tile_id::OverscaledTileID;
-use mln_util::error::Error;
 use mln_vec_map::VecSet;
 use mln_wire::sorted;
 

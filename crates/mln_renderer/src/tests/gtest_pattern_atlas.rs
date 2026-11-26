@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use mln_image::decode_image;
+use mln_style::bitmap::PremultipliedImage;
 use mln_style::image::Impl as ImageImpl;
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
+use mln_style::size::Size;
 
 use crate::pattern_atlas::PatternAtlas;
 

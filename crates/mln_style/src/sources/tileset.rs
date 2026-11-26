@@ -5,9 +5,7 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use mln_util::constants;
-use mln_util::tileset::{PartialTileset, Tileset, VectorEncoding};
-
+use crate::constants;
 use crate::conversion::tileset::{convert_tileset, optional_member};
 use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
@@ -16,6 +14,7 @@ use crate::source::{
     Data, Described, Fetch, Load, OfflineResources, Respond, Source, SourceData, SourceSummary, SourceTypeInfo,
     StyleSourceType,
 };
+use crate::tileset::{PartialTileset, Tileset, VectorEncoding};
 
 /// Which of the tileset source types a [`TilesetSourceType`] is.
 pub trait TilesetKind: Send + Sync + 'static {
@@ -156,7 +155,7 @@ impl<K: TilesetKind> StyleSourceType for TilesetSourceType<K> {
             None => Err("unexpectedly empty TileJSON".to_owned()),
             Some(data) => options.tileset_with_tilejson(&data, K::INFO.layer_kind),
         };
-        respond(tileset.map(Some).map_err(mln_util::Error::native));
+        respond(tileset.map(Some).map_err(crate::error::Error::native));
     }
 
     fn metadata_changed(old: Option<&Tileset>, new: Option<&Tileset>) -> bool {

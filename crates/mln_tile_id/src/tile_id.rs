@@ -11,8 +11,8 @@
 
 use std::fmt;
 
+use mln_style::constants;
 use mln_style::tile_id::CanonicalTileID;
-use mln_util::constants;
 
 /// Has integer z/x/y coordinates. `overscaled_z` describes the zoom level
 /// this tile is intended to represent, e.g. when parsing data. z is never

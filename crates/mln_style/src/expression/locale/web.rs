@@ -17,11 +17,11 @@ use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 
 use js_sys::{Object, Reflect};
-use mln_util::hash::HashMap;
 use wasm_bindgen::prelude::*;
 
 use super::keywords::CollationKeywords;
 use super::{FractionDigits, Sensitivity, Style, Unit, default_locale_override};
+use crate::hash::HashMap;
 
 mod intl {
     use js_sys::Object;

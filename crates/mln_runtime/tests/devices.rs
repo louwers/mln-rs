@@ -10,7 +10,7 @@ use mln_runtime::{
     FrameDemand, FrameDisposition, GlApi, GpuSync, Map, MapOptions, RenderSession, RenderTarget, Runtime, SyncKind,
     SyncKinds,
 };
-use mln_util::size::Size;
+use mln_style::size::Size;
 
 use crate::support::{eventually, runtime, wait};
 

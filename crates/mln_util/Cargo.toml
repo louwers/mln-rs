@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description.workspace = true
-license = "BSD-2-Clause AND Zlib"
+license.workspace = true
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
@@ -18,29 +18,20 @@ doctest = false
 [dependencies]
 feature.workspace = true
 flate2.workspace = true
-foldhash.workspace = true
 geo-types.workspace = true
 geometry.workspace = true
 glam.workspace = true
 httpdate.workspace = true
 log.workspace = true
 mln_math.workspace = true
+mln_style.workspace = true
 parking_lot.workspace = true
-mln_wire.workspace = true
-thiserror.workspace = true
-web-time.workspace = true
 
 [features]
 # `Queue::run_once_at`, which runs a queue's timed tasks by a clock of the
 # caller's, for the benchmarks' simulated network (tools/bench). Not API:
 # hidden from the documentation.
 bench = []
-
-[dev-dependencies]
-# The tile ids of the LatLng gtests (src/tests/gtest/geo.rs).
-mln_style = { package = "mln-rs-style", path = "../mln_style" }
-mln_tile_id = { package = "mln-rs-tile-id", path = "../mln_tile_id" }
-serde_json.workspace = true
 
 [lints]
 workspace = true

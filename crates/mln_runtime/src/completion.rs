@@ -6,7 +6,7 @@ use std::sync::{Arc, OnceLock};
 use std::task::{Context, Poll, Waker};
 use std::thread::ThreadId;
 
-use mln_util::error::Error;
+use mln_style::error::Error;
 use parking_lot::{Condvar, Mutex};
 
 type Callback<T> = Box<dyn FnOnce(Result<T, Error>) + Send>;
@@ -54,7 +54,7 @@ struct Shared<T> {
 /// executor of its own), block on it with [`wait`](Self::wait), or pass a
 /// callback to [`on_complete`](Self::on_complete). A command whose runtime
 /// or map goes away before it runs completes with
-/// [`ErrorKind::Cancelled`](mln_util::ErrorKind::Cancelled).
+/// [`ErrorKind::Cancelled`](mln_style::error::ErrorKind::Cancelled).
 #[must_use = "a completion does nothing unless it is received"]
 pub struct Completion<T> {
     /// `None` for a completion whose result is discarded, which acts as one
@@ -124,7 +124,7 @@ impl<T: Send + 'static> Completion<T> {
     /// completions wait for its map's runtime too, as a resize or a detach
     /// does, so their wait on the runtime's thread would never end either.
     /// Such a wait fails with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind::InvalidState) instead,
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind::InvalidState) instead,
     /// unless the result is already there, and so does every wait in the
     /// browser, whose instance has one thread: await the completion there,
     /// or pass it a callback.
@@ -272,7 +272,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::task::Wake;
 
-    use mln_util::ErrorKind;
+    use mln_style::error::ErrorKind;
 
     use super::*;
 

@@ -66,14 +66,14 @@ pub(crate) use fog::terrain_fog;
 pub(crate) use ground::{FrameGround, GroundHeights, StandingDraw, height_attribute, point_center};
 use mln_gfx::gpu::Gpu;
 use mln_map_types::{MapMode, TerrainSkirtLength};
+use mln_style::hash::HashMap;
 use mln_style::source::SourceData;
 use mln_style::sources::RasterDemSourceType;
 use mln_style::tile_id::CanonicalTileID;
+use mln_style::tileset::RasterEncoding;
 use mln_tile_id::OverscaledTileID;
 use mln_util::constants;
 use mln_util::dem::DemUnpack;
-use mln_util::hash::HashMap;
-use mln_util::tileset::RasterEncoding;
 pub(crate) use stacks::{DrapeStacks, Draped};
 
 use crate::gfx::context::Context;

@@ -6,7 +6,8 @@
 > Depend on [`mln-rs`](https://crates.io/crates/mln-rs) instead: it re-exports
 > this crate as `mln_rs::mln_math`.
 
-Ports `include/mln/math`: angles, clamping, wrapping, log2, min and max.
+Ports the engine's part of `include/mln/math`: degrees to radians, and the `f32`
+minimum, maximum and clamp. The rest is `mln_style::math`.
 
 Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering

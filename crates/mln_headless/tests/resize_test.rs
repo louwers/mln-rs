@@ -1,7 +1,7 @@
 // A map whose size changes renders as a map made at the new size.
 
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::size::Size;
 
 use crate::support::*;
 

@@ -2,25 +2,25 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use feature::Value;
-use mln_util::LatLng;
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
-use mln_util::tileset::PartialTileset;
 
 use super::util::{FixtureLog, new_layer, parse_json};
+use crate::bitmap::PremultipliedImage;
 use crate::color::Color;
 use crate::conversion::Convertible;
 use crate::expression::Functions;
+use crate::geo::LatLng;
 use crate::layer::LayerStyle;
 use crate::layers::Line;
 use crate::projection::Projection;
 use crate::property::transition::TransitionOptions;
 use crate::property::value::{PropertyValue, StyleValue as _};
+use crate::size::Size;
 use crate::sky::Sky;
 use crate::sources::tileset::vector_source as tileset_vector_source;
 use crate::style::Style;
 use crate::style::edit::Edit;
 use crate::terrain::Terrain;
+use crate::tileset::PartialTileset;
 use crate::types::{ProjectionDefinition, VisibilityType};
 use crate::{StyleRegistry, image};
 
@@ -45,7 +45,7 @@ fn set_layer_property(
     layer: &str,
     name: &str,
     value: serde_json::Value,
-) -> Result<(), mln_util::Error> {
+) -> Result<(), crate::error::Error> {
     style.apply(Edit::SetLayerProperty { layer: layer.to_owned(), name: name.to_owned(), value })
 }
 
@@ -259,7 +259,7 @@ fn a_layer_edit_that_changes_nothing_keeps_the_layers() {
     assert!(!Arc::ptr_eq(&before, style.get_layer_list()));
 
     let error = set_layer_property(&mut style, "absent", "background-color", serde_json::json!("white")).unwrap_err();
-    assert_eq!(mln_util::ErrorKind::NotFound, error.kind);
+    assert_eq!(crate::error::ErrorKind::NotFound, error.kind);
 }
 
 #[test]
@@ -276,7 +276,7 @@ fn layer_changes_leave_earlier_versions_unchanged() {
     let error = style
         .apply(Edit::AddLayer { layer: new_layer("line", "a", "source"), before: Some("b".to_owned()) })
         .unwrap_err();
-    assert_eq!(mln_util::ErrorKind::AlreadyExists, error.kind);
+    assert_eq!(crate::error::ErrorKind::AlreadyExists, error.kind);
     assert_eq!("Layer a already exists", error.message);
     let added = style.clone();
     assert_eq!(["a", "c", "b"], *ids(added.get_layer_list()));
@@ -287,7 +287,7 @@ fn layer_changes_leave_earlier_versions_unchanged() {
     assert_eq!(["a", "b"], *ids(loaded.get_layer_list()));
     assert_eq!(["a", "c", "b"], *ids(added.get_layer_list()));
     let error = style.apply(Edit::RemoveLayer("a".to_owned())).unwrap_err();
-    assert_eq!(mln_util::ErrorKind::NotFound, error.kind);
+    assert_eq!(crate::error::ErrorKind::NotFound, error.kind);
 }
 
 // gtest: Style.GlobalState
@@ -485,7 +485,7 @@ fn visibility_expression_rejects_other_dependencies() {
     // Visibility expressions may only depend on the global state.
     let json = serde_json::json!(["case", [">", ["zoom"], 10], "visible", "none"]);
     let error = set_layer_property(&mut style, "background", "visibility", json).unwrap_err();
-    assert_eq!(mln_util::ErrorKind::InvalidArgument, error.kind);
+    assert_eq!(crate::error::ErrorKind::InvalidArgument, error.kind);
     assert_eq!(VisibilityType::Visible, style.get_layer("background").unwrap().get_visibility());
 }
 
@@ -594,7 +594,7 @@ fn a_terrain_needs_a_raster_dem_source_if_the_style_has_the_source() {
 
     let before = style.clone();
     let error = style.apply(Edit::SetTerrain(Some(Terrain::new("points")))).unwrap_err();
-    assert_eq!(mln_util::ErrorKind::InvalidArgument, error.kind);
+    assert_eq!(crate::error::ErrorKind::InvalidArgument, error.kind);
     assert!(before.is_same_version(&style));
 
     // A source the style lacks is accepted: the terrain waits for it.
@@ -610,7 +610,7 @@ fn a_terrains_exaggeration_is_finite_and_at_least_zero() {
     for exaggeration in [-1.0, f32::NAN, f32::INFINITY] {
         let terrain = Terrain { source: "dem".to_owned(), exaggeration };
         let error = style.apply(Edit::SetTerrain(Some(terrain))).unwrap_err();
-        assert_eq!(mln_util::ErrorKind::InvalidArgument, error.kind, "{exaggeration}");
+        assert_eq!(crate::error::ErrorKind::InvalidArgument, error.kind, "{exaggeration}");
     }
     assert!(style.get_terrain().is_none());
 
@@ -700,7 +700,7 @@ fn sources_keep_the_order_they_were_added_in() {
     }
     assert_eq!(["c", "b", "a"], *ids_of(style.get_sources()));
     let error = style.apply(Edit::AddSource(vector_source("b"))).unwrap_err();
-    assert_eq!(mln_util::ErrorKind::AlreadyExists, error.kind);
+    assert_eq!(crate::error::ErrorKind::AlreadyExists, error.kind);
 
     // A changed source keeps its place.
     let before = style.clone();
@@ -719,7 +719,7 @@ fn sources_keep_the_order_they_were_added_in() {
     assert_eq!(["c", "a"], *ids_of(style.get_sources()));
     assert_eq!(["c", "b", "a"], *ids_of(before.get_sources()));
     let error = style.apply(Edit::RemoveSource("b".to_owned())).unwrap_err();
-    assert_eq!(mln_util::ErrorKind::NotFound, error.kind);
+    assert_eq!(crate::error::ErrorKind::NotFound, error.kind);
 }
 
 /// A style with the raster DEM source `dem`, the GeoJSON source `points`,
@@ -733,7 +733,7 @@ const DOTS_STYLE: &str = r#"{"version":8,"sources":{
 fn assert_incompatible(style: &mut Style, edit: Edit) {
     let before = style.clone();
     let error = style.apply(edit).unwrap_err();
-    assert_eq!(mln_util::ErrorKind::InvalidArgument, error.kind, "{error}");
+    assert_eq!(crate::error::ErrorKind::InvalidArgument, error.kind, "{error}");
     assert!(error.to_string().contains("not compatible"), "{error}");
     assert!(before.is_same_version(style));
 }

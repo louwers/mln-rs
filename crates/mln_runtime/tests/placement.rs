@@ -3,9 +3,9 @@
 
 use mln_map::{CameraOptions, CameraUpdate, RenderMode};
 use mln_runtime::{AttachOptions, DemandMode, FrameDemand, FrameDisposition, FrameResult, RenderSession, RenderTarget};
-use mln_util::geo::LatLng;
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::geo::LatLng;
+use mln_style::size::Size;
 
 use crate::support::{eventually, map, runtime, wait};
 

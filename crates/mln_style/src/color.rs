@@ -8,9 +8,9 @@
 use std::f32::consts::{PI, TAU};
 
 use feature::Value;
-use mln_util::string::to_string_double;
 
 use crate::interpolate::interpolate as util_interpolate;
+use crate::string::to_string_double;
 
 mod css;
 

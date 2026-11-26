@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use geometry::Point;
-use mln_util::size::Size;
+use mln_style::size::Size;
 
 /// The map's mode. The runner keeps its own copy of the map's enum so that
 /// it does not depend on the map crate; `TestRunnerImpl` implementations

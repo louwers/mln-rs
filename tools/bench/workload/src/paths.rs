@@ -4,8 +4,8 @@
 //! lap after lap.
 
 use mln_map::CameraOptions;
-use mln_util::geo::LatLng;
-use mln_util::size::Size;
+use mln_style::geo::LatLng;
+use mln_style::size::Size;
 
 use crate::{Snapshot, Tiles};
 

@@ -6,12 +6,12 @@ use mln_gfx::rendering_stats::{RenderingStats, TerrainStats};
 use mln_gfx::shaders::bindings::PAINT_PARAMS_ID;
 use mln_gfx::{FrameImage, Handoff, Rgba, ScissorRect};
 use mln_style::color::Color;
+use mln_style::error::Error;
+use mln_style::time::Instant;
 use mln_text::GlyphCache;
 use mln_text::local_fonts::LocalGlyphs;
-use mln_util::error::Error;
 use mln_util::event_queue::Waker;
 use mln_util::pool::Pool;
-use mln_util::time::Instant;
 
 use crate::clip_masks::ClipMasks;
 use crate::frame::Frame;

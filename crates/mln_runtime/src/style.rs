@@ -5,8 +5,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use geojson::{GeoJson, GeometryValue};
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::error::Error;
 use mln_style::expression::Functions;
+use mln_style::geo::{LatLng, LatLngBounds};
+use mln_style::hash::HashMap;
 use mln_style::image::Impl as StyleImage;
+use mln_style::range::Range;
 use mln_style::source::{SourceData, StyleSourceType};
 use mln_style::sources::custom::{CustomVectorTileData, TileFunction};
 use mln_style::sources::custom_geometry_source::{self, TileOptions};
@@ -18,13 +23,8 @@ use mln_style::sources::{
     geojson_source,
 };
 use mln_style::tile_id::CanonicalTileID;
+use mln_style::tileset::{RasterEncoding, Scheme, VectorEncoding};
 use mln_style::{Edit, Source, SourceInstance, TransitionOptions};
-use mln_util::error::Error;
-use mln_util::geo::{LatLng, LatLngBounds};
-use mln_util::hash::HashMap;
-use mln_util::image::PremultipliedImage;
-use mln_util::range::Range;
-use mln_util::tileset::{RasterEncoding, Scheme, VectorEncoding};
 use parking_lot::Mutex;
 
 use crate::completion::{Completion, Resolver};
@@ -106,7 +106,7 @@ impl GeoJsonSourceOptions {
         }
     }
 
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for an
     /// option out of range.
     fn check(&self) -> Result<(), Error> {
         // Tiling stops at zoom 24, and a cluster ID holds its zoom level plus
@@ -135,7 +135,7 @@ impl GeoJsonSourceOptions {
     /// Parses the cluster properties on this thread against `functions`, for
     /// a caller that must reject them before it sends the source, which
     /// [`Map::add_geojson_source`] otherwise parses on the runtime's thread.
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for
     /// text that isn't a `clusterProperties` object.
     pub fn check_cluster_properties(&self, functions: &Arc<Functions>) -> Result<(), Error> {
         self.cluster_properties.as_deref().map_or(Ok(()), |json| parse_cluster_properties(json, functions).map(drop))
@@ -167,7 +167,7 @@ impl GeoJsonSourceOptions {
 
 /// Parses a `clusterProperties` object through the style's conversion of a
 /// GeoJSON source, as its one member. Fails with
-/// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for text that isn't
+/// [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for text that isn't
 /// such an object.
 fn parse_cluster_properties(
     json: &str,
@@ -604,7 +604,7 @@ impl Map {
     /// Adds a GeoJSON source with no data and `options`, which stay fixed
     /// for as long as the style holds it.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for an
     /// option out of range, and completes with it for cluster properties
     /// that don't parse.
     pub fn add_geojson_source(
@@ -657,7 +657,7 @@ impl Map {
     /// to follow it. With synchronous tiling on, the command prepares the
     /// data before later commands run.
     ///
-    /// Completes with [`ErrorKind::NotFound`](mln_util::ErrorKind) when the
+    /// Completes with [`ErrorKind::NotFound`](mln_style::error::ErrorKind) when the
     /// style has no such source, with `InvalidArgument` when it isn't a
     /// GeoJSON source, when `json` isn't GeoJSON, or when the source clusters
     /// and the data isn't a feature collection of points, and with
@@ -921,7 +921,7 @@ impl Map {
     }
 
     /// Removes an image from the style. Completes with
-    /// [`ErrorKind::NotFound`](mln_util::ErrorKind) when the style has no
+    /// [`ErrorKind::NotFound`](mln_style::error::ErrorKind) when the style has no
     /// such image.
     pub fn remove_style_image(&self, image_id: impl Into<String>) -> Result<Completion<Applied>, Error> {
         let image_id = image_id.into();

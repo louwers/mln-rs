@@ -1,10 +1,9 @@
-use mln_util::string::to_string_double;
-
 use crate::conversion::Convertible;
 use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::type_::Type;
 use crate::expression::value::Value;
 use crate::expression::{EvaluationContext, EvaluationError, EvaluationResult, Expr, Node};
+use crate::string::to_string_double;
 
 /// `["at", index, array]`.
 #[derive(Clone, PartialEq, mln_wire::Wire)]

@@ -21,10 +21,13 @@ use mln_storage::offline_database::{DatabaseError, OfflineDatabase};
 use mln_storage::resource::{Priority, TileFormat, Usage};
 use mln_storage::response::{Caching, Reason, ResourceError};
 use mln_storage::{FileSource, Kind, LoadingMethod, Request, Resource, Response};
+use mln_style::hash::{HashMap, HashSet};
 use mln_style::i18n::glyph_range_is_entirely_locally_generated;
 use mln_style::layer::SourceKind;
+use mln_style::range::Range;
 use mln_style::source::{OfflineResources, SourceTypeInfo};
 use mln_style::tile_id::CanonicalTileID;
+use mln_style::tileset::{Tileset, VectorEncoding};
 use mln_style::{Parser, StyleRegistry};
 use mln_text::glyph::{
     GLYPH_RANGES_PER_FONT_STACK, GLYPHS_PER_GLYPH_RANGE, GlyphID, NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK,
@@ -32,9 +35,6 @@ use mln_text::glyph::{
 };
 use mln_util::chrono::now;
 use mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
-use mln_util::hash::{HashMap, HashSet};
-use mln_util::range::Range;
-use mln_util::tileset::{Tileset, VectorEncoding};
 use mln_vec_map::VecMap;
 
 const K_RESOURCES_BATCH_SIZE: usize = 64;

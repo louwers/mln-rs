@@ -3,13 +3,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
+use mln_style::constants::EXTENT;
 use mln_style::feature::{GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileFeature};
 use mln_style::geometry::FeatureType;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionLayoutProperties;
 use mln_style::subdivision_granularity::{SubdivisionGranularityExpression, SubdivisionGranularitySetting};
 use mln_style::tile_id::CanonicalTileID;
 use mln_text::atlas::ImagePositions;
-use mln_util::constants::EXTENT;
 use mln_vec_map::VecMap;
 
 use super::with_context;
@@ -198,7 +198,7 @@ impl GeometryTileFeature for StubGeometryTileFeature {
     fn get_id(&self) -> Identifier {
         Identifier::Null
     }
-    fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, mln_util::error::Error> {
+    fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, mln_style::error::Error> {
         Ok(Cow::Borrowed(&self.geometry))
     }
 }

@@ -1,8 +1,8 @@
 use buffa::DecodeError;
 use buffa::encoding::{Tag, WireType, skip_field};
 use buffa::types::{borrow_bytes, decode_sint32, decode_uint32};
-use mln_util::image::AlphaImage;
-use mln_util::size::Size;
+use mln_style::bitmap::AlphaImage;
+use mln_style::size::Size;
 
 use crate::glyph::{Glyph, GlyphID, GlyphRange};
 

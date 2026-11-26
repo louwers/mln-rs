@@ -13,7 +13,7 @@ pub(super) mod native_vsync {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use mln_util::Error;
+    use mln_style::error::Error;
     use parking_lot::Mutex;
 
     use crate::{Limit, VsyncSource, Vsyncs};

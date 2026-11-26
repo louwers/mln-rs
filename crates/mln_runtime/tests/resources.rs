@@ -16,7 +16,7 @@ use mln_storage::offline::{OfflineRegionDownloadState, OfflineTilePyramidRegionD
 use mln_storage::resource::Kind;
 use mln_storage::response::Caching;
 use mln_storage::{ResourceError, Response};
-use mln_util::geo::{LatLng, LatLngBounds};
+use mln_style::geo::{LatLng, LatLngBounds};
 
 use crate::support::{EMPTY_STYLE, EventLog, TempDir, map, runtime, wait, wait_err};
 

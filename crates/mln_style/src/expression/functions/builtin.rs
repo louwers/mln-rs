@@ -3,7 +3,6 @@
 use std::borrow::Cow;
 
 use feature::{Identifier as FeatureIdentifier, Value as MbglValue};
-use mln_math::{fmax, fmin};
 
 use super::{Eval, Functions, OverloadSpec, Params, RegisterError, Role};
 use crate::color::Color;
@@ -17,6 +16,7 @@ use crate::expression::{
 use crate::feature::GeometryTileFeature;
 use crate::geometry::FeatureType;
 use crate::i18n;
+use crate::math::{fmax, fmin};
 
 /// Adds the style specification's functions to `functions`, each name's
 /// overloads in the order parsing tries them. Fails if `functions` already

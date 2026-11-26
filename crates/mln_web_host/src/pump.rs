@@ -18,8 +18,8 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::time::Duration;
 
+use mln_style::time::Instant;
 use mln_util::pool::Pool;
-use mln_util::time::Instant;
 use wasm_bindgen::prelude::*;
 
 /// How long each slice runs the pools' tasks. The steps run in every slice,

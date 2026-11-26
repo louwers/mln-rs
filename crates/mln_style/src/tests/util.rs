@@ -170,7 +170,7 @@ impl crate::feature::GeometryTileFeature for StubGeometryTileFeature {
         self.id.clone()
     }
 
-    fn get_geometries(&self) -> Result<Cow<'_, crate::feature::GeometryCollection>, mln_util::error::Error> {
+    fn get_geometries(&self) -> Result<Cow<'_, crate::feature::GeometryCollection>, crate::error::Error> {
         Ok(Cow::Borrowed(&self.geometry))
     }
 }

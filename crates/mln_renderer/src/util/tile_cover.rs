@@ -12,15 +12,16 @@ use geo_types::{Coord, Geometry, LineString, Polygon};
 use geometry::Point;
 use glam::DVec3;
 use mln_map_types::{TileCoordinate, TileLodMode, View, ViewportMode};
-use mln_math::{fmax, fmin};
+use mln_style::constants;
+use mln_style::error::Error;
+use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
+use mln_style::math::{fmax, fmin};
+use mln_style::range::Range;
 use mln_style::tile_id::CanonicalTileID;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::bounding_volumes::{AABB, Frustum, IntersectionResult};
-use mln_util::constants;
-use mln_util::error::Error;
-use mln_util::geo::{LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
+use mln_util::geo::ScreenCoordinate;
 use mln_util::projection::Projection;
-use mln_util::range::Range;
 
 use crate::terrain::ElevationRanges;
 use crate::util::tile_cover_impl::Impl;
@@ -202,7 +203,7 @@ impl TileCover {
     }
 
     /// The cover at zoom `z` of `geom` in longitudes and latitudes. Fails
-    /// with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a point
+    /// with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a point
     /// that isn't a valid `LatLng`.
     pub fn new_from_geometry(geom: &Geometry<f64>, z: u8) -> Result<TileCover, Error> {
         Ok(TileCover { impl_: Box::new(Impl::new_projected(i32::from(z), geom)?) })
@@ -281,12 +282,12 @@ mod globe {
     use geometry::Point;
     use glam::{DVec3, DVec4, Vec4Swizzles};
     use mln_map_types::VerticalPerspectiveProjection;
+    use mln_style::constants;
+    use mln_style::range::Range;
     use mln_style::tile_id::CanonicalTileID;
     use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
     use mln_util::bounding_volumes::{Frustum, IntersectionResult};
-    use mln_util::constants;
     use mln_util::projection::Projection;
-    use mln_util::range::Range;
 
     use super::TileCoverParameters;
     use crate::terrain::ElevationRanges;
@@ -421,8 +422,8 @@ mod globe {
     fn tile_bounding_volume(tile: &CanonicalTileID, (min_elevation, max_elevation): (f64, f64)) -> ConvexVolume {
         // Distances from the planet's center in a world where the surface is
         // at 1.
-        let min_radius = min_elevation / constants::EARTH_RADIUS_M + 1.0;
-        let max_radius = max_elevation / constants::EARTH_RADIUS_M + 1.0;
+        let min_radius = min_elevation / mln_util::constants::EARTH_RADIUS_M + 1.0;
+        let max_radius = max_elevation / mln_util::constants::EARTH_RADIUS_M + 1.0;
         if tile.z == 0 {
             return aabb_volume(DVec3::splat(-max_radius), DVec3::splat(max_radius));
         }
@@ -632,7 +633,7 @@ mod globe {
             if elevation <= 0.0 || normal_length <= 0.0 {
                 return (frustum.clone(), horizon);
             }
-            let shell_radius = 1.0 + elevation / constants::EARTH_RADIUS_M;
+            let shell_radius = 1.0 + elevation / mln_util::constants::EARTH_RADIUS_M;
             let horizon_cos = (-horizon.w / normal_length).clamp(-1.0, 1.0);
             let shell_cos = (horizon_cos.acos() + (1.0 / shell_radius).acos()).cos();
             let culling_horizon = DVec4::from((horizon.xyz(), -shell_cos * normal_length));
@@ -652,7 +653,7 @@ mod globe {
         let whole_zoom = |zoom: f64| if state.round_zoom { zoom.round() } else { zoom.floor() };
         let allow_variable_zoom = whole_zoom(requested_center_zoom) > 4.0;
 
-        let center_lat_lng = transform.center(mln_util::geo::WrapMode::Unwrapped);
+        let center_lat_lng = transform.center(mln_style::geo::WrapMode::Unwrapped);
         let center = Projection::project(&center_lat_lng, 1.0 / constants::TILE_SIZE_D);
         // Over terrain, the center at its altitude, where the camera stands
         // it on the ground, as GL JS's `worldFromLngLat(center, elevation)`.
@@ -678,9 +679,9 @@ mod globe {
         // are chosen around the center brought back to the edge of the range,
         // and the camera moves with it.
         let mut camera_coord = camera_position;
-        let latitude = transform.center(mln_util::geo::WrapMode::Unwrapped).latitude();
+        let latitude = transform.center(mln_style::geo::WrapMode::Unwrapped).latitude();
         if latitude.abs() > constants::LATITUDE_MAX {
-            camera_coord[1] += center.y - (0.5 - mln_math::deg2rad(latitude).tan().asinh() / constants::M2PI);
+            camera_coord[1] += center.y - (0.5 - mln_math::deg2rad(latitude).tan().asinh() / mln_util::constants::M2PI);
         }
         let distance_to_center_2d = (center_coord[0] - camera_coord[0]).hypot(center_coord[1] - camera_coord[1]);
         let distance_z = (center_coord[2] - camera_coord[2]).abs();
@@ -789,7 +790,7 @@ mod globe {
         overscaled_z: Option<u8>,
     ) -> Vec<OverscaledTileID> {
         let center =
-            Projection::project(&state.view.center(mln_util::geo::WrapMode::Unwrapped), 1.0 / constants::TILE_SIZE_D);
+            Projection::project(&state.view.center(mln_style::geo::WrapMode::Unwrapped), 1.0 / constants::TILE_SIZE_D);
         let center_world = center.x.floor();
         let first_copy_center_x = center.x - center_world;
         let overscaled_zoom =
@@ -1234,8 +1235,8 @@ pub fn tile_count_bounds(bounds: &LatLngBounds, zoom: u8) -> u64 {
     let max_tile = 2.0f64.powf(f64::from(zoom));
     let x1 = sw.x.floor();
     let x2 = ne.x.ceil() - 1.0;
-    let y1 = mln_math::clamp_f64(sw.y.floor(), 0.0, max_tile - 1.0);
-    let y2 = mln_math::clamp_f64(ne.y.floor(), 0.0, max_tile - 1.0);
+    let y1 = mln_style::math::clamp_f64(sw.y.floor(), 0.0, max_tile - 1.0);
+    let y2 = mln_style::math::clamp_f64(ne.y.floor(), 0.0, max_tile - 1.0);
 
     let dx = if x1 > x2 { (max_tile - x1) + x2 } else { x2 - x1 };
     let dy = y1 - y2;

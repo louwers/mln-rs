@@ -8,6 +8,7 @@ use geometry::Point;
 use mln_map_types::View;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::color::Color;
+use mln_style::constants::EXTENT;
 use mln_style::expression::{Image, Value};
 use mln_style::feature::{GeometryCollection, GeometryCoordinates, GeometryTileFeature, classify_rings};
 use mln_style::layers::FillExtrusion;
@@ -18,7 +19,7 @@ use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::LightAnchorType;
 use mln_text::atlas::ImagePositions;
 use mln_tile::geometry_tile_data::{is_boundary_edge, is_entirely_outside, limit_holes, round_polygon_corners};
-use mln_util::constants::{EARTH_RADIUS_M, EXTENT, M2PI};
+use mln_util::constants::{EARTH_RADIUS_M, M2PI};
 use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketBase, UploadNeeds};

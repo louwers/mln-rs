@@ -8,7 +8,7 @@ use mln_gfx::Size;
 use mln_gfx::gpu::{Gpu, GpuError, SamplerId, TextureDesc, TextureFormat, TextureId, TextureRegion, TextureUsage};
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::texture2d::SamplerState;
-use mln_util::image::PremultipliedImage;
+use mln_style::bitmap::PremultipliedImage;
 
 use crate::gfx::resources::{Device, SharedGpuTexture};
 use crate::gfx::texture_size;

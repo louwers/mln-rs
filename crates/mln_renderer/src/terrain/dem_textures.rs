@@ -4,10 +4,10 @@
 use std::collections::hash_map::Entry;
 use std::rc::Rc;
 
-use mln_util::hash::{HashMap, HashSet};
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::hash::{HashMap, HashSet};
+use mln_style::size::Size;
 use mln_util::identity::SimpleIdentity;
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
 
 use crate::gfx::context::Context;
 use crate::gfx::store::SharedTexture;
@@ -69,7 +69,7 @@ impl DemTextures {
 #[cfg(test)]
 mod tests {
     use mln_gfx::gpu::{Caps, ClipDepthRange};
-    use mln_util::tileset::RasterEncoding;
+    use mln_style::tileset::RasterEncoding;
 
     use super::*;
     use crate::geometry::dem_data::DEMData;

@@ -8,7 +8,7 @@ use std::sync::mpsc::{Sender, channel};
 
 use httpmock::MockServer;
 use mln_runtime::{AttachOptions, Map, RenderSession, RenderTarget, ResourceRequest, Runtime, RuntimeOptions};
-use mln_util::size::Size;
+use mln_style::size::Size;
 use parking_lot::Mutex;
 
 use crate::support::{EMPTY_STYLE, TIMEOUT, eventually, map, wait};

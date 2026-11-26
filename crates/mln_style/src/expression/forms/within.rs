@@ -9,8 +9,8 @@ use feature::Value as MbglValue;
 use geo_types::{Coord, Geometry, Polygon};
 use geojson::GeoJson;
 use geometry::Point;
-use mln_util::constants::{DEGREES_MAX, EXTENT, LONGITUDE_MAX};
 
+use crate::constants::{DEGREES_MAX, EXTENT, LONGITUDE_MAX};
 use crate::conversion::{Convertible, Error};
 use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::{EvaluationContext, Expr, Node};
@@ -161,7 +161,7 @@ fn lat_lon_to_tile_coordinates(point: &Coord<f64>, canonical: &CanonicalTileID) 
 
     let x = (point.x + LONGITUDE_MAX) * size / DEGREES_MAX;
     let y =
-        (LONGITUDE_MAX - mln_math::rad2deg((point.y * PI / DEGREES_MAX + PI / 4.0).tan().ln())) * size / DEGREES_MAX;
+        (LONGITUDE_MAX - crate::math::rad2deg((point.y * PI / DEGREES_MAX + PI / 4.0).tan().ln())) * size / DEGREES_MAX;
 
     // `util::clamp<int64_t>(static_cast<int64_t>(x), min, max)`; `as`
     // saturates where the C++ cast is UB.
@@ -479,7 +479,7 @@ mod tests {
             None
         }
 
-        fn get_geometries(&self) -> Result<Cow<'_, crate::feature::GeometryCollection>, mln_util::error::Error> {
+        fn get_geometries(&self) -> Result<Cow<'_, crate::feature::GeometryCollection>, crate::error::Error> {
             Ok(Cow::Borrowed(&self.0))
         }
     }

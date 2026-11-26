@@ -3,14 +3,14 @@
 //! draws.
 
 use mln_map_types::{TileCoordinate, View};
+use mln_style::constants;
+use mln_style::geo::WrapMode;
+use mln_style::hash::{HashMap, HashSet};
+use mln_style::range::Range;
 use mln_style::tile_id::CanonicalTileID;
+use mln_style::tileset::Tileset;
 use mln_tile_id::OverscaledTileID;
-use mln_util::constants;
 use mln_util::dem::DemCoords;
-use mln_util::geo::WrapMode;
-use mln_util::hash::{HashMap, HashSet};
-use mln_util::range::Range;
-use mln_util::tileset::Tileset;
 
 use crate::geometry::dem_data::DEMData;
 use crate::tile::contents::Contents;

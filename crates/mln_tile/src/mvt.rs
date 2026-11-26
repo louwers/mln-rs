@@ -15,10 +15,10 @@ use std::sync::{Arc, OnceLock};
 use fast_mvt::{MvtLazyFeature, MvtLazyLayer, MvtLazyReader, MvtResult, MvtValueRef};
 use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
+use mln_style::constants::EXTENT;
 use mln_style::feature::GeometryCollection;
 use mln_style::geometry::FeatureType;
-use mln_util::constants::EXTENT;
-use mln_util::hash::HashMap;
+use mln_style::hash::HashMap;
 
 use crate::TileError;
 use crate::geometry_tile_data::fixup_polygons;

@@ -9,12 +9,12 @@ use mln_gfx::shaders::program::Program;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_style::PropertyEvaluationParameters;
 use mln_style::color::Color;
+use mln_style::constants::TILE_SIZE_D;
+use mln_style::error::Error;
 use mln_style::layer::LayerStyle;
 use mln_style::layers::Fill;
 use mln_style::layers::fill_layer_properties::FillPaintProperties;
 use mln_style::types::{AlignmentType, LayerBlendType, TranslateAnchorType};
-use mln_util::constants::TILE_SIZE_D;
-use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
 
 use super::{cast_matrix, refresh_paint_attributes};

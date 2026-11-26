@@ -3,10 +3,11 @@ use std::f64::consts::PI;
 use geometry::Point;
 use glam::dcamera::rh::proj::opengl::perspective;
 use glam::{DMat3, DMat4, DQuat, DVec3, DVec4, EulerRot, Vec3Swizzles, Vec4Swizzles};
+use mln_style::constants::{EXTENT, LATITUDE_MAX, TILE_SIZE_D};
+use mln_style::geo::{LatLng, WrapMode};
 use mln_style::interpolate::interpolate;
 use mln_tile_id::UnwrappedTileID;
-use mln_util::constants::{EXTENT, LATITUDE_MAX, TILE_SIZE_D};
-use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
+use mln_util::geo::ScreenCoordinate;
 use mln_util::projection::Projection;
 
 use crate::projection::{ProjectedTilePoint, ProjectionData, mercator_tile_coords};
@@ -277,13 +278,13 @@ impl VerticalPerspectiveProjection {
     /// The location of a unit-sphere point, or `None` for a point that isn't
     /// a number, as a degenerate camera's can be.
     pub(crate) fn surface_vector_to_lat_lng(surface: DVec3) -> Option<LatLng> {
-        let latitude = mln_math::rad2deg(surface.y.clamp(-1.0, 1.0).asin());
+        let latitude = mln_style::math::rad2deg(surface.y.clamp(-1.0, 1.0).asin());
         let length_xz = surface.xz().length();
         if length_xz <= POLE_AXIS_DISTANCE {
             return LatLng::with_mode(latitude, 0.0, WrapMode::Unwrapped).ok();
         }
         let acos_z = (surface.z / length_xz).clamp(-1.0, 1.0).acos();
-        let longitude = mln_math::rad2deg(if surface.x > 0.0 { acos_z } else { -acos_z });
+        let longitude = mln_style::math::rad2deg(if surface.x > 0.0 { acos_z } else { -acos_z });
         LatLng::with_mode(latitude, longitude, WrapMode::Wrapped).ok()
     }
 
@@ -299,7 +300,7 @@ impl VerticalPerspectiveProjection {
         let latitude = location.latitude();
         // `Projection::project`'s formula, without its clamp.
         let y = if latitude.abs() > LATITUDE_MAX {
-            (180.0 - mln_math::rad2deg((PI / 4.0 + mln_math::deg2rad(latitude) / 2.0).tan().ln())) / 360.0
+            (180.0 - mln_style::math::rad2deg((PI / 4.0 + mln_math::deg2rad(latitude) / 2.0).tan().ln())) / 360.0
         } else {
             world.y
         };
@@ -449,8 +450,8 @@ impl VerticalPerspectiveProjection {
             return None;
         };
         Some(LatLng::saturating(
-            (mln_math::rad2deg(lat)).clamp(-90.0, 90.0),
-            mln_math::rad2deg(lng),
+            (mln_style::math::rad2deg(lat)).clamp(-90.0, 90.0),
+            mln_style::math::rad2deg(lng),
             WrapMode::Unwrapped,
         ))
     }
@@ -578,7 +579,7 @@ impl VerticalPerspectiveProjection {
         let reach_pixels = f64::from(size.width.min(size.height)) / 2.0;
         let center_pixels = f64::min(area_pixels, reach_pixels)
             * remap_saturate(area_pixels, reach_pixels, reach_pixels * POLE_AREA_FADE_SCALE, 1.0, 0.0);
-        LATITUDE_MAX + mln_math::rad2deg(area_radians * center_pixels / area_pixels)
+        LATITUDE_MAX + mln_style::math::rad2deg(area_radians * center_pixels / area_pixels)
     }
 
     /// GL JS `computeGlobePanCenter`: the center after a pan of `offset`
@@ -645,7 +646,7 @@ impl VerticalPerspectiveProjection {
         let lat_lng = view.center(WrapMode::Unwrapped);
         let pixels = offset.x.hypot(offset.y);
         if pixels == 0.0 {
-            return CenterAndBearing { center: lat_lng, bearing: -mln_math::rad2deg(view.angle()) };
+            return CenterAndBearing { center: lat_lng, bearing: -mln_style::math::rad2deg(view.angle()) };
         }
         let axis =
             pan_surface_vector(view, &Point::new(center.x - offset.x / pixels, center.y - offset.y / pixels), 0.0)
@@ -680,7 +681,7 @@ impl VerticalPerspectiveProjection {
     pub fn drag_center(view: &View, point: &ScreenCoordinate, pan_delta: &ScreenCoordinate, height: f64) -> LatLng {
         let center = view.center(WrapMode::Unwrapped);
         // GL JS's bearing is the view's angle with the sign flipped.
-        let bearing = -mln_math::rad2deg(view.angle());
+        let bearing = -mln_style::math::rad2deg(view.angle());
         let swung = orientation_to_lat_lng_bearing(turned(
             camera_orientation(view),
             pan_surface_vector(view, &Point::new(point.x - pan_delta.x, point.y - pan_delta.y), height),
@@ -711,12 +712,12 @@ impl VerticalPerspectiveProjection {
         let ry = pole.y - point.y;
         let ramp = (1.0 - (LATITUDE_MAX - center.latitude().abs()) / DIAL_RAMP_DEGREES).clamp(0.0, 1.0);
         let dial = ramp * ramp * (3.0 - 2.0 * ramp);
-        let d_lng_swing = mln_math::wrap(swung.longitude - center.longitude() + 180.0, 0.0, 360.0) - 180.0;
+        let d_lng_swing = mln_style::math::wrap(swung.longitude - center.longitude() + 180.0, 0.0, 360.0) - 180.0;
         let mut d_lng_dial = 0.0;
         if dial > 0.0 {
             let radius_squared = f64::max(rx * rx + ry * ry, DIAL_MIN_RADIUS_PIXELS * DIAL_MIN_RADIUS_PIXELS);
             let d_theta = (rx * -pan_delta.y - ry * pan_delta.x) / radius_squared;
-            d_lng_dial = (if pole_latitude > 0.0 { 1.0 } else { -1.0 }) * mln_math::rad2deg(d_theta);
+            d_lng_dial = (if pole_latitude > 0.0 { 1.0 } else { -1.0 }) * mln_style::math::rad2deg(d_theta);
         }
         LatLng::saturating(
             latitude,
@@ -775,8 +776,8 @@ impl VerticalPerspectiveProjection {
     /// The shorter signed way around from one angle to the other, in degrees.
     #[must_use]
     pub fn difference_of_angles_degrees(from: f64, to: f64) -> f64 {
-        let a = mln_math::wrap(from, 0.0, 360.0);
-        let b = mln_math::wrap(to, 0.0, 360.0);
+        let a = mln_style::math::wrap(from, 0.0, 360.0);
+        let b = mln_style::math::wrap(to, 0.0, 360.0);
         let direct = b - a;
         let around = if b > a { direct - 360.0 } else { direct + 360.0 };
         if direct.abs() < around.abs() { direct } else { around }
@@ -844,9 +845,11 @@ struct Orientation {
 /// GL JS `lngLatBearingFromOrientation`.
 fn orientation_to_lat_lng_bearing(q: DQuat) -> Orientation {
     Orientation {
-        latitude: -mln_math::rad2deg((2.0 * (q.w * q.y - q.z * q.x)).clamp(-1.0, 1.0).asin()),
-        longitude: -mln_math::rad2deg((2.0 * (q.w * q.x + q.y * q.z)).atan2(1.0 - 2.0 * (q.x * q.x + q.y * q.y))),
-        bearing: mln_math::rad2deg((2.0 * (q.w * q.z + q.x * q.y)).atan2(1.0 - 2.0 * (q.y * q.y + q.z * q.z))),
+        latitude: -mln_style::math::rad2deg((2.0 * (q.w * q.y - q.z * q.x)).clamp(-1.0, 1.0).asin()),
+        longitude: -mln_style::math::rad2deg(
+            (2.0 * (q.w * q.x + q.y * q.z)).atan2(1.0 - 2.0 * (q.x * q.x + q.y * q.y)),
+        ),
+        bearing: mln_style::math::rad2deg((2.0 * (q.w * q.z + q.x * q.y)).atan2(1.0 - 2.0 * (q.y * q.y + q.z * q.z))),
     }
 }
 
@@ -929,7 +932,7 @@ fn camera_over_sphere(view: &View, height: f64) -> DVec3 {
 /// The globe camera's orientation; GL JS's bearing is the view's angle with the
 /// sign flipped.
 fn camera_orientation(view: &View) -> DQuat {
-    orientation_from_lat_lng_bearing(&view.center(WrapMode::Unwrapped), -mln_math::rad2deg(view.angle()))
+    orientation_from_lat_lng_bearing(&view.center(WrapMode::Unwrapped), -mln_style::math::rad2deg(view.angle()))
 }
 
 /// The rotation about `axis` by `angle`, composed as GL JS's drag composes

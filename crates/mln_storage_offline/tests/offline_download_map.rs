@@ -20,8 +20,8 @@ use mln_storage::resource::{Priority, Usage};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Resource, Response};
 use mln_storage_offline::{Downloads, OfflineDownload, Post};
+use mln_style::geo::{LatLng, LatLngBounds};
 use mln_util::compression::compress;
-use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::pool::Pool;
 use mln_util::queue::Queue;
 

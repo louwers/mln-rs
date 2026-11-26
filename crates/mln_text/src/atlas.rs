@@ -76,4 +76,4 @@ impl ImagePosition {
 }
 
 /// The places of the images of a layout, by id.
-pub type ImagePositions = mln_util::hash::HashMap<String, ImagePosition>;
+pub type ImagePositions = mln_style::hash::HashMap<String, ImagePosition>;

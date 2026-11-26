@@ -3,12 +3,11 @@
 
 use std::sync::Arc;
 
-use mln_util::LatLng;
-use mln_util::image::PremultipliedImage;
-
 use crate::Edit;
+use crate::bitmap::PremultipliedImage;
 use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
+use crate::geo::LatLng;
 use crate::layer::SourceKind;
 use crate::source::{
     Described, Fetch, Load, OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType,

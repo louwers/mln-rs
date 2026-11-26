@@ -28,6 +28,6 @@ pub(crate) mod vertex_attribute;
 pub(crate) mod vertices;
 
 /// The size of a texture of an image of `size`.
-pub(crate) fn texture_size(size: mln_util::size::Size) -> mln_gfx::Size {
+pub(crate) fn texture_size(size: mln_style::size::Size) -> mln_gfx::Size {
     mln_gfx::Size::new(size.width, size.height)
 }

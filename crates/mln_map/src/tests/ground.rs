@@ -11,7 +11,7 @@ use mln_map_types::Elevation;
 use mln_renderer::{RenderMode, RendererEvent};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::Edit;
-use mln_util::geo::{LatLng, WrapMode};
+use mln_style::geo::{LatLng, WrapMode};
 use mln_util::queue::Queue;
 
 use crate::{
@@ -180,7 +180,7 @@ fn map(mode: MapMode, run_loop: &Queue<()>) -> Map {
 /// A 512 by 512 map of `style` that may pitch up to 180 degrees.
 pub(super) fn pitchable(style: &str, run_loop: &Queue<()>) -> Map {
     let file_source = StubFileSource::on_queue(run_loop, ResponseType::Asynchronous);
-    let options = MapOptions { size: mln_util::size::Size::new(512, 512), ..Default::default() };
+    let options = MapOptions { size: mln_style::size::Size::new(512, 512), ..Default::default() };
     let mut map = Map::with_file_source(file_source, options, &crate::tests::pool()).expect("map");
     map.load_style_json(style);
     map.process_events();
@@ -190,7 +190,7 @@ pub(super) fn pitchable(style: &str, run_loop: &Queue<()>) -> Map {
 
 /// Where `location` is in Web Mercator at zoom 0.
 pub(super) fn world(location: &LatLng) -> DVec2 {
-    let point = mln_util::projection::Projection::project(location, 1.0 / mln_util::constants::TILE_SIZE_D);
+    let point = mln_util::projection::Projection::project(location, 1.0 / mln_style::constants::TILE_SIZE_D);
     DVec2::new(point.x, point.y)
 }
 

@@ -129,13 +129,12 @@ fn an_equal_filter_parsed_again_is_no_change() {
 mod versions {
     use std::sync::Arc;
 
-    use mln_util::image::PremultipliedImage;
-    use mln_util::size::Size;
-    use mln_util::tileset::PartialTileset;
-
+    use crate::bitmap::PremultipliedImage;
     use crate::diff::{LayerChange, StyleDiff, sources_by_id};
+    use crate::size::Size;
     use crate::sources::geojson::{GeoJSONOptions, geojson_source};
     use crate::sources::tileset::vector_source;
+    use crate::tileset::PartialTileset;
     use crate::{Edit, StyleRegistry, image};
 
     const STYLE: &str = r#"{"version":8,

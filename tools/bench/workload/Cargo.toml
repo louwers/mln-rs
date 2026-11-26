@@ -18,7 +18,7 @@ name = "mln_bench_workload"
 # libraries by path, and other crates by loose requirements.
 [dependencies]
 mln_map = { package = "mln-rs-map", path = "../../../crates/mln_map" }
-mln_util = { package = "mln-rs-util", path = "../../../crates/mln_util" }
+mln_style = { package = "mln-rs-style", path = "../../../crates/mln_style" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The manifest's hash, which names the snapshot's directory.

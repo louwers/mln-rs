@@ -1,6 +1,6 @@
 use glam::Vec2;
-use mln_math::deg2radf;
 use mln_style::feature::GeometryCoordinate;
+use mln_style::math::deg2radf;
 use mln_style::padding::Padding;
 use mln_text::PositionedIcon;
 use mln_text::glyph::Shaping;

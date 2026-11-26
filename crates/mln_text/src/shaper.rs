@@ -22,7 +22,7 @@ use harfrust::{
     Buffer, Direction, Feature, FontFuncs, GlyphExtents, GlyphId, Language, Script, ShapeOptions, ShapePlan,
     ShaperFont, Tag,
 };
-use mln_util::hash::HashMap;
+use mln_style::hash::HashMap;
 use parking_lot::Mutex;
 use unicode_properties::{GeneralCategory, UnicodeGeneralCategory};
 

@@ -10,8 +10,11 @@ use mln_map_types::{CameraOptions, ConstrainMode, MapMode, TileLodMode, Transfor
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, FileSourceExt, Kind, RequestOrder, Resource, Responder, Response};
+use mln_style::error::Error;
+use mln_style::geo::LatLng;
 use mln_style::layer::{Layer, LayerStyle};
 use mln_style::layers::{Circle, Hillshade, Line, Raster};
+use mln_style::size::Size;
 use mln_style::source::{Fetch, Load, SourceData};
 use mln_style::sources::custom_geometry_source::{self, Options as CustomGeometrySourceOptions};
 use mln_style::sources::custom_vector_source::{self, Options as CustomVectorSourceOptions, TileDataFormat};
@@ -22,15 +25,12 @@ use mln_style::sources::{
 };
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
+use mln_style::tileset::{PartialTileset, Tileset};
 use mln_style::types::ProjectionDefinition;
 use mln_style::{Edit, Source, Style};
 use mln_tile_id::OverscaledTileID;
-use mln_util::error::Error;
-use mln_util::geo::LatLng;
 use mln_util::pool::{Pool, TaskGroup};
 use mln_util::queue::Queue;
-use mln_util::size::Size;
-use mln_util::tileset::{PartialTileset, Tileset};
 use parking_lot::Mutex;
 
 use crate::Registry;
@@ -118,9 +118,9 @@ impl SourceTest {
     /// Runs the loop, and `store`'s updates as the renderer's, until the
     /// test ends; `on_event` gets what the store reports.
     fn run_with(&self, store: &mut TileStore, mut on_event: impl FnMut(&mut TileStore, StoreEvent)) {
-        let deadline = mln_util::time::Instant::now() + Duration::from_secs(30);
+        let deadline = mln_style::time::Instant::now() + Duration::from_secs(30);
         while !self.ended.load(Ordering::SeqCst) {
-            assert!(mln_util::time::Instant::now() < deadline, "the test didn't end");
+            assert!(mln_style::time::Instant::now() < deadline, "the test didn't end");
             self.run_loop.run_once(&mut ());
             crate::tests::update(store);
             for event in store.take_events() {
@@ -452,7 +452,7 @@ impl OpenTileSource {
     /// Answers the open requests of the tiles at `z` with a 1x1 image.
     fn answer_zoom(&self, z: i8) {
         let mut response = Response::new();
-        let image = mln_util::image::PremultipliedImage::new(Size::new(1, 1));
+        let image = mln_style::bitmap::PremultipliedImage::new(Size::new(1, 1));
         response.data = Some(Arc::new(mln_image::encode_png(&image)));
         let open: Vec<Responder> =
             self.open.lock().iter().filter(|(zoom, _)| *zoom == z).map(|(_, responder)| responder.clone()).collect();
@@ -508,9 +508,9 @@ fn view_tiles_loaded_before_their_prefetched_parent_keep_their_requests() {
 
     // The view's tiles load; their parent doesn't yet.
     file_source.answer_zoom(1);
-    let deadline = mln_util::time::Instant::now() + Duration::from_secs(30);
+    let deadline = mln_style::time::Instant::now() + Duration::from_secs(30);
     while !ideal_renderable(&store) {
-        assert!(mln_util::time::Instant::now() < deadline, "the view's tiles didn't load");
+        assert!(mln_style::time::Instant::now() < deadline, "the view's tiles didn't load");
         crate::tests::update(&mut store);
         std::thread::yield_now();
     }
@@ -691,12 +691,12 @@ fn tile_attribution(kind: Tiled, attribution: &'static str) {
         let _ = sender.send(response);
     });
     // The stub answers in the turns of the test's loop.
-    let deadline = mln_util::time::Instant::now() + Duration::from_secs(30);
+    let deadline = mln_style::time::Instant::now() + Duration::from_secs(30);
     let response = loop {
         if let Ok(response) = responses.try_recv() {
             break response;
         }
-        assert!(mln_util::time::Instant::now() < deadline, "the TileJSON didn't load");
+        assert!(mln_style::time::Instant::now() < deadline, "the TileJSON didn't load");
         test.run_loop.run_once(&mut ());
         crate::tests::update(&mut store);
         std::thread::yield_now();
@@ -1570,7 +1570,7 @@ fn raster_dem_borders_across_a_world_wrap() {
     let mut store = test.store();
     let mut render_source = crate::tests::create_render_source(&source, &mut store);
     let fs: Arc<dyn FileSource> = file_source;
-    let deadline = mln_util::time::Instant::now() + Duration::from_secs(30);
+    let deadline = mln_style::time::Instant::now() + Duration::from_secs(30);
     let mut relayout = true;
     loop {
         // The store backfills the tiles as their DEMs arrive.
@@ -1581,7 +1581,7 @@ fn raster_dem_borders_across_a_world_wrap() {
         if store.source(key).is_some_and(|source| source.slots().next().is_some()) && render_source.is_loaded(&store) {
             break;
         }
-        assert!(mln_util::time::Instant::now() < deadline, "the tiles didn't load");
+        assert!(mln_style::time::Instant::now() < deadline, "the tiles didn't load");
         test.run_loop.run_once(&mut ());
         crate::tests::update(&mut store);
         std::thread::yield_now();
@@ -1642,7 +1642,7 @@ fn raster_dem_tiles_past_the_maxzoom_stay_at_their_zoom() {
             zoom: Some(zoom),
             ..Default::default()
         });
-        let deadline = mln_util::time::Instant::now() + Duration::from_secs(30);
+        let deadline = mln_style::time::Instant::now() + Duration::from_secs(30);
         loop {
             let mut parameters = test.tile_parameters_with(MapMode::Continuous, Some(Arc::clone(&fs)));
             parameters.prefetch_zoom_delta = 0;
@@ -1651,7 +1651,7 @@ fn raster_dem_tiles_past_the_maxzoom_stay_at_their_zoom() {
             if render_source.is_loaded(&store) {
                 break;
             }
-            assert!(mln_util::time::Instant::now() < deadline, "the tiles didn't load at zoom {zoom}");
+            assert!(mln_style::time::Instant::now() < deadline, "the tiles didn't load at zoom {zoom}");
             test.run_loop.run_once(&mut ());
             crate::tests::update(&mut store);
             std::thread::yield_now();
@@ -1682,7 +1682,7 @@ fn image_seen_by(test: &SourceTest, west: f64, east: f64) -> crate::sources::ren
     use mln_style::sources::{ImageSourceType, image_source};
     let corners =
         [(10.0, west), (10.0, east), (-10.0, east), (-10.0, west)].map(|(lat, lng)| LatLng::new(lat, lng).unwrap());
-    let image = mln_util::image::PremultipliedImage::from_vec(Size::new(1, 1), vec![255, 0, 0, 255]);
+    let image = mln_style::bitmap::PremultipliedImage::from_vec(Size::new(1, 1), vec![255, 0, 0, 255]);
     let source = edited(&image_source("image", corners), ImageSourceType::set_image("image", image));
     let mut store = test.store();
     let mut render_source = crate::sources::render_image_source::RenderImageSource::new(source.clone());

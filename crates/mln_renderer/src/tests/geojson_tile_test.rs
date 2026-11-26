@@ -3,13 +3,13 @@ use std::sync::Arc;
 use feature::Feature;
 use geo_types::Point;
 use mln_map_types::MapMode;
+use mln_style::error::Error;
 use mln_style::layer::{Layer, LayerStyle};
 use mln_style::layers::Circle;
 use mln_style::property::evaluation::PropertyEvaluationParameters;
 use mln_style::sources::geojson::{Features, GeoJSONData, TileFeatures};
 use mln_style::tile_id::CanonicalTileID;
 use mln_tile_id::OverscaledTileID;
-use mln_util::error::Error;
 use mln_util::pool::TaskGroup;
 
 use crate::Registry;

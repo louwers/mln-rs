@@ -17,13 +17,12 @@ pub(crate) mod builtin;
 use std::borrow::Cow;
 use std::sync::{Arc, LazyLock};
 
-use mln_util::hash::HashMap;
-
 pub use self::builtin::register_builtin_functions;
 use crate::color::Color;
 use crate::expression::parse::is_special_form;
 use crate::expression::type_::Type;
 use crate::expression::{Dependency, EvalResult, EvaluationContext, EvaluationResult, Expr};
+use crate::hash::HashMap;
 
 /// The parameter list of an overload: fixed types, or any number of
 /// arguments of one type.

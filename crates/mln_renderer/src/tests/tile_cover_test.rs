@@ -4,13 +4,14 @@
 use geo_types::{Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use mln_map::transform::Transform;
 use mln_map_types::{CameraLimits, CameraOptions, ConstrainMode, TileLodMode, ViewportMode};
+use mln_style::constants;
+use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
+use mln_style::range::Range;
+use mln_style::size::Size;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::ProjectionDefinition;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
-use mln_util::constants;
-use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, WrapMode};
-use mln_util::range::Range;
-use mln_util::size::Size;
+use mln_util::geo::EdgeInsets;
 
 use crate::util::tile_cover::{
     TileCover, TileCoverParameters, covering_zoom_level, tile_count_bounds, tile_cover, tile_cover_bounds,
@@ -159,8 +160,8 @@ mod tile_cover {
         transform.jump_to(&CameraOptions {
             center: Some(ll(59.116_898_740_996_106, 91.565_660_781_803_62)),
             zoom: Some(2.055_112_674_841_721_4),
-            bearing: Some(mln_math::rad2deg(0.749_639_382_565_672_6)),
-            pitch: Some(mln_math::rad2deg(1.047_197_551_196_597_6)),
+            bearing: Some(mln_style::math::rad2deg(0.749_639_382_565_672_6)),
+            pitch: Some(mln_style::math::rad2deg(1.047_197_551_196_597_6)),
             ..Default::default()
         });
 
@@ -676,7 +677,7 @@ mod tile_cover {
         // EXPECT_THROW(..., std::domain_error): the LatLng constructor's error.
         let point = p(-122.5744, 97.6609);
         assert_eq!(
-            Err(mln_util::Error::invalid_argument("latitude must be between -90 and 90")),
+            Err(mln_style::error::Error::invalid_argument("latitude must be between -90 and 90")),
             tile_cover_geometry(&Geometry::Point(point), 2)
         );
 
@@ -1292,7 +1293,7 @@ mod terrain_cover {
     /// Whether GL JS picks each tile's zoom by its distance without terrain:
     /// past a pitch that leaves the top of the view near the horizon.
     fn gljs_allows_variable_zoom(camera: &Camera) -> bool {
-        let fov = camera.fov.unwrap_or(mln_math::rad2deg(constants::DEFAULT_FOV));
+        let fov = camera.fov.unwrap_or(mln_style::math::rad2deg(mln_util::constants::DEFAULT_FOV));
         camera.pitch > (78.5 - fov / 2.0).clamp(0.0, 60.0)
     }
 
@@ -1316,7 +1317,7 @@ mod terrain_cover {
     fn gljs_cover(camera: &Camera, options: Options) -> Vec<OverscaledTileID> {
         let fov = camera.transform().view().fov();
         let tile_zoom = TileZoomFunction::new(
-            mln_math::rad2deg(fov),
+            mln_style::math::rad2deg(fov),
             TileZoomFunction::DEFAULT_MAX_ZOOM_LEVELS_ON_SCREEN,
             TileZoomFunction::DEFAULT_TILE_COUNT_MAX_MIN_RATIO,
         );
@@ -1440,7 +1441,7 @@ mod terrain_cover {
         // The zoom functions of fewer zoom levels on screen and fewer tiles.
         let with_lod = |max_zoom_levels_on_screen: f64, tile_count_max_min_ratio: f64| {
             let tile_zoom = TileZoomFunction::new(
-                mln_math::rad2deg(constants::DEFAULT_FOV),
+                mln_style::math::rad2deg(mln_util::constants::DEFAULT_FOV),
                 max_zoom_levels_on_screen,
                 tile_count_max_min_ratio,
             );

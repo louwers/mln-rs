@@ -1,11 +1,12 @@
 //! One view of a map: the camera, size and projection that a map snapshot or a
 //! rendered frame shows.
 
+use mln_style::error::Error;
+use mln_style::geo::{LatLng, WrapMode};
+use mln_style::size::Size;
 use mln_style::types::ProjectionDefinition;
 use mln_util::constants;
-use mln_util::error::Error;
-use mln_util::geo::{EdgeInsets, LatLng, NorthOrientation, WrapMode};
-use mln_util::size::Size;
+use mln_util::geo::{EdgeInsets, NorthOrientation};
 
 use crate::camera::CameraOptions;
 use crate::camera_limits::{CameraLimits, MAX_FIELD_OF_VIEW, MIN_FIELD_OF_VIEW};
@@ -188,9 +189,10 @@ impl MapView {
         let globe = projection.at_zoom(camera.zoom).transition_state() > 0.0;
         let min_zoom = limits.min_zoom_at_latitude_with(camera.center.latitude(), globe);
         if !(min_zoom..=constants::MAX_ZOOM).contains(&camera.zoom)
-            || !(mln_math::rad2deg(constants::PITCH_MIN)..=mln_math::rad2deg(constants::PITCH_MAX))
+            || !(mln_style::math::rad2deg(constants::PITCH_MIN)..=mln_style::math::rad2deg(constants::PITCH_MAX))
                 .contains(&camera.pitch)
-            || !(mln_math::rad2deg(MIN_FIELD_OF_VIEW)..=mln_math::rad2deg(MAX_FIELD_OF_VIEW)).contains(&camera.fov)
+            || !(mln_style::math::rad2deg(MIN_FIELD_OF_VIEW)..=mln_style::math::rad2deg(MAX_FIELD_OF_VIEW))
+                .contains(&camera.fov)
         {
             return Err(Error::invalid_argument(
                 "view camera zoom, pitch and field of view must be within the limits of a map",

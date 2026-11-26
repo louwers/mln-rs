@@ -16,16 +16,16 @@ use mln_gfx::{ConsumerSync, GpuSync, Handoff, SyncKind};
 use mln_map::RenderMode;
 use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_renderer::{Registry, Renderer, RendererEvent, RendererEvents, Update, UpdateReader};
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::error::Error;
+use mln_style::size::Size;
 use mln_style::source::SourceData;
 use mln_style::sources::{GeoJSONData, GeoJsonSourceType};
 use mln_text::GlyphCache;
 use mln_text::local_fonts::LocalGlyphs;
-use mln_util::error::Error;
 use mln_util::event_queue::Waker;
-use mln_util::image::PremultipliedImage;
 use mln_util::pool::Pool;
 use mln_util::queue::Queue;
-use mln_util::size::Size;
 
 use super::frame::{DemandMode, FrameDemand, FrameDisposition, FrameResult};
 use super::local::LocalTarget;
@@ -1747,7 +1747,7 @@ mod tests {
 
     use mln_map::RenderMode;
     use mln_renderer::RendererEvent;
-    use mln_util::error::Error;
+    use mln_style::error::Error;
 
     use super::{FrameOutcome, disown_still};
 

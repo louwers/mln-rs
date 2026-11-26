@@ -1,5 +1,5 @@
 use mln_style::feature::GeometryCoordinate;
-use mln_util::hash::HashMap;
+use mln_style::hash::HashMap;
 
 use crate::layout::symbol_feature::SymbolFeature;
 

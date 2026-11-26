@@ -3,7 +3,7 @@
 
 use std::str::FromStr;
 
-use mln_util::ParseEnumError;
+use crate::error::ParseEnumError;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, mln_wire::Wire)]
 #[repr(u8)]

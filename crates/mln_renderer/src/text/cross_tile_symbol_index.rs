@@ -28,10 +28,10 @@ use std::sync::Arc;
 use geometry::Point;
 use glam::{I64Vec2, Vec2};
 use mln_map_types::{TileProjector, View};
+use mln_style::constants::EXTENT;
+use mln_style::hash::HashSet;
 use mln_style::tile_id::CanonicalTileID;
 use mln_tile_id::OverscaledTileID;
-use mln_util::constants::EXTENT;
-use mln_util::hash::HashSet;
 use mln_vec_map::{VecMap, VecSet};
 
 use crate::buckets::symbol_bucket::SymbolBucket;
@@ -403,11 +403,11 @@ fn key_of<'a>(keys: &'a [u8], symbol: &IndexedSymbol) -> &'a [u8] {
 mod tests {
     use std::sync::Arc;
 
+    use mln_style::geo::LatLng;
     use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
     use mln_style::property::value::PropertyValue;
+    use mln_style::size::Size;
     use mln_style::types::ProjectionDefinition;
-    use mln_util::geo::LatLng;
-    use mln_util::size::Size;
 
     use super::*;
     use crate::buckets::symbol_bucket::{SymbolBucketStyle, SymbolLayoutFlags};

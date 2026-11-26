@@ -8,7 +8,7 @@ use mln_storage::offline::{
     OfflineRegionObserver, OfflineRegionStatus,
 };
 use mln_storage_offline::DatabaseFileSourceExt;
-use mln_util::error::Error;
+use mln_style::error::Error;
 
 use crate::completion::Completion;
 use crate::event::{EventMask, EventSource, RuntimeEvent, RuntimeEventKind};
@@ -57,7 +57,7 @@ impl<'a> Offline<'a> {
     /// this database's copy of each. A region that this database has already
     /// isn't copied again. The other database only needs to be readable.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) when
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) when
     /// `side_database_path` names no database file that opens for reading.
     /// That check opens the file on the calling thread.
     pub fn merge_regions(
@@ -102,7 +102,7 @@ impl<'a> Offline<'a> {
     /// download, from [`EventMask::ALL_RUNTIME_EVENTS`]. It replaces the
     /// region's earlier selection, and [`EventMask::NONE`] stops them.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a
     /// mask with map events.
     pub fn set_region_observed(&self, region_id: i64, events: EventMask) -> Result<Completion<()>, Error> {
         if events.bits() & !EventMask::ALL_RUNTIME_EVENTS.bits() != 0 {

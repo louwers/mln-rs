@@ -21,9 +21,9 @@ use mln_runtime::{
     MapOptions, RenderSession, RenderTarget, Runtime, RuntimeEvent, RuntimeEventKind, RuntimeOptions, Surface,
     ViewportOptions,
 };
-use mln_util::LatLng;
+use mln_style::geo::LatLng;
+use mln_style::size::Size;
 use mln_util::geo::ScreenCoordinate;
-use mln_util::size::Size;
 use mln_web_host::{pump, shaper};
 use parking_lot::Mutex;
 use wasm_bindgen::prelude::*;

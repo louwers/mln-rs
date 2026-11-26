@@ -6,13 +6,13 @@ use std::sync::Arc;
 
 use geometry::Point;
 use mln_map_types::MapMode;
+use mln_style::constants::EXTENT;
 use mln_style::expression::Value;
 use mln_style::feature::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
 use mln_style::layers::Heatmap;
 use mln_style::layers::heatmap_layer_properties::HeatmapPaintProperties;
 use mln_style::tile_id::CanonicalTileID;
 use mln_text::atlas::ImagePositions;
-use mln_util::constants::EXTENT;
 use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketBase, UploadNeeds};

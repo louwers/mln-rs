@@ -14,13 +14,13 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::hash::{HashMap, HashSet};
 use mln_style::layer::LayerStyle;
 use mln_style::layers::Raster;
 use mln_style::types::{LayerBlendType, RasterResamplingType, ResamplingType, TranslateAnchorType};
 use mln_tile_id::UnwrappedTileID;
-use mln_util::hash::{HashMap, HashSet};
 use mln_util::identity::SimpleIdentity;
-use mln_util::image::PremultipliedImage;
 
 use super::cast_matrix;
 use crate::bucket::NoBucket;
@@ -368,7 +368,7 @@ impl RenderRasterLayer {
 }
 
 fn spin_weights(spin: f32) -> [f32; 4] {
-    let spin = mln_math::deg2radf(spin);
+    let spin = mln_style::math::deg2radf(spin);
     let s = spin.sin();
     let c = spin.cos();
     let sqrt3 = 3.0f32.sqrt();

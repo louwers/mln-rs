@@ -495,7 +495,7 @@ fn a_redirect_keeps_headers_only_within_the_origin() {
 const MLT_ACCEPT: &str = "application/vnd.maplibre-tile, */*;q=0.1";
 
 fn mlt_tile(url: &str) -> Resource {
-    Resource::tile(url, 1.0, 0, 0, 0, mln_util::tileset::Scheme::XYZ, TileFormat::Mlt, LoadingMethod::All)
+    Resource::tile(url, 1.0, 0, 0, 0, mln_style::tileset::Scheme::XYZ, TileFormat::Mlt, LoadingMethod::All)
 }
 
 #[test]

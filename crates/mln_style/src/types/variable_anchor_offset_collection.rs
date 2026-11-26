@@ -1,6 +1,6 @@
 use feature::Value;
-use mln_util::string::to_string_double;
 
+use crate::string::to_string_double;
 use crate::types::SymbolAnchorType;
 
 #[derive(Clone, Copy, Debug, PartialEq, mln_wire::Wire)]

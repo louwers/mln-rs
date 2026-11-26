@@ -1,7 +1,8 @@
 use geometry::Point;
+use mln_style::constants;
+use mln_style::geo::LatLng;
 use mln_tile_id::UnwrappedTileID;
-use mln_util::constants;
-use mln_util::geo::{LatLng, ScreenCoordinate};
+use mln_util::geo::ScreenCoordinate;
 use mln_util::projection::Projection;
 
 use crate::view::View;

@@ -6,12 +6,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
+use mln_style::error::ErrorKind;
+use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
+use mln_style::size::Size;
 use mln_style::sources::GeoJsonSourceType;
 use mln_style::types::{ProjectionDefinition, ProjectionType};
-use mln_util::error::ErrorKind;
-use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
+use mln_util::geo::{EdgeInsets, ScreenCoordinate};
 use mln_util::queue::Queue;
-use mln_util::size::Size;
 
 use crate::map_snapshot::{CameraBounds, FreeCamera, TileSettings};
 use crate::{

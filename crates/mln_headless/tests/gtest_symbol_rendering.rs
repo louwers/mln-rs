@@ -13,13 +13,13 @@ use mln_renderer::Registry;
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::Edit;
+use mln_style::bitmap::PremultipliedImage;
 use mln_style::conversion::Convertible;
+use mln_style::geo::LatLng;
 use mln_style::layer::Layer;
+use mln_style::size::Size;
 use mln_style::types::VisibilityType;
-use mln_util::geo::LatLng;
-use mln_util::image::PremultipliedImage;
 use mln_util::pool::Pool;
-use mln_util::size::Size;
 
 use crate::support::*;
 

@@ -6,12 +6,11 @@
 > Depend on [`mln-rs`](https://crates.io/crates/mln-rs) instead: it re-exports
 > this crate as `mln_rs::mln_util`.
 
-Ports the utilities of the C++ core (`src/mln/util`, `include/mln/util`).
-
-Licensed under the BSD 2-Clause License, as the rest of mln-rs is
-([LICENSE.md](../../LICENSE.md)), except the ports that keep their own licenses:
-`mat2.rs`, `mat3.rs` and `mat4.rs` from gl-matrix (zlib License) and
-`unitbezier.rs` from WebKit (BSD 2-Clause License, Apple), each in its header.
+Ports the engine's utilities of the C++ core (`src/mln/util`,
+`include/mln/util`): the camera's geometry and math, threads, task queues and
+pools, HTTP headers and dates, compression and SDF glyphs. The utilities that
+the style shares with the engine, such as errors, colors, sizes, coordinates and
+tilesets, are mln-rs-style's.
 
 Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering

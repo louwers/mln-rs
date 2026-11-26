@@ -4,9 +4,9 @@
 
 use std::sync::Arc;
 
+use mln_style::bitmap::PremultipliedImage;
 use mln_style::tile_id::CanonicalTileID;
 use mln_util::identity::SimpleIdentity;
-use mln_util::image::PremultipliedImage;
 
 use crate::tile_mask::{TileMask, is_whole};
 

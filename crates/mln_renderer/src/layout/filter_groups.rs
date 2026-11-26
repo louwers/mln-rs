@@ -5,8 +5,8 @@
 use mln_style::expression::{EvaluationContext, Expr, Value};
 use mln_style::feature::GeometryTileFeature;
 use mln_style::filter::Filter;
+use mln_style::hash::HashMap;
 use mln_tile::{FeatureGroups, TileLayer};
-use mln_util::hash::HashMap;
 
 /// A scalar value that an equality filter compares, as a key that equal
 /// values share.
@@ -169,9 +169,9 @@ mod tests {
     use mln_style::conversion::{Convertible, Error};
     use mln_style::expression::{EvaluationContext, Functions, GlobalStateMap};
     use mln_style::filter::convert_filter;
+    use mln_style::hash::HashMap;
     use mln_style::tile_id::CanonicalTileID;
     use mln_tile::{MltTile, MvtTile, TileData};
-    use mln_util::hash::HashMap;
     use mlt_core::encoder::{EncoderConfig, Network, Profile};
     use mlt_core::geo_types::Coord;
     use mlt_core::{GeometryType, LayerWriter, PropKind};

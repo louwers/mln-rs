@@ -3,7 +3,7 @@
 //! before as still images and reading them back.
 
 use mln_map::{CameraOptions, MapMode};
-use mln_util::size::Size;
+use mln_style::size::Size;
 
 use crate::scenario::{Bench, Kind, Scenario};
 use crate::support::fixtures::{Fixtures, Tiles};

@@ -19,11 +19,11 @@ use std::time::Duration;
 
 use mln_map_types::{MapMode, View};
 use mln_style::TransitionOptions;
+use mln_style::constants::DEFAULT_TRANSITION_DURATION;
+use mln_style::hash::{HashMap, HashSet};
+use mln_style::time::Instant;
 use mln_style::types::{SymbolAnchorType, TextWritingModeType};
 use mln_tile_id::OverscaledTileID;
-use mln_util::constants::DEFAULT_TRANSITION_DURATION;
-use mln_util::hash::{HashMap, HashSet};
-use mln_util::time::Instant;
 
 use self::context::{BucketOptions, CollisionGroups, PlacementContext};
 use self::tile::TilePlacementState;

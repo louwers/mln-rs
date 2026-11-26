@@ -1,7 +1,6 @@
 use std::hash::{Hash, Hasher};
 
 use feature::{Value as MbglValue, ValueObject};
-use mln_util::string::to_string_double;
 use serde::Serialize;
 
 use crate::color::Color;
@@ -12,6 +11,7 @@ use crate::expression::locale::collator::Collator;
 use crate::expression::type_::Type;
 use crate::expression::{EvaluationContext, Expr};
 use crate::padding::Padding;
+use crate::string::to_string_double;
 use crate::types::{
     AlignmentType, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType, IconOverlapType,
     IconTextFitType, LayerBlendType, LightAnchorType, LineCapType, LineJoinType, Position, ProjectionDefinition,

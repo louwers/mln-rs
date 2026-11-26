@@ -9,13 +9,13 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_map_types::{TileCoordinate, TileProjector};
 use mln_style::color::Color;
+use mln_style::error::Error;
 use mln_style::expression::EvaluationContext;
+use mln_style::geo::WrapMode;
 use mln_style::layer::LayerStyle;
 use mln_style::layers::Circle;
 use mln_style::types::{AlignmentType, CirclePitchScaleType};
 use mln_tile_id::OverscaledTileID;
-use mln_util::error::Error;
-use mln_util::geo::WrapMode;
 
 use super::{cast_matrix, refresh_paint_attributes};
 use crate::bucket::Bucket;
@@ -57,7 +57,7 @@ fn project_point(
     p: Point<f64>,
     elevation: f64,
     projector: &TileProjector<'_>,
-    size: mln_util::size::Size,
+    size: mln_style::size::Size,
 ) -> mln_style::feature::GeometryCoordinate {
     let pos = projector.project(&p, elevation).point;
     // `(float(pos.x) + 1) * size.width * 0.5`: float, then double.
@@ -70,7 +70,7 @@ fn project_point(
 fn project_query_geometry(
     query_geometry: &mln_style::feature::GeometryCoordinates,
     projector: &TileProjector<'_>,
-    size: mln_util::size::Size,
+    size: mln_style::size::Size,
 ) -> mln_style::feature::GeometryCoordinates {
     query_geometry
         .iter()
@@ -82,7 +82,7 @@ fn project_query_geometry(
 /// its bottom left.
 fn viewport_geometry(
     screen: &[mln_util::geo::ScreenCoordinate],
-    size: mln_util::size::Size,
+    size: mln_style::size::Size,
 ) -> mln_style::feature::GeometryCoordinates {
     let height = f64::from(size.height);
     screen.iter().map(|p| mln_style::feature::GeometryCoordinate::new(p.x as i16, (height - p.y) as i16)).collect()

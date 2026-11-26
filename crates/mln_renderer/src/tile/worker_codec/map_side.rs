@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use mln_util::error::Error;
+use mln_style::error::Error;
 use mln_wire::payload::Payloads;
 use mln_wire::shared::Role;
 

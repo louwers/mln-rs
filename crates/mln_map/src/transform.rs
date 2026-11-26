@@ -19,13 +19,14 @@ use mln_map_types::{
     AnimationOptions, CameraLimits, CameraOptions, CenterAndBearing, ConstrainMode, FreeCameraOptions,
     NorthOrientation, ProjectionMode, TransformState, TransitionEnd, VerticalPerspectiveProjection, View, ViewportMode,
 };
+use mln_style::error::Error;
+use mln_style::geo::{LatLng, WrapMode};
+use mln_style::size::Size;
+use mln_style::time::Instant;
 use mln_style::types::ProjectionDefinition;
 use mln_util::constants::M2PI;
-use mln_util::error::Error;
-use mln_util::geo::{EdgeInsets, LatLng, ScreenCoordinate, WrapMode};
+use mln_util::geo::{EdgeInsets, ScreenCoordinate};
 use mln_util::projection::Projection;
-use mln_util::size::Size;
-use mln_util::time::Instant;
 use parking_lot::Mutex;
 
 use crate::log_target;
@@ -57,7 +58,7 @@ fn normalize_angle(mut angle: f64, anchor_angle: f64) -> f64 {
         return 0.0;
     }
 
-    angle = mln_math::wrap(angle, -PI, PI);
+    angle = mln_style::math::wrap(angle, -PI, PI);
     if angle == -PI {
         angle = PI;
     }
@@ -345,7 +346,7 @@ impl Transform {
     }
 
     /// Pans the map by the given amount.
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a NaN
     /// or infinite offset.
     pub fn move_by(
         &mut self,
@@ -406,7 +407,7 @@ impl Transform {
             // of spinning round it.
             let start = CenterAndBearing {
                 center: self.view().center(WrapMode::Unwrapped),
-                bearing: -mln_math::rad2deg(self.view().angle()),
+                bearing: -mln_style::math::rad2deg(self.view().angle()),
             };
             let end = VerticalPerspectiveProjection::fling_camera(
                 self.state.view(),
@@ -759,7 +760,7 @@ impl Transform {
     }
 
     /// The location under `point`, in screen coordinates (y down).
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a NaN
     /// or infinite point.
     pub fn screen_coordinate_to_lat_lng(&self, point: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {
         let mut flipped_point = *point;

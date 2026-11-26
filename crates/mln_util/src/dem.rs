@@ -13,7 +13,7 @@
 //! `i + 1`. Pixel `i` describes the cell centred at `(i + 0.5) / dim` of the
 //! tile, as hillshade and color-relief read it.
 
-use crate::tileset::RasterEncoding;
+use mln_style::tileset::RasterEncoding;
 
 /// How a DEM's texels decode: `(r·w0 + g·w1 + b·w2 + base) · scale`, over
 /// channels from 0 to 255.

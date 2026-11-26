@@ -1,6 +1,5 @@
-use mln_util::LatLng;
-
 use super::{Converter, Convertible, Error};
+use crate::geo::LatLng;
 
 impl Converter for LatLng {
     fn convert(value: &Convertible<'_>, error: &mut Error) -> Option<LatLng> {

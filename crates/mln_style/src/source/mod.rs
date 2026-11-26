@@ -19,15 +19,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use mln_util::constants;
-use mln_util::image::PremultipliedImage;
-use mln_util::tileset::{Tileset, VectorEncoding};
-
+use crate::bitmap::PremultipliedImage;
 use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
 use crate::layer::SourceKind;
-use crate::log_target;
 use crate::sources::geojson::GeoJSONOptions;
+use crate::tileset::{Tileset, VectorEncoding};
+use crate::{constants, log_target};
 
 mod convert;
 mod list;
@@ -128,7 +126,7 @@ pub type Data = Arc<Vec<u8>>;
 
 /// What describing a source's fetched data found: its description, `None`
 /// for data that describes nothing, or why the source failed to load.
-pub type Described<D> = Result<Option<D>, mln_util::Error>;
+pub type Described<D> = Result<Option<D>, crate::error::Error>;
 
 /// A description of a source of some type, which
 /// [`Source::with_description`] gives back to its type.
@@ -168,13 +166,13 @@ pub trait StyleSourceType: Sized + Send + Sync + 'static {
     /// description of a source of `options`, and answers through `respond`,
     /// at once or later. `None` is a response without content.
     fn describe(_options: &Self::Options, _data: Option<Data>, respond: Respond<Described<Self::Description>>) {
-        respond(Err(mln_util::Error::native(format!("a {} source fetches nothing", Self::INFO.name))));
+        respond(Err(crate::error::Error::native(format!("a {} source fetches nothing", Self::INFO.name))));
     }
 
     /// Turns `image`, the decoded image of a [`Fetch::Image`], into the
     /// description of a source of `options`.
     fn describe_image(_options: &Self::Options, _image: PremultipliedImage) -> Described<Self::Description> {
-        Err(mln_util::Error::native(format!("a {} source fetches no image", Self::INFO.name)))
+        Err(crate::error::Error::native(format!("a {} source fetches no image", Self::INFO.name)))
     }
 
     /// Whether `new`, a loaded description that replaces `old`, changes what

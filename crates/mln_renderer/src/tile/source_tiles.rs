@@ -7,16 +7,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use mln_map_types::{MapMode, TileLodMode, VerticalPerspectiveProjection};
-use mln_style::Source;
+use mln_style::geo::{LatLngBounds, WrapMode};
+use mln_style::hash::HashSet;
 use mln_style::property::value::PropertyValue;
+use mln_style::range::Range;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_style::{Source, constants};
 use mln_tile_id::tile_range::TileRange;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
-use mln_util::constants;
-use mln_util::geo::{LatLngBounds, WrapMode};
-use mln_util::hash::HashSet;
 use mln_util::projection::Projection;
-use mln_util::range::Range;
 use mln_vec_map::VecMap;
 use smallvec::SmallVec;
 
@@ -624,7 +623,7 @@ impl SourceTiles {
 
         self.handle_wrap_jump(parameters.view.center(WrapMode::Unwrapped).longitude() as f32, ctx);
 
-        let zoom = mln_math::clamp_f64(
+        let zoom = mln_style::math::clamp_f64(
             parameters.view.zoom() + parameters.tile_lod_zoom_shift,
             parameters.min_zoom,
             parameters.max_zoom,
@@ -1146,7 +1145,7 @@ impl SourceTiles {
         options: &crate::query::RenderedQueryOptions,
         global_state: Option<&mln_style::expression::GlobalStateMap>,
         proj_matrix: &glam::DMat4,
-    ) -> Result<crate::geometry::feature_index::QueryResults, mln_util::error::Error> {
+    ) -> Result<crate::geometry::feature_index::QueryResults, mln_style::error::Error> {
         use mln_map_types::tile_coordinate::TileCoordinate;
 
         let feature_state = &self.info.feature_state;
@@ -1271,7 +1270,7 @@ impl SourceTiles {
         // tested at three copies and can be rendered at two wraps: these are
         // where this tile's features start in each layer's results.
         let mut canonical_tile: Option<mln_style::tile_id::CanonicalTileID> = None;
-        let mut canonical_tile_start: mln_util::hash::HashMap<String, usize> = mln_util::hash::HashMap::default();
+        let mut canonical_tile_start: mln_style::hash::HashMap<String, usize> = mln_style::hash::HashMap::default();
 
         for (id, key) in sorted_tiles {
             let Some(tile) = self.tile(key) else {
@@ -1382,7 +1381,7 @@ impl SourceTiles {
         &self,
         options: &crate::query::SourceQueryOptions,
         global_state: Option<&mln_style::expression::GlobalStateMap>,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
+    ) -> Result<Vec<mln_util::feature::Feature>, mln_style::error::Error> {
         let mut result = Vec::new();
         for tile in self.cover() {
             if let Some(contents) = tile.contents().and_then(Contents::geometry) {

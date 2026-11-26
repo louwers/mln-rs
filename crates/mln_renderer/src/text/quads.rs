@@ -1,7 +1,7 @@
 use glam::Vec2;
-use mln_math::deg2radf;
 use mln_style::image::ImageStretch;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
+use mln_style::math::deg2radf;
 use mln_style::types::{SymbolPlacementType, TextRotationAlignmentType};
 use mln_text::PositionedIcon;
 use mln_text::atlas::{ImagePosition, ImagePositions, RectU16};
@@ -323,11 +323,11 @@ pub(crate) fn glyph_quads(
 
 #[cfg(test)]
 mod tests {
+    use mln_style::bitmap::PremultipliedImage;
     use mln_style::image::Impl as ImageImpl;
+    use mln_style::size::Size;
     use mln_style::types::{IconTextFitType, SymbolAnchorType};
     use mln_text::glyph::{Bounds, GlyphID, GlyphMetrics, PositionedGlyph, PositionedLine};
-    use mln_util::image::PremultipliedImage;
-    use mln_util::size::Size;
 
     use super::*;
 

@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use mln_image::decode_image;
+use mln_style::bitmap::PremultipliedImage;
 use mln_style::image::{ImageContent, TextFit};
-use mln_util::image::PremultipliedImage;
 
 use super::{FixtureLog, read_file};
 use crate::sprite_parser::{create_style_image, parse_sprite};

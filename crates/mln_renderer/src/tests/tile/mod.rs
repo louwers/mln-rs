@@ -78,7 +78,7 @@ pub(crate) fn remote_workers(count: usize) -> crate::tile::worker_codec::RemoteW
 /// Port-only: an opaque PNG whose pixels differ from their neighbours.
 #[must_use]
 pub(crate) fn png(width: u32, height: u32) -> mln_storage::Data {
-    let mut image = mln_util::image::PremultipliedImage::new(mln_util::size::Size::new(width, height));
+    let mut image = mln_style::bitmap::PremultipliedImage::new(mln_style::size::Size::new(width, height));
     for (i, pixel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
         pixel.copy_from_slice(&[(i % 251) as u8, (i / 7 % 253) as u8, (i * 3 % 255) as u8, 255]);
     }
@@ -89,7 +89,7 @@ pub(crate) fn png(width: u32, height: u32) -> mln_storage::Data {
 /// neighbours and from those of other `seed`s.
 #[must_use]
 pub(crate) fn dem_png(seed: u32) -> mln_storage::Data {
-    let mut image = mln_util::image::PremultipliedImage::new(mln_util::size::Size::new(16, 16));
+    let mut image = mln_style::bitmap::PremultipliedImage::new(mln_style::size::Size::new(16, 16));
     for (i, pixel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
         let i = i as u32;
         *pixel = [((seed * 37 + i) % 256) as u8, (i * 7 % 256) as u8, ((i * 3 + seed) % 256) as u8, 255];

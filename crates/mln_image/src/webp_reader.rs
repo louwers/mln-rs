@@ -5,9 +5,9 @@
 
 use std::io::Cursor;
 
-use mln_util::image::{PremultipliedImage, UnassociatedImage};
+use mln_style::bitmap::{PremultipliedImage, UnassociatedImage};
+use mln_style::size::Size;
 use mln_util::premultiply::premultiply;
-use mln_util::size::Size;
 
 use crate::log_target;
 

@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use mln_map::{CameraDelta, CameraOptions, CameraUpdate, TransformState, TransitionEnd};
-use mln_util::LatLng;
+use mln_style::geo::LatLng;
 use mln_util::geo::ScreenCoordinate;
 use parking_lot::Mutex;
 

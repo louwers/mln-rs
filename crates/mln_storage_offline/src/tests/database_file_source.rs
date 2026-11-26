@@ -14,7 +14,7 @@ use mln_storage::offline::{
     OfflineTilePyramidRegionDefinition,
 };
 use mln_storage::offline_database::{DatabaseError, OfflineDatabase};
-use mln_util::geo::{LatLng, LatLngBounds};
+use mln_style::geo::{LatLng, LatLngBounds};
 
 use super::TempDir;
 use crate::database_file_source::{DatabaseFileSourceExt, RegionDatabase, region_database};

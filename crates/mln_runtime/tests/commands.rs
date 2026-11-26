@@ -9,7 +9,7 @@ use std::sync::mpsc::channel;
 
 use mln_map::{CameraOptions, CameraUpdate};
 use mln_runtime::{ErrorKind, LogicalExtent, MapOptions, ResourceRequest, Runtime, RuntimeOptions};
-use mln_util::size::Size;
+use mln_style::size::Size;
 use parking_lot::Mutex;
 
 use crate::support::{EMPTY_STYLE, TIMEOUT, TempDir, eventually, map, map_options, runtime, wait, wait_err};

@@ -12,10 +12,10 @@ use std::ops::Range;
 use std::sync::{Arc, OnceLock};
 
 use feature::{Identifier, PropertyMap, Value};
+use mln_style::constants::EXTENT;
 use mln_style::feature::{GeometryCollection, GeometryCoordinate, GeometryCoordinates};
 use mln_style::geometry::FeatureType;
-use mln_util::constants::EXTENT;
-use mln_util::hash::HashMap;
+use mln_style::hash::HashMap;
 use mlt_core::wire::{Analyze as _, LogicalEncoding, PhysicalEncoding};
 use mlt_core::{GeometryType, GeometryValues, ParsedLayer01, ParsedProperty};
 

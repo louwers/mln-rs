@@ -1,5 +1,5 @@
 use mln_map_types::{ConstrainMode, MapMode, NorthOrientation, TerrainOptions, ViewportMode};
-use mln_util::size::Size;
+use mln_style::size::Size;
 
 /// What a map does with a style image once no layer uses it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

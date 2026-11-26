@@ -2,7 +2,7 @@
 // that the web demo reads too, and the terrain it adds to some of them. And
 // the projections it draws them with.
 
-use mln_util::error::Error;
+use mln_style::error::Error;
 
 const STYLES_JSON: &str = include_str!("../../styles.json");
 
@@ -242,7 +242,7 @@ impl Projection {
 
 #[cfg(test)]
 mod tests {
-    use mln_util::hash::HashSet;
+    use mln_style::hash::HashSet;
 
     use super::*;
 

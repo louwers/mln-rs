@@ -76,7 +76,7 @@ pub use map::{Applied, CameraQuery, CommandGroup, Map, MapId, MapOptions};
 pub use mln_map::{LogicalExtent, MapSnapshot};
 pub use mln_renderer::query::{RenderedQueryOptions, SourceQueryOptions};
 pub use mln_renderer::{ClipDepthRange, FrameProjection};
-pub use mln_util::{Error, ErrorKind};
+pub use mln_style::error::{Error, ErrorKind};
 pub use offline::Offline;
 pub use render::{
     AcquiredFrame, Adapter, AttachOptions, BackendRef, BackendType, BorrowedRing, CanvasFormat, ConsumerSync,

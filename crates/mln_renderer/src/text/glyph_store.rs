@@ -51,6 +51,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_storage::{FileSource, Request, Resource, Response};
+use mln_style::error::Error;
+use mln_style::hash::HashMap;
 use mln_style::i18n;
 use mln_text::glyph::{
     FontData, FontFace, FontFaces, Glyph, GlyphDependencies, GlyphID, GlyphIDType, GlyphMap, GlyphRange, ShapeRequests,
@@ -62,9 +64,7 @@ use mln_text::local_fonts::LocalGlyphs;
 use mln_text::tagged_string::font_stack_hash;
 use mln_text::weight::REGULAR_WEIGHT;
 use mln_text::{BiDiRun, ShapedText, visual_runs};
-use mln_util::error::Error;
 use mln_util::font_stack::FontStack;
-use mln_util::hash::HashMap;
 use mln_util::pool::TaskGroup;
 use mln_util::tiny_sdf::transform_raster_to_sdf;
 use mln_vec_map::{VecMap, VecSet};

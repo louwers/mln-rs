@@ -2,7 +2,6 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use feature::Value;
-use mln_util::time::Instant;
 use mln_vec_map::VecSet;
 
 use super::util::parse_json;
@@ -16,6 +15,7 @@ use crate::property::expression::PropertyExpression;
 use crate::property::set::{Transitionable, Transitioning};
 use crate::property::transition::{GlobalStateChange, TransitionOptions, TransitionParameters};
 use crate::property::value::PropertyValue;
+use crate::time::Instant;
 
 /// The time the tests' transitions start at.
 fn start() -> Instant {

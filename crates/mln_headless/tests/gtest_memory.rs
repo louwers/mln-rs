@@ -6,9 +6,9 @@ use mln_renderer::Registry;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Resource, Response};
 use mln_style::Edit;
-use mln_util::hash::HashMap;
+use mln_style::hash::HashMap;
+use mln_style::size::Size;
 use mln_util::pool::Pool;
-use mln_util::size::Size;
 use parking_lot::Mutex;
 
 use crate::support::{TestLoop, read_bytes};

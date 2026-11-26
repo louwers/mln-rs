@@ -9,7 +9,7 @@
 use core::ffi::c_void;
 use std::sync::Arc;
 
-use mln_util::ErrorKind;
+use mln_style::error::ErrorKind;
 
 use crate::buffer::{LentText, Strided};
 use crate::callback::{self, UserData};
@@ -225,7 +225,7 @@ impl Completion {
 pub(crate) fn forward<T: Send + 'static, V: CompletionValue>(
     completion: mln_runtime::Completion<T>,
     sink: Option<Completion>,
-    finish: impl FnOnce(Result<T, mln_util::Error>) -> (Result<V, Error>, Generations) + Send + 'static,
+    finish: impl FnOnce(Result<T, mln_style::error::Error>) -> (Result<V, Error>, Generations) + Send + 'static,
 ) {
     completion.on_complete(move |result| {
         let (result, generations) = finish(result);
@@ -413,12 +413,13 @@ pub(crate) mod tests {
 
     #[test]
     fn a_command_without_a_completion_logs_its_failure_as_a_warning() {
-        let finish = |result: Result<(), mln_util::Error>| (result.map_err(Error::from), Generations::default());
+        let finish =
+            |result: Result<(), mln_style::error::Error>| (result.map_err(Error::from), Generations::default());
         let warnings = discard_warnings(|| {
             forward(mln_runtime::Completion::ready(Ok(())), None, finish);
-            let failed = mln_util::Error::new(ErrorKind::InvalidState, "map has no open command group");
+            let failed = mln_style::error::Error::new(ErrorKind::InvalidState, "map has no open command group");
             forward(mln_runtime::Completion::ready(Err(failed)), None, finish);
-            let cancelled = mln_util::Error::new(ErrorKind::Cancelled, "the map was released");
+            let cancelled = mln_style::error::Error::new(ErrorKind::Cancelled, "the map was released");
             forward(mln_runtime::Completion::ready(Err(cancelled)), None, finish);
         });
         assert_eq!(

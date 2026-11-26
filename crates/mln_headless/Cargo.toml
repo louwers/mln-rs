@@ -29,6 +29,7 @@ mln_renderer.workspace = true
 # backend.
 mln_runtime = { workspace = true, features = ["default", "webgpu"] }
 mln_text.workspace = true
+mln_style.workspace = true
 mln_util.workspace = true
 parking_lot.workspace = true
 
@@ -45,7 +46,6 @@ geojson.workspace = true
 glam.workspace = true
 mln_image = { package = "mln-rs-image", path = "../mln_image" }
 mln_map_types = { package = "mln-rs-map-types", path = "../mln_map_types" }
-mln_math = { package = "mln-rs-math", path = "../mln_math" }
 # system_fonts_test shapes text with mln_text's Shaper in-process.
 mln_renderer = { workspace = true, features = ["font-face-shaper"] }
 mln_storage = { workspace = true, features = ["sqlite", "stub-file-source"] }

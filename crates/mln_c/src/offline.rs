@@ -7,9 +7,9 @@ use mln_storage::offline::{
     OfflineGeometryRegionDefinition, OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState,
     OfflineRegionExpiry, OfflineRegionStatus, OfflineTilePyramidRegionDefinition,
 };
+use mln_style::geo::LatLngBounds;
 use mln_style::geometry::for_each_point;
 use mln_util::chrono::Timestamp;
-use mln_util::geo::LatLngBounds;
 
 use crate::buffer::LentText;
 use crate::completion::{self, CompletionValue, Generations, PendingCompletion};
@@ -184,7 +184,7 @@ fn expiry(expiry: &OfflineRegionExpiry) -> mln_offline_region_expiry {
 unsafe fn operation<T: Send + 'static, V: CompletionValue>(
     runtime: mln_runtime,
     completion: *const mln_completion,
-    send: impl FnOnce(Offline<'_>) -> Result<::mln_runtime::Completion<T>, mln_util::Error>,
+    send: impl FnOnce(Offline<'_>) -> Result<::mln_runtime::Completion<T>, mln_style::error::Error>,
     value: impl FnOnce(T) -> V + Send + 'static,
 ) -> Result<(), Error> {
     let object = runtime::resolve(runtime)?;

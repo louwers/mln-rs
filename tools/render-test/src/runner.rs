@@ -13,13 +13,13 @@ use std::time::Duration;
 use feature::Value;
 use geometry::Point;
 use mln_image::{decode_image, encode_png};
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::geo::LatLng;
+use mln_style::hash::HashMap;
+use mln_style::size::Size;
 use mln_util::feature::Feature;
-use mln_util::geo::LatLng;
-use mln_util::hash::HashMap;
-use mln_util::image::PremultipliedImage;
 use mln_util::pool::Pool;
 use mln_util::queue::Queue;
-use mln_util::size::Size;
 
 use crate::file_source::ProxyFileSource;
 use crate::filesystem;
@@ -1062,17 +1062,17 @@ fn render_with_map(
 fn get_tile_center_coordinates(tile_id: &TileId) -> LatLng {
     let scale = f64::from(1u32 << tile_id.z);
     let tile_center = Point::new(
-        (f64::from(tile_id.x) + 0.5) * mln_util::constants::TILE_SIZE_D,
-        (f64::from(tile_id.y) + 0.5) * mln_util::constants::TILE_SIZE_D,
+        (f64::from(tile_id.x) + 0.5) * mln_style::constants::TILE_SIZE_D,
+        (f64::from(tile_id.y) + 0.5) * mln_style::constants::TILE_SIZE_D,
     );
     // Projection::unproject(tileCenter, scale) (LatLng::Unwrapped); tile
     // centers are always valid coordinates.
-    mln_util::projection::Projection::unproject(&tile_center, scale, mln_util::geo::WrapMode::Unwrapped)
+    mln_util::projection::Projection::unproject(&tile_center, scale, mln_style::geo::WrapMode::Unwrapped)
         .expect("tile center")
 }
 
 fn get_tile_screen_pixel_size(pixel_ratio: f32) -> u32 {
-    (mln_util::constants::TILE_SIZE_D * f64::from(pixel_ratio)) as u32
+    (mln_style::constants::TILE_SIZE_D * f64::from(pixel_ratio)) as u32
 }
 
 fn get_image_tile_offset(dims: &std::collections::BTreeSet<u32>, dim: u32, pixel_ratio: f32) -> u32 {

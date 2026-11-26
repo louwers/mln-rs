@@ -1,11 +1,11 @@
 use etagere::{AllocId, BucketedAtlasAllocator, size2};
 use geometry::Point;
 use mln_gfx::gpu::{Gpu, TextureFormat};
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::hash::HashMap;
 use mln_style::image::Impl as ImageImpl;
+use mln_style::size::Size;
 use mln_text::atlas::{ImagePosition, RectU16};
-use mln_util::hash::HashMap;
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
 
 use crate::gfx::context::Context;
 use crate::gfx::store::SharedTexture;

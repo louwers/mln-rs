@@ -333,7 +333,7 @@ impl Drapes {
     /// changed, which may draw something. A drape updates where its key
     /// differs from the one it was drawn from, or it has a texture of another
     /// side than its tile's.
-    pub(crate) fn choose(&mut self, parameters: &mut PaintParameters<'_>, pattern_atlas_size: mln_util::size::Size) {
+    pub(crate) fn choose(&mut self, parameters: &mut PaintParameters<'_>, pattern_atlas_size: mln_style::size::Size) {
         let mut held = Vec::with_capacity(self.drapes.len());
         for Drape { tile, transform, stacks, .. } in &mut self.drapes {
             let (clip_masks, composite) = (&mut ClipMasks::default(), &mut LayerComposite::default());
@@ -700,9 +700,9 @@ fn drape_texture(context: &mut Context, side: u32) -> SharedTexture {
 mod tests {
     use mln_map::transform::Transform;
     use mln_map_types::{CameraOptions, ConstrainMode, ViewportMode};
+    use mln_style::geo::LatLng;
     use mln_style::tile_id::CanonicalTileID;
     use mln_style::types::ProjectionDefinition;
-    use mln_util::geo::LatLng;
 
     use super::*;
     use crate::terrain::{ElevationRanges, TerrainTile};
@@ -710,7 +710,7 @@ mod tests {
     /// A view of the globe at `zoom` over 512 by 512 pixels.
     fn globe(center: LatLng, zoom: f64) -> View {
         let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
-        transform.resize(mln_util::size::Size::new(512, 512)).unwrap();
+        transform.resize(mln_style::size::Size::new(512, 512)).unwrap();
         transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
         transform.jump_to(&CameraOptions { center: Some(center), zoom: Some(zoom), ..Default::default() });
         assert!(transform.view().is_globe());

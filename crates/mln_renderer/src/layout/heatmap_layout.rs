@@ -5,11 +5,11 @@
 use std::sync::Arc;
 
 use mln_map_types::MapMode;
+use mln_style::error::Error;
 use mln_style::expression::EvaluationContext;
 use mln_style::feature::GeometryTileFeature;
 use mln_style::layers::Heatmap;
 use mln_text::atlas::ImagePositions;
-use mln_util::error::Error;
 use mln_vec_map::VecMap;
 
 use crate::bucket::Bucket;

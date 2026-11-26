@@ -5,11 +5,11 @@
 
 use std::sync::Arc;
 
+use mln_style::error::Error;
 use mln_style::expression::UnavailableImages;
 use mln_style::tile_id::CanonicalTileID;
 use mln_text::glyph::GlyphDependencies;
 use mln_tile::{TileData, TileLayer};
-use mln_util::error::Error;
 use mln_vec_map::{VecMap, VecSet};
 
 use crate::bucket_parameters::BucketParameters;

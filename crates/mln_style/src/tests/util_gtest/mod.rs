@@ -1,9 +1,13 @@
-//! Ported C++ gtests of test/util, for the utilities that are part of the
+//! Ported C++ gtests of test/util and test/math, for the utilities that are part of the
 //! style. Every test carries a `// gtest: Group.Name` marker naming the C++
 //! test it ports.
 
 mod color;
+mod geo;
+mod math;
+mod number_conversions;
 mod padding;
+mod string;
 
 /// The ULP distance gtest's `FloatingPoint<T>::AlmostEquals` uses.
 const MAX_ULPS: u64 = 4;

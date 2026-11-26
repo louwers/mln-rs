@@ -11,9 +11,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_util::UnitBezier;
-use mln_util::time::Instant;
-
 use super::util::FixtureLog;
 use crate::color::Color;
 use crate::expression::Functions;
@@ -23,7 +20,9 @@ use crate::property::evaluation::{PropertyEvaluationParameters, ZoomHistory};
 use crate::property::transition::{TransitionOptions, TransitionParameters};
 use crate::registry::StyleRegistry;
 use crate::style::Style;
+use crate::time::Instant;
 use crate::types::VisibilityType;
+use crate::unitbezier::UnitBezier;
 
 fn render_tests_dir() -> PathBuf {
     std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())

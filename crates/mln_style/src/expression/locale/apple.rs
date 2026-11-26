@@ -23,13 +23,13 @@ use std::ffi::CString;
 use std::ptr::NonNull;
 use std::sync::OnceLock;
 
-use mln_util::hash::HashSet;
 use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::AnyObject;
 use objc2_foundation::{NSLocale, NSRange, NSString, NSStringCompareOptions};
 
 use super::keywords::CollationKeywords;
 use super::{FractionDigits, Sensitivity, Style, Unit, default_locale_override};
+use crate::hash::HashSet;
 
 /// The language of an ICU locale identifier or a language tag.
 fn language_of(identifier: &str) -> &str {

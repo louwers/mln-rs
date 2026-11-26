@@ -1,7 +1,7 @@
 //! Port-only: hash maps and sets written in key order, so that the same
 //! value always encodes to the same bytes.
 
-#![expect(clippy::disallowed_types, reason = "maps and sets of every hasher, mln_util's among them")]
+#![expect(clippy::disallowed_types, reason = "maps and sets of every hasher, mln_style's among them")]
 
 /// `#[wire(with)]` for a `HashMap` with ordered keys.
 pub mod map {

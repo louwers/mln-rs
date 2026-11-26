@@ -1,7 +1,6 @@
-use mln_util::UnitBezier;
-use mln_util::range::Range;
-
 use crate::interpolate::interpolation_factor;
+use crate::range::Range;
+use crate::unitbezier::UnitBezier;
 
 #[derive(Clone, Copy, Debug, PartialEq, mln_wire::Wire)]
 pub struct ExponentialInterpolator {

@@ -11,16 +11,16 @@ use mln_map::{
 use mln_renderer::text::font_face_engine::FontFaceEngine;
 use mln_renderer::{Custom, CustomLayerHost, Registry, UpdateReader};
 use mln_style::Edit;
+use mln_style::error::{Error, ErrorKind};
+use mln_style::geo::LatLngBounds;
+use mln_style::hash::HashMap;
+use mln_style::size::Size;
+use mln_style::time::Instant;
 use mln_text::GlyphCache;
 use mln_text::local_fonts::LocalGlyphs;
-use mln_util::error::{Error, ErrorKind};
 use mln_util::event_queue::Waker;
-use mln_util::geo::LatLngBounds;
-use mln_util::hash::HashMap;
 use mln_util::pool::Pool;
 use mln_util::queue::TimedTask;
-use mln_util::size::Size;
-use mln_util::time::Instant;
 use parking_lot::Mutex;
 
 use crate::camera::{self, CameraFitArea, CameraFitOptions, CameraFitUpdate, TileOptions, ViewportOptions};
@@ -315,7 +315,7 @@ impl Drop for MapShared {
 ///
 /// The map lives until [`release`](Self::release) or until its last handle
 /// drops. A command on a released map fails with
-/// [`ErrorKind::InvalidState`](mln_util::ErrorKind).
+/// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind).
 #[derive(Clone)]
 pub struct Map {
     pub(crate) shared: Arc<MapShared>,
@@ -449,7 +449,7 @@ impl Map {
     /// renderer's updates as they are when it is read, which can be later
     /// than the rest of the state.
     ///
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) until the
+    /// Fails with [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) until the
     /// map is built, and after it is released.
     pub fn snapshot(&self) -> Result<MapSnapshot, Error> {
         let mut snapshot = self.published(|state| state.snapshot)?;
@@ -476,7 +476,7 @@ impl Map {
     }
 
     /// What `read` takes from the map's last flush. Fails with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) until the map is
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) until the map is
     /// built, and after it is released.
     fn published<T>(&self, read: impl FnOnce(&PublishedState) -> T) -> Result<T, Error> {
         if self.shared.released.load(Ordering::SeqCst) {
@@ -537,7 +537,7 @@ impl Map {
     /// caller-driven one that the host stopped servicing would otherwise
     /// hold the map for good.
     ///
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) when the
+    /// Fails with [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) when the
     /// map was released already, or while a render session that wasn't
     /// released is attached to it.
     pub fn release(&self) -> Result<Completion<()>, Error> {
@@ -547,13 +547,13 @@ impl Map {
     /// Releases the map whatever its state, as dropping its last handle
     /// does, and lets the runtime finish in the background: the completion
     /// reports when the runtime has let go of it, and may be dropped. Every
-    /// command fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind)
+    /// command fails with [`ErrorKind::InvalidState`](mln_style::error::ErrorKind)
     /// from now on. A render session that is attached and wasn't released
     /// keeps drawing the map's last update, and the runtime lets go of the
     /// map once the session detaches or is abandoned. A released one is
     /// abandoned, as [`release`](Self::release) does.
     ///
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) when the
+    /// Fails with [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) when the
     /// map was released already.
     pub fn dispose(&self) -> Result<Completion<()>, Error> {
         self.release_with(true)
@@ -595,10 +595,10 @@ impl Map {
 
     /// Sets the map's size and scale factor. The map keeps its tiles, and a
     /// resize to the extent the map has changes nothing, so it renders
-    /// nothing. Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind)
+    /// nothing. Fails with [`ErrorKind::InvalidState`](mln_style::error::ErrorKind)
     /// while a render session is attached, since the session sizes the map
     /// to its target: resize the session instead. Fails with
-    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty size,
+    /// [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for an empty size,
     /// or a scale factor that isn't finite and positive.
     pub fn resize(&self, extent: LogicalExtent) -> Result<Completion<Applied>, Error> {
         let LogicalExtent { size, scale_factor } = extent;
@@ -622,7 +622,7 @@ impl Map {
     }
 
     /// Renders a new frame of a continuous map, even when nothing changed.
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) for a
     /// static or tile map, which renders only still images.
     pub fn request_repaint(&self) -> Result<Completion<Applied>, Error> {
         if self.shared.mode != MapMode::Continuous {
@@ -646,7 +646,7 @@ impl Map {
     }
 
     /// Ends the group that [`begin_command_group`](Self::begin_command_group)
-    /// began. Completes with [`ErrorKind::InvalidState`](mln_util::ErrorKind)
+    /// began. Completes with [`ErrorKind::InvalidState`](mln_style::error::ErrorKind)
     /// when no group is open.
     pub fn end_command_group(&self) -> Result<Completion<Applied>, Error> {
         self.command(mln_map::Map::end_command_group)
@@ -686,19 +686,19 @@ impl Map {
     /// that takes its [`DriverWork`](crate::DriverWork): the attach completes
     /// in that thread's first service.
     ///
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) when the
+    /// Fails with [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) when the
     /// map already has a session or was released, or a window is minimized
     /// or has no client area, and with
-    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty
+    /// [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for an empty
     /// target, a [`Surface::wgpu`](crate::Surface::wgpu) without the
     /// host's device, or a Win32 window with a pixel format of its own that
     /// OpenGL would present to. The completion fails as
     /// [`Device::new`](crate::Device::new) does when the
     /// session has to create its device and can't, with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) when the window or
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) when the window or
     /// surface had no area to present to by then, with
-    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) when no GPU can present
-    /// to a window, and with [`ErrorKind::Native`](mln_util::ErrorKind) when
+    /// [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) when no GPU can present
+    /// to a window, and with [`ErrorKind::Native`](mln_style::error::ErrorKind) when
     /// the window has no surface to give.
     pub fn attach(
         &self,
@@ -744,13 +744,13 @@ impl Map {
     /// ends too, and the image waits for the next one: once the barrier ran,
     /// the target came back, or the next session attached.
     ///
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) for a
     /// continuous map. Completes with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) while another image
+    /// [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) while another image
     /// is on its way or a command group is open,
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) when the
+    /// [`ErrorKind::Native`](mln_style::error::ErrorKind) when the
     /// style or a resource that the image needs fails to load, and
-    /// [`ErrorKind::Cancelled`](mln_util::ErrorKind) when the map is released
+    /// [`ErrorKind::Cancelled`](mln_style::error::ErrorKind) when the map is released
     /// first.
     pub fn request_still_image(&self) -> Result<Completion<()>, Error> {
         if self.shared.mode == MapMode::Continuous {
@@ -1026,7 +1026,7 @@ impl Map {
     /// that update. A command that changes no state publishes no update: an
     /// empty `state` merges nothing.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a
     /// selector without a feature.
     pub fn set_feature_state(
         &self,
@@ -1042,7 +1042,7 @@ impl Map {
     }
 
     /// The state of the feature that `selector` names, empty when it has
-    /// none. Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind)
+    /// none. Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind)
     /// for a selector without a feature.
     pub fn feature_state(&self, selector: &FeatureStateSelector) -> Result<Completion<FeatureState>, Error> {
         let key = selector.key(true)?;
@@ -1057,7 +1057,7 @@ impl Map {
     /// The removal reaches the render session as
     /// [`set_feature_state`](Self::set_feature_state) describes, and a
     /// removal of no state publishes no update. Fails with
-    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a state key
+    /// [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a state key
     /// without a feature.
     pub fn remove_feature_state(&self, selector: &FeatureStateSelector) -> Result<Completion<Applied>, Error> {
         let key = selector.key(false)?;
@@ -1077,11 +1077,11 @@ impl Map {
     /// Loads the map's style from `url`.
     ///
     /// Completes once the style document has loaded and parsed, with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) when it fails to, and with
-    /// [`ErrorKind::Cancelled`](mln_util::ErrorKind) when another style load
+    /// [`ErrorKind::Native`](mln_style::error::ErrorKind) when it fails to, and with
+    /// [`ErrorKind::Cancelled`](mln_style::error::ErrorKind) when another style load
     /// starts or the map is released first. The style's sources, sprites and
     /// glyphs then load in the background. Commands that change the style
-    /// fail with [`ErrorKind::InvalidState`](mln_util::ErrorKind) until the
+    /// fail with [`ErrorKind::InvalidState`](mln_style::error::ErrorKind) until the
     /// document has parsed.
     pub fn set_style_url(&self, url: impl Into<String>) -> Result<Completion<Applied>, Error> {
         let url = url.into();
@@ -1093,7 +1093,7 @@ impl Map {
 
     /// Loads the map's style from JSON text. Completes as
     /// [`set_style_url`](Self::set_style_url) does, once the style has
-    /// parsed, but with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind)
+    /// parsed, but with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind)
     /// for JSON that isn't a valid style. A style that fails to parse leaves
     /// the map's style as it was.
     pub fn set_style_json(&self, json: impl Into<String>) -> Result<Completion<Applied>, Error> {
@@ -1133,8 +1133,8 @@ impl Map {
     }
 
     /// Removes a source from the style. Completes with
-    /// [`ErrorKind::NotFound`](mln_util::ErrorKind) when the style has no
-    /// such source, and [`ErrorKind::InvalidState`](mln_util::ErrorKind)
+    /// [`ErrorKind::NotFound`](mln_style::error::ErrorKind) when the style has no
+    /// such source, and [`ErrorKind::InvalidState`](mln_style::error::ErrorKind)
     /// when a layer uses it or the style isn't loaded. The source's features
     /// lose their state, and a custom source's callbacks drop before the
     /// completion.
@@ -1192,8 +1192,8 @@ impl Map {
     }
 
     /// Removes a layer from the style. Completes with
-    /// [`ErrorKind::NotFound`](mln_util::ErrorKind) when the style has no
-    /// such layer, and [`ErrorKind::InvalidState`](mln_util::ErrorKind)
+    /// [`ErrorKind::NotFound`](mln_style::error::ErrorKind) when the style has no
+    /// such layer, and [`ErrorKind::InvalidState`](mln_style::error::ErrorKind)
     /// while the style isn't loaded.
     pub fn remove_style_layer(&self, layer_id: impl Into<String>) -> Result<Completion<Applied>, Error> {
         let layer_id = layer_id.into();
@@ -1280,7 +1280,7 @@ impl Map {
     /// A command that moves the camera, whose end `on_end` receives. `on_end`
     /// is in place before the command is sent, so it runs on the runtime's
     /// thread, or on this one with
-    /// [`ErrorKind::Cancelled`](mln_util::ErrorKind) when the send fails.
+    /// [`ErrorKind::Cancelled`](mln_style::error::ErrorKind) when the send fails.
     fn camera_command_then(
         &self,
         apply: impl FnOnce(&mut mln_map::Map) -> Result<CameraCommandId, Error> + Send + 'static,
@@ -1331,7 +1331,7 @@ impl Map {
     /// returned completion when the change ends within the command. A
     /// command that fails ends as cancelled, and one that the map's release
     /// ends as closed, with generation 0. `on_end` runs on this thread only
-    /// with [`ErrorKind::Cancelled`](mln_util::ErrorKind), when the send
+    /// with [`ErrorKind::Cancelled`](mln_style::error::ErrorKind), when the send
     /// fails.
     pub fn update_camera_then(
         &self,
@@ -1342,7 +1342,7 @@ impl Map {
     }
 
     /// Moves the camera relative to where it is, as a gesture does.
-    /// Completes with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for
+    /// Completes with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for
     /// a delta that the camera can't apply.
     pub fn apply_camera_delta(&self, delta: CameraDelta) -> Result<Completion<Applied>, Error> {
         self.camera_command(move |map| {
@@ -1368,7 +1368,7 @@ impl Map {
     /// sent before. It keeps the map's bearing and pitch unless `options`
     /// sets them, and its zoom stays within the map's zoom limits.
     ///
-    /// Completes with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for
+    /// Completes with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for
     /// an empty area, and for padding that leaves no room for it.
     pub fn camera_for(
         &self,

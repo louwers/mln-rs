@@ -1,5 +1,3 @@
-use mln_util::string::to_string_double;
-
 use crate::conversion::Convertible;
 use crate::expression::forms::length::{
     get_unicode_character_offset_on_validated_utf8, unicode_length_on_validated_utf8,
@@ -8,6 +6,7 @@ use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::type_::Type;
 use crate::expression::value::{Value, type_of};
 use crate::expression::{EvalResult, EvaluationContext, EvaluationError, Expr, Node, type_};
+use crate::string::to_string_double;
 
 /// `["index-of", keyword, input, from_index?]`.
 #[derive(Clone, PartialEq, mln_wire::Wire)]

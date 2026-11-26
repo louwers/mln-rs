@@ -6,12 +6,12 @@
 use std::sync::Arc;
 
 use geojson::GeoJson;
-use mln_util::constants;
-use mln_util::error::Error;
-use mln_util::geo::LatLngBounds;
-use mln_util::range::Range;
 
+use crate::constants;
+use crate::error::Error;
+use crate::geo::LatLngBounds;
 use crate::layer::SourceKind;
+use crate::range::Range;
 use crate::source::{Data, SourceData, SourceTypeInfo, StyleSourceType};
 use crate::tile_id::CanonicalTileID;
 

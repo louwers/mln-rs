@@ -7,9 +7,10 @@ use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_map_types::{ProjectionData, View};
+use mln_style::constants::EXTENT;
 use mln_style::types::TranslateAnchorType;
 use mln_tile_id::UnwrappedTileID;
-use mln_util::constants::{EXTENT, M2PI};
+use mln_util::constants::M2PI;
 
 use crate::gfx::context::Context;
 use crate::gfx::uniform_buffer::UniformBufferArray;

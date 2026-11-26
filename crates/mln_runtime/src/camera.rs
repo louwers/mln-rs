@@ -5,9 +5,10 @@ use geo_types::Geometry;
 use mln_map::{
     AnimationOptions, CameraOptions, CameraUpdateMode, ConstrainMode, NorthOrientation, TileLodMode, ViewportMode,
 };
+use mln_style::error::Error;
+use mln_style::geo::{LatLng, LatLngBounds};
 use mln_style::geometry::for_each_point;
-use mln_util::error::Error;
-use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds};
+use mln_util::geo::EdgeInsets;
 
 /// An area for a camera to fit in the map's view.
 #[derive(Clone, Debug, PartialEq)]
@@ -71,7 +72,7 @@ pub struct TileOptions {
 }
 
 /// The camera that fits `area` in `map`'s view. Fails with
-/// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty area,
+/// [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for an empty area,
 /// and for padding that leaves no room for it, for which the core would keep
 /// the zoom.
 pub(crate) fn camera_for(

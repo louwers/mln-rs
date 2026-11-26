@@ -6,8 +6,9 @@ use std::time::Duration;
 use mln_map_types::{
     AnimationOptions, CameraOptions, TransformState, TransitionOutcome, VerticalPerspectiveProjection,
 };
+use mln_style::geo::{LatLngBounds, WrapMode};
 use mln_style::interpolate::interpolate;
-use mln_util::geo::{EdgeInsets, LatLngBounds, WrapMode};
+use mln_util::geo::EdgeInsets;
 use mln_util::projection::Projection;
 
 use super::transition::{AlongFn, FrameFn};
@@ -133,13 +134,13 @@ impl Transform {
             Some(projection_for_zoom) => projection_for_zoom(zoom).transition_state() > 0.0,
             None => globe,
         };
-        zoom = mln_math::clamp_f64(
+        zoom = mln_style::math::clamp_f64(
             zoom,
             self.state.min_zoom_at_latitude_with(lat_lng_end.latitude(), target_globe),
             self.state.limits().max_zoom,
         );
-        pitch = mln_math::clamp_f64(pitch, self.state.limits().min_pitch, self.state.limits().max_pitch);
-        fov = mln_math::clamp_f64(fov, mln_map_types::MIN_FIELD_OF_VIEW, mln_map_types::MAX_FIELD_OF_VIEW);
+        pitch = mln_style::math::clamp_f64(pitch, self.state.limits().min_pitch, self.state.limits().max_pitch);
+        fov = mln_style::math::clamp_f64(fov, mln_map_types::MIN_FIELD_OF_VIEW, mln_map_types::MAX_FIELD_OF_VIEW);
 
         // Minimize rotation by taking the shorter path around the circle.
         bearing = normalize_angle(bearing, self.state.view().angle());
@@ -227,11 +228,15 @@ impl Transform {
                 center: frame_lat_lng,
                 zoom: Some(frame_zoom),
                 center_altitude: Some(interpolate(&start_center_alt, &center_alt, t)),
-                bearing: Some(-mln_math::rad2deg(mln_math::wrap(interpolate(&start_bearing, &bearing, t), -PI, PI))),
+                bearing: Some(-mln_style::math::rad2deg(mln_style::math::wrap(
+                    interpolate(&start_bearing, &bearing, t),
+                    -PI,
+                    PI,
+                ))),
                 padding: interpolate_edge_insets(&start_edge_insets, &padding, t),
-                pitch: Some(mln_math::rad2deg(interpolate(&start_pitch, &pitch, t))),
-                roll: Some(mln_math::rad2deg(interpolate(&start_roll, &roll, t))),
-                fov: Some(mln_math::rad2deg(interpolate(&start_fov, &fov, t))),
+                pitch: Some(mln_style::math::rad2deg(interpolate(&start_pitch, &pitch, t))),
+                roll: Some(mln_style::math::rad2deg(interpolate(&start_roll, &roll, t))),
+                fov: Some(mln_style::math::rad2deg(interpolate(&start_fov, &fov, t))),
                 ..Default::default()
             }
         });
@@ -340,13 +345,13 @@ impl Transform {
             Some(projection_for_zoom) => projection_for_zoom(zoom).transition_state() > 0.0,
             None => globe,
         };
-        zoom = mln_math::clamp_f64(
+        zoom = mln_style::math::clamp_f64(
             zoom,
             self.state.min_zoom_at_latitude_with(lat_lng_end.latitude(), target_globe),
             self.state.limits().max_zoom,
         );
-        pitch = mln_math::clamp_f64(pitch, self.state.limits().min_pitch, self.state.limits().max_pitch);
-        fov = mln_math::clamp_f64(fov, mln_map_types::MIN_FIELD_OF_VIEW, mln_map_types::MAX_FIELD_OF_VIEW);
+        pitch = mln_style::math::clamp_f64(pitch, self.state.limits().min_pitch, self.state.limits().max_pitch);
+        fov = mln_style::math::clamp_f64(fov, mln_map_types::MIN_FIELD_OF_VIEW, mln_map_types::MAX_FIELD_OF_VIEW);
 
         // Minimize rotation by taking the shorter path around the circle.
         bearing = normalize_angle(bearing, self.state.view().angle());
@@ -412,7 +417,7 @@ impl Transform {
                 ),
                 normalized_zoom,
             );
-            let min_zoom = mln_math::clamp_f64(
+            let min_zoom = mln_style::math::clamp_f64(
                 normalized_floor_zoom + VerticalPerspectiveProjection::zoom_adjustment(0.0, lat_lng_end.latitude()),
                 self.state.min_zoom_at_latitude(lat_lng_end.latitude()),
                 self.state.limits().max_zoom,
@@ -427,9 +432,11 @@ impl Transform {
             }
         } else if animation.min_zoom.is_some() || linear_zoom_interpolation {
             // util::min(a, b, c) = min(a, min(b, c)), fmin on doubles
-            let mut min_zoom =
-                mln_math::fmin(animation.min_zoom.unwrap_or(start_zoom), mln_math::fmin(start_zoom, zoom));
-            min_zoom = mln_math::clamp_f64(
+            let mut min_zoom = mln_style::math::fmin(
+                animation.min_zoom.unwrap_or(start_zoom),
+                mln_style::math::fmin(start_zoom, zoom),
+            );
+            min_zoom = mln_style::math::clamp_f64(
                 min_zoom,
                 self.state.min_zoom_at_latitude(lat_lng_end.latitude()),
                 self.state.limits().max_zoom,
@@ -569,11 +576,15 @@ impl Transform {
                 center: frame_lat_lng,
                 zoom: Some(frame_zoom),
                 center_altitude: Some(interpolate(&start_center_alt, &center_alt, us)),
-                bearing: Some(-mln_math::rad2deg(mln_math::wrap(interpolate(&start_bearing, &bearing, k), -PI, PI))),
+                bearing: Some(-mln_style::math::rad2deg(mln_style::math::wrap(
+                    interpolate(&start_bearing, &bearing, k),
+                    -PI,
+                    PI,
+                ))),
                 padding: interpolate_edge_insets(&start_edge_insets, &padding, k),
-                pitch: Some(mln_math::rad2deg(interpolate(&start_pitch, &pitch, k))),
-                roll: Some(mln_math::rad2deg(interpolate(&start_roll, &roll, k))),
-                fov: Some(mln_math::rad2deg(interpolate(&start_fov, &fov, k))),
+                pitch: Some(mln_style::math::rad2deg(interpolate(&start_pitch, &pitch, k))),
+                roll: Some(mln_style::math::rad2deg(interpolate(&start_roll, &roll, k))),
+                fov: Some(mln_style::math::rad2deg(interpolate(&start_fov, &fov, k))),
                 ..Default::default()
             }
         });

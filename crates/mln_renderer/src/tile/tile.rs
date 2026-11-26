@@ -95,7 +95,7 @@ pub(crate) struct TileUpdateParameters {
 pub(crate) enum TileKind {
     Geometry,
     Raster,
-    Dem(mln_util::tileset::RasterEncoding),
+    Dem(mln_style::tileset::RasterEncoding),
 }
 
 /// What a load delivers. `data` is `None` for a tile without any (204, no

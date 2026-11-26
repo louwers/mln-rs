@@ -9,7 +9,7 @@ use ::mln_runtime::{
     AcquiredFrame, ConsumerSync, ExportedImage, FrameDepth, FrameTexture, FrameTextureKind, FrameView, GpuSync,
     NativeTexture, SyncKind,
 };
-use mln_util::ErrorKind;
+use mln_style::error::ErrorKind;
 use parking_lot::Mutex;
 
 use crate::error::Error;

@@ -8,19 +8,19 @@ use mln_map::transform::Transform;
 use mln_map_types::{CameraOptions, ConstrainMode, MapMode, TileLodMode, ViewportMode};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Response};
+use mln_style::bitmap::PremultipliedImage;
 use mln_style::conversion::{Convertible, Error as ConversionError};
+use mln_style::geo::LatLng;
 use mln_style::image::Impl as ImageImpl;
 use mln_style::layer::{LayerStyle, convert_layer};
 use mln_style::layers::{Circle, Fill, FillExtrusion, Line, Symbol};
+use mln_style::size::Size;
 use mln_style::sources::vector_source;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_style::tileset::PartialTileset;
 use mln_tile_id::OverscaledTileID;
-use mln_util::geo::LatLng;
-use mln_util::image::PremultipliedImage;
 use mln_util::pool::TaskGroup;
 use mln_util::queue::Queue;
-use mln_util::size::Size;
-use mln_util::tileset::PartialTileset;
 use proptest::prelude::*;
 use serde_json::json;
 
@@ -113,7 +113,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
 
     // What the renderer's updates do, until the tile shows its layout or
     // fails.
-    let deadline = mln_util::time::Instant::now() + Duration::from_secs(30);
+    let deadline = mln_style::time::Instant::now() + Duration::from_secs(30);
     let outcome = loop {
         run_loop.run_once(&mut ());
         crate::tests::update(&mut store);
@@ -125,7 +125,7 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
         if let Some(outcome) = outcome {
             break outcome;
         }
-        if mln_util::time::Instant::now() > deadline {
+        if mln_style::time::Instant::now() > deadline {
             break Outcome::Error("timeout".to_owned());
         }
         std::thread::sleep(Duration::from_millis(1));

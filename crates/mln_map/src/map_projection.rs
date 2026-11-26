@@ -4,8 +4,9 @@
 use std::sync::Arc;
 
 use mln_map_types::{Camera, CameraOptions, Elevation, MapView, TransformState, View};
-use mln_util::error::Error;
-use mln_util::geo::{LatLng, ScreenCoordinate, WrapMode};
+use mln_style::error::Error;
+use mln_style::geo::{LatLng, WrapMode};
+use mln_util::geo::ScreenCoordinate;
 
 use crate::map::Map;
 use crate::transform::{TerrainGround, Transform, flip_y, lowest_ground};
@@ -90,7 +91,7 @@ impl MapProjection {
 
     /// The location under `pixel`: on the projection's ground, or on the
     /// flat map ([`Map::lat_lng_for_pixel`]). Fails with
-    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN or
+    /// [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a NaN or
     /// infinite pixel.
     pub fn lat_lng_for_pixel(&self, pixel: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {
         lat_lng_for_pixel(self.state.view(), self.ground.as_deref(), pixel, wrap_mode)

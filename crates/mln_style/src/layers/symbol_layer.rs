@@ -5,9 +5,9 @@
 
 use std::sync::Arc;
 
-use mln_util::constants::{LAST_RESORT_ALPHABETIC_FONT, LAST_RESORT_PAN_UNICODE_FONT};
 use mln_vec_map::VecSet;
 
+use crate::constants::{LAST_RESORT_ALPHABETIC_FONT, LAST_RESORT_PAN_UNICODE_FONT};
 use crate::expression::forms::format::FormatExpressionSection;
 use crate::expression::forms::format_section_override::{FormatSectionOverride, OverrideDefault};
 use crate::expression::value::from_expression_value;

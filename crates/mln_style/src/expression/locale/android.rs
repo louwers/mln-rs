@@ -25,11 +25,11 @@ use jni::errors::Error as JniError;
 use jni::objects::{Global, JObject, JObjectArray, JString, JValue};
 use jni::strings::{JNIStr, JNIString};
 use jni::{Env, jni_sig, jni_str};
-use mln_util::hash::HashSet;
 use parking_lot::Mutex;
 
 use super::keywords::CollationKeywords;
 use super::{FractionDigits, Sensitivity, Style, Unit, default_locale_override};
+use crate::hash::HashSet;
 
 /// The first API level with `android.icu.number.NumberFormatter`.
 const NUMBER_FORMATTER_LEVEL: i32 = 30;

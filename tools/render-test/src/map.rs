@@ -6,10 +6,10 @@ use mln_renderer::Registry;
 use mln_renderer::tile::worker_codec::{RemoteWorkers, ThreadWorkerInstances};
 use mln_storage::{FileSource, FileSourceExt};
 use mln_style::Edit;
-use mln_util::image::PremultipliedImage;
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::time::Instant;
 use mln_util::pool::Pool;
 use mln_util::queue::Queue;
-use mln_util::time::Instant;
 
 use crate::file_source::{Assets, proxy_loader};
 use crate::metadata::{MapMode, TerrainSkirtLength, TestMetadata};
@@ -335,7 +335,7 @@ impl TestRunnerImpl for Impl {
 
     /// The runner gives the threshold in radians, as C++ takes it.
     fn set_tile_lod_pitch_threshold(&mut self, value: f64) -> Result<(), MapError> {
-        self.set_tile(|tile| tile.lod_pitch_threshold = mln_math::rad2deg(value));
+        self.set_tile(|tile| tile.lod_pitch_threshold = mln_style::math::rad2deg(value));
         Ok(())
     }
 

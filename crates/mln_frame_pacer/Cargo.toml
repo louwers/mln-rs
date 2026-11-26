@@ -16,7 +16,7 @@ name = "mln_frame_pacer"
 doctest = false
 
 [dependencies]
-mln_util.workspace = true
+mln_style.workspace = true
 parking_lot.workspace = true
 
 # The display links, and the run loop of their thread.

@@ -6,18 +6,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ::mln_runtime::{Applied, CustomSourceCallbacks, GeoJsonSourceOptions, LayerInfo, SourceInfo, SourceKind};
-use mln_style::TransitionOptions;
+use mln_style::bitmap::PremultipliedImage;
 use mln_style::expression::Functions;
+use mln_style::geo::{LatLng, LatLngBounds};
 use mln_style::image::{ImageContent, Impl as StyleImage, TextFit};
+use mln_style::range::Range;
+use mln_style::size::Size;
 use mln_style::sources::TileDataFormat;
 use mln_style::sources::custom_geometry_source::TileOptions;
 use mln_style::tile_id::CanonicalTileID;
-use mln_util::constants;
-use mln_util::geo::{LatLng, LatLngBounds};
-use mln_util::image::PremultipliedImage;
-use mln_util::range::Range;
-use mln_util::size::Size;
-use mln_util::tileset::{RasterEncoding, Scheme, VectorEncoding};
+use mln_style::tileset::{RasterEncoding, Scheme, VectorEncoding};
+use mln_style::{TransitionOptions, constants};
 
 use crate::buffer::LentText;
 use crate::callback::{Registration, UserData};
@@ -121,7 +120,7 @@ unsafe fn command_with<T>(
     map: mln_map,
     completion: *const mln_completion,
     checked: Result<T, Error>,
-    send: impl FnOnce(&::mln_runtime::Map, T) -> Result<::mln_runtime::Completion<Applied>, mln_util::Error>,
+    send: impl FnOnce(&::mln_runtime::Map, T) -> Result<::mln_runtime::Completion<Applied>, mln_style::error::Error>,
 ) -> Result<(), Error> {
     match checked {
         // SAFETY: the caller's contract.

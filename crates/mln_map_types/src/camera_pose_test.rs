@@ -1,7 +1,8 @@
 use std::f64::consts::SQRT_2;
 
 use glam::dvec3;
-use mln_util::constants::{EARTH_RADIUS_M, LATITUDE_MAX};
+use mln_style::constants::LATITUDE_MAX;
+use mln_util::constants::EARTH_RADIUS_M;
 
 use super::*;
 

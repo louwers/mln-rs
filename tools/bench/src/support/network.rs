@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use mln_storage::simulated_network::{Clock, OnlineDriver, Transfer, Transport, online_file_source};
 use mln_storage::{Cache, FileSource, Loader, Resource};
-use mln_util::hash::{HashMap, HashSet};
+use mln_style::hash::{HashMap, HashSet};
 use mln_util::pool::Pool;
 use parking_lot::Mutex;
 

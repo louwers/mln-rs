@@ -4,10 +4,9 @@
 
 use std::sync::Arc;
 
-use mln_util::range::Range;
-
 pub use super::custom::{CustomVectorSourceHandle, CustomVectorTileData, TileDataFormat};
 use super::custom::{CustomVectorSourceOptions, CustomVectorSourceType, TileFunction, TileFunctions};
+use crate::range::Range;
 use crate::source::{Source, SourceData};
 
 #[derive(Clone)]

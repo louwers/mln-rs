@@ -15,7 +15,10 @@ use std::time::{Duration, Instant};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Resource, Response};
+use mln_style::bitmap::AlphaImage;
+use mln_style::error::Error;
 use mln_style::i18n;
+use mln_style::size::Size;
 use mln_text::glyph::{
     FontData, FontFace, GLYPH_RANGES_PER_FONT_STACK, GLYPHS_PER_GLYPH_RANGE, Glyph, GlyphDependencies, GlyphID,
     GlyphIDType, GlyphIDs, GlyphMap, GlyphMetrics, GlyphRange, NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK,
@@ -25,12 +28,9 @@ use mln_text::glyph_cache::GlyphCache;
 use mln_text::local_fonts::{FontChooser, LocalGlyphRasterizer, LocalGlyphs};
 use mln_text::tagged_string::font_stack_hash;
 use mln_text::{GlyphAdjust, ShapedText};
-use mln_util::error::Error;
 use mln_util::font_stack::FontStack;
-use mln_util::image::AlphaImage;
 use mln_util::pool::{Pool, TaskGroup};
 use mln_util::queue::Queue;
-use mln_util::size::Size;
 use mln_vec_map::{VecMap, VecSet};
 use parking_lot::Mutex;
 

@@ -9,18 +9,10 @@ repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
 include.workspace = true
-# The [[test]]s below; tests/ also holds their modules.
-autotests = false
-
 [lib]
 name = "mln_math"
 # The doc comments have no examples to run.
 doctest = false
-
-# Ported C++ gtests (test/math); markers `// gtest: Group.Name`.
-[[test]]
-name = "mln_math_gtest"
-path = "tests/gtest_math.rs"
 
 [lints]
 workspace = true

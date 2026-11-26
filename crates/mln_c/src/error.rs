@@ -3,7 +3,7 @@
 
 use std::borrow::Cow;
 
-use mln_util::ErrorKind;
+use mln_style::error::ErrorKind;
 
 use crate::generated::types::{
     MLN_STATUS_ALREADY_EXISTS, MLN_STATUS_BUSY, MLN_STATUS_CANCELLED, MLN_STATUS_INVALID_ARGUMENT,
@@ -68,8 +68,8 @@ impl Error {
     }
 }
 
-impl From<mln_util::Error> for Error {
-    fn from(error: mln_util::Error) -> Self {
+impl From<mln_style::error::Error> for Error {
+    fn from(error: mln_style::error::Error) -> Self {
         Self::new(error.kind, error.message)
     }
 }
@@ -112,7 +112,7 @@ mod tests {
 
     #[test]
     fn a_core_error_keeps_its_kind_and_message() {
-        let error = Error::from(mln_util::Error::not_found("no layer"));
+        let error = Error::from(mln_style::error::Error::not_found("no layer"));
         assert_eq!((error.status(), error.message()), (MLN_STATUS_NOT_FOUND, "no layer"));
         let error = Error::from(mln_gfx::Error::unsupported("no Vulkan"));
         assert_eq!((error.status(), error.message()), (MLN_STATUS_UNSUPPORTED, "no Vulkan"));

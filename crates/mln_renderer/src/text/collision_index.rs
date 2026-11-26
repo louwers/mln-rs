@@ -1,12 +1,12 @@
 use geometry::Point;
 use glam::{DMat4, DVec4, Vec2};
 use mln_map_types::{MapMode, ProjectedTilePoint, TileProjector, View};
+use mln_style::constants::EXTENT;
 use mln_style::feature::GeometryCoordinates;
+use mln_style::hash::{HashMap, HashSet};
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::types::IconOverlapType;
-use mln_util::constants::EXTENT;
 use mln_util::geo::ScreenLineString;
-use mln_util::hash::{HashMap, HashSet};
 use mln_util::intersection_tests::polygon_intersects_polygon;
 
 use crate::buckets::symbol_bucket::{PlacedSymbol, PlacedSymbolPools};
@@ -775,7 +775,7 @@ fn polygon_intersects_box(polygon: &[Point<f32>], bbox: &Aabb) -> bool {
 mod tests {
     use std::sync::Arc;
 
-    use mln_util::size::Size;
+    use mln_style::size::Size;
 
     use super::*;
     use crate::util::pool::PoolRange;

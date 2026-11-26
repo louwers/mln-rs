@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use mln_util::time::Instant;
+use mln_style::time::Instant;
 
 use crate::http_file_source::{HttpTransport, TransferRequest};
 use crate::network_status::NetworkStatus;

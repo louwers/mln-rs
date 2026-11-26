@@ -4,9 +4,12 @@
 //! and the conversions from JSON-like values to style types (`conversion`).
 //!
 //! It also holds the vocabulary that the style shares with the engine:
-//! colors (`color`), padding, interpolation, feature types (`geometry`),
-//! canonical tile ids (`tile_id`), the Unicode script checks (`i18n`) and
-//! the projection's subdivision granularity.
+//! errors, colors, padding, sizes, ranges, interpolation and easing
+//! (`unitbezier`), images' pixels (`bitmap`), coordinates (`geo`), tilesets,
+//! feature types (`geometry`), canonical tile ids (`tile_id`), the spec's
+//! constants, math, number formatting (`string`), hash maps, clocks
+//! (`time`), the Unicode script checks (`i18n`) and the projection's
+//! subdivision granularity.
 //!
 //! A style parses against a [`StyleRegistry`]: the expression functions and
 //! layer types its JSON, property values and filters may name.
@@ -43,13 +46,18 @@
 
 #[cfg(target_os = "android")]
 pub mod android;
+pub mod bitmap;
 pub mod color;
+pub mod constants;
 pub mod conversion;
+pub mod error;
 pub mod expression;
 pub mod feature;
 pub mod filter;
 pub mod font_face;
+pub mod geo;
 pub mod geometry;
+pub mod hash;
 pub mod i18n;
 pub mod image;
 pub mod interpolate;
@@ -58,21 +66,28 @@ pub mod layers;
 pub mod light;
 #[rustfmt::skip]
 mod light_properties;
+pub mod math;
 pub mod padding;
 pub mod projection;
 pub mod property;
+pub mod range;
 pub mod registry;
+pub mod size;
 pub mod sky;
 #[rustfmt::skip]
 mod sky_properties;
 pub mod source;
 pub mod sources;
 pub mod sprite;
+pub mod string;
 mod style;
 pub mod subdivision_granularity;
 pub mod terrain;
 pub mod tile_id;
+pub mod tileset;
+pub mod time;
 pub mod types;
+pub mod unitbezier;
 #[doc(hidden)]
 pub mod wire;
 

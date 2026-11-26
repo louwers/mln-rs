@@ -64,7 +64,7 @@ fn which(v: &Value) -> usize {
 
 /// The number at the start of `s`, after leading whitespace, if there is one.
 fn stod(s: &str) -> Option<f64> {
-    mln_util::string::float_prefix(s).parse().ok()
+    mln_style::string::float_prefix(s).parse().ok()
 }
 
 #[must_use]

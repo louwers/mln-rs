@@ -1,5 +1,5 @@
 // Durations and the monotonic clock are std::time's `Duration` and
-// crate::time's `Instant`; this module has the wall-clock `Timestamp`.
+// mln_style::time's `Instant`; this module has the wall-clock `Timestamp`.
 
 /// A wall-clock time: a signed count of seconds since the Unix epoch.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -21,7 +21,7 @@ impl Timestamp {
 /// seconds.
 #[must_use]
 pub fn now() -> Timestamp {
-    let secs = match crate::time::SystemTime::now().duration_since(crate::time::UNIX_EPOCH) {
+    let secs = match mln_style::time::SystemTime::now().duration_since(mln_style::time::UNIX_EPOCH) {
         Ok(d) => d.as_secs() as i64,
         Err(e) => -(e.duration().as_secs() as i64),
     };

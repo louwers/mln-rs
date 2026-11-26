@@ -9,9 +9,9 @@ use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::{CullFaceWindingType, DepthFunctionType, StencilOpType};
 use mln_gfx::{DepthMaskType, DepthMode, ScissorRect, Size, StencilMode};
 use mln_map_types::{ProjectionData, View, ViewportMode};
+use mln_style::constants::EXTENT;
 use mln_style::tile_id::CanonicalTileID;
 use mln_tile_id::UnwrappedTileID;
-use mln_util::constants::EXTENT;
 use mln_util::identity::SimpleIdentity;
 use mln_vec_map::VecMap;
 use smallvec::SmallVec;
@@ -367,7 +367,7 @@ impl<'a> PaintParameters<'a> {
     /// atlas of `pattern_atlas_size`: the target's size and the pixels'
     /// scale, the camera and the frame's values.
     #[must_use]
-    pub(crate) fn global_paint_params(&self, pattern_atlas_size: mln_util::size::Size) -> GlobalPaintParamsUBO {
+    pub(crate) fn global_paint_params(&self, pattern_atlas_size: mln_style::size::Size) -> GlobalPaintParamsUBO {
         GlobalPaintParamsUBO {
             pattern_atlas_texsize: [pattern_atlas_size.width as f32, pattern_atlas_size.height as f32],
             units_to_pixels: [1.0 / self.pixels_to_gl_units[0], 1.0 / self.pixels_to_gl_units[1]],

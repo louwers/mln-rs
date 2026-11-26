@@ -13,10 +13,10 @@ use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapMode, MapOptions, RenderFrameStatus, RenderMode};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::Edit;
+use mln_style::bitmap::PremultipliedImage;
 use mln_style::feature::FeatureState;
-use mln_util::image::PremultipliedImage;
+use mln_style::size::Size;
 use mln_util::pool::Pool;
-use mln_util::size::Size;
 use serde_json::json;
 
 use crate::gtest_api::style_image;
@@ -102,7 +102,7 @@ impl ContinuousMap {
         let marker = PremultipliedImage::from_vec(Size::new(16, 16), vec![255; 16 * 16 * 4]);
         map.edit_style(|style| style.apply(Edit::AddImage(style_image("marker", marker, 1.0)))).unwrap();
         map.jump_to(&CameraOptions {
-            center: Some(mln_util::geo::LatLng::new(5.0, 5.0).unwrap()),
+            center: Some(mln_style::geo::LatLng::new(5.0, 5.0).unwrap()),
             zoom: Some(4.0),
             ..Default::default()
         });
@@ -311,7 +311,7 @@ fn tiles_held_with_no_symbols_to_place_let_the_map_go_idle() {
 fn a_camera_move_that_moves_no_label_draws_twice() {
     let test = ContinuousMap::new();
     test.settle_after_a_placement();
-    let nudged = mln_util::geo::LatLng::new(5.0, 5.001).unwrap();
+    let nudged = mln_style::geo::LatLng::new(5.0, 5.001).unwrap();
     test.map.borrow_mut().jump_to(&CameraOptions { center: Some(nudged), ..Default::default() });
     let frames = test.settle();
     assert_eq!(frames.len(), 2, "{frames:?}");

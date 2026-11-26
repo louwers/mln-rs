@@ -5,9 +5,9 @@ use std::sync::Arc;
 
 use mln_headless::HeadlessFrontend;
 use mln_map::{Map, MapMode, MapOptions};
+use mln_style::size::Size;
 use mln_util::pool::Pool;
 use mln_util::queue::Queue;
-use mln_util::size::Size;
 
 /// What a frontend on `device` draws of a map whose background is `color`.
 fn render_on(device: &mln_runtime::Device, color: &str) -> Vec<u8> {

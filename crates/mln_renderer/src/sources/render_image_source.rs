@@ -7,15 +7,14 @@ use std::sync::Arc;
 use geometry::Point;
 use mln_map_types::TileCoordinate;
 use mln_map_types::tile_coordinate::TileCoordinatePoint;
-use mln_style::Source;
 use mln_style::feature::GeometryCoordinates;
+use mln_style::geo::LatLngBounds;
+use mln_style::range::Range;
 use mln_style::source::SourceData;
 use mln_style::sources::ImageSourceType;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_style::{Source, constants};
 use mln_tile_id::UnwrappedTileID;
-use mln_util::constants;
-use mln_util::geo::LatLngBounds;
-use mln_util::range::Range;
 
 use crate::bucket::UploadNeeds;
 use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
@@ -158,7 +157,7 @@ impl ImageQuad {
 }
 
 fn to_vertex_coordinate(value: f64) -> i16 {
-    mln_math::clamp_f64(value.round(), f64::from(i16::MIN), f64::from(i16::MAX)) as i16
+    mln_style::math::clamp_f64(value.round(), f64::from(i16::MIN), f64::from(i16::MAX)) as i16
 }
 
 // The unit square as a grid of `cells` x `cells`, textured edge to edge,

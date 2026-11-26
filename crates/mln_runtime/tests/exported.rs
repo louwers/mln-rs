@@ -12,7 +12,7 @@ use mln_runtime::{
     ErrorKind, ExportKind, ExportKinds, ExportedImage, ExportedRing, FrameDemand, FrameDisposition, FrameTextureKind,
     GpuSync, LogicalExtent, Map, MapOptions, RenderSession, RenderTarget, Runtime, SyncKind, SyncKinds,
 };
-use mln_util::size::Size;
+use mln_style::size::Size;
 
 use crate::support::{eventually, runtime, wait};
 

@@ -5,9 +5,9 @@ use std::f64::consts::PI;
 
 use geo_types::{Coord, CoordNum, Geometry, LineString, MultiLineString, MultiPolygon, Polygon};
 use geometry::Point;
-use mln_util::constants::EXTENT;
 
 use super::GeometryCollection;
+use crate::constants::EXTENT;
 use crate::geometry::FeatureType;
 use crate::tile_id::CanonicalTileID;
 

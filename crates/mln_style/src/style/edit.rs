@@ -4,8 +4,8 @@
 use std::sync::Arc;
 
 use feature::Value;
-use mln_util::error::Error;
 
+use crate::error::Error;
 use crate::expression::GlobalStateMap;
 use crate::filter::Filter;
 use crate::image;

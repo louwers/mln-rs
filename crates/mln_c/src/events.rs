@@ -358,7 +358,7 @@ mod tests {
                 RuntimeEventKind::Map(MapEvent::GlyphsError {
                     font_stack: vec!["Open Sans".into(), "Noto".into()],
                     range: GlyphRange::new(256, 511, GlyphIDType::FontPBF),
-                    error: mln_util::Error::native("no glyphs"),
+                    error: mln_style::error::Error::native("no glyphs"),
                 }),
             ),
             event(

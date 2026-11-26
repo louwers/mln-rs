@@ -61,7 +61,7 @@ impl GeometryTileFeature for SymbolFeature {
         self.id.clone()
     }
 
-    fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, mln_util::error::Error> {
+    fn get_geometries(&self) -> Result<Cow<'_, GeometryCollection>, mln_style::error::Error> {
         Ok(Cow::Borrowed(&self.original_geometry))
     }
 }

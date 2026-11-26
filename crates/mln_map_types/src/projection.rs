@@ -1,7 +1,7 @@
 use geometry::Point;
 use glam::{DMat4, DVec2, DVec3, DVec4};
+use mln_style::constants;
 use mln_tile_id::UnwrappedTileID;
-use mln_util::constants;
 use mln_util::projection::Projection as WebMercator;
 
 use crate::vertical_perspective_projection::VerticalPerspectiveProjection;

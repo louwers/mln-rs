@@ -10,14 +10,14 @@ use mln_runtime::{
 };
 use mln_storage::response::Reason;
 use mln_storage::{ResourceError, Response};
+use mln_style::bitmap::PremultipliedImage;
 use mln_style::expression::Functions;
+use mln_style::geo::LatLng;
+use mln_style::range::Range;
+use mln_style::size::Size;
 use mln_style::sources::TileDataFormat;
 use mln_style::sources::custom_geometry_source::TileOptions;
 use mln_style::types::{ProjectionDefinition, ProjectionType};
-use mln_util::geo::LatLng;
-use mln_util::image::PremultipliedImage;
-use mln_util::range::Range;
-use mln_util::size::Size;
 
 use crate::support::{EMPTY_STYLE, TestRuntime, map, runtime, wait, wait_err};
 

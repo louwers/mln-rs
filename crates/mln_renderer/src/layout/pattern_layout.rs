@@ -9,8 +9,10 @@
 
 use std::sync::Arc;
 
+use mln_style::error::Error;
 use mln_style::expression::{EvaluationContext, Image};
 use mln_style::feature::GeometryTileFeature;
+use mln_style::hash::HashMap;
 use mln_style::layers::fill_layer_properties::FillLayoutProperties;
 use mln_style::layers::line_layer_properties::LineLayoutProperties;
 use mln_style::layers::{Fill, Line};
@@ -19,8 +21,6 @@ use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 use mln_text::atlas::ImagePositions;
-use mln_util::error::Error;
-use mln_util::hash::HashMap;
 use mln_vec_map::VecMap;
 
 use crate::bucket::Bucket;

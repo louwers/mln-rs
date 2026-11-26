@@ -8,7 +8,7 @@
 use std::time::{Duration, Instant};
 
 use mln_runtime::{Completion, MapOptions, Runtime, RuntimeOptions};
-use mln_util::size::Size;
+use mln_style::size::Size;
 
 // The app's styles and the edits it makes to them (src/styles.rs).
 #[path = "../src/styles.rs"]

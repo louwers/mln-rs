@@ -18,17 +18,17 @@ use mln_map_types::{CameraOptions, ConstrainMode, MapMode, TileLodMode, Viewport
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{FileSource, Resource, Responder, Response};
 use mln_style::Source;
+use mln_style::geo::LatLng;
 use mln_style::layer::{Layer, LayerStyle};
 use mln_style::layers::{Fill, Raster};
+use mln_style::size::Size;
 use mln_style::sources::{raster_source, vector_source};
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_style::tileset::PartialTileset;
 use mln_util::chrono::{Timestamp, now};
 use mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
-use mln_util::geo::LatLng;
 use mln_util::pool::TaskGroup;
 use mln_util::queue::Queue;
-use mln_util::size::Size;
-use mln_util::tileset::PartialTileset;
 use parking_lot::Mutex;
 
 use crate::Registry;

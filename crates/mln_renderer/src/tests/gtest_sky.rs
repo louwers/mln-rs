@@ -13,8 +13,8 @@ use mln_style::property::table::Kind;
 use mln_style::property::transition::TransitionOptions;
 use mln_style::property::value::PropertyValue;
 use mln_style::sky::{Sky, convert_sky};
+use mln_style::time::Instant;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
-use mln_util::time::Instant;
 use serde_json::json;
 
 use crate::render_sky::RenderSky;

@@ -5,18 +5,18 @@ use std::sync::Arc;
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Response};
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::error::ErrorKind;
+use mln_style::geo::LatLng;
+use mln_style::size::Size;
 use mln_style::source::SourceData;
 use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, geojson_data, geojson_source};
 use mln_style::sources::{ImageSourceType, VectorSourceType, image_source, vector_source as tileset_vector_source};
 use mln_style::tile_id::CanonicalTileID;
+use mln_style::tileset::PartialTileset;
 use mln_style::{Edit, Layer};
-use mln_util::ErrorKind;
-use mln_util::geo::LatLng;
-use mln_util::image::PremultipliedImage;
 use mln_util::pool::Pool;
 use mln_util::queue::Queue;
-use mln_util::size::Size;
-use mln_util::tileset::PartialTileset;
 
 use crate::{Map, MapEvent, MapOptions};
 
@@ -127,13 +127,13 @@ fn map_over(file_source: &Arc<StubFileSource>) -> Map {
 /// Runs `map`'s pool and `run_loop`, and handles `map`'s reports, until
 /// `done` holds.
 fn run_until(map: &mut Map, run_loop: &Queue<()>, mut done: impl FnMut(&Map) -> bool) {
-    let deadline = mln_util::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = mln_style::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         map.process_events();
         if done(map) {
             return;
         }
-        assert!(mln_util::time::Instant::now() < deadline, "timed out");
+        assert!(mln_style::time::Instant::now() < deadline, "timed out");
         map.pool().run_all();
         if !run_loop.run_once(&mut ()) {
             std::thread::yield_now();

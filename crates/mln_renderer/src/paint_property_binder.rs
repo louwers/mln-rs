@@ -14,12 +14,12 @@ use mln_style::expression::{Dependency, EvaluationContext, Image, Value, ValueCo
 use mln_style::feature::GeometryTileFeature;
 use mln_style::property::evaluated::{Evaluated, Faded};
 use mln_style::property::expression::PropertyExpression;
+use mln_style::range::Range;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::LineCapType;
 use mln_text::atlas::ImagePositions;
 use mln_tile::TileLayer;
 use mln_util::feature::feature_id_to_string;
-use mln_util::range::Range;
 use mln_vec_map::VecMap;
 
 use crate::bucket_geometry::GeometryVec;

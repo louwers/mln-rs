@@ -13,7 +13,7 @@ use mln_runtime::{
     FrameDemand, FrameDisposition, FrameResult, LogicalExtent, Map, MapOptions, RenderSession, RenderSessionState,
     RenderTarget, Runtime, Wake,
 };
-use mln_util::size::Size;
+use mln_style::size::Size;
 
 use crate::support::{TIMEOUT, eventually, runtime, wait};
 

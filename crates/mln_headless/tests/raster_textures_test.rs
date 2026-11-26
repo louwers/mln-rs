@@ -9,12 +9,12 @@ use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapMode, MapOptions};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Resource, Response};
-use mln_util::error::ErrorKind;
-use mln_util::geo::LatLng;
-use mln_util::image::PremultipliedImage;
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::error::ErrorKind;
+use mln_style::geo::LatLng;
+use mln_style::size::Size;
 use mln_util::pool::Pool;
 use mln_util::queue::Queue;
-use mln_util::size::Size;
 
 /// The layer types, each with the paint property that hides it at 0.
 const LAYERS: [(&str, &str); 3] =

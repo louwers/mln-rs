@@ -15,10 +15,10 @@ use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
 use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
 use mln_style::property::expression::PropertyExpression;
 use mln_style::property::value::PropertyValue;
+use mln_style::range::Range;
 use mln_style::types::TextWritingModeType;
 use mln_text::atlas::ImagePositions;
 use mln_tile::TileLayer;
-use mln_util::range::Range;
 use mln_vec_map::VecMap;
 use mln_wire::payload::pod;
 

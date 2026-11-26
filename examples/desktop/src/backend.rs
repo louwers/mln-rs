@@ -23,9 +23,9 @@ use mln_runtime::{
     AttachOptions, BackendType, Completion, DemandMode, Device, DeviceOptions, Driver, DriverWork, FrameDemand,
     FrameDisposition, Map, RenderSession, RenderTarget, Surface, SurfaceOverlay,
 };
-use mln_util::error::Error;
-use mln_util::image::PremultipliedImage;
-use mln_util::size::Size;
+use mln_style::bitmap::PremultipliedImage;
+use mln_style::error::Error;
+use mln_style::size::Size;
 
 use crate::host::Inbox;
 use crate::overlay::Paint;
