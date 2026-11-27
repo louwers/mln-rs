@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use glam::dcamera::rh::proj::opengl::orthographic;
 use glam::{DMat4, DVec3};
-use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
@@ -25,22 +24,20 @@ use mln_style::types::{AlignmentType, IconTextFitType, SymbolPlacementType, Text
 use crate::camera::{Projection, ProjectionData};
 use crate::draw::atlas_binding::AtlasBinding;
 use crate::draw::context::Context;
+use crate::draw::draws::{Draw, Draws, LayerFrame};
 use crate::draw::objects::{DrawGeometry, Mesh, copy_shared_attributes};
 use crate::draw::segment::SegmentBase;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::{SharedVertices, TypedVertices};
 use crate::layer::bucket_geometry::{BucketGeometry, bucket_vertices, copied_indexes, paint_vertices};
-use crate::layer::layer_drawing::{
-    BucketChanges, DrawGroup, DrawOrder, FrameDraw, LayerDrawing, LayerDraws, MeshMut, TileMap,
-};
+use crate::layer::layer_drawing::BucketChanges;
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, Hosted, LayerCx, LayerValues, OnTerrain, RenderLayer, TypedLayer,
+    EvaluateCx, Evaluation, Hosted, LayerValues, OnTerrain, PrepareCx, RenderLayer, TypedLayer,
 };
 use crate::layer::tile_input::Features;
 use crate::layers::cast_matrix;
-use crate::render::paint_parameters::PaintParameters;
 use crate::render::pass::RenderPass;
 use crate::render::terrain::FrameGround;
 use crate::render::tile::{FrameTile, RenderTile};
@@ -283,8 +280,6 @@ struct SymbolDraw {
     /// none doesn't draw, and doesn't copy the bucket's attributes again
     /// until it shows some.
     visible: bool,
-    /// Gives the draw the textures of its tile's atlases.
-    atlases: AtlasBinding,
 }
 
 /// What tells apart the draws of a tile that read the same attributes: a
@@ -304,75 +299,10 @@ pub(crate) struct SymbolTile {
     draws: Vec<SymbolDraw>,
 }
 
-/// The layer's draws of the frame, each of the draw at its index among
-/// those of its tile's value.
-#[derive(Default)]
-pub(crate) struct SymbolDrawing {
-    frame: Option<LayerDraws<usize>>,
-}
-
-impl SymbolDrawing {
-    /// The mesh of `draw`, the draw at `index` of its tile, with what
-    /// gives them the textures of the tile's atlases.
-    fn meshes<'a>(tiles: &'a mut TileMap<SymbolTile>, draw: &FrameDraw, index: usize) -> Option<MeshMut<'a>> {
-        let draw = tiles.get_mut(&draw.tile?)?.draws.get_mut(index)?;
-        Some(MeshMut { mesh: &mut draw.mesh, atlases: Some(&draw.atlases) })
-    }
-
-    /// Draws the pass's draws of the layer's draw group, if it has it, with
-    /// their meshes in `tiles`.
-    fn render_frame(
-        &mut self,
-        tiles: &mut TileMap<SymbolTile>,
-        gpu: &mut dyn Gpu,
-        parameters: &mut PaintParameters<'_>,
-        order: DrawOrder,
-    ) {
-        if let Some(frame) = &mut self.frame {
-            frame.render(tiles, Self::meshes, gpu, parameters);
-            order.step(parameters);
-        }
-    }
-}
-
-impl LayerDrawing<SymbolTile> for SymbolDrawing {
-    fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
-        if let Some(frame) = &self.frame {
-            visit(DrawGroup::Draws(frame.frame()));
-        }
-    }
-
-    fn begin_frame(&mut self) {
-        self.frame.get_or_insert_default().clear();
-    }
-
-    fn clear_frame(&mut self) {
-        if let Some(frame) = &mut self.frame {
-            frame.clear();
-        }
-    }
-
-    fn upload(&mut self, tiles: &mut TileMap<SymbolTile>, gpu: &mut dyn Gpu, context: &mut Context) {
-        if let Some(frame) = &self.frame {
-            frame.upload(gpu, tiles, Self::meshes, context);
-        }
-    }
-
-    fn render(
-        &mut self,
-        tiles: &mut TileMap<SymbolTile>,
-        gpu: &mut dyn Gpu,
-        parameters: &mut PaintParameters<'_>,
-        order: DrawOrder,
-    ) {
-        self.render_frame(tiles, gpu, parameters, order);
-    }
-}
-
 /// The size of the texture `mesh` binds at `slot` in `context`,
 /// zero for none.
 fn texture_size(context: &Context, mesh: &Mesh, slot: usize) -> [f32; 2] {
-    mesh.texture(slot).and_then(|texture| context.texture(texture)).map_or([0.0, 0.0], |texture| {
+    mesh.texture(context, slot).and_then(|texture| context.texture(texture)).map_or([0.0, 0.0], |texture| {
         let size = texture.size();
         [size.width as f32, size.height as f32]
     })
@@ -401,7 +331,7 @@ fn refresh_draws(
     let (before, rest) = draws.split_at_mut(source);
     let Some((source, after)) = rest.split_first_mut() else { return };
     for draw in before.iter_mut().chain(after) {
-        draw.mesh.share_vertex_attributes(&source.mesh);
+        draw.mesh.share_vertex_attributes(context, &source.mesh);
         draw.placed = source.placed.clone();
     }
 }
@@ -451,19 +381,23 @@ fn refresh_draw(
     }
 
     if copy_attributes {
-        let attrs = draw.mesh.vertex_attributes_mut();
-        if refresh.dynamic {
-            set_projected_pos_attribute(context, buffer, layer_id, attrs, &mut draw.placed.projected);
-        }
-        if refresh.opacity {
-            set_fade_opacity_attribute(context, buffer, attrs, &mut draw.placed.opacity);
-            set_elevation_attribute(context, geometry, buffer, attrs, &mut draw.placed.elevation);
-        }
-        if refresh.paint
-            && let Some(paint_props) = bucket.paint_properties.get(layer_id)
-        {
-            set_binder_attributes(context, geometry, is_text, paint_props, evaluated, attrs, &mut Uniforms::default());
-        }
+        let placed = &mut draw.placed;
+        draw.mesh.update(context, |objects, context| {
+            let attrs = objects.vertex_attributes_mut();
+            if refresh.dynamic {
+                set_projected_pos_attribute(context, buffer, layer_id, attrs, &mut placed.projected);
+            }
+            if refresh.opacity {
+                set_fade_opacity_attribute(context, buffer, attrs, &mut placed.opacity);
+                set_elevation_attribute(context, geometry, buffer, attrs, &mut placed.elevation);
+            }
+            if refresh.paint
+                && let Some(paint_props) = bucket.paint_properties.get(layer_id)
+            {
+                let uniforms = &mut Uniforms::default();
+                set_binder_attributes(context, geometry, is_text, paint_props, evaluated, attrs, uniforms);
+            }
+        });
     }
 
     if refresh.sort && !buffer.triangles.is_empty() {
@@ -472,7 +406,7 @@ fn refresh_draw(
             None => &buffer.segments,
         };
         let segments = segments.iter().map(SegmentBase::copy).collect();
-        draw.mesh.replace_indexes(copied_indexes(&buffer.triangles), segments);
+        draw.mesh.replace_indexes(context, copied_indexes(&buffer.triangles), segments);
     }
     copy_attributes
 }
@@ -537,16 +471,18 @@ pub(crate) struct RenderSymbolLayer {
 
 impl RenderSymbolLayer {
     /// The blocks and the projection of `draw`, of the tile `tile_id` and
-    /// its `bucket`, of the layer `layer_id` with the values `layer`.
+    /// its `bucket`, of the layer `layer_id` with the values `layer`, in
+    /// `frame`, with the textures of `context`.
     fn uniforms(
         layer_id: &str,
         layer: &EvaluatedLayer<Symbol>,
         tile_id: &OverscaledTileID,
         bucket: &SymbolBucket,
         draw: &SymbolDraw,
-        parameters: &PaintParameters<'_>,
+        frame: &LayerFrame<'_>,
+        context: &Context,
     ) -> Option<((SymbolDrawableUBO, SymbolTilePropsUBO), ProjectionUBO)> {
-        let state = parameters.view;
+        let state = frame.view;
         let evaluated = &layer.paint;
         let zoom = state.zoom() as f32;
         let paint_properties = bucket.paint_properties.get(layer_id)?;
@@ -569,7 +505,7 @@ impl RenderSymbolLayer {
             const IN_VIEWPORT_PIXEL_UNITS: bool = false;
             projection_data(
                 &tile_id,
-                parameters,
+                frame,
                 [0.0, 0.0],
                 *anchor.uniform(),
                 NEAR_CLIPPED,
@@ -637,8 +573,8 @@ impl RenderSymbolLayer {
             matrix: cast_matrix(&matrix),
             label_plane_matrix: cast_matrix(&label_plane_matrix),
             coord_matrix: cast_matrix(&gl_coord_matrix),
-            texsize: texture_size(parameters.context, &draw.mesh, TEXTURE_SLOT),
-            texsize_icon: texture_size(parameters.context, &draw.mesh, TEXTURE_ICON_SLOT),
+            texsize: texture_size(context, &draw.mesh, TEXTURE_SLOT),
+            texsize_icon: texture_size(context, &draw.mesh, TEXTURE_ICON_SLOT),
             is_text_prop: i32::from(is_text),
             rotate_symbol: i32::from(rotate_in_shader),
             pitch_with_map: i32::from(pitch_with_map),
@@ -664,25 +600,22 @@ impl RenderSymbolLayer {
         Some(((drawable, tile_props), to_projection_ubo(&projection)))
     }
 
-    /// Makes the frame's draws, in `cx.drawing`, of the layer's draws of
-    /// `tiles` in `cx.tiles` that show any symbols, in `passes`, which hide
-    /// behind the ground in front of them where they draw with a variant
-    /// that stands on terrain (`stands`).
-    fn make_frame_draws(
-        cx: &mut LayerCx<'_, Self>,
-        gpu: &mut dyn Gpu,
+    /// Pushes into `out` the frame's draws of the layer's draws of `tiles`
+    /// in `cx.tiles` that show any symbols, in `passes`, in the order their
+    /// meshes were made, which hide behind the ground in front of them
+    /// where they draw with a variant that stands on terrain (`stands`).
+    fn push_draws(
+        cx: &mut PrepareCx<'_, '_, Self>,
         tiles: &[FrameTile<'_, Symbol>],
         passes: RenderPass,
         stands: bool,
-        paint_parameters: &mut PaintParameters<'_>,
+        out: &mut Draws,
     ) {
         let layer_id = cx.base.style.base().id.as_str();
         let layer = &*cx.values.evaluated;
-        let ground = paint_parameters.ground.clone().filter(|_| stands);
-        let depth = ground.as_deref().and_then(FrameGround::depth);
-        let Some(frame) = &mut cx.drawing.frame else {
-            return;
-        };
+        let frame = cx.frame;
+        let ground = frame.ground.as_deref().filter(|_| stands);
+        let depth = ground.and_then(FrameGround::depth);
         for tile in tiles {
             let tile_id = tile.id();
             let Some(cached) = cx.tiles.get_mut(&tile_id) else {
@@ -690,21 +623,22 @@ impl RenderSymbolLayer {
             };
             let bucket = tile.data().map(|bucket| bucket.bucket);
             debug_assert!(bucket.is_some() || cached.draws.is_empty());
-            for (index, draw) in cached.draws.iter_mut().enumerate().filter(|(_, draw)| draw.visible) {
-                let Some((blocks, projection)) =
-                    bucket.and_then(|bucket| Self::uniforms(layer_id, layer, &tile_id, bucket, draw, paint_parameters))
+            for draw in cached.draws.iter().filter(|draw| draw.visible) {
+                let Some((blocks, projection)) = bucket
+                    .and_then(|bucket| Self::uniforms(layer_id, layer, &tile_id, bucket, draw, frame, cx.context))
                 else {
                     continue;
                 };
                 if let Some(depth) = depth {
-                    draw.mesh.set_texture(GROUND_DEPTH_SLOT, Some(depth));
+                    draw.mesh.set_texture(cx.context, GROUND_DEPTH_SLOT, Some(depth));
                 }
-                let frame_draw = FrameDraw { pass: passes, ..FrameDraw::new(Some(tile_id), draw.mesh.id()) };
-                frame.push_at(frame_draw, index, &draw.mesh, &projection, blocks);
+                let opaque = passes & RenderPass::Opaque != RenderPass::None;
+                let frame_draw = Draw { order: draw.mesh.seq(), opaque, ..Draw::DEFAULT };
+                out.main().push_at(&draw.mesh, tile_id, &projection, frame_draw, blocks);
             }
         }
 
-        frame.block(&props(&layer.paint)).finish(gpu, paint_parameters);
+        out.main().block(&props(&layer.paint));
     }
 }
 
@@ -730,7 +664,6 @@ fn props(evaluated: &SymbolPaintProperties::PossiblyEvaluated) -> SymbolEvaluate
 impl TypedLayer for RenderSymbolLayer {
     type Type = Symbol;
     type Tile = SymbolTile;
-    type Drawing = SymbolDrawing;
 
     /// Symbols draw the lower of two tiles' overlapping symbols over the
     /// higher's.
@@ -775,19 +708,13 @@ impl TypedLayer for RenderSymbolLayer {
         }
     }
 
-    /// Makes the frame's draws of the layer: those of each of its tiles,
+    /// Pushes the frame's draws of the layer: those of each of its tiles,
     /// which it builds for a tile it keeps none of and refreshes where the
-    /// tile's bucket changed, and writes the buffers they read. It builds
-    /// them here rather than in [`tile`](TypedLayer::tile): their ids, which
-    /// order the frame's draws, are made in the order of the segments
-    /// sorted across the tiles.
-    fn update_draws(
-        &mut self,
-        mut cx: LayerCx<'_, Self>,
-        gpu: &mut dyn Gpu,
-        paint_parameters: &mut PaintParameters<'_>,
-        render_tiles: &[FrameTile<'_, Symbol>],
-    ) {
+    /// tile's bucket changed. It builds them here rather than in
+    /// [`tile`](TypedLayer::tile): their meshes, whose
+    /// [`seq`](Mesh::seq) orders the frame's draws, are made in the order of
+    /// the segments sorted across the tiles.
+    fn prepare(&mut self, cx: &mut PrepareCx<'_, '_, Self>, render_tiles: &[FrameTile<'_, Symbol>], out: &mut Draws) {
         /// The atlases' textures given to one tile's draws.
         #[derive(Default)]
         struct TileAtlases {
@@ -795,11 +722,10 @@ impl TypedLayer for RenderSymbolLayer {
             icon: Option<AtlasBinding>,
         }
 
-        let transform = paint_parameters.view;
+        let transform = cx.frame.view;
         let passes = cx.base.passes;
         if passes != self.draws_passes {
             cx.tiles.clear();
-            cx.drawing.clear();
             self.draws_passes = passes;
         }
 
@@ -850,7 +776,7 @@ impl TypedLayer for RenderSymbolLayer {
             if let Some(cached) = entry.value.as_mut().filter(|cached| !cached.draws.is_empty()) {
                 // The draws that read the same attributes are next to each
                 // other, as the update builds them.
-                let (context, geometry) = (&mut *paint_parameters.context, render_data.geometry());
+                let (context, geometry) = (&mut *cx.context, render_data.geometry());
                 for draws in cached.draws.chunk_by_mut(|a, b| a.attributes_key() == b.attributes_key()) {
                     refresh_draws(context, draws, geometry, bucket, layer_id, evaluated, refresh);
                 }
@@ -971,7 +897,7 @@ impl TypedLayer for RenderSymbolLayer {
             let mut uniforms = Uniforms::default();
             let mut vertex_attribs = VertexAttributeArray::new();
             let placed = update_tile_attributes(
-                paint_parameters.context,
+                cx.context,
                 render_data.geometry(),
                 buffer,
                 layer_id,
@@ -1049,9 +975,10 @@ impl TypedLayer for RenderSymbolLayer {
                     segments: segments.iter().map(SegmentBase::copy).collect(),
                     instances: None,
                 };
-                let shader = paint_parameters.context.shader_key(program, uniforms, symbol_projection_variant);
+                let shader = cx.context.shader_key(program, uniforms, symbol_projection_variant);
                 let textures = draw_atlases.textures(&shader);
-                let mesh = Mesh::new(shader, color_mode, CullFaceMode::disabled(), geometry, textures);
+                let mesh = Mesh::new(cx.context, shader, color_mode, CullFaceMode::disabled(), geometry, textures);
+                mesh.set_atlases(cx.context, Some(draw_atlases.clone()));
 
                 let draw = SymbolDraw {
                     mesh,
@@ -1068,7 +995,6 @@ impl TypedLayer for RenderSymbolLayer {
                         segment: group.segment,
                     },
                     visible,
-                    atlases: draw_atlases.clone(),
                 };
                 if let Some(entry) = cx.tiles.entry(&tile_id) {
                     entry.value.get_or_insert_with(SymbolTile::default).draws.push(draw);
@@ -1077,13 +1003,6 @@ impl TypedLayer for RenderSymbolLayer {
         }
 
         self.renderable_segments = renderable_segments;
-        Self::make_frame_draws(
-            &mut cx,
-            gpu,
-            render_tiles,
-            passes,
-            symbol_projection_variant.stands(),
-            paint_parameters,
-        );
+        Self::push_draws(cx, render_tiles, passes, symbol_projection_variant.stands(), out);
     }
 }
