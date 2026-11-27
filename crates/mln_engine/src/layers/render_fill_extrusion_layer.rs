@@ -52,9 +52,8 @@ use crate::buckets::fill_extrusion_bucket::{
 use crate::camera::View;
 use crate::draw::atlas_binding::AtlasBinding;
 use crate::draw::context::Context;
-use crate::draw::identity::SimpleIdentity;
 use crate::draw::indexes::{Indexes, SharedIndexes};
-use crate::draw::objects::{DrawGeometry, DrawObjects, copy_shared_attributes};
+use crate::draw::objects::{DrawGeometry, Mesh, copy_shared_attributes};
 use crate::draw::segment::SegmentBase;
 use crate::draw::texture2d::Texture2D;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
@@ -63,7 +62,7 @@ use crate::layer::bucket_geometry::{
     BucketGeometry, bucket_indexes, bucket_vertices, copied_vertices, derived_vertices, paint_vertices,
 };
 use crate::layer::layer_drawing::{
-    DrawDepth, DrawList, DrawObjectsMut, DrawPriority, FrameDraw, TileDraws, TileObjects, UniformWriter,
+    DrawDepth, DrawList, DrawPriority, FrameDraw, MeshMut, TileDraws, TileObjects, UniformWriter,
 };
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::paint_property_binder::PaintBinders as _;
@@ -117,9 +116,7 @@ const DEPTH_PASS_SETBACK: f64 = 1.0 / (1 << 20) as f64;
 /// A draw the layer keeps of a tile: of its roofs or its walls, into depth
 /// only or in color.
 struct ExtrusionDraw {
-    /// The id of the draw's GPU objects, made with them.
-    id: SimpleIdentity,
-    objects: DrawObjects,
+    mesh: Mesh,
     /// 0 for a draw into depth only, which draws before those in color.
     priority: DrawPriority,
     /// Whether it draws the walls rather than the roofs.
@@ -179,13 +176,13 @@ impl ExtrusionTile {
             match (draw.walls, walls) {
                 (true, Walls::Pulled) => {
                     if let Some(heights) = &heights {
-                        draw.objects.read_as_storage(WALL_HEIGHTS_ID, Some(heights.clone()));
+                        draw.mesh.read_as_storage(WALL_HEIGHTS_ID, Some(heights.clone()));
                     }
                 }
                 (true, Walls::Quads) => {
                     if let Some(quad_heights) = &quad_heights {
                         let attribute = height_attribute(quad_heights);
-                        draw.objects.paint_attributes_mut().set_shared("ground_height", attribute);
+                        draw.mesh.paint_attributes_mut().set_shared("ground_height", attribute);
                     }
                 }
                 // The roofs read them per vertex, the instanced walls per
@@ -193,7 +190,7 @@ impl ExtrusionTile {
                 _ => {
                     if let Some(heights) = &heights {
                         let attribute = height_attribute(heights);
-                        draw.objects.paint_attributes_mut().set_shared("ground_height", attribute);
+                        draw.mesh.paint_attributes_mut().set_shared("ground_height", attribute);
                     }
                 }
             }
@@ -205,14 +202,8 @@ impl TileObjects for ExtrusionTile {
     /// The index of the draw among the tile's.
     type Part = usize;
 
-    fn objects(&mut self, index: usize) -> Option<DrawObjectsMut<'_>> {
-        Some(DrawObjectsMut { objects: &mut self.draws.get_mut(index)?.objects, atlases: self.atlases.as_ref() })
-    }
-
-    fn drop_bindings(&mut self) {
-        for draw in &mut self.draws {
-            draw.objects.drop_bindings();
-        }
+    fn objects(&mut self, index: usize) -> Option<MeshMut<'_>> {
+        Some(MeshMut { mesh: &mut self.draws.get_mut(index)?.mesh, atlases: self.atlases.as_ref() })
     }
 }
 
@@ -352,8 +343,8 @@ fn extrusion_draw(
     let in_color = color_mode.is_some();
     let color_mode = color_mode.unwrap_or_else(ColorMode::disabled);
     let textures = atlases.map(|atlases| atlases.textures(shader)).unwrap_or_default();
-    let objects = DrawObjects::new(shader.clone(), color_mode, CullFaceMode::back_ccw(), draw_geometry, textures);
-    ExtrusionDraw { id: SimpleIdentity::new(), objects, priority: DrawPriority::from(in_color), walls, clip }
+    let mesh = Mesh::new(shader.clone(), color_mode, CullFaceMode::back_ccw(), draw_geometry, textures);
+    ExtrusionDraw { mesh, priority: DrawPriority::from(in_color), walls, clip }
 }
 
 impl LayerType for FillExtrusion {
@@ -526,13 +517,13 @@ impl TypedLayer for RenderFillExtrusionLayer {
                 cached.stand(context, ground, tile_id.to_unwrapped(), &bucket.centroids, walls);
             }
             for (index, draw) in cached.draws.iter_mut().enumerate() {
-                draw.objects.set_cull_face_mode(cull_face_mode);
+                draw.mesh.set_cull_face_mode(cull_face_mode);
                 let frame_draw = FrameDraw {
                     priority: draw.priority,
                     pass: RENDER_PASS,
                     depth: DrawDepth::Volume { mask: DepthMaskType::ReadWrite },
                     clip: draw.clip,
-                    ..FrameDraw::new(Some(tile_id), draw.id)
+                    ..FrameDraw::new(Some(tile_id), draw.mesh.id())
                 };
                 let layout = cached.paint_layout;
                 let uniforms = Self::uniforms(layer, tile_id, render_data, binders, draw, layout, paint_parameters);
@@ -547,7 +538,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
         // The draws that composite draw opaque: the composite has the
         // layer's opacity.
         let opacity = if composite.is_some() { 1.0 } else { opacity };
-        cx.drawing.finish(&mut self.draw_list, cx.tiles, gpu, paint_parameters.context, |writer| {
+        cx.drawing.finish(&mut self.draw_list, gpu, paint_parameters.context, |writer| {
             Self::write_uniforms(layer, writer, light, state, opacity);
         });
     }
@@ -736,8 +727,8 @@ impl TileBuilder<'_> {
         }
         if self.walls == Walls::Pulled {
             for draw in draws.iter_mut().filter(|draw| draw.walls) {
-                draw.objects.read_as_storage(WALL_VERTICES_ID, Some(vertices.clone()));
-                draw.objects.read_as_storage(WALL_PAINT_ID, paint.cloned());
+                draw.mesh.read_as_storage(WALL_VERTICES_ID, Some(vertices.clone()));
+                draw.mesh.read_as_storage(WALL_PAINT_ID, paint.cloned());
             }
         }
 
@@ -786,14 +777,14 @@ impl ExtrusionTile {
         let wall_count = tile_bucket.bucket.vertices.len().saturating_sub(1);
         let quad_paint = (walls == Walls::Quads).then(|| wall_paint(context, geometry, binders, wall_count)).flatten();
         for draw in &mut self.draws {
-            let attrs = draw.objects.paint_attributes_mut();
+            let attrs = draw.mesh.paint_attributes_mut();
             binders.bind(evaluated, paint.as_ref(), attrs, &mut Uniforms::default());
             if let (Some(paint), Some(quad_paint)) = (&paint, quad_paint.as_ref().filter(|_| draw.walls)) {
                 read_quad_paint(attrs, paint, quad_paint);
             }
             if walls == Walls::Pulled && draw.walls {
                 self.paint_layout = paint_layout(attrs);
-                draw.objects.read_as_storage(WALL_PAINT_ID, paint.clone());
+                draw.mesh.read_as_storage(WALL_PAINT_ID, paint.clone());
             }
         }
     }
@@ -860,7 +851,7 @@ impl RenderFillExtrusionLayer {
         let num_tiles = 2f64.powi(i32::from(tile_id.canonical.z));
         let height_factor = (-num_tiles / TILE_SIZE_D / 8.0) as f32;
 
-        let texture = draw.objects.texture(IMAGE_SLOT).and_then(|texture| parameters.context.texture(texture));
+        let texture = draw.mesh.texture(IMAGE_SLOT).and_then(|texture| parameters.context.texture(texture));
         let texture_size = texture.map(Texture2D::size).unwrap_or_default();
         let pattern = evaluated.fill_extrusion_pattern.faded();
         let tlbr = |id: &str| tile_bucket.pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
