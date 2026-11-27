@@ -26,15 +26,13 @@ use mln_style::types::{AlignmentType, IconTextFitType, SymbolPlacementType, Text
 use crate::camera::{Projection, ProjectionData};
 use crate::draw::atlas_binding::AtlasBinding;
 use crate::draw::context::Context;
-use crate::draw::identity::SimpleIdentity;
-use crate::draw::objects::{DrawGeometry, DrawObjects, copy_shared_attributes};
+use crate::draw::objects::{DrawGeometry, Mesh, copy_shared_attributes};
 use crate::draw::segment::SegmentBase;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::{SharedVertices, TypedVertices};
 use crate::layer::bucket_geometry::{BucketGeometry, bucket_vertices, copied_indexes, paint_vertices};
 use crate::layer::layer_drawing::{
-    BucketChanges, DrawGroup, DrawList, DrawObjectsMut, DrawOrder, FrameDraw, LayerDrawing, LayerDraws, TileMap,
-    UniformWriter,
+    BucketChanges, DrawGroup, DrawList, DrawOrder, FrameDraw, LayerDrawing, LayerDraws, MeshMut, TileMap, UniformWriter,
 };
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::paint_property_binder::PaintBinders as _;
@@ -285,9 +283,7 @@ struct PlacedVertices {
 /// A draw the layer keeps of a tile: the halo or the fill of the text or the
 /// icons of one of the bucket's buffers, or of one of its segments.
 struct SymbolDraw {
-    /// The id of the draw's GPU objects, made with them.
-    id: SimpleIdentity,
-    objects: DrawObjects,
+    mesh: Mesh,
     /// The vertices placement lays out, which the draw's attributes read.
     placed: PlacedVertices,
     data: SymbolDrawData,
@@ -324,15 +320,15 @@ pub(crate) struct SymbolDrawing {
 }
 
 impl SymbolDrawing {
-    /// The GPU objects of `draw`, the draw at `index` of its tile, with what
+    /// The mesh of `draw`, the draw at `index` of its tile, with what
     /// gives them the textures of the tile's atlases.
-    fn objects<'a>(tiles: &'a mut TileMap<SymbolTile>, draw: &FrameDraw, index: usize) -> Option<DrawObjectsMut<'a>> {
+    fn meshes<'a>(tiles: &'a mut TileMap<SymbolTile>, draw: &FrameDraw, index: usize) -> Option<MeshMut<'a>> {
         let draw = tiles.get_mut(&draw.tile?)?.draws.get_mut(index)?;
-        Some(DrawObjectsMut { objects: &mut draw.objects, atlases: Some(&draw.atlases) })
+        Some(MeshMut { mesh: &mut draw.mesh, atlases: Some(&draw.atlases) })
     }
 
     /// Draws the pass's draws of the layer's draw group, if it has it, with
-    /// their objects in `tiles`.
+    /// their meshes in `tiles`.
     fn render_frame(
         &mut self,
         tiles: &mut TileMap<SymbolTile>,
@@ -340,8 +336,8 @@ impl SymbolDrawing {
         parameters: &mut PaintParameters<'_>,
         order: DrawOrder,
     ) {
-        if let Some(frame) = &self.frame {
-            frame.render(tiles, Self::objects, gpu, parameters);
+        if let Some(frame) = &mut self.frame {
+            frame.render(tiles, Self::meshes, gpu, parameters);
             order.step(parameters);
         }
     }
@@ -366,7 +362,7 @@ impl LayerDrawing<SymbolTile> for SymbolDrawing {
 
     fn upload(&mut self, tiles: &mut TileMap<SymbolTile>, gpu: &mut dyn Gpu, context: &mut Context) {
         if let Some(frame) = &self.frame {
-            frame.upload(gpu, tiles, Self::objects, context);
+            frame.upload(gpu, tiles, Self::meshes, context);
         }
     }
 
@@ -388,10 +384,10 @@ struct SymbolUniforms {
     projection: ProjectionUBO,
 }
 
-/// The size of the texture `objects` binds at `slot` in `context`,
+/// The size of the texture `mesh` binds at `slot` in `context`,
 /// zero for none.
-fn texture_size(context: &Context, objects: &DrawObjects, slot: usize) -> [f32; 2] {
-    objects.texture(slot).and_then(|texture| context.texture(texture)).map_or([0.0, 0.0], |texture| {
+fn texture_size(context: &Context, mesh: &Mesh, slot: usize) -> [f32; 2] {
+    mesh.texture(slot).and_then(|texture| context.texture(texture)).map_or([0.0, 0.0], |texture| {
         let size = texture.size();
         [size.width as f32, size.height as f32]
     })
@@ -420,7 +416,7 @@ fn refresh_draws(
     let (before, rest) = draws.split_at_mut(source);
     let Some((source, after)) = rest.split_first_mut() else { return };
     for draw in before.iter_mut().chain(after) {
-        draw.objects.share_vertex_attributes(&source.objects);
+        draw.mesh.share_vertex_attributes(&source.mesh);
         draw.placed = source.placed.clone();
     }
 }
@@ -470,7 +466,7 @@ fn refresh_draw(
     }
 
     if copy_attributes {
-        let attrs = draw.objects.vertex_attributes_mut();
+        let attrs = draw.mesh.vertex_attributes_mut();
         if refresh.dynamic {
             set_projected_pos_attribute(context, buffer, layer_id, attrs, &mut draw.placed.projected);
         }
@@ -491,7 +487,7 @@ fn refresh_draw(
             None => &buffer.segments,
         };
         let segments = segments.iter().map(SegmentBase::copy).collect();
-        draw.objects.replace_indexes(copied_indexes(&buffer.triangles), segments);
+        draw.mesh.replace_indexes(copied_indexes(&buffer.triangles), segments);
     }
     copy_attributes
 }
@@ -792,8 +788,8 @@ impl RenderSymbolLayer {
                 matrix: cast_matrix(&matrix),
                 label_plane_matrix: cast_matrix(&label_plane_matrix),
                 coord_matrix: cast_matrix(&gl_coord_matrix),
-                texsize: texture_size(parameters.context, &draw.objects, TEXTURE_SLOT),
-                texsize_icon: texture_size(parameters.context, &draw.objects, TEXTURE_ICON_SLOT),
+                texsize: texture_size(parameters.context, &draw.mesh, TEXTURE_SLOT),
+                texsize_icon: texture_size(parameters.context, &draw.mesh, TEXTURE_ICON_SLOT),
                 is_text_prop: i32::from(is_text),
                 rotate_symbol: i32::from(rotate_in_shader),
                 pitch_with_map: i32::from(pitch_with_map),
@@ -855,22 +851,15 @@ impl RenderSymbolLayer {
                     continue;
                 };
                 if let Some(depth) = depth {
-                    draw.objects.set_texture(GROUND_DEPTH_SLOT, Some(depth));
+                    draw.mesh.set_texture(GROUND_DEPTH_SLOT, Some(depth));
                 }
-                let frame_draw = FrameDraw { pass: passes, ..FrameDraw::new(Some(tile_id), draw.id) };
+                let frame_draw = FrameDraw { pass: passes, ..FrameDraw::new(Some(tile_id), draw.mesh.id()) };
                 self.draw_list.push_part(frame_draw, index, uniforms);
             }
         }
 
         if let Some(frame) = &mut cx.drawing.frame {
-            if self
-                .draw_list
-                .finish(frame, gpu, paint_parameters.context, |writer| write_uniforms(&layer.paint, writer))
-            {
-                for draw in cx.tiles.values_mut().flat_map(|tile| &mut tile.draws) {
-                    draw.objects.drop_bindings();
-                }
-            }
+            self.draw_list.finish(frame, gpu, paint_parameters.context, |writer| write_uniforms(&layer.paint, writer));
         } else {
             self.draw_list.clear();
         }
@@ -1233,11 +1222,10 @@ impl TypedLayer for RenderSymbolLayer {
                 };
                 let shader = paint_parameters.context.shader_key(program, uniforms, symbol_projection_variant);
                 let textures = draw_atlases.textures(&shader);
-                let objects = DrawObjects::new(shader, color_mode, CullFaceMode::disabled(), geometry, textures);
+                let mesh = Mesh::new(shader, color_mode, CullFaceMode::disabled(), geometry, textures);
 
                 let draw = SymbolDraw {
-                    id: SimpleIdentity::new(),
-                    objects,
+                    mesh,
                     placed: placed.clone(),
                     data: SymbolDrawData {
                         is_halo,
