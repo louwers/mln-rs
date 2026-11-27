@@ -228,17 +228,20 @@ impl<'a> ScreenTile<'a> {
     /// logical pixels from its top left, meet the level `height` meters
     /// above sea level, the plane or on the globe the sphere there, between
     /// the near and far planes, in the tile's units; a point whose line
-    /// misses it meets it nowhere.
+    /// misses it meets it nowhere. On the globe, a ring's points whose lines
+    /// miss the sphere stand for the nearest points of its horizon, so that
+    /// a ring around the whole planet holds what it shows.
     #[must_use]
     pub fn on_level(&self, screen: &[ScreenCoordinate], height: f64) -> Vec<Vec2> {
         let view = self.view;
         let size_height = f64::from(view.size().height);
+        let ring = screen.len() > 1;
         screen
             .iter()
             .filter_map(|p| {
                 let up = ScreenCoordinate::new(p.x, size_height - p.y);
                 let world = if view.is_globe() {
-                    if !VerticalPerspectiveProjection::screen_coordinate_hits_globe(view, &up, height) {
+                    if !ring && !VerticalPerspectiveProjection::screen_coordinate_hits_globe(view, &up, height) {
                         return None;
                     }
                     let location = view.screen_coordinate_to_lat_lng_at(&up, height, WrapMode::Unwrapped).ok()?;

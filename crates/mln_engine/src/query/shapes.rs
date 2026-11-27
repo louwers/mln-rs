@@ -43,6 +43,30 @@ pub fn segments_cross(a0: Vec2, a1: Vec2, b0: Vec2, b1: Vec2) -> bool {
     turn(a0, b0, b1) != turn(a1, b0, b1) && turn(a0, a1, b0) != turn(a0, a1, b1)
 }
 
+/// Where the segment `a0`-`a1` crosses the segment `b0`-`b1`, as how far
+/// along `a0`-`a1` it is, from 0 to 1; `None` where they don't cross or are
+/// parallel.
+#[must_use]
+pub fn segment_crossing(a0: Vec2, a1: Vec2, b0: Vec2, b1: Vec2) -> Option<f32> {
+    let (da, db) = (a1 - a0, b1 - b0);
+    let denominator = da.perp_dot(db);
+    if denominator == 0.0 {
+        return None;
+    }
+    let (t, u) = ((b0 - a0).perp_dot(db) / denominator, (b0 - a0).perp_dot(da) / denominator);
+    ((0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u)).then_some(t)
+}
+
+/// The points where the edges of the rings `a` and `b`, both closed, cross.
+#[must_use]
+pub fn edge_crossings(a: &[Vec2], b: &[Vec2]) -> Vec<Vec2> {
+    edges(a)
+        .flat_map(|(a0, a1)| {
+            edges(b).filter_map(move |(b0, b1)| segment_crossing(a0, a1, b0, b1)).map(move |t| a0.lerp(a1, t))
+        })
+        .collect()
+}
+
 /// The distance from `p` to the segment `a`-`b`.
 #[must_use]
 pub fn distance_to_segment(p: Vec2, a: Vec2, b: Vec2) -> f32 {
@@ -122,6 +146,22 @@ mod tests {
         let bar = vec![Vec2::new(-1.0, 4.0), Vec2::new(11.0, 4.0), Vec2::new(11.0, 6.0), Vec2::new(-1.0, 6.0)];
         let column = [vec![Vec2::new(4.0, -1.0), Vec2::new(6.0, -1.0), Vec2::new(6.0, 11.0), Vec2::new(4.0, 11.0)]];
         assert!(meets_polygon(&bar, &column));
+    }
+
+    #[test]
+    fn crossing_edges_meet_where_both_pass() {
+        let (a0, a1) = (Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0));
+        assert_eq!(segment_crossing(a0, a1, Vec2::new(4.0, -1.0), Vec2::new(4.0, 1.0)), Some(0.4));
+        assert_eq!(segment_crossing(a0, a1, Vec2::new(4.0, 1.0), Vec2::new(4.0, 2.0)), None);
+        assert_eq!(segment_crossing(a0, a1, Vec2::new(0.0, 1.0), Vec2::new(10.0, 1.0)), None);
+        // A bar across a column, with no corner inside the other.
+        let bar = [Vec2::new(-1.0, 4.0), Vec2::new(11.0, 4.0), Vec2::new(11.0, 6.0), Vec2::new(-1.0, 6.0)];
+        let column = [Vec2::new(4.0, -1.0), Vec2::new(6.0, -1.0), Vec2::new(6.0, 11.0), Vec2::new(4.0, 11.0)];
+        let crossings = edge_crossings(&bar, &column);
+        assert_eq!(crossings.len(), 4);
+        for corner in [Vec2::new(4.0, 4.0), Vec2::new(4.0, 6.0), Vec2::new(6.0, 4.0), Vec2::new(6.0, 6.0)] {
+            assert!(crossings.iter().any(|p| p.distance(corner) < 1e-4), "{corner} in {crossings:?}");
+        }
     }
 
     #[test]

@@ -47,7 +47,7 @@ use mln_engine::layer::{
     PrepareCx, ScreenPoint, TileCx, TileData, TileQuery, bucket_indexes, bucket_vertices, copied_vertices,
     derived_vertices, paint_vertices,
 };
-use mln_engine::query::shapes::{distance_on_plane, meets_polygon, ring_contains};
+use mln_engine::query::shapes::{distance_on_plane, edge_crossings, meets_polygon, ring_contains};
 use mln_engine::tile::geometry_tile_data::is_boundary_edge;
 use mln_engine::tile::{OverscaledTileID, UnwrappedTileID};
 use mln_gfx::gpu::{Caps, ClipDepthRange, ShaderKey};
@@ -564,15 +564,18 @@ impl Layer for RenderFillExtrusionLayer {
 
 /// Whether the ground in front leaves some of the planar face `face`, an
 /// outline on the screen with the points `corners` of it where they draw,
-/// that `query` meets: at the query's points inside it, and at its points
-/// inside the query.
+/// that `query` meets: at the query's points inside it, at its points
+/// inside the query, and where their edges cross.
 fn face_shows(query: &TileQuery<'_>, pixels: &[Vec2], face: &[Vec2], corners: &[ScreenPoint]) -> bool {
     let Some(plane) = plane_of(corners) else {
         return true;
     };
+    let ring = pixels.len() > 2;
     let inside_face = pixels.iter().copied().filter(|&p| ring_contains(face, p));
-    let inside_query = face.iter().copied().filter(|&p| pixels.len() > 2 && ring_contains(pixels, p));
-    inside_face.chain(inside_query).chain(pixels.first().copied().filter(|_| pixels.len() == 1)).any(|point| {
+    let inside_query = face.iter().copied().filter(|&p| ring && ring_contains(pixels, p));
+    let crossings = if ring { edge_crossings(pixels, face) } else { Vec::new() };
+    let point = pixels.first().copied().filter(|_| pixels.len() == 1);
+    inside_face.chain(inside_query).chain(crossings).chain(point).any(|point| {
         distance_on_plane(point, plane).is_none_or(|distance| !query.behind_ground(&ScreenPoint { point, distance }))
     })
 }

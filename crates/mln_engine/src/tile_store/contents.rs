@@ -478,7 +478,7 @@ impl GeometryContents {
         let elevation = pass.elevation.filter(|_| pass.on_terrain);
         let ground = elevation.filter(|_| pass.stands).map(|ground| TileGround::new(ground, tile));
         let screen_tile = ScreenTile::new(view, &projector, ground, elevation);
-        let query = TileQuery::new(input.screen, &screen_tile, input.ground);
+        let query = TileQuery::new(input.screen, &screen_tile, input.ground, id.overscaled_z);
         let selection =
             FeatureSelection { layers, options, global_state, tile_id: id, feature_state: Some(feature_state) };
         let reach = Reach { geometry: input.culling, whole_tile: input.whole_tile };

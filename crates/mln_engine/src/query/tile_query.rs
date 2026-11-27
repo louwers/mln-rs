@@ -27,13 +27,15 @@ pub struct TileQuery<'a> {
     ground: &'a [Vec2],
     /// The tile units the layer's draws translate its features by.
     translation: DVec2,
+    /// The zoom the tile's data was laid out at.
+    zoom: u8,
 }
 
 impl<'a> TileQuery<'a> {
     /// The query `screen` of `tile`, which meets the ground the layer lies
-    /// on at `ground`.
-    pub(crate) fn new(screen: &'a [ScreenCoordinate], tile: &'a ScreenTile<'a>, ground: &'a [Vec2]) -> Self {
-        TileQuery { screen, tile, ground, translation: DVec2::ZERO }
+    /// on at `ground`, and whose data was laid out at `zoom`.
+    pub(crate) fn new(screen: &'a [ScreenCoordinate], tile: &'a ScreenTile<'a>, ground: &'a [Vec2], zoom: u8) -> Self {
+        TileQuery { screen, tile, ground, translation: DVec2::ZERO, zoom }
     }
 
     /// The query's geometry, in the view's logical pixels from its top left:
@@ -60,6 +62,15 @@ impl<'a> TileQuery<'a> {
     #[must_use]
     pub fn tile_id(&self) -> UnwrappedTileID {
         self.tile.tile_id()
+    }
+
+    /// The zoom the tile's data was laid out at, the zoom of a layer's
+    /// layout properties in its buckets
+    /// ([`LayoutCx::zoom`](crate::layer::LayoutCx::zoom)): the tile's own,
+    /// overscaled past its source's maximum zoom.
+    #[must_use]
+    pub fn zoom(&self) -> u8 {
+        self.zoom
     }
 
     /// The query of a layer whose draws translate its features by

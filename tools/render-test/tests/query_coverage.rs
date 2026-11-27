@@ -4,13 +4,27 @@
 //! hill hides some of it, aligned with the map or the viewport, and
 //! translated.
 
+use mln_engine::geo::ScreenCoordinate;
 use render_test::coverage::{
-    COLOR, FLAT, GLOBE, GLOBE_NEAR, HORIZON, MARK, PITCHED, Scene, TERRAIN, hill, layer, line, points, scene, square,
+    COLOR, FLAT, GLOBE, GLOBE_NEAR, HORIZON, MARK, PITCHED, SIDE, Scene, TERRAIN, hill, layer, line, points, scene,
+    shows_at, square,
 };
 
 fn assert_matches(cases: Vec<(&str, Scene)>) {
     let output = mln_headless::test_output_dir(env!("CARGO_TARGET_TMPDIR")).join("query_coverage");
     render_test::coverage::assert_matches(&mln_builtins::registry(), &output, cases);
+}
+
+/// Whether a query of the box from `min` to `max`, in the view's pixels,
+/// finds the layer of `scene`, which shows at `shown`, a pixel in the box,
+/// where given; `None` where the machine has no device.
+fn box_finds(scene: &Scene, [x0, y0]: [f64; 2], [x1, y1]: [f64; 2], shown: Option<[u32; 2]>) -> Option<bool> {
+    let ring = [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]].map(|[x, y]| ScreenCoordinate::new(x, y));
+    let (found, image) = render_test::coverage::query(mln_builtins::registry(), scene, &ring)?;
+    if let Some([x, y]) = shown {
+        assert!(shows_at(&image, x, y), "the layer shows at {x}, {y}");
+    }
+    Some(found)
 }
 
 #[test]
@@ -48,6 +62,23 @@ fn a_query_finds_a_line_where_it_draws() {
         ("line-globe-offset", scene(GLOBE, "globe", None, &far, &wide(offset))),
         ("line-horizon", scene(HORIZON, "globe", None, &line(&[[-25.0, -20.0], [-20.0, 20.0]]), &wide(""))),
         ("line-terrain", scene(TERRAIN, "mercator", Some(hill()), &over_hill, &line_layer(30.0, ""))),
+        // Past the source's maximum zoom, the caps that the tiles' zoom
+        // lays out.
+        (
+            "line-cap-overscaled",
+            scene(
+                FLAT,
+                "mercator",
+                None,
+                &near,
+                &layer(
+                    "line",
+                    &format!(r#""line-color": "{COLOR}", "line-width": 16"#),
+                    r#""line-cap": ["step", ["zoom"], "butt", 9, "round"]"#,
+                ),
+            )
+            .with_source_maxzoom(8),
+        ),
     ]);
 }
 
@@ -118,4 +149,36 @@ fn a_query_finds_a_fill_extrusion_where_it_draws() {
             scene(TERRAIN, "mercator", Some(hill()), &square(0.0, 0.007, 0.0015), &extrusion(800.0)),
         ),
     ]);
+}
+
+#[test]
+fn a_box_query_finds_an_extrusion_whose_roof_it_crosses() {
+    // A roof wide across the view and a narrow box across it, neither with
+    // a corner inside the other.
+    let roof = r#"{"type": "Polygon", "coordinates": [[[-0.06, -0.01], [0.06, -0.01], [0.06, 0.01], [-0.06, 0.01], [-0.06, -0.01]]]}"#;
+    let extrusion =
+        layer("fill-extrusion", &format!(r#""fill-extrusion-color": "{COLOR}", "fill-extrusion-height": 500"#), "");
+    let scene = scene(FLAT, "mercator", None, roof, &extrusion);
+    let middle = f64::from(SIDE / 2);
+    let Some(across) = box_finds(&scene, [middle - 2.0, 64.0], [middle + 2.0, 192.0], Some([SIDE / 2, SIDE / 2]))
+    else {
+        return;
+    };
+    assert!(across, "a box across the roof finds it");
+    let beside = box_finds(&scene, [230.0, 64.0], [240.0, 192.0], None);
+    assert_eq!(beside, Some(false), "a box beside the roof doesn't find it");
+}
+
+#[test]
+fn a_box_around_the_whole_globe_finds_circles_that_lie_on_it() {
+    let circle = layer(
+        "circle",
+        &format!(r#""circle-color": "{COLOR}", "circle-radius": 6, "circle-pitch-alignment": "map""#),
+        "",
+    );
+    let scene = scene([0.0, 0.0, 0.0, 0.0, 0.0], "globe", None, &points(&[[0.0, 0.0], [20.0, 10.0]]), &circle);
+    let side = f64::from(SIDE);
+    let middle = SIDE / 2;
+    let found = box_finds(&scene, [1.0, 1.0], [side - 1.0, side - 1.0], Some([middle, middle]));
+    assert_ne!(found, Some(false), "a box around the planet finds what it shows");
 }

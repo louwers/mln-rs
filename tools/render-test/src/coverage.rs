@@ -174,11 +174,30 @@ pub fn style(camera: Camera, projection: &str, terrain: bool, geojson: &str, lay
     )
 }
 
+/// Whether the image `image` of a scene shows its layer at the pixel `x`,
+/// `y` from its top left.
+#[must_use]
+pub fn shows_at(image: &PremultipliedImage, x: u32, y: u32) -> bool {
+    colored(image.data.as_chunks::<4>().0[(y * image.size.width + x) as usize])
+}
+
 /// Whether a pixel is [`COLOR`], as the layer draws it, shaded or lit: a
 /// red and a blue alike, well above its green.
 fn colored([r, g, b, _]: [u8; 4]) -> bool {
     let (r, g, b) = (i32::from(r), i32::from(g), i32::from(b));
     r > 60 && (r - b).abs() < 48 && g * 3 < r
+}
+
+impl Scene {
+    /// The scene with its source `data` cut into tiles no deeper than
+    /// `maxzoom`, which a view past it overscales.
+    #[must_use]
+    pub fn with_source_maxzoom(mut self, maxzoom: u8) -> Self {
+        let source = r#""data": {"type": "geojson","#;
+        assert!(self.style.contains(source), "a scene of the source `data`");
+        self.style = self.style.replacen(source, &format!(r#""data": {{"type": "geojson", "maxzoom": {maxzoom},"#), 1);
+        self
+    }
 }
 
 /// Draws `scene` with the layer types of `registry` on the harness's
@@ -190,6 +209,77 @@ fn colored([r, g, b, _]: [u8; 4]) -> bool {
 /// Where the map can't be drawn or queried.
 #[must_use]
 pub fn check(registry: Arc<Registry>, scene: &Scene) -> Option<Coverage> {
+    drawn(registry, scene, |frontend, image| {
+        let side = SIDE as i32;
+        let pixels = image.data.as_chunks::<4>().0;
+        let shows = |x: i32, y: i32| colored(pixels[(y * side + x) as usize]);
+        let mut coverage = Coverage {
+            image: PremultipliedImage::new(Size::new(SIDE, SIDE)),
+            tested: 0,
+            shown: 0,
+            missed: Vec::new(),
+            extra: Vec::new(),
+        };
+        for y in (EDGE..side - EDGE).step_by(STEP) {
+            for x in (EDGE..side - EDGE).step_by(STEP) {
+                let shown = shows(x, y);
+                let near = (-EDGE..=EDGE).flat_map(|dy| (-EDGE..=EDGE).map(move |dx| (x + dx, y + dy)));
+                if near.into_iter().any(|(nx, ny)| shows(nx, ny) != shown) {
+                    continue;
+                }
+                let point = ScreenCoordinate::new(f64::from(x) + 0.5, f64::from(y) + 0.5);
+                let found = finds(frontend, scene, std::slice::from_ref(&point));
+                coverage.tested += 1;
+                coverage.shown += usize::from(shown);
+                match (shown, found) {
+                    (true, false) => coverage.missed.push(point),
+                    (false, true) => coverage.extra.push(point),
+                    _ => {}
+                }
+            }
+        }
+        coverage.image = image;
+        coverage
+    })
+}
+
+/// Whether a query of `geometry`, a point or a closed ring in the view's
+/// pixels from its top left, finds the layer of `scene` drawn with the
+/// layer types of `registry`, and the still image of it; `None` where the
+/// machine has no device ([`check`]).
+///
+/// # Panics
+///
+/// Where the map can't be drawn or queried.
+#[must_use]
+pub fn query(
+    registry: Arc<Registry>,
+    scene: &Scene,
+    geometry: &[ScreenCoordinate],
+) -> Option<(bool, PremultipliedImage)> {
+    drawn(registry, scene, |frontend, image| (finds(frontend, scene, geometry), image))
+}
+
+/// Whether a query of `geometry` finds the layer of `scene` that
+/// `frontend` drew.
+fn finds(frontend: &mut HeadlessFrontend, scene: &Scene, geometry: &[ScreenCoordinate]) -> bool {
+    let options = RenderedQueryOptions::new(Some(vec![scene.layer.clone()]), None);
+    let renderer = frontend.renderer();
+    let found = match geometry {
+        [point] => renderer.query_rendered_features_at_point(point, &options),
+        ring => renderer.query_rendered_features(ring, &options),
+    };
+    !found.expect("a query").is_empty()
+}
+
+/// `then` of the frontend that drew `scene` with the layer types of
+/// `registry` on the harness's device, and the still image it drew; `None`
+/// where the machine has no such device.
+fn drawn<T>(
+    registry: Arc<Registry>,
+    scene: &Scene,
+    then: impl FnOnce(&mut HeadlessFrontend, PremultipliedImage) -> T,
+) -> Option<T> {
     let size = Size::new(SIDE, SIDE);
     let run_loop = Queue::new();
     let pool = Pool::new(4);
@@ -226,34 +316,7 @@ pub fn check(registry: Arc<Registry>, scene: &Scene) -> Option<Coverage> {
     let camera = mln_engine::map::style_camera(map.style());
     map.jump_to(&camera);
     let image = frontend.render(&mut map).expect("the still image").image;
-
-    let side = SIDE as i32;
-    let pixels = image.data.as_chunks::<4>().0;
-    let shows = |x: i32, y: i32| colored(pixels[(y * side + x) as usize]);
-    let options = RenderedQueryOptions::new(Some(vec![scene.layer.clone()]), None);
-    let mut coverage =
-        Coverage { image: PremultipliedImage::new(size), tested: 0, shown: 0, missed: Vec::new(), extra: Vec::new() };
-    for y in (EDGE..side - EDGE).step_by(STEP) {
-        for x in (EDGE..side - EDGE).step_by(STEP) {
-            let shown = shows(x, y);
-            let near = (-EDGE..=EDGE).flat_map(|dy| (-EDGE..=EDGE).map(move |dx| (x + dx, y + dy)));
-            if near.into_iter().any(|(nx, ny)| shows(nx, ny) != shown) {
-                continue;
-            }
-            let point = ScreenCoordinate::new(f64::from(x) + 0.5, f64::from(y) + 0.5);
-            let found =
-                !frontend.renderer().query_rendered_features_at_point(&point, &options).expect("a query").is_empty();
-            coverage.tested += 1;
-            coverage.shown += usize::from(shown);
-            match (shown, found) {
-                (true, false) => coverage.missed.push(point),
-                (false, true) => coverage.extra.push(point),
-                _ => {}
-            }
-        }
-    }
-    coverage.image = image;
-    Some(coverage)
+    Some(then(&mut frontend, image))
 }
 
 /// The texel of a height of `meters` in the Mapbox encoding:

@@ -428,10 +428,10 @@ impl Layer for RenderLineLayer {
         let (outer, inner) = if gap > 0.0 { (gap / 2.0 + width, Some(gap / 2.0)) } else { (width / 2.0, None) };
 
         // The joins and caps the line's mesh was laid out with, at the
-        // tile's zoom.
-        let tile = query.tile_id();
-        let layout = values.style.layout.evaluate(&PropertyEvaluationParameters::new(f32::from(tile.canonical.z)));
-        let layout_context = EvaluationContext::with_zoom_feature(f32::from(tile.canonical.z), Some(feature))
+        // zoom of the tile's data.
+        let (tile, layout_zoom) = (query.tile_id(), f32::from(query.zoom()));
+        let layout = values.style.layout.evaluate(&PropertyEvaluationParameters::new(layout_zoom));
+        let layout_context = EvaluationContext::with_zoom_feature(layout_zoom, Some(feature))
             .with_canonical_tile_id(Some(&tile.canonical));
         let stroke = Stroke {
             join: layout.line_join.evaluate(&layout_context),
