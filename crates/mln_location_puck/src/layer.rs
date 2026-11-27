@@ -107,7 +107,8 @@ impl Layer for LocationPuckLayer {
     }
 
     /// A point at the position where the query meets the puck or the arrow
-    /// of any of its anchors.
+    /// of any of its anchors, where they show in front of the globe's
+    /// horizon.
     fn hit_frame(&self, query: &FrameQuery<'_, Self>, hits: &mut Vec<Feature>) {
         let paint = &query.values().evaluated.paint;
         let view = query.view();
@@ -120,13 +121,16 @@ impl Layer for LocationPuckLayer {
             let ground = Ground::new(paint, view, anchor);
             parts(paint).filter(|part| part.hit).any(|part| {
                 let [center, x, y] = ground.square(&part);
-                let corner = |[cx, cy]: [f64; 2]| {
-                    let point = [center[0] + cx * x[0] + cy * y[0], center[1] + cx * x[1] + cy * y[1]];
+                let outline: Vec<[f64; 2]> = part
+                    .outline()
+                    .into_iter()
+                    .map(|[cx, cy]| [center[0] + cx * x[0] + cy * y[0], center[1] + cx * x[1] + cy * y[1]])
+                    .collect();
+                let screen = |point: [f64; 2]| {
                     let screen = to_screen(view, anchor.tile, point, anchor.height)?;
                     Some(Vec2::new(screen.x as f32, screen.y as f32))
                 };
-                let outline: Option<Vec<Vec2>> = part.outline().into_iter().map(corner).collect();
-                outline.is_some_and(|outline| polygons_intersect(&geometry, &outline))
+                polygons_intersect(&geometry, &visible_outline(&outline, screen))
             })
         });
         if hit {
@@ -134,6 +138,34 @@ impl Layer for LocationPuckLayer {
             hits.push(Feature { geometry: Some(point.into()), ..Feature::default() });
         }
     }
+}
+
+/// Where the ring `ring` shows on the screen, which `screen` gives of each
+/// of its points, `None` where a point doesn't show: the ring clipped where
+/// it passes out of sight, at the last point of each edge that shows, which
+/// bisection finds.
+fn visible_outline(ring: &[[f64; 2]], screen: impl Fn([f64; 2]) -> Option<Vec2>) -> Vec<Vec2> {
+    let lerp = |a: [f64; 2], b: [f64; 2], t: f64| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+    let mut outline = Vec::with_capacity(ring.len());
+    for (&a, &b) in ring.iter().zip(ring.iter().cycle().skip(1)) {
+        let (shown_a, shown_b) = (screen(a), screen(b));
+        outline.extend(shown_a);
+        let ((Some(last), None) | (None, Some(last))) = (shown_a, shown_b) else {
+            continue;
+        };
+        // From the end that shows toward the one that doesn't.
+        let (from, to) = if shown_a.is_some() { (a, b) } else { (b, a) };
+        let (mut last, mut shown, mut hidden) = (last, 0.0, 1.0);
+        for _ in 0..16 {
+            let mid = f64::midpoint(shown, hidden);
+            match screen(lerp(from, to, mid)) {
+                Some(point) => (last, shown) = (point, mid),
+                None => hidden = mid,
+            }
+        }
+        outline.push(last);
+    }
+    outline
 }
 
 /// Whether the polygon or point `a` and the polygon `b` meet: one has a
