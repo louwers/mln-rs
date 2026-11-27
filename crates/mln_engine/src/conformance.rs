@@ -285,7 +285,7 @@ fn clipped_frame(gpu: &mut impl Gpu) -> Result<ClippedFrame, GpuError> {
     })?;
     let projections =
         [ProjectionUBO::default(), ProjectionUBO { matrix: tile_matrix(1.0), ..ProjectionUBO::default() }];
-    let drawables = [BackgroundDrawableUnionUBO::default(); 2];
+    let drawables = [<BackgroundDrawableUnionUBO as bytemuck::Zeroable>::zeroed(); 2];
     let props = BackgroundPropsUBO { color: [1.0, 0.0, 0.0, 1.0], opacity: 1.0, ..BackgroundPropsUBO::default() };
     let projections = bytemuck::cast_slice(&projections);
     let drawables = bytemuck::cast_slice(&drawables);

@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
@@ -19,7 +18,7 @@ use crate::draw::indexes::DrawIndexes;
 use crate::draw::objects::{DrawGeometry, Mesh, Textures, raw_vertices};
 use crate::draw::segment::SegmentBase;
 use crate::draw::vertex_attribute::Uniforms;
-use crate::layer::layer_drawing::{DrawDepth, DrawList, FrameDraw, MeshMut, TileDraws, TileObjects};
+use crate::layer::layer_drawing::{DrawDepth, FrameDraw, MeshMut, TileDraws, TileObjects};
 use crate::layer::layer_type::LayerType;
 use crate::layer::render_layer::{
     EvaluateCx, Evaluation, Hosted, LayerCx, LayerValues, OnTerrain, RenderLayer, TypedLayer, UpdateCx,
@@ -28,8 +27,7 @@ use crate::layer::tile_input::NoTiles;
 use crate::layers::background::pattern_atlas::PatternAtlas;
 use crate::layers::background::programs;
 use crate::layers::background::ubo::{
-    BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO,
-    BackgroundPropsUBO,
+    BackgroundDrawableUBO, BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO, BackgroundPropsUBO,
 };
 use crate::render::globe::globe_tile_mesh::raw_globe_tile_mesh;
 use crate::render::paint_parameters::PaintParameters;
@@ -39,10 +37,6 @@ use crate::render::tile::FrameTile;
 use crate::render::tile_matrix::{projection_data, to_projection_ubo};
 use crate::tile::OverscaledTileID;
 use crate::tile_store::tile_cover::{TileCoverParameters, tile_cover};
-
-/// The ids of the buffers that the draws bind.
-const DRAWABLE_ID: usize = programs::BACKGROUND.buffer_id("drawableVector");
-const PROPS_ID: usize = programs::BACKGROUND.buffer_id("props");
 
 impl LayerType for Background {
     type Input = NoTiles;
@@ -68,10 +62,13 @@ impl TileObjects for BackgroundTile {
     }
 }
 
+/// The block of a tile's draw, of the program with or without a pattern.
+enum DrawableBlock {
+    Plain(BackgroundDrawableUBO),
+    Pattern(BackgroundPatternDrawableUBO),
+}
+
 pub(crate) struct RenderBackgroundLayer {
-    /// The frame's draws as the update makes them, with their uniform blocks
-    /// and projections.
-    draw_list: DrawList<(BackgroundDrawableUnionUBO, ProjectionUBO)>,
     /// The patterns of `background-pattern`.
     patterns: PatternAtlas,
 }
@@ -114,12 +111,12 @@ impl RenderBackgroundLayer {
         Mesh::new(shader, color_mode, CullFaceMode::disabled(), geometry, Textures::default())
     }
 
-    /// The entries in the layer's storage buffers of the draw of `tile_id`.
+    /// The block of the draw of `tile_id`, and its projection.
     fn uniforms(
         tile_id: &OverscaledTileID,
         pattern: bool,
         parameters: &PaintParameters<'_>,
-    ) -> (BackgroundDrawableUnionUBO, ProjectionUBO) {
+    ) -> (DrawableBlock, ProjectionUBO) {
         let tile_id = tile_id.to_unwrapped();
         let projection =
             projection_data(&tile_id, parameters, [0.0, 0.0], TranslateAnchorType::Viewport, false, false, None, false);
@@ -135,7 +132,7 @@ impl RenderBackgroundLayer {
                 as i32;
             let pixel_y = tile_size_at_nearest_zoom.wrapping_mul(tile_id.canonical.y as i32);
             let pix_to_tile = tile_id.pixels_to_tile_units(1.0, f32::from(int_zoom));
-            BackgroundDrawableUnionUBO::from_pattern_drawable(&BackgroundPatternDrawableUBO {
+            DrawableBlock::Pattern(BackgroundPatternDrawableUBO {
                 matrix,
                 pixel_coord_upper: [(pixel_x >> 16) as f32, (pixel_y >> 16) as f32],
                 pixel_coord_lower: [(pixel_x & 0xFFFF) as f32, (pixel_y & 0xFFFF) as f32],
@@ -145,7 +142,7 @@ impl RenderBackgroundLayer {
                 pad3: 0.0,
             })
         } else {
-            BackgroundDrawableUnionUBO::from_drawable(&BackgroundDrawableUBO { matrix })
+            DrawableBlock::Plain(BackgroundDrawableUBO { matrix })
         };
         (draw_ubo, to_projection_ubo(&projection))
     }
@@ -159,7 +156,7 @@ impl TypedLayer for RenderBackgroundLayer {
     const PICKS_TILES: bool = true;
 
     fn new(_values: &LayerValues<Background>) -> Self {
-        RenderBackgroundLayer { draw_list: DrawList::default(), patterns: PatternAtlas::new() }
+        RenderBackgroundLayer { patterns: PatternAtlas::new() }
     }
 
     /// Keeps a tile's draw built for the passes and pattern the layer draws
@@ -170,7 +167,7 @@ impl TypedLayer for RenderBackgroundLayer {
 
     /// Makes the frame's draws of the layer, one of each tile it picked: the
     /// tiles that cover the view, or a drape's tile. It builds the draw of a
-    /// tile it keeps none of, and writes the layer's buffers the draws read.
+    /// tile it keeps none of.
     fn update_draws(
         &mut self,
         cx: LayerCx<'_, Self>,
@@ -178,7 +175,7 @@ impl TypedLayer for RenderBackgroundLayer {
         paint_parameters: &mut PaintParameters<'_>,
         _tiles: &[FrameTile<'_, Background>],
     ) {
-        let RenderBackgroundLayer { draw_list, patterns } = self;
+        let RenderBackgroundLayer { patterns } = self;
         let LayerCx { base, values, tiles, drawing } = cx;
         let layer = &*values.evaluated;
         let evaluated = &layer.paint;
@@ -227,43 +224,47 @@ impl TypedLayer for RenderBackgroundLayer {
                 depth: DrawDepth::Layer { sub_layer: 0, mask: DepthMaskType::ReadWrite },
                 ..FrameDraw::new(Some(tile_id), cached.mesh.id())
             };
-            draw_list.push(draw, Self::uniforms(&tile_id, has_pattern, paint_parameters));
+            let frame = drawing.frame_mut();
+            match Self::uniforms(&tile_id, has_pattern, paint_parameters) {
+                (DrawableBlock::Plain(block), projection) => frame.push_at(draw, (), &cached.mesh, &projection, block),
+                (DrawableBlock::Pattern(block), projection) => {
+                    frame.push_at(draw, (), &cached.mesh, &projection, block);
+                }
+            }
         }
 
         let texsize = patterns.pixel_size();
-        drawing.finish(draw_list, gpu, paint_parameters.context, |writer| {
-            let opacity = *evaluated.background_opacity.uniform();
-            if let Some((from, to)) = pattern_positions {
-                let crossfade = &layer.crossfade;
-                let props = BackgroundPatternPropsUBO {
-                    pattern_tl_a: from.tl().map(f32::from),
-                    pattern_br_a: from.br().map(f32::from),
-                    pattern_tl_b: to.tl().map(f32::from),
-                    pattern_br_b: to.br().map(f32::from),
-                    pattern_size_a: from.display_size(),
-                    pattern_size_b: to.display_size(),
-                    scale_a: crossfade.from_scale,
-                    scale_b: crossfade.to_scale,
-                    mix: crossfade.t,
-                    opacity,
-                    texsize: [texsize.width as f32, texsize.height as f32],
-                    pad1: 0.0,
-                    pad2: 0.0,
-                };
-                writer.uniform(PROPS_ID, &props);
-            } else {
-                let props = BackgroundPropsUBO {
-                    color: evaluated.background_color.uniform().to_float_array(),
-                    opacity,
-                    pad1: 0.0,
-                    pad2: 0.0,
-                    pad3: 0.0,
-                };
-                writer.uniform(PROPS_ID, &props);
-            }
-            writer.storage(DRAWABLE_ID, |(draw_ubo, _)| *draw_ubo);
-            writer.storage(PROJECTION_ID, |(_, projection)| *projection);
-        });
+        let opacity = *evaluated.background_opacity.uniform();
+        let frame = drawing.frame_mut();
+        if let Some((from, to)) = pattern_positions {
+            let crossfade = &layer.crossfade;
+            let props = BackgroundPatternPropsUBO {
+                pattern_tl_a: from.tl().map(f32::from),
+                pattern_br_a: from.br().map(f32::from),
+                pattern_tl_b: to.tl().map(f32::from),
+                pattern_br_b: to.br().map(f32::from),
+                pattern_size_a: from.display_size(),
+                pattern_size_b: to.display_size(),
+                scale_a: crossfade.from_scale,
+                scale_b: crossfade.to_scale,
+                mix: crossfade.t,
+                opacity,
+                texsize: [texsize.width as f32, texsize.height as f32],
+                pad1: 0.0,
+                pad2: 0.0,
+            };
+            frame.block(&props);
+        } else {
+            let props = BackgroundPropsUBO {
+                color: evaluated.background_color.uniform().to_float_array(),
+                opacity,
+                pad1: 0.0,
+                pad2: 0.0,
+                pad3: 0.0,
+            };
+            frame.block(&props);
+        }
+        drawing.finish(gpu, paint_parameters);
     }
 
     /// Draws nothing where the layer is transparent, and in the opaque pass

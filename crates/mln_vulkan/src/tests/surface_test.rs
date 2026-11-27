@@ -257,7 +257,9 @@ impl Scene {
     /// which the frames before used.
     fn set_half(&self, gpu: &mut VulkanGpu, right: bool) {
         let matrix = half_matrix(right);
-        let drawable = BackgroundDrawableUnionUBO::from_drawable(&BackgroundDrawableUBO { matrix });
+        // The buffer's element is as large as either background block, and
+        // the rest of it stays zeros.
+        let drawable = BackgroundDrawableUBO { matrix };
         let projection = ProjectionUBO { matrix, fallback_matrix: matrix, ..ProjectionUBO::default() };
         gpu.write_buffer(self.drawable, 0, bytemuck::bytes_of(&drawable)).expect("buffer write");
         gpu.write_buffer(self.projection, 0, bytemuck::bytes_of(&projection)).expect("buffer write");

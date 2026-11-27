@@ -67,7 +67,7 @@ fn solid_at(gpu: &mut impl Gpu, format: TextureFormat, color: [f32; 4], matrix: 
     let (quad, indices) = quad(gpu)?;
     let shader = gpu.create_shader(&ShaderKey::new(&BACKGROUND, []))?;
     let projection = [ProjectionUBO { matrix, ..ProjectionUBO::default() }];
-    let drawable = [BackgroundDrawableUnionUBO::default()];
+    let drawable = [<BackgroundDrawableUnionUBO as bytemuck::Zeroable>::zeroed()];
     let props = BackgroundPropsUBO { color, opacity: 1.0, ..BackgroundPropsUBO::default() };
     let (projection, drawable) = (bytemuck::cast_slice(&projection), bytemuck::cast_slice(&drawable));
     let props = bytemuck::bytes_of(&props);
@@ -1388,7 +1388,7 @@ pub fn host_writes<G: Gpu + ?Sized>(
     let target = target(gpu, TextureFormat::Rgba8Unorm)?;
     let (quad, indices) = quad(gpu)?;
     let shader = gpu.create_shader(&ShaderKey::new(&BACKGROUND, []))?;
-    let drawable = [BackgroundDrawableUnionUBO::default()];
+    let drawable = [<BackgroundDrawableUnionUBO as bytemuck::Zeroable>::zeroed()];
     let drawable = bytemuck::cast_slice(&drawable);
     let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable)?;
     let props = |color| BackgroundPropsUBO { color, opacity: 1.0, ..BackgroundPropsUBO::default() };
@@ -1513,7 +1513,7 @@ pub fn memory_growth(gpu: &mut impl Gpu, mut arm: impl FnMut(usize)) -> Result<m
     let props = BackgroundPropsUBO { color: GROWTH_COLOR, opacity: 1.0, ..BackgroundPropsUBO::default() };
     let props = bytemuck::bytes_of(&props);
     let props_buffer = buffer(gpu, BufferUsage::Uniform, props)?;
-    let drawable = [BackgroundDrawableUnionUBO::default()];
+    let drawable = [<BackgroundDrawableUnionUBO as bytemuck::Zeroable>::zeroed()];
     let drawable = bytemuck::cast_slice(&drawable);
     let drawable_buffer = buffer(gpu, BufferUsage::Storage, drawable)?;
     let projection = |x_max| [ProjectionUBO { matrix: tile_matrix(x_max), ..ProjectionUBO::default() }];

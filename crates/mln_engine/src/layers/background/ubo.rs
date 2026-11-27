@@ -55,35 +55,11 @@ uniform_block! {
     }
 }
 
-/// Either background per-drawable uniform block, for consolidated UBOs: a C++
-/// union, the size of the larger member, 96 bytes. Write either member with
-/// `from_drawable` / `from_pattern_drawable`; the rest stays zero (C++
-/// value-initializes the vector elements).
-#[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
+/// Either background per-drawable uniform block, as large as the larger,
+/// 96 bytes: the element of the buffer that both programs' draws write.
+#[derive(Clone, Copy, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct BackgroundDrawableUnionUBO {
     bytes: [u8; 96],
 }
 const _: () = assert!(size_of::<BackgroundDrawableUnionUBO>() == 6 * 16);
-
-impl Default for BackgroundDrawableUnionUBO {
-    fn default() -> Self {
-        Self::zeroed()
-    }
-}
-
-impl BackgroundDrawableUnionUBO {
-    #[must_use]
-    pub fn from_drawable(ubo: &BackgroundDrawableUBO) -> Self {
-        let mut u = Self::zeroed();
-        u.bytes[..64].copy_from_slice(bytemuck::bytes_of(ubo));
-        u
-    }
-
-    #[must_use]
-    pub fn from_pattern_drawable(ubo: &BackgroundPatternDrawableUBO) -> Self {
-        let mut u = Self::zeroed();
-        u.bytes.copy_from_slice(bytemuck::bytes_of(ubo));
-        u
-    }
-}

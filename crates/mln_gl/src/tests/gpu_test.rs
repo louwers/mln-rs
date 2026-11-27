@@ -268,7 +268,7 @@ fn background(gpu: &mut GlGpu, props: &BackgroundPropsUBO) -> Background {
         matrix: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
         ..ProjectionUBO::default()
     }];
-    let drawable = [BackgroundDrawableUnionUBO::default()];
+    let drawable = [<BackgroundDrawableUnionUBO as bytemuck::Zeroable>::zeroed()];
     let projection = bytemuck::cast_slice(&projection);
     let drawable = bytemuck::cast_slice(&drawable);
     let projection_buffer = buffer(gpu, BufferUsage::Storage, projection);
