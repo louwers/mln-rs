@@ -9,7 +9,7 @@
 use std::any::Any;
 
 use mln_gfx::gpu::Caps;
-use mln_wire::{Reader, Wire, Writer};
+use mln_wire::{Wire, Writer};
 
 use crate::draw::context::Context;
 use crate::draw::identity::SimpleIdentity;
@@ -226,26 +226,6 @@ impl dyn ErasedBucket {
     pub(crate) fn downcast_mut<B: Bucket>(&mut self) -> Option<&mut B> {
         let any: &mut dyn Any = self;
         Some(&mut any.downcast_mut::<Stored<B>>()?.bucket)
-    }
-}
-
-/// The bucket of a layer type that doesn't lay out: there is no value.
-#[derive(Clone)]
-pub(crate) enum NoBucket {}
-
-impl Bucket for NoBucket {
-    fn upload(&mut self, _up: &mut Upload<'_>) {
-        match *self {}
-    }
-}
-
-impl Wire for NoBucket {
-    fn write(&self, _w: &mut Writer) {
-        match *self {}
-    }
-
-    fn read(r: &mut Reader<'_>) -> Option<Self> {
-        r.fail("a bucket of a layer type that doesn't lay out")
     }
 }
 

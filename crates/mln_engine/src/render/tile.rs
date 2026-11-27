@@ -2,22 +2,25 @@
 // matrices, and what it copies of the tile and its render entry (its id,
 // hold-for-fade state and whether it draws a visible layer) when the
 // frame's update makes it. It lives in its render source, apart from the
-// tile store. The frame's phases look the tile's contents up in the store
-// by the tile's slot and id (`FrameTile`); the store changes them only in
-// the frame's update, before the layers read them.
+// tile store. The frame's phases look the tile's contents up through its
+// source, in the store by the tile's slot and id (`TileContent`, `FrameTile`);
+// the store changes them only in the frame's update, before the layers read
+// them.
 
 use glam::{DMat4, Vec2};
+use mln_style::constants;
 use mln_style::types::TranslateAnchorType;
 
 use crate::camera::{ProjectionData, View};
 use crate::draw::identity::SimpleIdentity;
 use crate::layer::layer_type::LayerType;
-use crate::render::paint_parameters::{PaintParameters, TransformParameters};
+use crate::layer::tile_input::TileData;
+use crate::layer::tile_input::input::Find;
+use crate::render::paint_parameters::TransformParameters;
 use crate::render::pass::RenderPass;
+use crate::source::render_image_source::ImageTile;
 use crate::tile::{OverscaledTileID, UnwrappedTileID};
 use crate::tile_store::contents::Contents;
-use crate::tile_store::dem::DemContents;
-use crate::tile_store::raster::RasterContents;
 use crate::tile_store::tile::Tile;
 
 pub(crate) struct RenderTile {
@@ -95,85 +98,76 @@ impl RenderTile {
     }
 }
 
+/// What a frame's tile shows the layers of its source: its contents in the
+/// tile store, or an image source's image, which each of the source's
+/// tiles draws.
+#[derive(Clone, Copy)]
+pub(crate) enum TileContent<'a> {
+    Tile(&'a Contents),
+    Image(&'a ImageTile),
+}
+
+impl TileContent<'_> {
+    /// The bucket or the raster, raster-dem or image contents that the
+    /// content shows at `place`, with the generations of their mask or mesh
+    /// and of their DEM's border.
+    pub(crate) fn stamp(self, place: ViewPlace) -> Option<(SimpleIdentity, [u64; 2])> {
+        match (self, place) {
+            (TileContent::Tile(contents), place) => contents.stamp(place),
+            (TileContent::Image(image), ViewPlace::Own) => Some((image.id(), [image.generation(), 0])),
+            (TileContent::Image(_), ViewPlace::Laid(_)) => None,
+        }
+    }
+
+    /// The box that the content draws over, in its tile's units: min x,
+    /// min y, max x, max y. A tile's contents draw over the tile; an image
+    /// source's image over the box of its quad's corners, which may reach
+    /// past the tile.
+    pub(crate) fn bounds(self) -> [i32; 4] {
+        match self {
+            TileContent::Tile(_) => TILE_BOUNDS,
+            TileContent::Image(image) => image.bounds,
+        }
+    }
+}
+
+/// The box of a whole tile, in its units.
+pub(crate) const TILE_BOUNDS: [i32; 4] = [0, 0, constants::EXTENT, constants::EXTENT];
+
+/// Whether `bounds`, a box in the units of the tile `tile`, covers part of
+/// the tile `other`. A box that only touches its edge doesn't.
+pub(crate) fn overlaps(tile: &UnwrappedTileID, bounds: [i32; 4], other: &UnwrappedTileID) -> bool {
+    // Both boxes in the tile units of the finer of the two zooms, from the
+    // west edge of world copy 0.
+    let zoom = tile.canonical.z.max(other.canonical.z);
+    let place = |id: &UnwrappedTileID| {
+        let scale = 1i64 << (zoom - id.canonical.z);
+        let extent = i64::from(constants::EXTENT) * scale;
+        let x = ((i64::from(id.wrap) << id.canonical.z) + i64::from(id.canonical.x)) * extent;
+        (x, i64::from(id.canonical.y) * extent, scale)
+    };
+    let (left, top, scale) = place(tile);
+    let [min_x, min_y, max_x, max_y] = bounds.map(|bound| i64::from(bound) * scale);
+    let (other_left, other_top, other_scale) = place(other);
+    let other_extent = i64::from(constants::EXTENT) * other_scale;
+    left + min_x < other_left + other_extent
+        && other_left < left + max_x
+        && top + min_y < other_top + other_extent
+        && other_top < top + max_y
+}
+
 /// Where a tile's contents keep what they show a layer. The frame's found
 /// tiles keep it for layers of every type in one list, so a place of one
-/// type's views can reach another's [`TileView::at`], which asserts that it
-/// doesn't.
+/// type's inputs can reach another's
+/// [`Find::at`](crate::layer::tile_input::input::Find::at), which asserts
+/// that it doesn't.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ViewPlace {
     /// The layer's place among the layers of the tile's layout.
     Laid(usize),
-    /// The tile's own contents, a raster or raster-dem tile's, which every
-    /// layer of its source draws.
+    /// The tile's own contents, a raster or raster-dem tile's or an image
+    /// source's image, which every layer of its source draws.
     Own,
-}
-
-/// What a frame's tile shows a layer of some type: its bucket in the tile's
-/// layout, or a raster or raster-dem tile's own contents. A frame finds it by
-/// the layer's id once ([`find`](Self::find)), in its update, and its encode
-/// takes it again from where it was found ([`at`](Self::at)).
-pub(crate) trait TileView<'a>: Copy {
-    /// What `contents` show the layer `layer_id`, if anything, and where it
-    /// is in them.
-    fn find(contents: &'a Contents, layer_id: &str) -> Option<(Self, ViewPlace)>;
-
-    /// What `contents` show at `place`, where [`find`](Self::find) found
-    /// what they show a layer in the same contents.
-    fn at(contents: &'a Contents, place: ViewPlace) -> Option<Self>;
-
-    /// Whether this is what a tile shows the layer `layer_id`, rather than
-    /// another layer.
-    fn is_for(self, _layer_id: &str) -> bool {
-        true
-    }
-
-    /// The passes the bucket was laid out to draw in, which its layer draws
-    /// in too; none for a bucket that isn't laid out.
-    fn passes(self) -> RenderPass {
-        RenderPass::None
-    }
-}
-
-impl<'a> TileView<'a> for &'a RasterContents {
-    fn find(contents: &'a Contents, _layer_id: &str) -> Option<(Self, ViewPlace)> {
-        Some((Self::at(contents, ViewPlace::Own)?, ViewPlace::Own))
-    }
-
-    fn at(contents: &'a Contents, place: ViewPlace) -> Option<Self> {
-        debug_assert_eq!(place, ViewPlace::Own, "a laid-out layer's place for a tile's own contents");
-        match contents {
-            Contents::Raster(raster) => Some(raster),
-            _ => None,
-        }
-    }
-}
-
-impl<'a> TileView<'a> for &'a DemContents {
-    fn find(contents: &'a Contents, _layer_id: &str) -> Option<(Self, ViewPlace)> {
-        Some((Self::at(contents, ViewPlace::Own)?, ViewPlace::Own))
-    }
-
-    fn at(contents: &'a Contents, place: ViewPlace) -> Option<Self> {
-        debug_assert_eq!(place, ViewPlace::Own, "a laid-out layer's place for a tile's own contents");
-        match contents {
-            Contents::Dem(dem) => Some(dem),
-            _ => None,
-        }
-    }
-}
-
-/// What a tile shows a layer of a type without a source: nothing.
-#[derive(Clone, Copy)]
-pub(crate) enum NoTileBucket {}
-
-impl TileView<'_> for NoTileBucket {
-    fn find(_contents: &Contents, _layer_id: &str) -> Option<(Self, ViewPlace)> {
-        None
-    }
-
-    fn at(_contents: &Contents, _place: ViewPlace) -> Option<Self> {
-        None
-    }
 }
 
 /// What a layer draws of a frame's tile: the tile, the bucket or contents
@@ -189,17 +183,21 @@ pub(crate) struct TileStamp {
 
 /// A layer's tile of a frame, as the frame's update found it: its index
 /// among its source's render tiles, and where what it shows the layer is in
-/// its contents ([`TileView::find`]).
+/// its contents ([`Find::find`](crate::layer::tile_input::input::Find::find)).
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct FoundTile {
     pub(crate) tile: usize,
     pub(crate) view: Option<ViewPlace>,
 }
 
-/// A render tile of a frame, with what it shows a layer of the type `T`.
+/// A render tile of a frame, with what it holds for a layer of the type
+/// `T` and the world copy the layer draws it in.
 pub(crate) struct FrameTile<'a, T: LayerType> {
     pub(crate) tile: &'a RenderTile,
-    bucket: Option<T::TileBucket<'a>>,
+    /// The world copy the layer draws the tile in: its own, but in a drape
+    /// one by the drape's.
+    wrap: i16,
+    data: Option<TileData<'a, T>>,
 }
 
 impl<T: LayerType> Clone for FrameTile<'_, T> {
@@ -211,42 +209,49 @@ impl<T: LayerType> Clone for FrameTile<'_, T> {
 impl<T: LayerType> Copy for FrameTile<'_, T> {}
 
 impl<'a, T: LayerType> FrameTile<'a, T> {
-    /// The tile `tile`, which shows `contents`, as the layer `layer_id`
-    /// sees it, and where it found what the tile shows the layer.
+    /// The tile `tile`, which shows `content`, as the layer `layer_id`
+    /// sees it, and where it found what the tile holds for the layer.
     #[must_use]
     pub(crate) fn find(
         tile: &'a RenderTile,
-        contents: Option<&'a Contents>,
+        content: Option<TileContent<'a>>,
         layer_id: &str,
     ) -> (Self, Option<ViewPlace>) {
-        let found = contents.and_then(|contents| T::TileBucket::find(contents, layer_id));
-        (FrameTile { tile, bucket: found.map(|(bucket, _)| bucket) }, found.map(|(_, place)| place))
+        let found = content.and_then(|content| T::Input::find(content, layer_id));
+        let frame_tile = FrameTile { tile, wrap: tile.id.wrap, data: found.map(|(data, _)| data) };
+        (frame_tile, found.map(|(_, place)| place))
     }
 
-    /// The tile `tile`, which shows `contents`, as the layer `layer_id`
-    /// sees it, with what it shows the layer at `view` in `contents`, where
-    /// [`find`](Self::find) found it.
+    /// The tile `tile`, which shows `content`, as the layer `layer_id`
+    /// sees it, with what it holds for the layer at `view` in `content`,
+    /// where [`find`](Self::find) found it.
     #[must_use]
     pub(crate) fn at(
         tile: &'a RenderTile,
-        contents: Option<&'a Contents>,
+        content: Option<TileContent<'a>>,
         layer_id: &str,
         view: Option<ViewPlace>,
     ) -> Self {
-        let bucket = contents.zip(view).and_then(|(contents, place)| T::TileBucket::at(contents, place));
-        debug_assert_eq!(bucket.is_some(), view.is_some(), "a tile's contents changed since the frame's update");
-        debug_assert!(bucket.is_none_or(|bucket| bucket.is_for(layer_id)), "a layer found at another's place");
-        FrameTile { tile, bucket }
+        let data = content.zip(view).and_then(|(content, place)| T::Input::at(content, place));
+        debug_assert_eq!(data.is_some(), view.is_some(), "a tile's contents changed since the frame's update");
+        debug_assert!(data.is_none_or(|data| T::Input::is_for(data, layer_id)), "a layer found at another's place");
+        FrameTile { tile, wrap: tile.id.wrap, data }
     }
 
-    /// What the tile shows the layer, if anything.
-    pub(crate) fn bucket(self) -> Option<T::TileBucket<'a>> {
-        self.bucket
+    /// The tile, drawn in the world copy `wrap`.
+    #[must_use]
+    pub(crate) fn in_copy(self, wrap: i16) -> Self {
+        FrameTile { wrap, ..self }
     }
 
-    /// [`bucket`](Self::bucket), if it was laid out to draw in `pass`.
-    pub(crate) fn bucket_for_pass(self, pass: RenderPass) -> Option<T::TileBucket<'a>> {
-        self.bucket.filter(|bucket| bucket.passes() & pass != RenderPass::None)
+    /// What the tile holds for the layer, if anything.
+    pub(crate) fn data(self) -> Option<TileData<'a, T>> {
+        self.data
+    }
+
+    /// [`data`](Self::data), if it was laid out to draw in `pass`.
+    pub(crate) fn data_for_pass(self, pass: RenderPass) -> Option<TileData<'a, T>> {
+        self.data.filter(|&data| T::Input::passes(data) & pass != RenderPass::None)
     }
 
     /// The tile's id.
@@ -255,14 +260,10 @@ impl<'a, T: LayerType> FrameTile<'a, T> {
         *self.tile.overscaled_tile_id()
     }
 
-    /// The id that a layer that drapes draws the tile under with
-    /// `parameters`: its own, but in a drape in the drape's world copy.
+    /// The id that the layer draws the tile under: its own, but in a drape
+    /// in the world copy the drape draws it in.
     #[must_use]
-    pub(crate) fn draw_id(self, parameters: &PaintParameters<'_>) -> OverscaledTileID {
-        let id = self.id();
-        match parameters.drape_wrap() {
-            Some(wrap) => OverscaledTileID { wrap, ..id },
-            None => id,
-        }
+    pub(crate) fn draw_id(self) -> OverscaledTileID {
+        OverscaledTileID { wrap: self.wrap, ..self.id() }
     }
 }

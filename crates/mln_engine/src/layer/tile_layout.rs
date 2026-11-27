@@ -186,7 +186,9 @@ pub(crate) fn discover(input: &LayoutInput<'_>) -> Result<Discovered, Error> {
                 },
                 SourceLayer::new(data.clone(), source_layer.clone()),
             )?;
-            Some(layout)
+            // A type that needs resources lays out.
+            debug_assert!(layout.is_some(), "a type that needs resources without a layout");
+            layout
         } else {
             None
         };
@@ -223,7 +225,7 @@ pub(crate) fn build(discovered: Discovered, input: &LayoutInput<'_>, resolved: &
         built.feature_index.set_bucket_layer_ids(&leader.base().id, &layer_ids);
 
         let layout = match layout {
-            Some(layout) => layout,
+            Some(layout) => Some(layout),
             // Layouts of groups that need no glyphs or images record nothing.
             None => layers[0].entry().create_layout(
                 &layers,
@@ -240,6 +242,8 @@ pub(crate) fn build(discovered: Discovered, input: &LayoutInput<'_>, resolved: &
                 SourceLayer::new(data.clone(), leader.base().source_layer.clone()),
             )?,
         };
+        // A group of a type that doesn't lay out has no bucket.
+        let Some(layout) = layout else { continue };
         if layout.needs_resources() {
             waiting.push(layout);
         } else {

@@ -139,7 +139,8 @@ fn create_bucket(properties: &Arc<dyn ErasedEvaluatedLayer>, shape: Shape) -> Bo
             },
             SourceLayer::new(data.clone(), ""),
         )
-        .unwrap();
+        .unwrap()
+        .expect("a layout of a type that lays out");
 
     let marker = Arc::new(
         ImageImpl::new(

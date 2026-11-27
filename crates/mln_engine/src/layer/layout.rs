@@ -57,24 +57,6 @@ pub(crate) trait Layout<T: LayerType>: Send + Sized + 'static {
     fn build(self, cx: &mut BuildCx<'_, T>) -> Result<Option<Self::Bucket>, Error>;
 }
 
-/// The bucket of the layer type `T`'s layout.
-pub(crate) type BucketOf<T> = <<T as LayerType>::Layout as Layout<T>>::Bucket;
-
-/// The layout of a layer type that doesn't lay out, which builds nothing.
-pub(crate) struct NoLayout;
-
-impl<T: LayerType> Layout<T> for NoLayout {
-    type Bucket = crate::layer::bucket::NoBucket;
-
-    fn new(_cx: &mut LayoutCx<'_, T>) -> Result<Self, Error> {
-        Ok(NoLayout)
-    }
-
-    fn build(self, _cx: &mut BuildCx<'_, T>) -> Result<Option<Self::Bucket>, Error> {
-        Ok(None)
-    }
-}
-
 /// The layer a layout reads: its tile data and its name.
 #[derive(Clone)]
 pub(crate) struct SourceLayer {

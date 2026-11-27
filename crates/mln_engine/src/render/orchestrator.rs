@@ -27,7 +27,7 @@ use crate::exec::pool::{Pool, TaskGroup};
 use crate::image::image_store::ImageStore;
 use crate::layer::layer_drawing::{ChangedBuckets, DrawGroup, DrawOrder, SingleDraw};
 use crate::layer::layer_type::ErasedEvaluatedLayer;
-use crate::layer::render_layer::{FrameSourceTiles, LayerSource, LayerUpdateParameters, OnTerrain, RenderLayer};
+use crate::layer::render_layer::{FrameSourceTiles, LayerUpdateParameters, OnTerrain, RenderLayer};
 use crate::layers::custom::EndedHosts;
 use crate::map::MapMode;
 use crate::placement::{Placement, PlacementInputs};
@@ -37,13 +37,12 @@ use crate::render::globe::depth_pass::GlobeDepthPass;
 use crate::render::paint_parameters::PaintParameters;
 use crate::render::pass::RenderPass;
 use crate::render::terrain::{DrapeStacks, Draped, RenderTerrain};
-use crate::render::tile::{FoundTile, RenderTile};
+use crate::render::tile::{FoundTile, TileContent};
 use crate::render::update_parameters::UpdateParameters;
 use crate::source::render_source::{self, RenderSource, RenderTileParameters, TileOrder};
 use crate::text::GlyphCache;
 use crate::text::glyph_store::GlyphStore;
 use crate::text::local_fonts::LocalGlyphs;
-use crate::tile_store::contents::Contents;
 use crate::tile_store::inbox::Waker;
 use crate::tile_store::source_tiles::SourceTiles;
 use crate::tile_store::store::{StoreEvent, TileStore};
@@ -1706,47 +1705,43 @@ impl RenderOrchestrator {
 #[derive(Default)]
 struct SourceContents<'a> {
     source: Option<&'a str>,
-    contents: Vec<Option<&'a Contents>>,
+    contents: Vec<Option<TileContent<'a>>>,
 }
 
 impl<'a> SourceContents<'a> {
     /// What the render tiles of `source`, an id and its render source,
     /// show, from `store`; none for no source.
-    fn of(&mut self, source: Option<(&'a str, &'a dyn RenderSource)>, store: &'a TileStore) -> &[Option<&'a Contents>] {
+    fn of(
+        &mut self,
+        source: Option<(&'a str, &'a dyn RenderSource)>,
+        store: &'a TileStore,
+    ) -> &[Option<TileContent<'a>>] {
         let Some((id, source)) = source else {
             return &[];
         };
         if self.source != Some(id) {
             self.source = Some(id);
             self.contents.clear();
-            let tiles = source.tiles().and_then(|key| store.source(key));
-            let contents_of = |tile: &RenderTile| tiles?.contents_at(tile.overscaled_tile_id(), tile.slot());
-            self.contents.extend(source.render_tiles().iter().map(contents_of));
+            source.tile_contents(store, &mut self.contents);
         }
         &self.contents
     }
 }
 
 /// What `frame_layer`, a layer of the frame, draws from its source among
-/// `render_sources`: an image source's image, or the source's render tiles
-/// with what `contents` finds they show in `tile_store`, among which it draws
-/// those of `found` its update found.
+/// `render_sources`: the source's render tiles with what `contents` finds
+/// they show in `tile_store`, among which it draws those of `found` its
+/// update found.
 fn layer_source<'a, 'c>(
     frame_layer: &'a FrameLayer,
     render_sources: &'a HashMap<String, Box<dyn RenderSource>>,
     tile_store: &'a TileStore,
     found: &'a [FoundTile],
     contents: &'c mut SourceContents<'a>,
-) -> Option<LayerSource<'c>> {
+) -> Option<FrameSourceTiles<'c>> {
     let source = frame_layer.source.as_ref().and_then(|id| render_sources.get_key_value(id));
     let (id, source) = source.map(|(id, source)| (id.as_str(), &**source))?;
-    Some(match source.image_render_data() {
-        Some(image) => LayerSource::Image(image),
-        None => LayerSource::Tiles(
-            FrameSourceTiles::new(source.render_tiles(), contents.of(Some((id, source)), tile_store)),
-            found,
-        ),
-    })
+    Some(FrameSourceTiles::new(source.render_tiles(), contents.of(Some((id, source)), tile_store), found))
 }
 
 /// Drops `value` on `thread_pool`, the orchestrator's workers, instead of

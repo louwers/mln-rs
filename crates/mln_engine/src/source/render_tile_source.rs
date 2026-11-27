@@ -7,7 +7,7 @@ use mln_style::error::Error;
 use crate::draw::context::Context;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::query::FeatureExtensionValue;
-use crate::render::tile::RenderTile;
+use crate::render::tile::{RenderTile, TileContent};
 use crate::render::update_parameters::UpdateParameters;
 use crate::source::MapSettings;
 use crate::source::erased::ErasedOrigin;
@@ -167,6 +167,12 @@ impl RenderSource for RenderTileSource {
             TileOrder::ById => &self.order_by_id,
             TileOrder::ByY => &self.order_by_y,
         })
+    }
+
+    fn tile_contents<'a>(&'a self, store: &'a TileStore, contents: &mut Vec<Option<TileContent<'a>>>) {
+        let tiles = store.source(self.key);
+        let content_of = |tile: &RenderTile| tiles?.contents_at(tile.overscaled_tile_id(), tile.slot());
+        contents.extend(self.render_tiles.iter().map(|tile| content_of(tile).map(TileContent::Tile)));
     }
 
     fn query_feature_extensions(

@@ -1,12 +1,9 @@
 // The raster meshes: the quads that draw what a raster or raster-dem tile's
-// mask keeps, which each layer makes of the tiles it draws (`MaskQuads`),
-// and an image source's bucket, which the source keeps.
+// mask keeps, which each layer makes of the tiles it draws (`MaskQuads`).
 
 use std::collections::hash_map::Entry;
-use std::sync::Arc;
 
 use geometry::Point;
-use mln_style::bitmap::PremultipliedImage;
 use mln_style::constants;
 use mln_style::hash::{HashMap, HashSet};
 
@@ -42,7 +39,7 @@ pub(crate) struct StoredQuads {
 
 impl StoredQuads {
     /// `vertices` and `indices` in `context`'s stores, drawn in `segments`.
-    fn new(
+    pub(crate) fn new(
         context: &mut Context,
         vertices: Vec<RasterLayoutVertex>,
         indices: Vec<u16>,
@@ -115,87 +112,5 @@ impl MaskQuads {
 
     pub(crate) fn clear(&mut self) {
         self.quads.clear();
-    }
-}
-
-/// Where an image source's mesh is.
-enum Mesh {
-    /// It has none yet.
-    None,
-    /// Its vertices and indices, until their upload moves them.
-    Data { vertices: Vec<RasterLayoutVertex>, indices: Vec<u16>, segments: Vec<SegmentBase> },
-    /// In the context's stores.
-    Stored(StoredQuads),
-}
-
-/// An image source's image, and the mesh that warps it onto the image's
-/// quad. The raster layers that draw the source share them.
-pub(crate) struct RasterBucket {
-    id: SimpleIdentity,
-    pub(crate) image: Arc<PremultipliedImage>,
-    mesh: Mesh,
-    /// Counts the changes of the mesh, after which the layers build their
-    /// draws of the image again.
-    generation: u64,
-}
-
-impl RasterBucket {
-    /// The bucket of `image`, which it shares, without a mesh.
-    #[must_use]
-    pub(crate) fn new(image: Arc<PremultipliedImage>) -> Self {
-        RasterBucket { id: SimpleIdentity::new(), image, mesh: Mesh::None, generation: 0 }
-    }
-
-    /// The bucket's identity, by which the layers keep the image's texture.
-    #[must_use]
-    pub(crate) fn id(&self) -> SimpleIdentity {
-        self.id
-    }
-
-    /// The number of times the mesh changed.
-    #[must_use]
-    pub(crate) fn generation(&self) -> u64 {
-        self.generation
-    }
-
-    /// Whether the bucket has a mesh.
-    #[must_use]
-    pub(crate) fn has_mesh(&self) -> bool {
-        !matches!(self.mesh, Mesh::None)
-    }
-
-    /// Makes the mesh `vertices` and `indices` in `segments`.
-    pub(crate) fn set_mesh(
-        &mut self,
-        vertices: Vec<RasterLayoutVertex>,
-        indices: Vec<u16>,
-        segments: Vec<SegmentBase>,
-    ) {
-        self.mesh = Mesh::Data { vertices, indices, segments };
-        self.generation += 1;
-    }
-
-    /// The mesh in the context's stores, once its upload moved it.
-    #[must_use]
-    pub(crate) fn quads(&self) -> Option<&StoredQuads> {
-        match &self.mesh {
-            Mesh::Stored(quads) => Some(quads),
-            Mesh::Data { vertices, .. } => {
-                debug_assert!(vertices.is_empty(), "an image source's mesh drawn before its upload");
-                None
-            }
-            Mesh::None => None,
-        }
-    }
-
-    /// Moves the mesh into `context`'s stores, unless it is there or there
-    /// is none.
-    pub(crate) fn upload(&mut self, context: &mut Context) {
-        self.mesh = match std::mem::replace(&mut self.mesh, Mesh::None) {
-            Mesh::Data { vertices, indices, segments } if !vertices.is_empty() => {
-                Mesh::Stored(StoredQuads::new(context, vertices, indices, segments))
-            }
-            mesh => mesh,
-        };
     }
 }

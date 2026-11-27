@@ -595,13 +595,6 @@ impl<'a> PaintParameters<'a> {
         tiles
     }
 
-    /// The world copy of the drape that the draws go into; `None` for the
-    /// frame, where each tile draws in its own.
-    #[must_use]
-    pub(crate) fn drape_wrap(&self) -> Option<i16> {
-        self.drape_tile.map(|tile| tile.wrap)
-    }
-
     fn draw_clip_masks(&mut self, gpu: &mut dyn Gpu, masks: &[(UnwrappedTileID, i32)]) {
         if let Some(target) = self.draw_target() {
             self.clip_masks.draw(gpu, masks, target, self.context);

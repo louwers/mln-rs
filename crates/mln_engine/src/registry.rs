@@ -22,6 +22,7 @@ use mln_style::sources::{
 use mln_vec_map::VecMap;
 
 use crate::layer::layer_type::{ErasedLayerType, LayerType, entry};
+use crate::layer::tile_input::input::Find;
 use crate::layers::custom::Custom;
 use crate::source::erased::{self, ErasedSourceType};
 use crate::source::{SourceType, kind};
@@ -55,7 +56,15 @@ impl RegistryBuilder {
     }
 
     /// Adds the layer type `T`. Fails for a name that an earlier type took.
+    /// A type whose input is of another kind of source than its style half
+    /// names doesn't compile.
     pub(crate) fn add_layer_type<T: LayerType>(&mut self) -> Result<(), RegisterError> {
+        const {
+            assert!(
+                T::INFO.source as u8 == <T::Input as Find<T>>::KIND as u8,
+                "a layer type draws from the kind of source its style half names"
+            );
+        }
         let name = T::INFO.name;
         if self.layer_types.contains_key(name) {
             return Err(RegisterError::Duplicate(name.to_owned()));

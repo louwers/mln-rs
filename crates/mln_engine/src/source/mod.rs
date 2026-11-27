@@ -206,7 +206,9 @@ impl TileKind for GeometryTiles {
 }
 
 /// The tiles of a raster source. A load delivers a tile's encoded image,
-/// which the engine decodes.
+/// which the engine decodes. A layer type that draws raster images draws
+/// them, or the one image of an image source ([`Supply::image`]), as its
+/// input.
 pub enum RasterTiles {}
 
 impl TileKind for RasterTiles {
@@ -215,7 +217,8 @@ impl TileKind for RasterTiles {
 
 /// The tiles of a raster-dem source. A load delivers a tile's encoded image,
 /// which the engine decodes with the elevation encoding its origin set
-/// ([`OriginUpdate::set_encoding`]).
+/// ([`OriginUpdate::set_encoding`]). A layer type that draws elevations
+/// draws them as its input.
 pub enum DemTiles {}
 
 impl TileKind for DemTiles {

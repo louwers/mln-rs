@@ -12,10 +12,10 @@ use crate::draw::context::Context;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::registry::Registry;
 use crate::render::paint_parameters::TransformParameters;
-use crate::render::tile::RenderTile;
+use crate::render::tile::{RenderTile, TileContent};
 use crate::render::update_parameters::UpdateParameters;
 use crate::source::Supplied;
-use crate::source::render_image_source::{ImageSourceRenderData, RenderImageSource};
+use crate::source::render_image_source::RenderImageSource;
 use crate::source::render_tile_source::RenderTileSource;
 use crate::tile_store::store::TileStore;
 use crate::tile_store::tile_parameters::TileParameters;
@@ -93,11 +93,9 @@ pub(crate) trait RenderSource {
         None
     }
 
-    /// An image source's image, as the layers that draw it read it; `None`
-    /// for other sources.
-    fn image_render_data(&self) -> Option<ImageSourceRenderData<'_>> {
-        None
-    }
+    /// Adds to `contents` what each of the source's render tiles shows, at
+    /// its index, from `store`.
+    fn tile_contents<'a>(&'a self, _store: &'a TileStore, _contents: &mut Vec<Option<TileContent<'a>>>) {}
 
     /// Queries a feature extension; sources without extensions return a null
     /// value.

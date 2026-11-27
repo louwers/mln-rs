@@ -21,28 +21,28 @@ use smallvec::SmallVec;
 
 use crate::layer::bucket::{ErasedBucket, Stored};
 use crate::layer::bucket_parameters::BucketParameters;
-use crate::layer::layout::{BucketOf, BuildCx, Layout, LayoutCx, LayoutParameters, SourceLayer, layers_by_id};
+use crate::layer::layout::{BuildCx, Layout, LayoutCx, LayoutParameters, SourceLayer, layers_by_id};
 use crate::layer::render_layer::RenderLayer;
+use crate::layer::tile_input::input::Find;
+use crate::layer::tile_input::{TileData, TileInput};
 use crate::layer::tile_layout::{Built, Resolved};
-use crate::render::tile::TileView;
+use crate::tile_store::contents::GeometryContents;
 
 /// A layer type that the renderer draws.
 pub(crate) trait LayerType: StyleLayerType {
-    /// How a tile lays out a group of the type's layers.
-    /// [`NoLayout`](crate::layer::layout::NoLayout) for a type that
-    /// doesn't lay out.
-    type Layout: Layout<Self>;
+    /// What the type's layers draw from: the features of a geometry
+    /// source's tiles, which a layout lays out into a bucket per tile
+    /// ([`Features`](crate::layer::tile_input::Features)), a raster or
+    /// raster-dem source's tiles, or none, for a type without a source. The
+    /// registry checks that it is of the kind of source that the type's
+    /// style half names.
+    type Input: TileInput<Self>;
 
-    /// What a frame's tile shows a layer of the type, which its draws draw:
-    /// its bucket in the tile's layout
-    /// ([`LayerBucket`](crate::layer::render_layer::LayerBucket)), a raster or
-    /// raster-dem tile's own contents, or nothing for a type without a source
-    /// ([`NoTileBucket`](crate::render::tile::NoTileBucket)).
-    type TileBucket<'a>: TileView<'a>;
-
-    /// How far outside a feature of `bucket` a query still hits it, from
-    /// `layer`'s current values and the bucket's statistics of them.
-    fn query_radius(_bucket: &BucketOf<Self>, _layer: &EvaluatedLayer<Self>) -> f32 {
+    /// How far outside a feature of `data`, a tile's bucket of the layer, a
+    /// query still hits it, from `layer`'s current values and the bucket's
+    /// statistics of them. The engine asks only a type whose input lays
+    /// out.
+    fn query_radius(_data: TileData<'_, Self>, _layer: &EvaluatedLayer<Self>) -> f32 {
         0.0
     }
 
@@ -167,21 +167,23 @@ pub(crate) trait ErasedLayerType: ErasedStyleLayerType {
     fn create_render_layer(&self, style: &Arc<dyn ErasedLayerStyle>) -> Option<Box<dyn RenderLayer>>;
 
     /// [`Layout::needs_resources`] of the type's layout; false for a layer
-    /// of another type.
+    /// of another type or a type that doesn't lay out.
     fn needs_resources(&self, group: &[Arc<dyn ErasedEvaluatedLayer>]) -> bool;
 
     /// The type's layout of `group`, layers of the same layout on
-    /// `source_layer`, with the dependencies it records in `parameters`.
-    /// Fails for a layer of another type.
+    /// `source_layer`, with the dependencies it records in `parameters`;
+    /// `None` for a type that doesn't lay out. Fails for a layer of another
+    /// type.
     fn create_layout(
         &self,
         group: &[Arc<dyn ErasedEvaluatedLayer>],
         parameters: LayoutParameters<'_>,
         source_layer: SourceLayer,
-    ) -> Result<Box<dyn ErasedLayout>, Error>;
+    ) -> Result<Option<Box<dyn ErasedLayout>>, Error>;
 
-    /// [`LayerType::query_radius`]; 0 for a bucket or layer of another type.
-    fn query_radius(&self, bucket: &dyn ErasedBucket, layer: &Arc<dyn ErasedEvaluatedLayer>) -> f32;
+    /// [`LayerType::query_radius`] of the bucket that `contents` laid out
+    /// for `layer`; 0 where they laid out none of the type's.
+    fn query_radius(&self, contents: &GeometryContents, layer: &Arc<dyn ErasedEvaluatedLayer>) -> f32;
 
     /// Reads the values that [`ErasedEvaluatedLayer::write`] wrote for a
     /// layer of the type.
@@ -197,7 +199,7 @@ impl<T: LayerType> ErasedLayerType for LayerTypeEntry<T> {
     }
 
     fn needs_resources(&self, group: &[Arc<dyn ErasedEvaluatedLayer>]) -> bool {
-        recover_group::<T>(group).is_ok_and(|group| T::Layout::needs_resources(&group))
+        T::Input::needs_resources(group)
     }
 
     fn create_layout(
@@ -205,19 +207,15 @@ impl<T: LayerType> ErasedLayerType for LayerTypeEntry<T> {
         group: &[Arc<dyn ErasedEvaluatedLayer>],
         parameters: LayoutParameters<'_>,
         source_layer: SourceLayer,
-    ) -> Result<Box<dyn ErasedLayout>, Error> {
-        let layers = recover_group::<T>(group)?;
-        debug_assert!(!layers.is_empty());
-        let needs_resources = T::Layout::needs_resources(&layers);
-        let layout = T::Layout::new(&mut LayoutCx { layers: &layers, source_layer: &source_layer, parameters })?;
-        Ok(Box::new(TypedLayout::<T> { layout, layers, source_layer, needs_resources }))
+    ) -> Result<Option<Box<dyn ErasedLayout>>, Error> {
+        T::Input::create_layout(group, parameters, source_layer)
     }
 
-    fn query_radius(&self, bucket: &dyn ErasedBucket, layer: &Arc<dyn ErasedEvaluatedLayer>) -> f32 {
-        match (bucket.downcast_ref::<BucketOf<T>>(), EvaluatedLayer::<T>::recover(layer)) {
-            (Some(bucket), Some(layer)) => T::query_radius(bucket, &layer),
-            _ => 0.0,
-        }
+    fn query_radius(&self, contents: &GeometryContents, layer: &Arc<dyn ErasedEvaluatedLayer>) -> f32 {
+        let Some(layer) = EvaluatedLayer::<T>::recover(layer) else {
+            return 0.0;
+        };
+        T::Input::laid(contents, &layer.style.id).map_or(0.0, |data| T::query_radius(data, &layer))
     }
 
     fn read_evaluated(&self, r: &mut Reader<'_>) -> Option<Arc<dyn ErasedEvaluatedLayer>> {
@@ -234,8 +232,29 @@ impl<T: LayerType> ErasedLayerType for LayerTypeEntry<T> {
     }
 
     fn read_bucket(&self, r: &mut Reader<'_>) -> Option<Box<dyn ErasedBucket>> {
-        Some(Box::new(Stored::new(BucketOf::<T>::read(r)?)))
+        T::Input::read_bucket(r)
     }
+}
+
+/// [`Layout::needs_resources`] of `L`, a layout of the type `T`, for
+/// `group`; false if a layer of it is another type's.
+pub(crate) fn needs_resources<T: LayerType, L: Layout<T>>(group: &[Arc<dyn ErasedEvaluatedLayer>]) -> bool {
+    recover_group::<T>(group).is_ok_and(|group| L::needs_resources(&group))
+}
+
+/// The layout `L` of `group`, layers of the type `T` of the same layout on
+/// `source_layer`, with the dependencies it records in `parameters`. Fails
+/// for a layer of another type.
+pub(crate) fn create_layout<T: LayerType, L: Layout<T>>(
+    group: &[Arc<dyn ErasedEvaluatedLayer>],
+    parameters: LayoutParameters<'_>,
+    source_layer: SourceLayer,
+) -> Result<Box<dyn ErasedLayout>, Error> {
+    let layers = recover_group::<T>(group)?;
+    debug_assert!(!layers.is_empty());
+    let needs_resources = L::needs_resources(&layers);
+    let layout = L::new(&mut LayoutCx { layers: &layers, source_layer: &source_layer, parameters })?;
+    Ok(Box::new(TypedLayout::<T, L> { layout, layers, source_layer, needs_resources }))
 }
 
 /// `group`'s layers as `T` layers' values; fails if one is another type's.
@@ -273,14 +292,14 @@ pub(crate) trait ErasedLayout: Send {
 }
 
 /// A layout with the group it lays out and the layer it reads.
-struct TypedLayout<T: LayerType> {
-    layout: T::Layout,
+struct TypedLayout<T: LayerType, L> {
+    layout: L,
     layers: SmallVec<[Arc<EvaluatedLayer<T>>; 4]>,
     source_layer: SourceLayer,
     needs_resources: bool,
 }
 
-impl<T: LayerType> ErasedLayout for TypedLayout<T> {
+impl<T: LayerType, L: Layout<T>> ErasedLayout for TypedLayout<T, L> {
     fn needs_resources(&self) -> bool {
         self.needs_resources
     }
@@ -324,7 +343,6 @@ mod tests {
     use mln_style::property::evaluated::Evaluated;
 
     use super::*;
-    use crate::buckets::circle_bucket::CircleBucket;
 
     fn background() -> Arc<dyn ErasedEvaluatedLayer> {
         let paint = BackgroundPaintProperties::PossiblyEvaluated {
@@ -353,8 +371,6 @@ mod tests {
         let layer = background();
         let circles = entry::<Circle>();
         assert!(!circles.needs_resources(std::slice::from_ref(&layer)));
-        let bucket = Stored::new(CircleBucket::default());
-        assert_eq!(circles.query_radius(&bucket, &layer), 0.0);
         let symbols = entry::<Symbol>();
         assert!(!symbols.needs_resources(&[layer]));
     }

@@ -1694,14 +1694,16 @@ fn image_seen_by(test: &SourceTest, west: f64, east: f64) -> crate::source::rend
     let mut render_source =
         crate::source::render_image_source::RenderImageSource::new(source.clone(), crate::tests::image_of(&source));
     render_source.update(&mut store, source, &[], true, false, &test.tile_parameters(MapMode::Static));
+    let transform = crate::render::paint_parameters::TransformParameters::new(test.transform.state().view());
+    let parameters = crate::source::render_source::RenderTileParameters { transform: &transform, sort_by_y: false };
+    render_source.update_render_tiles(&mut store, &parameters);
     render_source
 }
 
 /// The world copies the image of [`image_seen_by`] draws in, by wrap.
 fn image_copies(test: &SourceTest, west: f64, east: f64) -> Vec<i16> {
     let render_source = image_seen_by(test, west, east);
-    let data = render_source.image_render_data().expect("an image source's render data");
-    let mut wraps: Vec<i16> = data.tile_ids.iter().map(|id| id.wrap).collect();
+    let mut wraps: Vec<i16> = render_source.render_tiles().iter().map(|tile| tile.id.wrap).collect();
     wraps.sort_unstable();
     wraps
 }
@@ -1758,6 +1760,6 @@ fn an_image_out_of_view_is_loaded() {
     let test = image_view(256, 3.0, 15.0);
     let store = test.store();
     let out_of_view = image_seen_by(&test, 100.0, 110.0);
-    assert_eq!(out_of_view.image_render_data().unwrap().tile_ids, []);
+    assert!(out_of_view.render_tiles().is_empty());
     assert!(out_of_view.is_loaded(&store));
 }

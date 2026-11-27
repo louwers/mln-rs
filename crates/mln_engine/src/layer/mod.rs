@@ -13,4 +13,5 @@ pub(crate) mod layout;
 pub(crate) mod paint_property_binder;
 pub(crate) mod paint_property_statistics;
 pub(crate) mod render_layer;
+pub(crate) mod tile_input;
 pub(crate) mod tile_layout;

@@ -61,7 +61,7 @@ use crate::draw::resources::{GpuTexture, attachment_bytes};
 use crate::draw::store::SharedTexture;
 use crate::layer::layer_drawing::{ChangedBuckets, DrapeDrawing, DrawGroups, DrawOrder};
 use crate::layer::layer_type::ErasedEvaluatedLayer;
-use crate::layer::render_layer::{LayerSource, RenderLayer};
+use crate::layer::render_layer::{FrameSourceTiles, RenderLayer};
 use crate::render::clip_masks::ClipMasks;
 use crate::render::layer_composite::LayerComposite;
 use crate::render::paint_parameters::{OpenPass, PaintParameters, TransformParameters};
@@ -302,7 +302,7 @@ impl Drapes {
         &mut self,
         stack: usize,
         layer: &dyn RenderLayer,
-        source: Option<LayerSource<'_>>,
+        source: Option<FrameSourceTiles<'_>>,
         lit: bool,
     ) {
         let base = layer.base();
@@ -371,7 +371,7 @@ impl Drapes {
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
         layer: &mut dyn RenderLayer,
-        source: Option<LayerSource<'_>>,
+        source: Option<FrameSourceTiles<'_>>,
         lit: bool,
     ) {
         let globe = self.globe;

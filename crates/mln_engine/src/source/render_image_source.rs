@@ -1,24 +1,27 @@
 // An image source draws one image, stretched over the quad of its
-// coordinates, in the tiles that the quad covers. The raster layers that
-// draw it borrow its bucket from the source for the frame.
+// coordinates, in the tiles that the quad covers: its render tiles, one in
+// each world copy it draws in, which all show its one image tile.
 
 use std::sync::Arc;
 
 use geometry::Point;
+use mln_style::bitmap::PremultipliedImage;
 use mln_style::feature::GeometryCoordinates;
 use mln_style::geo::LatLngBounds;
 use mln_style::range::Range;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::{Source, constants};
 
-use crate::buckets::raster_bucket::{RasterBucket, RasterLayoutVertex};
+use crate::buckets::raster_bucket::{RasterLayoutVertex, StoredQuads};
 use crate::camera::TileCoordinate;
 use crate::camera::tile_coordinate::TileCoordinatePoint;
 use crate::draw::context::Context;
+use crate::draw::identity::SimpleIdentity;
 use crate::draw::segment::SegmentBase;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::log_target;
-use crate::source::render_source::{RenderSource, RenderSourceBase, RenderTileParameters};
+use crate::render::tile::{RenderTile, TileContent};
+use crate::source::render_source::{RenderSource, RenderSourceBase, RenderTileParameters, TileOrder};
 use crate::source::{ImageOf, SourceImage};
 use crate::tile::UnwrappedTileID;
 use crate::tile_store::store::TileStore;
@@ -161,7 +164,7 @@ fn to_vertex_coordinate(value: f64) -> i16 {
 // The unit square as a grid of `cells` x `cells`, textured edge to edge,
 // which the raster shader puts on the image's quad, each cell split along
 // its diagonal from the top right, or from the top left if `from_top_left`.
-fn build_image_mesh(bucket: &mut RasterBucket, cells: u32, from_top_left: bool) {
+fn build_image_mesh(tile: &mut ImageTile, cells: u32, from_top_left: bool) {
     let rows = cells + 1;
     let extent = constants::EXTENT as u32;
     let mut vertices = Vec::with_capacity((rows * rows) as usize);
@@ -188,63 +191,96 @@ fn build_image_mesh(bucket: &mut RasterBucket, cells: u32, from_top_left: bool) 
         }
     }
     let segments = vec![SegmentBase::with_lengths(0, 0, vertices.len(), indices.len())];
-    bucket.set_mesh(vertices, indices, segments);
+    tile.set_mesh(vertices, indices, segments);
 }
 
-/// What a frame draws of an image source: its bucket, once the image has
-/// arrived, in each of the tiles it covers.
-#[derive(Clone, Copy)]
-pub(crate) struct ImageSourceRenderData<'a> {
-    pub(crate) bucket: Option<&'a RasterBucket>,
-    /// The tile the image draws in, in each world copy it draws in: one
-    /// canonical tile under different wraps.
-    pub(crate) tile_ids: &'a [UnwrappedTileID],
-    /// The box of the quad's corners, in the tile units of `tile_ids`'
-    /// canonical tile: min x, min y, max x, max y.
+/// Where an image tile's mesh is.
+enum Mesh {
+    /// It has none yet.
+    None,
+    /// Its vertices and indices, until their upload moves them.
+    Data { vertices: Vec<RasterLayoutVertex>, indices: Vec<u16>, segments: Vec<SegmentBase> },
+    /// In the context's stores.
+    Stored(StoredQuads),
+}
+
+/// What an image source shows in each of its tiles: its image, and the mesh
+/// of the unit square that the image's quad puts in the tile. The raster
+/// layers that draw the source share them.
+pub(crate) struct ImageTile {
+    id: SimpleIdentity,
+    pub(crate) image: Arc<PremultipliedImage>,
+    mesh: Mesh,
+    /// Counts the changes of the mesh, after which the layers build their
+    /// draws of the image again.
+    generation: u64,
+    /// The box of the quad's corners, in the tile units of the source's
+    /// tiles' canonical tile: min x, min y, max x, max y.
     pub(crate) bounds: [i32; 4],
-    /// Where the bucket's vertices draw, in the same units.
+    /// Where the mesh's vertices draw, in the same units.
     pub(crate) quad: ImageQuad,
 }
 
-impl ImageSourceRenderData<'_> {
-    /// Whether the image drawn in `tile_id`, one of `tile_ids`, covers part
-    /// of the tile `drape`. An image that only touches its edge doesn't.
-    pub(crate) fn overlaps(&self, tile_id: &UnwrappedTileID, drape: &UnwrappedTileID) -> bool {
-        // Both boxes in the tile units of the finer of the two zooms, from
-        // the west edge of world copy 0.
-        let zoom = tile_id.canonical.z.max(drape.canonical.z);
-        let place = |id: &UnwrappedTileID| {
-            let scale = 1i64 << (zoom - id.canonical.z);
-            let extent = i64::from(constants::EXTENT) * scale;
-            let x = ((i64::from(id.wrap) << id.canonical.z) + i64::from(id.canonical.x)) * extent;
-            (x, i64::from(id.canonical.y) * extent, scale)
-        };
-        let (left, top, scale) = place(tile_id);
-        let [min_x, min_y, max_x, max_y] = self.bounds.map(|bound| i64::from(bound) * scale);
-        let (drape_left, drape_top, drape_scale) = place(drape);
-        let drape_extent = i64::from(constants::EXTENT) * drape_scale;
-        left + min_x < drape_left + drape_extent
-            && drape_left < left + max_x
-            && top + min_y < drape_top + drape_extent
-            && drape_top < top + max_y
+impl ImageTile {
+    /// The tile of `image`, which it shares, without a mesh.
+    #[must_use]
+    fn new(image: Arc<PremultipliedImage>) -> Self {
+        ImageTile {
+            id: SimpleIdentity::new(),
+            image,
+            mesh: Mesh::None,
+            generation: 0,
+            bounds: [0; 4],
+            quad: ImageQuad::TILE,
+        }
     }
 
-    /// The copies of the image that cover part of the tile `drape`
-    /// ([`overlaps`](Self::overlaps)): of `tile_ids`, or on the `globe`,
-    /// whose one copy stands for every world copy, of that copy in the
-    /// drape's world and the worlds either side, which a quad that crosses
-    /// the antimeridian reaches into.
-    pub(crate) fn copies_over(
-        &self,
-        drape: &UnwrappedTileID,
-        globe: bool,
-    ) -> impl Iterator<Item = UnwrappedTileID> + use<'_> {
-        let drape = *drape;
-        let copies = self.tile_ids.iter().flat_map(move |copy| {
-            let wraps = if globe { drape.wrap - 1..=drape.wrap + 1 } else { copy.wrap..=copy.wrap };
-            wraps.map(|wrap| UnwrappedTileID::with_wrap(wrap, copy.canonical))
-        });
-        copies.filter(move |copy| self.overlaps(copy, &drape))
+    /// The tile's identity, by which the layers keep the image's texture.
+    #[must_use]
+    pub(crate) fn id(&self) -> SimpleIdentity {
+        self.id
+    }
+
+    /// The number of times the mesh changed.
+    #[must_use]
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Whether the tile has a mesh.
+    #[must_use]
+    fn has_mesh(&self) -> bool {
+        !matches!(self.mesh, Mesh::None)
+    }
+
+    /// Makes the mesh `vertices` and `indices` in `segments`.
+    fn set_mesh(&mut self, vertices: Vec<RasterLayoutVertex>, indices: Vec<u16>, segments: Vec<SegmentBase>) {
+        self.mesh = Mesh::Data { vertices, indices, segments };
+        self.generation += 1;
+    }
+
+    /// The mesh in the context's stores, once its upload moved it.
+    #[must_use]
+    pub(crate) fn quads(&self) -> Option<&StoredQuads> {
+        match &self.mesh {
+            Mesh::Stored(quads) => Some(quads),
+            Mesh::Data { vertices, .. } => {
+                debug_assert!(vertices.is_empty(), "an image source's mesh drawn before its upload");
+                None
+            }
+            Mesh::None => None,
+        }
+    }
+
+    /// Moves the mesh into `context`'s stores, unless it is there or there
+    /// is none.
+    fn upload(&mut self, context: &mut Context) {
+        self.mesh = match std::mem::replace(&mut self.mesh, Mesh::None) {
+            Mesh::Data { vertices, indices, segments } if !vertices.is_empty() => {
+                Mesh::Stored(StoredQuads::new(context, vertices, indices, segments))
+            }
+            mesh => mesh,
+        };
     }
 }
 
@@ -252,12 +288,14 @@ pub(crate) struct RenderImageSource {
     base: RenderSourceBase,
     /// Reads the image from each version of the source.
     image_of: ImageOf,
-    bucket: Option<RasterBucket>,
+    tile: Option<ImageTile>,
+    /// The tile the image draws in, in each world copy it draws in: one
+    /// canonical tile under different wraps.
     tile_ids: Vec<UnwrappedTileID>,
+    /// The tiles of `tile_ids` that the frame draws, and their order.
+    render_tiles: Vec<RenderTile>,
+    order: Vec<usize>,
     mesh_corners: GeometryCoordinates,
-    /// The box of `mesh_corners`, as [`ImageSourceRenderData::bounds`].
-    bounds: [i32; 4],
-    quad: ImageQuad,
     mesh_cells: u32,
 }
 
@@ -267,11 +305,11 @@ impl RenderImageSource {
         RenderImageSource {
             base: RenderSourceBase::new(style_source),
             image_of,
-            bucket: None,
+            tile: None,
             tile_ids: Vec::new(),
+            render_tiles: Vec::new(),
+            order: Vec::new(),
             mesh_corners: GeometryCoordinates::new(),
-            bounds: [0; 4],
-            quad: ImageQuad::TILE,
             mesh_cells: 0,
         }
     }
@@ -280,7 +318,7 @@ impl RenderImageSource {
     /// (one made without a url) has nothing to load, so a still render of it
     /// finishes.
     fn loaded(&self) -> bool {
-        self.bucket.is_some() || self.image().is_none_or(|image| image.image.is_none())
+        self.tile.is_some() || self.image().is_none_or(|image| image.image.is_none())
     }
 
     fn image(&self) -> Option<SourceImage<'_>> {
@@ -445,11 +483,11 @@ impl RenderSource for RenderImageSource {
             })
             .collect();
 
-        // A changed image gets a new bucket, whose id tells the layers to
-        // make its texture.
-        let bucket = match &mut self.bucket {
-            Some(bucket) if Arc::ptr_eq(&bucket.image, &image) => bucket,
-            slot => slot.insert(RasterBucket::new(image)),
+        // A changed image gets a new tile, whose id tells the layers to make
+        // its texture.
+        let tile = match &mut self.tile {
+            Some(tile) if Arc::ptr_eq(&tile.image, &image) => tile,
+            slot => slot.insert(ImageTile::new(image)),
         };
 
         // The globe bends the quad over the sphere with the tile mesh
@@ -468,34 +506,62 @@ impl RenderSource for RenderImageSource {
         } else {
             1
         };
-        if !bucket.has_mesh() || geom_coords != self.mesh_corners || cells != self.mesh_cells {
-            build_image_mesh(bucket, cells, matches!(concave, Some(0 | 2)));
-            self.quad = ImageQuad::new(&geom_coords, &warp);
+        if !tile.has_mesh() || geom_coords != self.mesh_corners || cells != self.mesh_cells {
+            build_image_mesh(tile, cells, matches!(concave, Some(0 | 2)));
+            tile.quad = ImageQuad::new(&geom_coords, &warp);
             let mut bounds = [i32::MAX, i32::MAX, i32::MIN, i32::MIN];
             for corner in &geom_coords {
                 let (x, y) = (i32::from(corner.x), i32::from(corner.y));
                 bounds = [bounds[0].min(x), bounds[1].min(y), bounds[2].max(x), bounds[3].max(y)];
             }
-            self.bounds = bounds;
+            tile.bounds = bounds;
             self.mesh_corners = geom_coords;
             self.mesh_cells = cells;
         }
     }
 
-    fn update_render_tiles(&mut self, _store: &mut TileStore, _parameters: &RenderTileParameters<'_>) {}
-
-    fn upload(&mut self, _store: &mut TileStore, context: &mut Context) {
-        if let Some(bucket) = &mut self.bucket {
-            bucket.upload(context);
+    /// Makes a render tile of each tile the image draws in, once it has
+    /// arrived. An image shrunk out of sight or out of view draws in none.
+    fn update_render_tiles(&mut self, _store: &mut TileStore, parameters: &RenderTileParameters<'_>) {
+        self.render_tiles.clear();
+        self.order.clear();
+        if !self.base.enabled || !self.loaded() {
+            return;
+        }
+        for (index, id) in self.tile_ids.iter().enumerate() {
+            let mut tile = RenderTile::of_tile_id(*id, id.overscale_to(id.canonical.z), false);
+            tile.set_projection(parameters.transform);
+            self.render_tiles.push(tile);
+            self.order.push(index);
         }
     }
 
-    fn image_render_data(&self) -> Option<ImageSourceRenderData<'_>> {
-        // A disabled source's tile ids and corners may be of other
-        // coordinates, and an image shrunk out of sight or out of view draws
-        // nowhere.
-        let tile_ids: &[UnwrappedTileID] = if self.base.enabled && self.loaded() { &self.tile_ids } else { &[] };
-        Some(ImageSourceRenderData { bucket: self.bucket.as_ref(), tile_ids, bounds: self.bounds, quad: self.quad })
+    /// A disabled source's tile ids and corners may be of other
+    /// coordinates: it draws in no tile.
+    fn release_render_data(&mut self) {
+        self.render_tiles.clear();
+        self.order.clear();
+    }
+
+    fn upload(&mut self, _store: &mut TileStore, context: &mut Context) {
+        if let Some(tile) = &mut self.tile {
+            tile.upload(context);
+        }
+    }
+
+    fn render_tiles(&self) -> &[RenderTile] {
+        &self.render_tiles
+    }
+
+    /// The tiles in the order they cover the image, for every order: they
+    /// are copies of one tile.
+    fn tile_order(&self, _order: TileOrder) -> Option<&[usize]> {
+        Some(&self.order)
+    }
+
+    fn tile_contents<'a>(&'a self, _store: &'a TileStore, contents: &mut Vec<Option<TileContent<'a>>>) {
+        let tile = self.tile.as_ref().map(TileContent::Image);
+        contents.extend(self.render_tiles.iter().map(|_| tile));
     }
 
     fn dump_debug_logs(&self) {
