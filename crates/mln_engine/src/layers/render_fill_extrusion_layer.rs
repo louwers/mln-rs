@@ -31,14 +31,12 @@
 // the frame's depth first and then in color where that depth is its own.
 
 use std::mem::offset_of;
-use std::sync::Arc;
 
 use mln_gfx::gpu::{Caps, ClipDepthRange, ShaderKey};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_style::constants::TILE_SIZE_D;
-use mln_style::layer::LayerStyle;
 use mln_style::layers::FillExtrusion;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionPaintProperties;
 use mln_style::types::{AlignmentType, LayerBlendType};
@@ -61,11 +59,9 @@ use crate::draw::vertices::SharedVertices;
 use crate::layer::bucket_geometry::{
     BucketGeometry, bucket_indexes, bucket_vertices, copied_vertices, derived_vertices, paint_vertices,
 };
-use crate::layer::layer_type::{EvaluatedLayer, LayerType};
+use crate::layer::layer_type::EvaluatedLayer;
 use crate::layer::paint_property_binder::PaintBinders as _;
-use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, Hosted, LayerValues, OnTerrain, PrepareCx, RenderLayer, TileCx, TypedLayer,
-};
+use crate::layer::render_layer::{EvaluateCx, Evaluation, Layer, LayerValues, OnTerrain, PrepareCx, TileCx};
 use crate::layer::tile_input::{Features, TileData};
 use crate::layers::fill_extrusion::programs;
 use crate::layers::fill_extrusion::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
@@ -329,20 +325,6 @@ fn extrusion_draw(
     ExtrusionDraw { mesh, priority: i64::from(in_color), walls, clip }
 }
 
-impl LayerType for FillExtrusion {
-    type Input = Features<PatternLayout<FillExtrusionLayoutSpec>>;
-    const CROSSFADES: bool = true;
-
-    fn query_radius(_data: TileData<'_, FillExtrusion>, layer: &EvaluatedLayer<FillExtrusion>) -> f32 {
-        let translate = layer.paint.fill_extrusion_translate.uniform();
-        (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
-    }
-
-    fn render_layer(style: Arc<LayerStyle<FillExtrusion>>) -> Box<dyn RenderLayer> {
-        Hosted::<RenderFillExtrusionLayer>::boxed(style)
-    }
-}
-
 pub(crate) struct RenderFillExtrusionLayer {
     /// The wall quad (`RenderStaticData::fill_extrusion_vertices`) of the
     /// instanced walls.
@@ -377,8 +359,15 @@ fn composite(
     })
 }
 
-impl TypedLayer for RenderFillExtrusionLayer {
-    type Type = FillExtrusion;
+impl Layer for RenderFillExtrusionLayer {
+    type Style = FillExtrusion;
+    type Input = Features<PatternLayout<FillExtrusionLayoutSpec>>;
+    const CROSSFADES: bool = true;
+
+    fn query_radius(_data: TileData<'_, RenderFillExtrusionLayer>, layer: &EvaluatedLayer<FillExtrusion>) -> f32 {
+        let translate = layer.paint.fill_extrusion_translate.uniform();
+        (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
+    }
     type Tile = ExtrusionTile;
 
     const TERRAIN: OnTerrain = OnTerrain::Stands { hides_behind_ground: false };
@@ -397,8 +386,8 @@ impl TypedLayer for RenderFillExtrusionLayer {
     fn tile(
         &mut self,
         cx: &mut TileCx<'_, '_, Self>,
-        tile: FrameTile<'_, FillExtrusion>,
-        _data: TileData<'_, FillExtrusion>,
+        tile: FrameTile<'_, RenderFillExtrusionLayer>,
+        _data: TileData<'_, RenderFillExtrusionLayer>,
         _previous: Option<ExtrusionTile>,
     ) -> Option<ExtrusionTile> {
         let render_data = tile.data_for_pass(RENDER_PASS)?;
@@ -449,7 +438,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
     fn prepare(
         &mut self,
         cx: &mut PrepareCx<'_, '_, Self>,
-        render_tiles: &[FrameTile<'_, FillExtrusion>],
+        render_tiles: &[FrameTile<'_, RenderFillExtrusionLayer>],
         out: &mut Draws,
     ) {
         let has_pattern = !cx.values.unevaluated.fill_extrusion_pattern.is_undefined();
@@ -515,7 +504,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
     }
 
     // query
-    fn query_intersects_feature(
+    fn hit(
         &self,
         values: &LayerValues<FillExtrusion>,
         region: &QueryRegion<'_>,
@@ -562,7 +551,7 @@ impl TileBuilder<'_> {
     fn build(
         &self,
         context: &mut Context,
-        tile_bucket: TileData<'_, FillExtrusion>,
+        tile_bucket: TileData<'_, RenderFillExtrusionLayer>,
         binders: &FillExtrusionBinders,
         evaluated: &FillExtrusionPaintProperties::PossiblyEvaluated,
     ) -> ExtrusionTile {
@@ -731,7 +720,7 @@ impl ExtrusionTile {
         &mut self,
         context: &mut Context,
         walls: Walls,
-        tile_bucket: TileData<'_, FillExtrusion>,
+        tile_bucket: TileData<'_, RenderFillExtrusionLayer>,
         binders: &FillExtrusionBinders,
         evaluated: &FillExtrusionPaintProperties::PossiblyEvaluated,
     ) {
@@ -769,7 +758,7 @@ impl RenderFillExtrusionLayer {
     fn uniforms(
         layer: &EvaluatedLayer<FillExtrusion>,
         tile_id: OverscaledTileID,
-        tile_bucket: TileData<'_, FillExtrusion>,
+        tile_bucket: TileData<'_, RenderFillExtrusionLayer>,
         binders: &FillExtrusionBinders,
         draw: &ExtrusionDraw,
         paint_layout: u32,
