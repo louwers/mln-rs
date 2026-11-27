@@ -68,9 +68,9 @@ use crate::layer::layer_drawing::{
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, LayerBucket, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer, RenderLayerBase,
-    TypedLayer,
+    EvaluateCx, Evaluation, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
+use crate::layer::tile_input::{Features, TileData};
 use crate::layers::fill_extrusion::programs;
 use crate::layers::fill_extrusion::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
 use crate::layout::pattern_layout::PatternLayout;
@@ -357,11 +357,10 @@ fn extrusion_draw(
 }
 
 impl LayerType for FillExtrusion {
-    type Layout = PatternLayout<FillExtrusionLayoutSpec>;
-    type TileBucket<'a> = LayerBucket<'a, FillExtrusion>;
+    type Input = Features<PatternLayout<FillExtrusionLayoutSpec>>;
     const CROSSFADES: bool = true;
 
-    fn query_radius(_bucket: &FillExtrusionBucket, layer: &EvaluatedLayer<FillExtrusion>) -> f32 {
+    fn query_radius(_data: TileData<'_, FillExtrusion>, layer: &EvaluatedLayer<FillExtrusion>) -> f32 {
         let translate = layer.paint.fill_extrusion_translate.uniform();
         (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
     }
@@ -489,7 +488,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
                 continue;
             };
 
-            let render_data = tile.bucket_for_pass(RENDER_PASS);
+            let render_data = tile.data_for_pass(RENDER_PASS);
             let Some(render_data) = render_data else {
                 *entry.value = None;
                 continue;
@@ -592,7 +591,7 @@ impl TileBuilder<'_> {
     fn build(
         &self,
         context: &mut Context,
-        tile_bucket: LayerBucket<'_, FillExtrusion>,
+        tile_bucket: TileData<'_, FillExtrusion>,
         binders: &FillExtrusionBinders,
         evaluated: &FillExtrusionPaintProperties::PossiblyEvaluated,
     ) -> ExtrusionTile {
@@ -768,7 +767,7 @@ impl TileBuilder<'_> {
         &self,
         context: &mut Context,
         cached: &mut ExtrusionTile,
-        tile_bucket: LayerBucket<'_, FillExtrusion>,
+        tile_bucket: TileData<'_, FillExtrusion>,
         binders: &FillExtrusionBinders,
         evaluated: &FillExtrusionPaintProperties::PossiblyEvaluated,
     ) {
@@ -799,7 +798,7 @@ impl RenderFillExtrusionLayer {
     fn uniforms(
         layer: &EvaluatedLayer<FillExtrusion>,
         tile_id: OverscaledTileID,
-        tile_bucket: LayerBucket<'_, FillExtrusion>,
+        tile_bucket: TileData<'_, FillExtrusion>,
         binders: &FillExtrusionBinders,
         draw: &ExtrusionDraw,
         paint_layout: u32,
