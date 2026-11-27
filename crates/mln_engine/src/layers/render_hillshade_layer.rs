@@ -16,7 +16,6 @@ use glam::dcamera::rh::proj::opengl::orthographic;
 use glam::{DMat4, DVec3};
 use mln_gfx::gpu::{Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
@@ -42,7 +41,7 @@ use crate::draw::store::SharedTexture;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::SharedVertices;
 use crate::layer::bucket_geometry::copied_vertices;
-use crate::layer::layer_drawing::{DrawList, FrameDraw, SingleDraw, TileDraws};
+use crate::layer::layer_drawing::{FrameDraw, SingleDraw, TileDraws};
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::render_layer::{
     EvaluateCx, Evaluation, Hosted, LayerCx, LayerValues, OnTerrain, RenderLayer, TileCx, TypedLayer, UpdateCx,
@@ -57,19 +56,12 @@ use crate::render::target::RenderTarget;
 use crate::render::terrain::SurfaceLight;
 use crate::render::terrain::ubo::{HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO, MAX_ILLUMINATION_SOURCES};
 use crate::render::tile::FrameTile;
-use crate::render::tile_matrix::{bind_no_projection, projection_data, to_projection_ubo};
+use crate::render::tile_matrix::{projection_data, to_projection_ubo};
 use crate::source::DemTiles;
 use crate::source::render_source::RenderSource;
 use crate::tile::UnwrappedTileID;
 use crate::tile::dem::{DemUnpack, TERRAIN_RGB_MAXZOOM};
 use crate::tile_store::dem::DemContents;
-
-/// The ids of the buffers that the draws bind.
-const DRAWABLE_ID: usize = programs::HILLSHADE.buffer_id("drawableVector");
-const TILE_PROPS_ID: usize = programs::HILLSHADE.buffer_id("tilePropsVector");
-const PROPS_ID: usize = programs::HILLSHADE.buffer_id("props");
-const PREPARE_DRAWABLE_ID: usize = programs::HILLSHADE_PREPARE.buffer_id("drawable");
-const PREPARE_TILE_PROPS_ID: usize = programs::HILLSHADE_PREPARE.buffer_id("tileProps");
 
 /// The slots of the programs' textures that the draws bind.
 const IMAGE_SLOT: usize = programs::HILLSHADE.texture_slot("image");
@@ -97,16 +89,7 @@ struct DemTarget {
     prepared: bool,
 }
 
-/// A tile's draw's entries in the layer's storage buffers.
-struct HillshadeUniforms {
-    draw_ubo: HillshadeDrawableUBO,
-    tile_props: HillshadeTilePropsUBO,
-    projection: ProjectionUBO,
-}
-
 pub(crate) struct RenderHillshadeLayer {
-    /// The frame's draws as the update makes them.
-    draw_list: DrawList<HillshadeUniforms>,
     maxzoom: u8,
 
     static_data_shared_vertices: Option<SharedVertices>,
@@ -303,7 +286,6 @@ impl TypedLayer for RenderHillshadeLayer {
 
     fn new(_values: &LayerValues<Hillshade>) -> Self {
         RenderHillshadeLayer {
-            draw_list: DrawList::default(),
             maxzoom: TERRAIN_RGB_MAXZOOM,
             static_data_shared_vertices: None,
             static_data_indices: None,
@@ -475,19 +457,15 @@ impl TypedLayer for RenderHillshadeLayer {
                 Self::illumination(&mut self.illumination, &cx.values.evaluated, paint_parameters)
             });
             let num_lights = if paint_parameters.drape_lit { 0 } else { num_lights };
-            let uniforms =
+            let (blocks, projection) =
                 Self::uniforms(&cx.values.evaluated.paint, &tile_id.to_unwrapped(), num_lights, paint_parameters);
-            self.draw_list.push(draw, uniforms);
+            cx.drawing.frame_mut().push_at(draw, (), kept, &projection, blocks);
         }
 
-        cx.drawing.finish(&mut self.draw_list, gpu, paint_parameters.context, |writer| {
-            if let Some(Illumination { props, .. }) = &illumination {
-                writer.uniform(PROPS_ID, props);
-            }
-            writer.storage(DRAWABLE_ID, |uniforms| uniforms.draw_ubo);
-            writer.storage(TILE_PROPS_ID, |uniforms| uniforms.tile_props);
-            writer.storage(PROJECTION_ID, |uniforms| uniforms.projection);
-        });
+        if let Some(Illumination { props, .. }) = &illumination {
+            cx.drawing.frame_mut().block(props);
+        }
+        cx.drawing.finish(gpu, paint_parameters);
     }
 
     /// Keeps the source's maximum zoom, which the DEMs' preparation reads,
@@ -604,9 +582,7 @@ impl DemTarget {
         let extent = f64::from(EXTENT);
         let m =
             orthographic(0.0, extent, -extent, 0.0, -1.0, 1.0) * DMat4::from_translation(DVec3::new(0.0, -extent, 0.0));
-        bind_no_projection(gpu, &mut prepare.frame.buffers, context);
         let draw_ubo = HillshadePrepareDrawableUBO { matrix: cast_matrix(&m) };
-        prepare.write_pod(gpu, PREPARE_DRAWABLE_ID, &draw_ubo, context);
         let unpack = DemUnpack::of(encoding);
         let tile_props = HillshadePrepareTilePropsUBO {
             unpack: unpack.weights_and_base(),
@@ -616,22 +592,21 @@ impl DemTarget {
             unpack_scale: unpack.scale,
             ..HillshadePrepareTilePropsUBO::default()
         };
-        prepare.write_pod(gpu, PREPARE_TILE_PROPS_ID, &tile_props, context);
+        prepare.write(gpu, context, (draw_ubo, tile_props));
 
         DemTarget { render_target, _dem: dem, prepare, generation, prepared: false }
     }
 }
 
 impl RenderHillshadeLayer {
-    /// The entries in the layer's storage buffers of the draw of `tile_id`
-    /// with the layer's values `evaluated`, lit by `num_lights` light
-    /// sources.
+    /// The blocks and the projection of the draw of `tile_id` with the
+    /// layer's values `evaluated`, lit by `num_lights` light sources.
     fn uniforms(
         evaluated: &HillshadePaintProperties::PossiblyEvaluated,
         tile_id: &UnwrappedTileID,
         num_lights: usize,
         parameters: &PaintParameters<'_>,
-    ) -> HillshadeUniforms {
+    ) -> ((HillshadeDrawableUBO, HillshadeTilePropsUBO), ProjectionUBO) {
         let projection = projection_data(
             tile_id,
             parameters,
@@ -642,19 +617,17 @@ impl RenderHillshadeLayer {
             None,
             !parameters.camera_moving,
         );
-        HillshadeUniforms {
-            draw_ubo: HillshadeDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) },
-            tile_props: HillshadeTilePropsUBO {
-                latrange: lat_range(tile_id),
-                exaggeration: *evaluated.hillshade_exaggeration.uniform(),
-                method: method_to_int(*evaluated.hillshade_method.uniform()),
-                num_lights: num_lights as i32,
-                pad0: 0.0,
-                pad1: 0.0,
-                pad2: 0.0,
-            },
-            projection: to_projection_ubo(&projection),
-        }
+        let drawable = HillshadeDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) };
+        let tile_props = HillshadeTilePropsUBO {
+            latrange: lat_range(tile_id),
+            exaggeration: *evaluated.hillshade_exaggeration.uniform(),
+            method: method_to_int(*evaluated.hillshade_method.uniform()),
+            num_lights: num_lights as i32,
+            pad0: 0.0,
+            pad1: 0.0,
+            pad2: 0.0,
+        };
+        ((drawable, tile_props), to_projection_ubo(&projection))
     }
 
     /// The illumination of the layer's evaluation `layer` at the frame's
