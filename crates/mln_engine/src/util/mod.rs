@@ -1,4 +1,3 @@
-//! Renderer utilities: pools of per-symbol data and triangulation.
+//! Renderer utilities: pools of per-symbol data.
 
 pub(crate) mod pool;
-pub(crate) mod tessellator;

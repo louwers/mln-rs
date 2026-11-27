@@ -73,7 +73,7 @@ impl Target {
     /// The texture the target's draws draw into, which draws sample. It is
     /// the same through a change of the target's size.
     #[must_use]
-    pub(crate) fn texture(&self) -> &SharedTexture {
+    pub fn texture(&self) -> &SharedTexture {
         &self.texture
     }
 

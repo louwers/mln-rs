@@ -8,9 +8,9 @@ use mln_gfx::shaders::source::Sources;
 use super::ubo::{AtmospherePropsUBO, LayerCompositeUBO, SkyPropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
 
-pub(crate) const POS: Attribute = Attribute::new("pos", Short2);
+pub const POS: Attribute = Attribute::new("pos", Short2);
 
-pub(crate) const IMAGE: ProgramTexture = ProgramTexture::new("image", Stages::Fragment);
+pub const IMAGE: ProgramTexture = ProgramTexture::new("image", Stages::Fragment);
 
 pub static CLIPPING_MASK: Program = Program {
     name: "ClippingMaskProgram",
@@ -29,7 +29,7 @@ pub static CLIPPING_MASK: Program = Program {
 };
 
 /// Where a vertex samples the program's textures, in their texels.
-pub(crate) const TEXTURE_POS: Attribute = Attribute::new("texture_pos", Short2);
+pub const TEXTURE_POS: Attribute = Attribute::new("texture_pos", Short2);
 
 pub static GLOBE_DEPTH: Program = Program {
     name: "GlobeDepthShader",

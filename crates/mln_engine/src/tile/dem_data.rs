@@ -13,10 +13,10 @@ use crate::tile::dem::DemUnpack;
 /// A raster-dem tile's elevations, a pixel of border on each side. It reads
 /// back only as `new` can make it (`from_parts`).
 #[derive(Clone, Debug)]
-pub(crate) struct DEMData {
-    pub(crate) dim: i32,
-    pub(crate) stride: i32,
-    pub(crate) encoding: RasterEncoding,
+pub struct DEMData {
+    pub dim: i32,
+    pub stride: i32,
+    pub encoding: RasterEncoding,
     /// [`DEMData::range`], once read: only the terrain reads it, so a map
     /// without terrain never decodes its DEM tiles' heights.
     range: OnceLock<(f32, f32)>,
@@ -211,7 +211,7 @@ impl DEMData {
     }
 
     #[must_use]
-    pub(crate) fn image(&self) -> &PremultipliedImage {
+    pub fn image(&self) -> &PremultipliedImage {
         &self.image
     }
 

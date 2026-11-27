@@ -20,7 +20,7 @@ pub(crate) const DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE: usize = 100 * 8192;
 
 /// What a layout uses an image as.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, mln_wire::Wire)]
-pub(crate) enum ImageType {
+pub enum ImageType {
     Icon,
     Pattern,
 }
@@ -50,7 +50,7 @@ pub(crate) struct ResolvedImages {
     pub(crate) patterns: ImageMap,
 }
 
-pub(crate) struct ImageStore {
+pub struct ImageStore {
     /// Whether the sprite loaded: before, a missing image may still come
     /// with it.
     loaded: bool,
@@ -126,7 +126,8 @@ impl ImageStore {
         log::info!(target: log_target::GENERAL, "ImageManager::loaded: {}", if self.is_loaded() { "1" } else { "0" });
     }
 
-    pub(crate) fn image(&self, id: &str) -> Option<&Arc<ImageImpl>> {
+    #[must_use]
+    pub fn image(&self, id: &str) -> Option<&Arc<ImageImpl>> {
         self.images.get(id)
     }
 

@@ -60,19 +60,19 @@ pub(crate) struct QueryGround<'a> {
 /// the camera.
 #[derive(Clone, Copy)]
 pub struct QueryRegion<'a> {
-    pub(crate) geometry: &'a GeometryCoordinates,
+    pub geometry: &'a GeometryCoordinates,
     /// The screen points of `geometry`, from the view's top left: where the
     /// query's lines of sight start.
-    pub(crate) screen: &'a [ScreenCoordinate],
+    pub screen: &'a [ScreenCoordinate],
     /// Over terrain, the ground the frame drew under the tile, where the
     /// lines of sight meet it at `geometry`, for the layers that stand on it.
-    pub(crate) ground: Option<crate::render::terrain::TileGround<'a>>,
+    pub ground: Option<crate::render::terrain::TileGround<'a>>,
     /// Whether every feature of the tile is a candidate, rather than those
     /// around `geometry` ([`QueryGround::standing`]).
     pub(crate) whole_tile: bool,
-    pub(crate) view: &'a View,
-    pub(crate) projector: &'a TileProjector<'a>,
-    pub(crate) pixels_to_tile_units: f32,
+    pub view: &'a View,
+    pub projector: &'a TileProjector<'a>,
+    pub pixels_to_tile_units: f32,
     /// How far around the geometry the layers' features may reach, in
     /// pixels.
     pub(crate) padding: f32,
@@ -478,39 +478,44 @@ impl FeatureIndex {
         Ok(())
     }
 
-    #[must_use]
-    pub(crate) fn translate_query_geometry(
-        query_geometry: &GeometryCoordinates,
-        translate: [f32; 2],
-        anchor_type: TranslateAnchorType,
-        bearing: f32,
-        pixels_to_tile_units: f32,
-    ) -> Option<GeometryCoordinates> {
-        if translate[0] == 0.0 && translate[1] == 0.0 {
-            return None;
-        }
-
-        let mut translate_vec = GeometryCoordinate::new(
-            (translate[0] * pixels_to_tile_units) as i16,
-            (translate[1] * pixels_to_tile_units) as i16,
-        );
-        if anchor_type == TranslateAnchorType::Viewport {
-            translate_vec = crate::geo::math::rotate_i16(translate_vec, -bearing);
-        }
-
-        Some(
-            query_geometry
-                .iter()
-                .map(|p| GeometryCoordinate::new(p.x.wrapping_sub(translate_vec.x), p.y.wrapping_sub(translate_vec.y)))
-                .collect(),
-        )
-    }
-
     /// The bucket leaders and their layer ids (sorted, for inspection).
     #[must_use]
     pub(crate) fn bucket_layer_ids(&self) -> VecMap<String, Vec<String>> {
         self.bucket_layer_ids.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
     }
+}
+
+/// `query_geometry`, a query's geometry in tile units, moved back by a
+/// layer's `translate` (in pixels, at `pixels_to_tile_units`), turned by
+/// `-bearing` for a translation anchored to the viewport: what a layer that
+/// translates its features tests them against. `None` without a
+/// translation.
+#[must_use]
+pub fn translate_query_geometry(
+    query_geometry: &GeometryCoordinates,
+    translate: [f32; 2],
+    anchor_type: TranslateAnchorType,
+    bearing: f32,
+    pixels_to_tile_units: f32,
+) -> Option<GeometryCoordinates> {
+    if translate[0] == 0.0 && translate[1] == 0.0 {
+        return None;
+    }
+
+    let mut translate_vec = GeometryCoordinate::new(
+        (translate[0] * pixels_to_tile_units) as i16,
+        (translate[1] * pixels_to_tile_units) as i16,
+    );
+    if anchor_type == TranslateAnchorType::Viewport {
+        translate_vec = crate::geo::math::rotate_i16(translate_vec, -bearing);
+    }
+
+    Some(
+        query_geometry
+            .iter()
+            .map(|p| GeometryCoordinate::new(p.x.wrapping_sub(translate_vec.x), p.y.wrapping_sub(translate_vec.y)))
+            .collect(),
+    )
 }
 
 /// A `FeatureIndex` as it crosses, for a tile worker in another wasm instance
@@ -615,17 +620,14 @@ mod tests {
     #[test]
     fn translate_query_geometry() {
         let query: GeometryCoordinates = vec![Point::new(10, 10), Point::new(20, 20)];
+        assert_eq!(super::translate_query_geometry(&query, [0.0, 0.0], TranslateAnchorType::Map, 0.0, 8.0), None);
         assert_eq!(
-            FeatureIndex::translate_query_geometry(&query, [0.0, 0.0], TranslateAnchorType::Map, 0.0, 8.0),
-            None
-        );
-        assert_eq!(
-            FeatureIndex::translate_query_geometry(&query, [1.0, -2.0], TranslateAnchorType::Map, 1.0, 8.0),
+            super::translate_query_geometry(&query, [1.0, -2.0], TranslateAnchorType::Map, 1.0, 8.0),
             Some(vec![Point::new(2, 26), Point::new(12, 36)])
         );
         // Viewport anchor: the translation is rotated by -bearing.
         assert_eq!(
-            FeatureIndex::translate_query_geometry(
+            super::translate_query_geometry(
                 &query,
                 [1.0, 0.0],
                 TranslateAnchorType::Viewport,

@@ -38,7 +38,7 @@ use crate::worker::worker_codec::fields::{SharedAvailableImages, SharedSourceSty
 /// A source, as the renderer numbers it. Never reused within a renderer, so
 /// a late reply can't match a source that was removed and added again.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, mln_wire::Wire)]
-pub(crate) struct SourceKey(pub(crate) u64);
+pub struct SourceKey(pub(crate) u64);
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct TileKey {

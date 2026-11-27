@@ -42,14 +42,14 @@ pub(crate) fn sampler(declarations: &GlslEsDeclarations, texture: &ProgramTextur
 
 #[cfg(test)]
 mod tests {
-    use mln_engine::shaders::PROGRAMS;
+    use mln_builtins::shaders::every_program;
     use mln_gfx::shaders::program::{PAINT_PARAMS, ProgramBuffer};
 
     /// Every member, attribute and texture a program's declarations name is
     /// one of the program's, so that none of them goes stale.
     #[test]
     fn the_declarations_name_what_their_programs_have() {
-        for program in PROGRAMS {
+        for program in every_program() {
             let Some(source) = program.sources.glsl_es else {
                 continue;
             };

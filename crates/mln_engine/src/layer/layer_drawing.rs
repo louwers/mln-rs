@@ -13,9 +13,9 @@ use crate::draw::identity::SimpleIdentity;
 use crate::tile::OverscaledTileID;
 /// What of a bucket's vertex data changed since a tile's draws copied it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct BucketChanges {
+pub struct BucketChanges {
     /// The values of the paint properties that read feature state.
-    pub(crate) paint: bool,
+    pub paint: bool,
     /// A symbol bucket's opacities, which placement sets.
     pub(crate) opacity: bool,
     /// A symbol bucket's positions of labels along lines or at variable
@@ -46,7 +46,7 @@ impl BitOrAssign for BucketChanges {
 
 /// The buckets whose vertex data changed, by bucket id, with what changed.
 #[derive(Default)]
-pub(crate) struct ChangedBuckets(HashMap<SimpleIdentity, BucketChanges>);
+pub struct ChangedBuckets(HashMap<SimpleIdentity, BucketChanges>);
 
 impl ChangedBuckets {
     /// Records that `changes` of the bucket `bucket` changed.
@@ -262,7 +262,7 @@ fn kept_tiles<'a>(
 /// tile's next one, which takes it, or the tile leaves.
 ///
 /// [`TypedLayer::tile`]: crate::layer::render_layer::TypedLayer::tile
-pub(crate) struct TileMap<T> {
+pub struct TileMap<T> {
     set: TileSet,
     /// Each tile's values, at the tile's index in the set.
     values: Vec<Slot<T>>,
@@ -361,12 +361,12 @@ impl<T> TileMap<T> {
 
     /// What the layer keeps of `tile_id`, if the tile is one of the frame's
     /// and the layer keeps anything of it.
-    pub(crate) fn get_mut(&mut self, tile_id: &OverscaledTileID) -> Option<&mut T> {
+    pub fn get_mut(&mut self, tile_id: &OverscaledTileID) -> Option<&mut T> {
         self.values.get_mut(self.set.find(tile_id)?)?.value.as_mut()
     }
 
     /// Drops what the layer keeps of `tile_id`, its previous value too.
-    pub(crate) fn drop_value(&mut self, tile_id: &OverscaledTileID) {
+    pub fn drop_value(&mut self, tile_id: &OverscaledTileID) {
         if let Some(slot) = self.set.find(tile_id).and_then(|index| self.values.get_mut(index)) {
             *slot = Slot::default();
         }
@@ -379,17 +379,17 @@ impl<T> TileMap<T> {
     }
 
     /// The entry of `tile_id`, if the tile is one of the frame's.
-    pub(crate) fn entry(&mut self, tile_id: &OverscaledTileID) -> Option<TileEntry<'_, T>> {
+    pub fn entry(&mut self, tile_id: &OverscaledTileID) -> Option<TileEntry<'_, T>> {
         let index = self.set.find(tile_id)?;
         Some(TileEntry::new(self.set.states.get_mut(index)?, self.values.get_mut(index)?))
     }
 }
 
 /// The entry of a tile in a [`TileMap`].
-pub(crate) struct TileEntry<'a, T> {
+pub struct TileEntry<'a, T> {
     state: &'a mut TileState,
     /// What the layer keeps of the tile, if anything.
-    pub(crate) value: &'a mut Option<T>,
+    pub value: &'a mut Option<T>,
     /// The tile's previous value, which the map retired.
     previous: &'a mut Option<T>,
 }
@@ -443,7 +443,7 @@ impl<'a, T> TileEntry<'a, T> {
 
     /// What of the tile's bucket changed since its value last copied it,
     /// which the layer is about to copy again.
-    pub(crate) fn take_changes(&mut self) -> BucketChanges {
+    pub fn take_changes(&mut self) -> BucketChanges {
         std::mem::take(&mut self.state.changes)
     }
 }

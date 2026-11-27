@@ -1,6 +1,6 @@
 use mln_style::constants::EXTENT;
 
-use crate::render::globe::subdivision::{NORTH_POLE_Y, SOUTH_POLE_Y};
+use crate::render::globe::{NORTH_POLE_Y, SOUTH_POLE_Y};
 
 const EXTENT_STENCIL_BORDER: i32 = EXTENT / 128;
 

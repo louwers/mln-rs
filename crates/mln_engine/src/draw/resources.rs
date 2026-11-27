@@ -25,8 +25,8 @@ use crate::log_target;
 /// into ([`target`](Self::target)). What it makes stays while the layer
 /// keeps its handle.
 pub struct Resources<'a> {
-    pub(crate) gpu: &'a mut dyn Gpu,
-    pub(crate) context: &'a mut Context,
+    pub gpu: &'a mut dyn Gpu,
+    pub context: &'a mut Context,
 }
 
 impl<'a> Resources<'a> {
@@ -37,7 +37,7 @@ impl<'a> Resources<'a> {
     /// The mesh of `geometry`, drawn with `shader` in `color_mode` and
     /// `cull_face_mode`, binding `textures`.
     #[must_use]
-    pub(crate) fn mesh(
+    pub fn mesh(
         &mut self,
         shader: ShaderKey,
         color_mode: ColorMode,

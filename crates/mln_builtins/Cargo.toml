@@ -15,14 +15,39 @@ name = "mln_builtins"
 # The doc comments have no examples to run.
 doctest = false
 
+[features]
+# `conformance`, the frames that the backends' tests draw through their
+# `Gpu`, with the built-in layer types' programs and the engine's.
+gpu-conformance = []
+
 [dependencies]
+bytemuck = { workspace = true, features = ["extern_crate_alloc"] }
+earcut.workspace = true
+etagere.workspace = true
 geojson.workspace = true
+geometry.workspace = true
+glam.workspace = true
 log.workspace = true
 mln_engine.workspace = true
 mln_geojson.workspace = true
+mln_gfx.workspace = true
 mln_style.workspace = true
+mln_wire = { workspace = true, features = ["geo-types", "glam", "parking_lot"] }
 parking_lot.workspace = true
 serde_json.workspace = true
+
+# `conformance::host_writes`'s bytes in a JS array.
+[target.'cfg(target_family = "wasm")'.dependencies]
+js-sys.workspace = true
+
+[dev-dependencies]
+geo-types.workspace = true
+# The unit tests' layouts of tiles (`mln_engine::bench`), and the GPU and
+# MLT tiles they upload and decode with.
+mln_engine = { workspace = true, features = ["bench"] }
+mln_webgpu.workspace = true
+mlt-core.workspace = true
+pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }
 
 [lints]
 workspace = true

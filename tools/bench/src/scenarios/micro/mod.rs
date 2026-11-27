@@ -128,9 +128,17 @@ impl StreetLayout {
     ) -> Self {
         let bytes = tile_bytes(fixtures, Tiles::Street, id);
         let load = |url: &str| Some(fixtures.read(&asset_path(url)));
-        let job =
-            TileLayout::overscaled(style, "openmaptiles", include, id, zoom, &tile_data(Tiles::Street, &bytes), load)
-                .unwrap_or_else(|error| panic!("{error}"));
+        let job = TileLayout::overscaled(
+            &mln_builtins::registry(),
+            style,
+            "openmaptiles",
+            include,
+            id,
+            zoom,
+            &tile_data(Tiles::Street, &bytes),
+            load,
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
         StreetLayout { job, bytes }
     }
 

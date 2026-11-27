@@ -46,7 +46,7 @@ fn tile_dense(bench: &mut Bench) {
 fn cross(bench: &mut Bench, tile: StreetTile) {
     let fixtures = Fixtures::open(bench);
     let layout = StreetLayout::new(&fixtures, &loaded_liberty(&fixtures), |_| true, tile.id);
-    let mut codec = Codec::new();
+    let mut codec = Codec::new(&mln_builtins::registry());
     // The instance's first job defines the style's layers there, once.
     let job = codec.send(&layout.job, layout.data()).unwrap_or_else(|error| panic!("{error}"));
     let reply = job.run();

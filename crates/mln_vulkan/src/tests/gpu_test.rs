@@ -2,12 +2,12 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use ash::vk;
-use mln_engine::conformance::{
+use mln_builtins::conformance::{
     clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids, imported_textures,
     instanced_walls, invalid_calls, mipmapped_targets, pulled_walls, readbacks, resources_in_use, terrain_heights,
     topologies, transparent_replace, vertex_layouts, wall_quads, written_vertex_texels,
 };
-use mln_engine::shaders::{PROGRAMS, projection_variants};
+use mln_builtins::shaders::{every_program, projection_variants};
 use mln_gfx::gpu::{
     ColorAttachment, Gpu as _, GpuError, LoadOp, PassDesc, TextureDesc, TextureFormat, TextureRegion, TextureUsage,
     read_texels,
@@ -182,7 +182,7 @@ fn every_program_compiles_for_gpu() {
     };
     let mut gpu = VulkanGpu::new(&device).expect("VulkanGpu");
     let parameters = ProgramParameters::new(1.0);
-    for program in PROGRAMS.iter().copied().filter(|program| program.sources.glsl.is_some()) {
+    for program in every_program().filter(|program| program.sources.glsl.is_some()) {
         for &variant in projection_variants(program) {
             for uniforms in [&[][..], program.properties] {
                 let key = program.variant_key(&parameters, uniforms, variant);

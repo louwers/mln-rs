@@ -19,6 +19,7 @@ use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::VisibilityType;
 use parking_lot::Mutex;
 
+use crate::Registry;
 use crate::camera::View;
 use crate::draw::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::image::image_store::{ImageMap, ImageType};
@@ -50,20 +51,7 @@ use crate::worker::job::{
 };
 use crate::worker::tile_workers::InlineWorkers;
 use crate::worker::worker_codec::{Encoded, MapCodec, WorkerCodec, read_job_id, read_reply_header};
-use crate::{Registry, RegistryBuilder};
 
-/// The specification's expression functions and the layer types, which are
-/// all that the measured layouts and codecs read.
-fn layer_registry() -> Arc<Registry> {
-    static LAYERS: std::sync::LazyLock<Arc<Registry>> = std::sync::LazyLock::new(|| {
-        let mut builder = RegistryBuilder::new();
-        let functions = mln_style::expression::functions::register_builtin_functions(builder.functions_mut());
-        let layers = crate::register_layer_types(&mut builder);
-        debug_assert!(functions.is_ok() && layers.is_ok(), "the built-ins register into an empty builder");
-        builder.build()
-    });
-    Arc::clone(&LAYERS)
-}
 /// A vector tile's layout job, as a tile worker runs it once the tile has
 /// every glyph and image it needs: the selection of each layer's features,
 /// and the buckets and feature index built from them.
@@ -87,6 +75,7 @@ impl TileLayout {
     /// into an atlas. Fails for a style without the source, a layer the
     /// renderer has no type for, or a layout that fails.
     pub fn new(
+        registry: &Arc<Registry>,
         style: &Style,
         source: &str,
         include: impl Fn(&str) -> bool,
@@ -94,14 +83,16 @@ impl TileLayout {
         data: &TileData,
         load: impl Fn(&str) -> Option<Vec<u8>>,
     ) -> Result<TileLayout, Error> {
-        TileLayout::overscaled(style, source, include, (z, x, y), z, data, load)
+        TileLayout::overscaled(registry, style, source, include, (z, x, y), z, data, load)
     }
 
     /// [`TileLayout::new`] for the tile shown at `overscaled_z`, a zoom
     /// at or above its own, as a map shows the tiles of its source's highest
     /// zoom when it zooms in further: the layers evaluated at that zoom, and
     /// the tile's features scaled to it.
+    #[expect(clippy::too_many_arguments, reason = "the tile, its zoom, its data, and what it lays out with")]
     pub fn overscaled(
+        registry: &Arc<Registry>,
         style: &Style,
         source: &str,
         include: impl Fn(&str) -> bool,
@@ -116,7 +107,6 @@ impl TileLayout {
         if overscaled_z < z {
             return Err(Error::invalid_argument(format!("tile {z}/{x}/{y} shown at zoom {overscaled_z}")));
         }
-        let registry = layer_registry();
         let parameters = PropertyEvaluationParameters::new(f32::from(overscaled_z));
         let mut layers: Vec<Arc<dyn ErasedEvaluatedLayer>> = Vec::new();
         for layer in style.get_layers() {
@@ -211,6 +201,13 @@ impl LaidOut {
     #[must_use]
     pub fn buckets(&self) -> usize {
         self.result.layer_render_data.len()
+    }
+
+    /// The bucket of the layer `layer_id`, as a `B`; `None` for a layer
+    /// without a bucket or with one of another type.
+    #[must_use]
+    pub fn bucket<B: crate::layer::Bucket>(&self, layer_id: &str) -> Option<&B> {
+        self.result.layer_render_data.get(layer_id)?.bucket.downcast_ref()
     }
 }
 
@@ -359,10 +356,14 @@ pub struct WorkerJob(Run);
 pub struct WorkerReply(Reply);
 
 impl Codec {
-    /// The two sides of a new worker instance.
+    /// The two sides of a new worker instance of `registry`'s types.
     #[must_use]
-    pub fn new() -> Codec {
-        Codec { map: MapCodec::new(layer_registry()), worker: WorkerCodec::new(layer_registry()), generation: 0 }
+    pub fn new(registry: &Arc<Registry>) -> Codec {
+        Codec {
+            map: MapCodec::new(Arc::clone(registry)),
+            worker: WorkerCodec::new(Arc::clone(registry)),
+            generation: 0,
+        }
     }
 
     /// Sends `layout`'s job for `data` to the worker: the map side encodes
@@ -390,12 +391,6 @@ impl Codec {
                 Err(Error::native("the reply isn't a layout"))
             }
         }
-    }
-}
-
-impl Default for Codec {
-    fn default() -> Self {
-        Codec::new()
     }
 }
 
@@ -723,11 +718,20 @@ mod tests {
             Some(glyphs.clone())
         };
 
-        let layout = TileLayout::new(&style, "s", |_| true, (0, 0, 0), &data, load).unwrap();
+        let layout = TileLayout::new(&crate::tests::registry(), &style, "s", |_| true, (0, 0, 0), &data, load).unwrap();
         assert_eq!(*requested.borrow(), ["local://glyphs/Test/0-255.pbf"]);
         assert_eq!(layout.run(data.clone()).unwrap().buckets(), 2);
 
-        let lines = TileLayout::new(&style, "s", |type_| type_ == "line", (0, 0, 0), &data, |_| None).unwrap();
+        let lines = TileLayout::new(
+            &crate::tests::registry(),
+            &style,
+            "s",
+            |type_| type_ == "line",
+            (0, 0, 0),
+            &data,
+            |_| None,
+        )
+        .unwrap();
         assert_eq!(lines.run(data).unwrap().buckets(), 1);
     }
 
@@ -736,6 +740,7 @@ mod tests {
         let (style, data, glyphs) = (style(), data(), glyphs());
         let symbols = |zoom| {
             let layout = TileLayout::overscaled(
+                &crate::tests::registry(),
                 &style,
                 "s",
                 |type_| type_ == "symbol",
@@ -764,7 +769,16 @@ mod tests {
     #[test]
     fn feature_state_rewrites_the_buckets_that_depend_on_it() {
         let (style, data) = (style(), data());
-        let layout = TileLayout::new(&style, "s", |type_| type_ == "line", (0, 0, 0), &data, |_| None).unwrap();
+        let layout = TileLayout::new(
+            &crate::tests::registry(),
+            &style,
+            "s",
+            |type_| type_ == "line",
+            (0, 0, 0),
+            &data,
+            |_| None,
+        )
+        .unwrap();
         let mut laid_out = layout.run(data).unwrap();
         let mut states = LayerFeatureStates::default();
         assert!(laid_out.result.set_feature_state(&states).is_empty(), "no state, no change");
@@ -778,9 +792,18 @@ mod tests {
     #[test]
     fn a_layout_crosses_the_codec_as_it_was_laid_out() {
         let (style, data, glyphs) = (style(), data(), glyphs());
-        let layout = TileLayout::new(&style, "s", |_| true, (0, 0, 0), &data, |_| Some(glyphs.clone())).unwrap();
+        let layout = TileLayout::new(
+            &crate::tests::registry(),
+            &style,
+            "s",
+            |_| true,
+            (0, 0, 0),
+            &data,
+            |_| Some(glyphs.clone()),
+        )
+        .unwrap();
         let direct = layout.run(data.clone()).unwrap();
-        let mut codec = Codec::new();
+        let mut codec = Codec::new(&crate::tests::registry());
         for _ in 0..2 {
             let reply = codec.send(&layout, data.clone()).unwrap().run();
             let crossed = codec.reply(&reply).unwrap();

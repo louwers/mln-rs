@@ -374,7 +374,7 @@ impl Answer {
 }
 
 /// What a geometry tile draws: a layout of one load of its data.
-pub(crate) struct GeometryContents {
+pub struct GeometryContents {
     /// The buckets, and the feature index, which holds the data the layout
     /// was built from.
     pub(crate) result: LayoutResult,
@@ -532,7 +532,7 @@ impl GeometryContents {
 }
 
 /// What a tile draws.
-pub(crate) enum Contents {
+pub enum Contents {
     Geometry(GeometryContents),
     /// A raster tile's image.
     Raster(RasterContents),

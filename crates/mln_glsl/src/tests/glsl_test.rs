@@ -13,7 +13,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::mem::size_of;
 
-use mln_engine::shaders::{PROGRAMS, STANDING, projection_variants};
+use mln_builtins::shaders::{every_program, projection_variants, stands};
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shaders::bindings::{
     FIRST_UNIFORM_ID, FRAGMENT_DRAW_ID, MAX_ATTRIBUTES, PAINT_PARAMS_ID, PROJECTION_ID, VERTEX_DRAW_ID,
@@ -35,7 +35,7 @@ use crate::{Stage, compose, prelude};
 
 /// Every program the renderer draws with that has GLSL, with its GLSL.
 fn programs() -> impl Iterator<Item = (&'static Program, &'static GlslSource)> {
-    PROGRAMS.iter().filter_map(|&program| Some((program, program.sources.glsl?)))
+    every_program().filter_map(|program| Some((program, program.sources.glsl?)))
 }
 
 const STAGES: [Stage; 2] = [Stage::Vertex, Stage::Fragment];
@@ -300,7 +300,7 @@ fn resources_are_in_the_descriptor_set_layouts() {
             // ground's depth.
             let depth = program.textures.iter().position(|texture| texture.name == "ground_depth");
             let ground: Vec<u32> = depth.into_iter().map(image_texture_binding).collect();
-            let expected: BTreeSet<u32> = if variant.projection.stands() || !STANDING.contains(&program) {
+            let expected: BTreeSet<u32> = if variant.projection.stands() || !stands(program) {
                 table.clone()
             } else {
                 table.iter().copied().filter(|binding| !ground.contains(binding)).collect()
@@ -550,15 +550,17 @@ fn stages_agree_on_what_passes_between_them() {
 // the offsets the shader preludes add, and `samplerBindingStartId`.
 #[test]
 fn bindings_follow_from_the_packed_ids() {
-    use mln_engine::layers::background::programs::BACKGROUND;
-    use mln_engine::layers::circle::programs::CIRCLE;
-    use mln_engine::layers::color_relief::programs::COLOR_RELIEF;
-    use mln_engine::layers::fill::programs::{FILL, FILL_OUTLINE_PULLED, FILL_PATTERN};
-    use mln_engine::layers::fill_extrusion::programs::{FILL_EXTRUSION, FILL_EXTRUSION_PATTERN, FILL_EXTRUSION_PULLED};
-    use mln_engine::layers::heatmap::programs::{HEATMAP, HEATMAP_TEXTURE};
-    use mln_engine::layers::hillshade::programs::{HILLSHADE, HILLSHADE_PREPARE};
-    use mln_engine::layers::line::programs::LINE;
-    use mln_engine::layers::raster::programs::RASTER;
+    use mln_builtins::layers::background::programs::BACKGROUND;
+    use mln_builtins::layers::circle::programs::CIRCLE;
+    use mln_builtins::layers::color_relief::programs::COLOR_RELIEF;
+    use mln_builtins::layers::fill::programs::{FILL, FILL_OUTLINE_PULLED, FILL_PATTERN};
+    use mln_builtins::layers::fill_extrusion::programs::{
+        FILL_EXTRUSION, FILL_EXTRUSION_PATTERN, FILL_EXTRUSION_PULLED,
+    };
+    use mln_builtins::layers::heatmap::programs::{HEATMAP, HEATMAP_TEXTURE};
+    use mln_builtins::layers::hillshade::programs::{HILLSHADE, HILLSHADE_PREPARE};
+    use mln_builtins::layers::line::programs::LINE;
+    use mln_builtins::layers::raster::programs::RASTER;
     use mln_engine::shaders::programs::{ATMOSPHERE, SKY};
     use mln_engine::symbol::programs::SYMBOL_SDF;
 

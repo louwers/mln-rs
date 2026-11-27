@@ -20,7 +20,7 @@ fn whole() -> TileMask {
 
 /// The parts of a raster or raster-dem tile's extent that it draws: the
 /// whole tile, unless better tiles cover some of it.
-pub(crate) struct Masking {
+pub struct Masking {
     mask: TileMask,
     /// Counts the changes of the mask, after which the layers build their
     /// draws of the tile again.
@@ -38,7 +38,7 @@ impl Masking {
     /// The tiles of the tile's extent that it draws: the whole tile's,
     /// `(0, 0, 0)`, unless better tiles cover some of it.
     #[must_use]
-    pub(crate) fn mask(&self) -> &TileMask {
+    pub fn mask(&self) -> &TileMask {
         &self.mask
     }
 
@@ -75,7 +75,7 @@ impl Masking {
 pub struct RasterContents {
     id: SimpleIdentity,
     pub(crate) image: Arc<PremultipliedImage>,
-    pub(crate) masking: Masking,
+    pub masking: Masking,
 }
 
 impl RasterContents {

@@ -41,13 +41,10 @@ mod drapes;
 mod draws;
 mod elevation;
 mod fog;
-#[rustfmt::skip]
 pub(crate) mod glsl;
-#[rustfmt::skip]
 pub(crate) mod glsl_es;
 mod ground;
 mod mesh;
-#[rustfmt::skip]
 pub(crate) mod msl;
 pub mod programs;
 mod stacks;
@@ -61,9 +58,10 @@ pub(crate) use cover::{ElevationRanges, TerrainCover};
 #[cfg(test)]
 pub(crate) use cover::{REMEMBERED_RANGES, TerrainTile, terrain_tile_size};
 pub(crate) use drapes::Drapes;
-pub(crate) use elevation::{TerrainElevation, TileGround};
+pub(crate) use elevation::TerrainElevation;
+pub use elevation::TileGround;
 pub(crate) use fog::terrain_fog;
-pub(crate) use ground::{FrameGround, GroundHeights, StandingDraw, height_attribute, point_center};
+pub use ground::{FrameGround, GroundHeights, StandingDraw, height_attribute, point_center};
 use mln_gfx::gpu::Gpu;
 use mln_style::hash::HashMap;
 use mln_style::layer::SourceKind;
@@ -136,10 +134,10 @@ impl Surface {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct SurfaceLight {
     /// The hillshade's lights, turned by the frame's bearing.
-    pub(crate) props: HillshadeEvaluatedPropsUBO,
+    pub props: HillshadeEvaluatedPropsUBO,
     /// The hillshade's values of a tile, but for its latitudes, which are
     /// each terrain tile's.
-    pub(crate) tile: HillshadeTilePropsUBO,
+    pub tile: HillshadeTilePropsUBO,
 }
 
 /// The textures of the DEM tiles that the frame's terrain tiles read, which

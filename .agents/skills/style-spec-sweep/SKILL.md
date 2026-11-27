@@ -29,8 +29,9 @@ meaning can change while its name stays the same.
   holds the sources, and `style_json.rs` the root properties.
 - `crates/mln_style/src/expression`: the expressions. `parsing_context.rs` lists
   the ones it parses.
-- `crates/mln_engine/src/layers/render_*_layer.rs`, `buckets/`, `layout/`,
-  `symbol/`, `text/`, `placement/`: where the properties are drawn.
+- `crates/mln_builtins/src/layers/<type>/` (each type's render layer, bucket and
+  layout) and `crates/mln_engine/src/symbol/`, `text/`, `placement/`: where the
+  properties are drawn.
 - `tools/render-test/testdata/metrics/integration/`: the render and query tests,
   from MapLibre Native plus the GL JS tests ported since.
   `tools/render-test/ignores/*.json` and

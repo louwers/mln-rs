@@ -1,12 +1,12 @@
-// Ports test/gl/bucket.test.cpp (circle, fill, line; on the WebGPU headless
-// backend) and test/renderer/fill_bucket.test.cpp.
+// The parts of test/gl/bucket.test.cpp of the engine's stores, raster masks
+// and symbol buckets (on the WebGPU headless backend).
 mod bucket_test;
 // Cameras that move faster than the network answers.
 mod fast_camera_test;
 mod fixture_log;
-// Ports test/layout/sort_key.test.cpp.
 mod gtest_sky;
-mod gtest_subdivision;
+mod gtest_tile_mesh;
+// The symbol parts of test/layout/sort_key.test.cpp.
 mod sort_key_test;
 // gtests-data: the test/tile gtests that need the renderer's tiles or
 // the camera's transform (tests/tile/main.rs lists them).
@@ -18,7 +18,6 @@ mod text;
 mod gtest_image_store;
 // gtests-core: test/renderer/dynamic_texture_atlas.test.cpp.
 mod gtest_dynamic_texture_atlas;
-mod gtest_fill_mesh;
 mod gtest_tile_lod;
 // gtests-core: test/algorithm/update_renderables.test.cpp.
 mod gtest_update_renderables;
@@ -66,20 +65,6 @@ pub(crate) fn registry() -> std::sync::Arc<crate::Registry> {
             .and_then(|()| types::layers::register_layer_types(&mut builder))
             .and_then(|()| types::register_source_types(&mut builder))
             .expect("the tests' types register into an empty builder");
-        builder.build()
-    });
-    std::sync::Arc::clone(&REGISTRY)
-}
-
-/// [`registry`] with the built-in layer types instead of the tests', for
-/// the tests of the built-in types.
-pub(crate) fn builtin_registry() -> std::sync::Arc<crate::Registry> {
-    static REGISTRY: std::sync::LazyLock<std::sync::Arc<crate::Registry>> = std::sync::LazyLock::new(|| {
-        let mut builder = crate::RegistryBuilder::new();
-        mln_style::expression::functions::register_builtin_functions(builder.functions_mut())
-            .and_then(|()| crate::register_layer_types(&mut builder))
-            .and_then(|()| types::register_source_types(&mut builder))
-            .expect("the built-ins register into an empty builder");
         builder.build()
     });
     std::sync::Arc::clone(&REGISTRY)

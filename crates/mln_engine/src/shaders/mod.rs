@@ -1,8 +1,7 @@
-//! The renderer's programs: the engine's own ([`programs`]), the blocks
-//! they read ([`ubo`]) and their text in each language, and every program
-//! the renderer draws with ([`PROGRAMS`]). Each built-in layer type's
-//! programs are in its module of [`layers`](crate::layers), and the
-//! terrain's in [`terrain`].
+//! The engine's programs: its own ([`programs`]), the blocks they read
+//! ([`ubo`]) and their text in each language, and every program it draws
+//! with ([`PROGRAMS`]): those, the symbol layer type's and the terrain's
+//! ([`terrain`]). A layer type's programs are in its own module.
 
 // The built-in programs' WGSL and MSL started as MapLibre Native's, and
 // read the vertices and blocks this renderer makes.
@@ -135,41 +134,13 @@ pub mod terrain {
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program::Program;
 
-use crate::layers::{background, circle, color_relief, fill, fill_extrusion, heatmap, hillshade, line, raster};
 use crate::symbol;
 
-/// Every program the renderer draws with, and, with the `gpu-conformance`
-/// feature, those the conformance cases draw with.
+/// The programs the engine draws with: its own and the symbol layer
+/// type's. Each crate of layer types lists its own (in
+/// `mln_builtins`, `mln_builtins::shaders::PROGRAMS`).
 pub static PROGRAMS: &[&Program] = &[
-    &background::programs::BACKGROUND,
-    &background::programs::BACKGROUND_PATTERN,
-    &circle::programs::CIRCLE,
     &programs::CLIPPING_MASK,
-    &fill::programs::FILL,
-    &fill::programs::FILL_OUTLINE,
-    &fill::programs::FILL_PATTERN,
-    &fill::programs::FILL_OUTLINE_PATTERN,
-    &fill::programs::FILL_OUTLINE_INSTANCED,
-    &fill::programs::FILL_OUTLINE_PULLED,
-    &fill::programs::FILL_OUTLINE_PATTERN_INSTANCED,
-    &line::programs::LINE,
-    &line::programs::LINE_GRADIENT,
-    &line::programs::LINE_PATTERN,
-    &line::programs::LINE_SDF,
-    &line::programs::LINE_GRADIENT_SDF,
-    &raster::programs::RASTER,
-    &fill_extrusion::programs::FILL_EXTRUSION,
-    &fill_extrusion::programs::FILL_EXTRUSION_INSTANCED,
-    &fill_extrusion::programs::FILL_EXTRUSION_WALL,
-    &fill_extrusion::programs::FILL_EXTRUSION_PULLED,
-    &fill_extrusion::programs::FILL_EXTRUSION_PATTERN,
-    &fill_extrusion::programs::FILL_EXTRUSION_PATTERN_INSTANCED,
-    &fill_extrusion::programs::FILL_EXTRUSION_PATTERN_WALL,
-    &heatmap::programs::HEATMAP,
-    &heatmap::programs::HEATMAP_TEXTURE,
-    &hillshade::programs::HILLSHADE,
-    &hillshade::programs::HILLSHADE_PREPARE,
-    &color_relief::programs::COLOR_RELIEF,
     &symbol::programs::SYMBOL_ICON,
     &symbol::programs::SYMBOL_SDF,
     &symbol::programs::SYMBOL_TEXT_AND_ICON,
@@ -179,38 +150,23 @@ pub static PROGRAMS: &[&Program] = &[
     &programs::LAYER_COMPOSITE,
     &crate::render::terrain::programs::TERRAIN,
     &crate::render::terrain::programs::TERRAIN_DEPTH,
-    #[cfg(feature = "gpu-conformance")]
-    &crate::conformance::programs::VERTEX_TEXEL,
-    #[cfg(feature = "gpu-conformance")]
-    &crate::conformance::programs::TERRAIN_PROBE,
 ];
 
-/// The programs with variants that stand on terrain
-/// ([`ProjectionVariant::stands`]).
-pub static STANDING: &[&Program] = &[
-    &circle::programs::CIRCLE,
-    &heatmap::programs::HEATMAP,
-    &fill_extrusion::programs::FILL_EXTRUSION,
-    &fill_extrusion::programs::FILL_EXTRUSION_INSTANCED,
-    &fill_extrusion::programs::FILL_EXTRUSION_WALL,
-    &fill_extrusion::programs::FILL_EXTRUSION_PULLED,
-    &fill_extrusion::programs::FILL_EXTRUSION_PATTERN,
-    &fill_extrusion::programs::FILL_EXTRUSION_PATTERN_INSTANCED,
-    &fill_extrusion::programs::FILL_EXTRUSION_PATTERN_WALL,
-    &symbol::programs::SYMBOL_ICON,
-    &symbol::programs::SYMBOL_SDF,
-    &symbol::programs::SYMBOL_TEXT_AND_ICON,
-];
+/// Those of [`PROGRAMS`] with variants that stand on terrain
+/// ([`ProjectionVariant::stands`]): the programs of a layer type that
+/// stands on terrain ([`OnTerrain::Stands`](crate::layer::OnTerrain::Stands)).
+pub static STANDING: &[&Program] =
+    &[&symbol::programs::SYMBOL_ICON, &symbol::programs::SYMBOL_SDF, &symbol::programs::SYMBOL_TEXT_AND_ICON];
 
-/// The projection variants of `program`: those that stand on terrain too,
-/// for one of [`STANDING`].
+/// The projection variants of a program: those that stand on terrain too,
+/// for one that `stands`, such as one of [`STANDING`].
 #[must_use]
-pub fn projection_variants(program: &Program) -> &'static [ProjectionVariant] {
+pub fn projection_variants(stands: bool) -> &'static [ProjectionVariant] {
     const ALL: [ProjectionVariant; 4] = [
         ProjectionVariant::Mercator,
         ProjectionVariant::Globe,
         ProjectionVariant::Terrain,
         ProjectionVariant::GlobeTerrain,
     ];
-    if STANDING.contains(&program) { &ALL } else { &ALL[..2] }
+    if stands { &ALL } else { &ALL[..2] }
 }

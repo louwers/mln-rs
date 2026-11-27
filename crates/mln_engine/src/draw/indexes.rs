@@ -31,7 +31,7 @@ enum Place {
 
 /// Indexes, which don't change once made: an upload moves them into their
 /// buffer.
-pub(crate) struct Indexes {
+pub struct Indexes {
     len: usize,
     place: Place,
 }
@@ -39,7 +39,7 @@ pub(crate) struct Indexes {
 impl Indexes {
     /// Indexes holding `indexes`.
     #[must_use]
-    pub(crate) fn new(indexes: Vec<u16>) -> Indexes {
+    pub fn new(indexes: Vec<u16>) -> Indexes {
         Indexes { len: indexes.len(), place: Place::Data(IndexData::Vec(indexes)) }
     }
 
@@ -58,8 +58,8 @@ impl Indexes {
     }
 
     /// Whether the CPU copy of the indexes is still there.
-    #[cfg(test)]
-    pub(crate) fn has_data(&self) -> bool {
+    #[must_use]
+    pub fn has_data(&self) -> bool {
         matches!(self.place, Place::Data(_))
     }
 
@@ -91,7 +91,7 @@ impl Indexes {
 
 /// The indexes a draw binds: its own, or those it shares through the
 /// context's store.
-pub(crate) enum DrawIndexes {
+pub enum DrawIndexes {
     Own(Indexes),
     Shared(SharedIndexes),
 }
@@ -111,7 +111,7 @@ impl From<SharedIndexes> for DrawIndexes {
 impl DrawIndexes {
     /// The draw's own indexes holding `indexes`.
     #[must_use]
-    pub(crate) fn new(indexes: Vec<u16>) -> DrawIndexes {
+    pub fn new(indexes: Vec<u16>) -> DrawIndexes {
         DrawIndexes::Own(Indexes::new(indexes))
     }
 
@@ -125,18 +125,17 @@ impl DrawIndexes {
 
     /// The number of indexes, which stays once the upload freed them.
     #[must_use]
-    pub(crate) fn len(&self, context: &Context) -> usize {
+    pub fn len(&self, context: &Context) -> usize {
         self.indexes(context).map_or(0, Indexes::len)
     }
 
     /// Whether the CPU copy of the indexes is still there.
-    #[cfg(test)]
-    pub(crate) fn has_data(&self, context: &Context) -> bool {
+    pub fn has_data(&self, context: &Context) -> bool {
         self.indexes(context).is_some_and(Indexes::has_data)
     }
 
     /// Writes the indexes to a buffer of `gpu`, unless they have one.
-    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) -> Result<(), GpuError> {
+    pub fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) -> Result<(), GpuError> {
         match self {
             DrawIndexes::Own(indexes) => indexes.upload(gpu, context.device()),
             DrawIndexes::Shared(shared) => context.upload_indexes(gpu, shared),
@@ -145,7 +144,7 @@ impl DrawIndexes {
 
     /// The buffer of the indexes, once uploaded.
     #[must_use]
-    pub(crate) fn buffer(&self, context: &Context) -> Option<BufferId> {
+    pub fn buffer(&self, context: &Context) -> Option<BufferId> {
         self.indexes(context).and_then(Indexes::buffer)
     }
 

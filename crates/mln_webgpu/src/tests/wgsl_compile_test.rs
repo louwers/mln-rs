@@ -5,7 +5,7 @@
 
 use std::collections::BTreeSet;
 
-use mln_engine::shaders::{PROGRAMS, projection_variants};
+use mln_builtins::shaders::{every_program, projection_variants};
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
@@ -23,7 +23,7 @@ use crate::shaders::shader_program::compile;
 
 /// Every program the renderer draws with that has WGSL, with its WGSL.
 fn programs() -> impl Iterator<Item = (&'static Program, &'static WgslSource)> {
-    PROGRAMS.iter().filter_map(|&program| Some((program, program.sources.wgsl?)))
+    every_program().filter_map(|program| Some((program, program.sources.wgsl?)))
 }
 
 /// The names after the `HAS_UNIFORM_u_` that `source`'s WGSL tests.

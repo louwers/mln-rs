@@ -7,7 +7,7 @@ use crate::map::MapMode;
 use crate::tile::OverscaledTileID;
 
 #[derive(Clone, Debug)]
-pub(crate) struct BucketParameters {
+pub struct BucketParameters {
     pub(crate) tile_id: OverscaledTileID,
     pub(crate) mode: MapMode,
     pub(crate) pixel_ratio: f32,

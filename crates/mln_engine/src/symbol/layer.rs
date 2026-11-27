@@ -21,6 +21,7 @@ use mln_style::types::{AlignmentType, IconTextFitType, SymbolPlacementType, Text
 
 use crate::camera::{Projection, ProjectionData};
 use crate::draw::atlas_binding::AtlasBinding;
+use crate::draw::cast_matrix;
 use crate::draw::context::Context;
 use crate::draw::draws::{Draw, Draws, LayerFrame};
 use crate::draw::objects::{DrawGeometry, Mesh, copy_shared_attributes};
@@ -33,7 +34,6 @@ use crate::layer::layer_type::EvaluatedLayer;
 use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{EvaluateCx, Evaluation, Layer, LayerValues, OnTerrain, PrepareCx};
 use crate::layer::tile_input::Features;
-use crate::layers::cast_matrix;
 use crate::render::pass::RenderPass;
 use crate::render::terrain::FrameGround;
 use crate::render::tile::{FrameTile, RenderTile};

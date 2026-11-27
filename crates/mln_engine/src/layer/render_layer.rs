@@ -53,7 +53,7 @@ pub(crate) struct ErasedLayerBucket<'a> {
 /// the tiles that the frame's updates of the layers found
 /// ([`LayerUpdateParameters::found`]), as the engine sees them.
 #[derive(Clone, Copy)]
-pub(crate) struct FrameSourceTiles<'a> {
+pub struct FrameSourceTiles<'a> {
     tiles: &'a [RenderTile],
     /// What each of `tiles` shows, at its index.
     contents: &'a [Option<TileContent<'a>>],
@@ -181,18 +181,18 @@ impl<'a> FrameSourceTiles<'a> {
 }
 
 /// What a layer reads in the frame's update, besides its tiles.
-pub(crate) struct LayerUpdateParameters<'a> {
+pub struct LayerUpdateParameters<'a> {
     /// The frame's camera.
-    pub(crate) view: &'a View,
+    pub view: &'a View,
     /// The update the frame draws.
-    pub(crate) update_parameters: &'a UpdateParameters,
+    pub update_parameters: &'a UpdateParameters,
     /// The layer's source, `None` for a layer without one or a source type
     /// the renderer has no render source for.
-    pub(crate) source: Option<&'a dyn RenderSource>,
+    pub source: Option<&'a dyn RenderSource>,
     /// What each of the source's render tiles shows, at its index.
     pub(crate) contents: &'a [Option<TileContent<'a>>],
     /// The images of the style.
-    pub(crate) images: &'a crate::image::image_store::ImageStore,
+    pub images: &'a crate::image::image_store::ImageStore,
     /// The tiles of the frame's layers, as their updates find them, which
     /// the update adds the layer's to: those the encode draws.
     pub(crate) found: &'a mut Vec<FoundTile>,
@@ -209,9 +209,9 @@ impl<'a> LayerUpdateParameters<'a> {
 }
 
 /// What every render layer has, whatever its type.
-pub(crate) struct RenderLayerBase {
+pub struct RenderLayerBase {
     pub(crate) evaluated_properties: Arc<dyn ErasedEvaluatedLayer>,
-    pub(crate) style: Arc<dyn ErasedLayerStyle>,
+    pub style: Arc<dyn ErasedLayerStyle>,
 
     pub(crate) passes: RenderPass,
     /// What the layer's last evaluation said of how it draws.
@@ -221,7 +221,7 @@ pub(crate) struct RenderLayerBase {
     pub(crate) is_renderable: bool,
 
     /// The projection variant this layer's draws are built with.
-    pub(crate) projection_variant: ProjectionVariant,
+    pub projection_variant: ProjectionVariant,
 
     /// Where the tiles the layer's update found are among the frame's
     /// ([`LayerUpdateParameters::found`]).
@@ -253,9 +253,9 @@ impl RenderLayerBase {
 /// A layer's values of its style half `T`: its style, its paint values in
 /// transition, and their evaluation for the last frame.
 pub struct LayerValues<T: StyleLayerType> {
-    pub(crate) style: Arc<LayerStyle<T>>,
-    pub(crate) unevaluated: <T::PaintProperties as PaintSet>::Unevaluated,
-    pub(crate) evaluated: Arc<EvaluatedLayer<T>>,
+    pub style: Arc<LayerStyle<T>>,
+    pub unevaluated: <T::PaintProperties as PaintSet>::Unevaluated,
+    pub evaluated: Arc<EvaluatedLayer<T>>,
 }
 
 impl<T: StyleLayerType> LayerValues<T> {
@@ -354,12 +354,12 @@ impl Evaluation {
 pub struct EvaluateCx<'a, L: Layer> {
     /// The layer's values before the evaluation: its style, its paint values
     /// in transition and their last evaluation.
-    pub(crate) values: &'a LayerValues<L::Style>,
+    pub values: &'a LayerValues<L::Style>,
     /// What the values were evaluated for.
-    pub(crate) parameters: &'a PropertyEvaluationParameters,
+    pub parameters: &'a PropertyEvaluationParameters,
     /// The new evaluation of the values, which becomes the layer's once the
     /// hook returns.
-    pub(crate) evaluated: &'a mut EvaluatedLayer<L::Style>,
+    pub evaluated: &'a mut EvaluatedLayer<L::Style>,
 }
 
 impl<L: Layer> EvaluateCx<'_, L> {
@@ -423,16 +423,16 @@ impl OnTerrain {
 /// and its drapes share, by the tiles' own ids ([`FrameTile::id`]), and the
 /// frame it makes its draws for, the map's or a drape's.
 pub struct PrepareCx<'a, 'f, L: Layer> {
-    pub(crate) base: &'a RenderLayerBase,
-    pub(crate) values: &'a LayerValues<L::Style>,
-    pub(crate) tiles: &'a mut TileMap<L::Tile>,
+    pub base: &'a RenderLayerBase,
+    pub values: &'a LayerValues<L::Style>,
+    pub tiles: &'a mut TileMap<L::Tile>,
     /// For a layer that picks its tiles ([`Layer::PICKS_TILES`]),
     /// those the frame draws, in id order: those it picked, or a drape's
     /// tile. Empty for another layer.
-    pub(crate) picked: &'a [OverscaledTileID],
+    pub picked: &'a [OverscaledTileID],
     /// What the layer makes its meshes and targets with.
-    pub(crate) res: Resources<'a>,
-    pub(crate) frame: &'a LayerFrame<'f>,
+    pub res: Resources<'a>,
+    pub frame: &'a LayerFrame<'f>,
 }
 
 impl<'a, L: Layer> PrepareCx<'a, '_, L> {
@@ -468,14 +468,14 @@ impl<'a, L: Layer> PrepareCx<'a, '_, L> {
 
 /// What a layer's [`Layer::tile`] reads to make a tile's value.
 pub struct TileCx<'a, 'f, L: Layer> {
-    pub(crate) base: &'a RenderLayerBase,
-    pub(crate) values: &'a LayerValues<L::Style>,
+    pub base: &'a RenderLayerBase,
+    pub values: &'a LayerValues<L::Style>,
     /// What the layer makes its meshes and targets with.
-    pub(crate) res: Resources<'a>,
+    pub res: Resources<'a>,
     /// The frame the value is made in: the map's, or for a layer that
     /// drapes, the drape's that first draws it, whose value every drape
     /// the tile overlaps draws.
-    pub(crate) frame: &'a LayerFrame<'f>,
+    pub frame: &'a LayerFrame<'f>,
 }
 
 impl<'a, L: Layer> TileCx<'a, '_, L> {
@@ -499,12 +499,19 @@ impl<'a, L: Layer> TileCx<'a, '_, L> {
 
 /// What a layer's [`Layer::update`] reads, besides its tiles.
 pub struct UpdateCx<'a, 'p, L: Layer> {
-    pub(crate) values: &'a LayerValues<L::Style>,
-    pub(crate) parameters: &'a mut LayerUpdateParameters<'p>,
+    pub values: &'a LayerValues<L::Style>,
+    pub parameters: &'a mut LayerUpdateParameters<'p>,
     picked: &'a mut Vec<OverscaledTileID>,
 }
 
 impl<L: Layer> UpdateCx<'_, '_, L> {
+    /// The deepest zoom the layer's source has tiles of; `None` for a layer
+    /// without a source or a source without tiles.
+    #[must_use]
+    pub fn source_max_zoom(&self) -> Option<u8> {
+        self.parameters.source.and_then(RenderSource::max_zoom)
+    }
+
     /// The layer's values of the frame.
     #[must_use]
     pub fn values(&self) -> &LayerValues<L::Style> {
@@ -526,7 +533,7 @@ impl<L: Layer> UpdateCx<'_, '_, L> {
 /// globe, and the tiles of every drape of the frame, in id order, which a
 /// layer that picks its tiles keeps values of.
 #[derive(Clone, Copy)]
-pub(crate) struct DrapeTile<'a> {
+pub struct DrapeTile<'a> {
     pub(crate) tile: OverscaledTileID,
     pub(crate) globe: bool,
     pub(crate) tiles: &'a [OverscaledTileID],
@@ -879,7 +886,7 @@ fn has_tiles<L: Layer>() -> bool {
 /// values and its draws, which it writes, uploads and draws. It runs
 /// the layer's [`Layer`] hooks with what is common to every layer type
 /// around them.
-pub(crate) trait RenderLayer {
+pub trait RenderLayer {
     fn base(&self) -> &RenderLayerBase;
 
     /// The layer's id.

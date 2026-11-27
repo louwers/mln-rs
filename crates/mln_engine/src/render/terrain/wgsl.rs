@@ -6,7 +6,9 @@ use mln_gfx::shaders::source::WgslSource;
 /// What the terrain variant of a program that hides behind the ground in
 /// front of it reads of the ground's depth, within `#ifdef TERRAIN` of its
 /// vertex stage: whether that ground hides a point (`ground_visibility`).
-macro_rules! ground_visibility {
+#[doc(hidden)]
+#[macro_export]
+macro_rules! terrain_wgsl_ground_visibility {
     () => {
         r"
 #ifdef TERRAIN
@@ -52,11 +54,15 @@ fn ground_visibility(clip: vec4<f32>, view_height: f32) -> f32 {
 "
     };
 }
-pub(crate) use ground_visibility;
+pub(crate) use crate::{
+    terrain_wgsl_ground_height as ground_height, terrain_wgsl_ground_visibility as ground_visibility,
+};
 
 /// The height rule of `crate::tile::dem`, over the DEM tile a draw reads: its
 /// RGBA8 texels behind a one-texel border, decoded by a `TerrainSurfaceUBO`.
-macro_rules! ground_height {
+#[doc(hidden)]
+#[macro_export]
+macro_rules! terrain_wgsl_ground_height {
     () => {
         r"
 // The height in meters of the DEM's bordered texel at `texel`, clamped to
@@ -97,7 +103,9 @@ fn ground_height(pos: vec2<f32>, dem_coords: vec4<f32>, props: TerrainSurfaceUBO
 /// `HillshadeEvaluatedPropsUBO` that the program binds. A macro, so that
 /// `concat!` puts it in the fragment stages of the hillshade and of the
 /// terrain's surface, which shades a drape of a hillshade's slopes.
-macro_rules! hillshade_shading {
+#[doc(hidden)]
+#[macro_export]
+macro_rules! terrain_wgsl_hillshade_shading {
     () => {
         r"
 const STANDARD: i32 = 0;
@@ -226,7 +234,7 @@ fn hillshade_color(deriv: vec2<f32>, tileProps: HillshadeTilePropsUBO) -> vec4<f
 "
     };
 }
-pub(crate) use hillshade_shading;
+pub(crate) use crate::terrain_wgsl_hillshade_shading as hillshade_shading;
 
 /// The terrain's surface: a tile's grid, raised to the heights of the tile's
 /// DEM with its skirts lowered and projected through the tile's entry of
@@ -328,7 +336,7 @@ fn main(@location(0) distance: f32) -> @location(0) vec4<f32> {
 
 /// The surface's and the probe's prelude: the terrain's uniform block, the
 /// height rule, the height of the surface's vertices, and the fog.
-pub(crate) const TERRAIN_PRELUDE: &str = concat!(
+pub const TERRAIN_PRELUDE: &str = concat!(
     ground_height!(),
     r"
 // How the terrain's DEM decodes, its exaggeration and its skirts' length,

@@ -6,22 +6,17 @@
 #[cfg(feature = "bench")]
 #[doc(hidden)]
 pub mod bench;
-mod buckets;
 pub mod camera;
-#[cfg(feature = "gpu-conformance")]
-pub mod conformance;
 pub mod draw;
 pub mod exec;
 pub mod geo;
 pub mod gestures;
-mod gfx;
 pub mod image;
 pub mod layer;
 // Each layer type's programs and the engine's, public for the backends'
 // tests, which compile them. Not API.
 #[doc(hidden)]
 pub mod layers;
-mod layout;
 pub mod map;
 #[cfg(feature = "sqlite")]
 pub mod offline;
@@ -45,7 +40,6 @@ pub mod tile_store;
 mod util;
 pub mod worker;
 
-pub(crate) use layer::paint_property_binder::paint_property_binders;
 pub use layers::custom::{
     Custom, CustomHost, CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters,
 };

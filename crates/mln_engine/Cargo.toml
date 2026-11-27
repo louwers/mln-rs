@@ -43,9 +43,6 @@ sqlite = ["dep:rusqlite"]
 # build the latter without the feature. Not API: hidden from the
 # documentation.
 bench = []
-# `conformance`, the frames that the backends' tests draw through their
-# `Gpu`.
-gpu-conformance = []
 # `text::system_fonts`: the device's fonts, found through fontconfig,
 # Android's font matcher, CoreText or DirectWrite, as font faces for the
 # glyphs that no style font has.
@@ -157,7 +154,7 @@ libloading = { workspace = true, optional = true }
 [target.'cfg(target_os = "android")'.dependencies]
 jni.workspace = true
 
-# The browser's fetch, and `conformance::host_writes`'s bytes in a JS array.
+# The browser's fetch.
 [target.'cfg(target_family = "wasm")'.dependencies]
 js-sys.workspace = true
 wasm-bindgen.workspace = true

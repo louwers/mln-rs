@@ -28,12 +28,12 @@ use crate::tile_store::contents::GeometryContents;
 
 /// The values of a layer of the style half `T` for a frame.
 pub struct EvaluatedLayer<T: StyleLayerType> {
-    pub(crate) style: Arc<LayerStyle<T>>,
-    pub(crate) paint: <T::PaintProperties as PaintSet>::Evaluated,
+    pub style: Arc<LayerStyle<T>>,
+    pub paint: <T::PaintProperties as PaintSet>::Evaluated,
     /// The default for a type without cross-faded properties.
-    pub(crate) crossfade: CrossfadeParameters,
+    pub crossfade: CrossfadeParameters,
     /// The `RenderPass` bits the layer draws in.
-    pub(crate) render_passes: u8,
+    pub render_passes: u8,
     /// The layer type whose layer has the values.
     pub(crate) layer_type: &'static dyn ErasedLayerType,
 }
@@ -54,7 +54,7 @@ impl<T: StyleLayerType> EvaluatedLayer<T> {
     /// The values of the layer `style` of `layer_type` with its paint
     /// properties evaluated to `paint`, without a cross-fade or render
     /// passes.
-    pub(crate) fn with_paint(
+    pub fn with_paint(
         style: Arc<LayerStyle<T>>,
         paint: <T::PaintProperties as PaintSet>::Evaluated,
         layer_type: &'static dyn ErasedLayerType,
@@ -93,20 +93,6 @@ impl<T: StyleLayerType> EvaluatedLayer<T> {
         Self::new(style, Self::type_of(&crate::tests::registry()))
     }
 
-    /// [`new`](Self::new), of the built-in layer type of the style half `T`.
-    pub(crate) fn builtin(style: Arc<LayerStyle<T>>) -> Self {
-        Self::new(style, Self::type_of(&crate::tests::builtin_registry()))
-    }
-
-    /// [`with_paint`](Self::with_paint), of the built-in layer type of the
-    /// style half `T`.
-    pub(crate) fn builtin_with_paint(
-        style: Arc<LayerStyle<T>>,
-        paint: <T::PaintProperties as PaintSet>::Evaluated,
-    ) -> Self {
-        Self::with_paint(style, paint, Self::type_of(&crate::tests::builtin_registry()))
-    }
-
     fn type_of(registry: &crate::Registry) -> &'static dyn ErasedLayerType {
         registry.layer_type(T::INFO.name).expect("a layer type of the registry")
     }
@@ -123,7 +109,7 @@ impl<T: StyleLayerType> std::fmt::Debug for EvaluatedLayer<T> {
 }
 
 /// A layer's values for a frame, whichever its type.
-pub(crate) trait ErasedEvaluatedLayer: Any + Send + Sync {
+pub trait ErasedEvaluatedLayer: Any + Send + Sync {
     fn entry(&self) -> &'static dyn ErasedLayerType;
 
     fn style(&self) -> &dyn ErasedLayerStyle;
@@ -191,7 +177,7 @@ impl std::fmt::Debug for dyn ErasedEvaluatedLayer {
 }
 
 /// A layer type that the renderer draws, whichever it is.
-pub(crate) trait ErasedLayerType: Sync {
+pub trait ErasedLayerType: Sync {
     /// The type's style half.
     fn style(&self) -> &'static dyn ErasedStyleLayerType;
 
@@ -332,7 +318,7 @@ fn recover_group<T: StyleLayerType>(
 }
 
 /// A layout, whichever its layer type.
-pub(crate) trait ErasedLayout: Send {
+pub trait ErasedLayout: Send {
     /// [`Layout::needs_resources`] of the layout's group: whether its
     /// bucket waits for the glyphs and images it asked for.
     fn needs_resources(&self) -> bool;

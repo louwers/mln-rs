@@ -11,8 +11,8 @@ use crate::draw::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::draw::mesh::Indexed;
 use crate::draw::segment::SegmentBase;
 use crate::draw::vertices::SharedVertices;
-use crate::render::globe::subdivision::{NORTH_POLE_Y, SOUTH_POLE_Y};
 use crate::render::globe::tile_mesh::{TileMeshOptions, create_tile_mesh};
+use crate::render::globe::{NORTH_POLE_Y, SOUTH_POLE_Y};
 use crate::tile_store::tile_mask::TileMask;
 
 /// The pole-capped globe grid for the parts of a tile its mask keeps, as
@@ -20,10 +20,10 @@ use crate::tile_store::tile_mask::TileMask;
 /// is gridded like the tile it stands in for, so it meets that tile's
 /// neighbours edge to edge; texture positions stay inside the tile so the
 /// pole rows sample the tile's edge.
-pub(crate) struct GlobeTileMesh {
-    pub(crate) vertices: SharedVertices,
+pub struct GlobeTileMesh {
+    pub vertices: SharedVertices,
     indices: SharedIndexes,
-    pub(crate) segments: Vec<SegmentBase>,
+    pub segments: Vec<SegmentBase>,
 }
 
 /// The data of a [`GlobeTileMesh`]: its vertices, indices and segments.
@@ -52,7 +52,7 @@ impl GlobeTileMesh {
 
     /// The mesh's indexes, for a draw that shares them.
     #[must_use]
-    pub(crate) fn indexes(&self) -> DrawIndexes {
+    pub fn indexes(&self) -> DrawIndexes {
         DrawIndexes::Shared(self.indices.clone())
     }
 }
@@ -104,7 +104,7 @@ struct Entry {
 
 /// The grids a layer has built so far, one per zoom, pole row and mask: the
 /// mesh depends on nothing else.
-pub(crate) struct GlobeTileMeshCache<V: bytemuck::Pod> {
+pub struct GlobeTileMeshCache<V: bytemuck::Pod> {
     uses: u64,
     meshes: BTreeMap<(u8, bool, bool, TileMask), Entry>,
     vertex_type: PhantomData<fn() -> V>,
@@ -119,14 +119,15 @@ impl<V: bytemuck::Pod> Default for GlobeTileMeshCache<V> {
 impl<V: bytemuck::Pod> GlobeTileMeshCache<V> {
     const MAX_MESHES: usize = 64;
 
+    /// An empty cache.
     #[must_use]
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self::default()
     }
 
     /// The mesh of the parts of the tile `canonical` that `mask` keeps, of
     /// `layout_vertex`'s vertices, which `context`'s stores keep.
-    pub(crate) fn get(
+    pub fn get(
         &mut self,
         context: &mut Context,
         canonical: &CanonicalTileID,
@@ -152,7 +153,8 @@ impl<V: bytemuck::Pod> GlobeTileMeshCache<V> {
         &entry.mesh
     }
 
-    pub(crate) fn clear(&mut self) {
+    /// Lets go of every mesh.
+    pub fn clear(&mut self) {
         self.meshes.clear();
     }
 
@@ -166,17 +168,17 @@ impl<V: bytemuck::Pod> GlobeTileMeshCache<V> {
 /// The same grid as raw `Short2` positions, for draws built from raw
 /// vertex bytes.
 #[derive(Debug, Default)]
-pub(crate) struct RawGlobeTileMesh {
-    pub(crate) vertices: Vec<u8>,
-    pub(crate) vertex_count: usize,
-    pub(crate) indices: Vec<u16>,
-    pub(crate) segments: Vec<SegmentBase>,
+pub struct RawGlobeTileMesh {
+    pub vertices: Vec<u8>,
+    pub vertex_count: usize,
+    pub indices: Vec<u16>,
+    pub segments: Vec<SegmentBase>,
 }
 
 /// The globe mesh of the tile `canonical`, with borders if
 /// `generate_borders`, subdivided by `granularity`.
 #[must_use]
-pub(crate) fn raw_globe_tile_mesh(
+pub fn raw_globe_tile_mesh(
     canonical: &CanonicalTileID,
     generate_borders: bool,
     granularity: SubdivisionGranularityExpression,

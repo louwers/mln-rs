@@ -12,7 +12,7 @@ use crate::render::paint_parameters::PaintParameters;
 /// Gives a draw the textures of its tile's glyph and icon atlases, which
 /// change after the draw is made.
 #[derive(Clone)]
-pub(crate) struct AtlasBinding {
+pub struct AtlasBinding {
     /// The textures of the tile's glyph and icon atlases, if it has
     /// atlases.
     atlases: Option<(Option<SharedTexture>, Option<SharedTexture>)>,
@@ -26,9 +26,12 @@ pub(crate) struct AtlasBinding {
 }
 
 impl AtlasBinding {
+    /// The binding of a tile's glyph and icon atlas textures, `atlases`, to
+    /// the slots of a program that samples them, for a draw of text
+    /// (`is_text`) or icons laid out as the other arguments say.
     #[expect(clippy::too_many_arguments, reason = "each argument is a field of the binding")]
     #[must_use]
-    pub(crate) fn new(
+    pub fn new(
         atlases: Option<TileAtlasTextures>,
         icon_slot: Option<usize>,
         glyph_slot: Option<usize>,
@@ -53,9 +56,9 @@ impl AtlasBinding {
     }
 
     /// The textures of a draw with `shader`: the atlases', in the slots the
-    /// shader samples them from. [`bind`](Self::bind) sets how they filter.
+    /// shader samples them from. `bind` sets how they filter.
     #[must_use]
-    pub(crate) fn textures(&self, shader: &ShaderKey) -> Textures {
+    pub fn textures(&self, shader: &ShaderKey) -> Textures {
         let mut textures = Textures::default();
         self.set_textures(self.samples_icon(shader), |slot, texture| textures[slot] = texture.cloned());
         textures

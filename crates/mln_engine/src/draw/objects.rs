@@ -45,32 +45,32 @@ use crate::log_target;
 use crate::render::paint_parameters::{DrawTarget, PaintParameters};
 
 /// The textures a draw binds, by the slots of its program's textures.
-pub(crate) type Textures = [Option<SharedTexture>; MAX_TEXTURES];
+pub type Textures = [Option<SharedTexture>; MAX_TEXTURES];
 
 /// The most vertex buffers a draw binds, WebGPU's default limit.
 const MAX_VERTEX_BUFFERS: usize = 8;
 
 /// What a mesh draws: its vertices, and the primitives its segments draw of
 /// them.
-pub(crate) struct DrawGeometry {
+pub struct DrawGeometry {
     /// The vertex attributes, by the names of the program's attributes.
-    pub(crate) vertices: VertexAttributeArray,
+    pub vertices: VertexAttributeArray,
     /// How many vertices the attributes hold, which an attribute the
     /// shader reads and the draw lacks gets default values for.
-    pub(crate) vertex_count: usize,
+    pub vertex_count: usize,
     /// The primitive the segments draw.
-    pub(crate) mode: DrawMode,
-    pub(crate) indexes: DrawIndexes,
+    pub mode: DrawMode,
+    pub indexes: DrawIndexes,
     /// The ranges of the indexes and vertices each draw call draws.
-    pub(crate) segments: Vec<SegmentBase>,
+    pub segments: Vec<SegmentBase>,
     /// The attributes of each instance, for a draw of instances.
-    pub(crate) instances: Option<VertexAttributeArray>,
+    pub instances: Option<VertexAttributeArray>,
 }
 
 /// `count` vertices of `data_type` in `data` as the vertex attribute `name`,
 /// none where there are no vertices.
 #[must_use]
-pub(crate) fn raw_vertices(
+pub fn raw_vertices(
     name: &'static str,
     data: Vec<u8>,
     count: usize,
@@ -667,7 +667,6 @@ impl DrawObjects {
 
     /// The buffer the draws bind as the storage buffer `id`, of the
     /// vertices read there as of the last upload.
-    #[cfg(test)]
     pub(crate) fn storage_buffer(&self, id: usize) -> Option<BufferId> {
         self.storage_vertices.iter().find(|(at, ..)| *at == id).and_then(|&(_, _, buffer)| buffer)
     }
@@ -737,7 +736,7 @@ impl Mesh {
     /// The mesh of `geometry`, drawn with `shader` in `color_mode` and
     /// `cull_face_mode`, binding `textures`, in `context`'s store.
     #[must_use]
-    pub(crate) fn new(
+    pub fn new(
         context: &mut Context,
         shader: ShaderKey,
         color_mode: ColorMode,
@@ -785,8 +784,8 @@ impl Mesh {
         Some(result)
     }
 
-    /// See [`DrawObjects::upload`].
-    pub(crate) fn upload(&self, gpu: &mut dyn Gpu, context: &mut Context) {
+    /// See `DrawObjects::upload`.
+    pub fn upload(&self, gpu: &mut dyn Gpu, context: &mut Context) {
         self.update(context, |objects, context| objects.upload(gpu, context));
     }
 
@@ -795,33 +794,33 @@ impl Mesh {
         context.mesh_mut(self).map(DrawObjects::vertex_attributes_mut)
     }
 
-    /// See [`DrawObjects::paint_attributes_mut`].
-    pub(crate) fn paint_attributes_mut<'c>(&self, context: &'c mut Context) -> Option<&'c mut VertexAttributeArray> {
+    /// See `DrawObjects::paint_attributes_mut`.
+    pub fn paint_attributes_mut<'c>(&self, context: &'c mut Context) -> Option<&'c mut VertexAttributeArray> {
         context.mesh_mut(self).map(DrawObjects::paint_attributes_mut)
     }
 
-    /// See [`DrawObjects::read_as_storage`].
-    pub(crate) fn read_as_storage(&self, context: &mut Context, id: usize, vertices: Option<SharedVertices>) {
+    /// See `DrawObjects::read_as_storage`.
+    pub fn read_as_storage(&self, context: &mut Context, id: usize, vertices: Option<SharedVertices>) {
         if let Some(objects) = context.mesh_mut(self) {
             objects.read_as_storage(id, vertices);
         }
     }
 
-    /// See [`DrawObjects::storage_buffer`].
-    #[cfg(test)]
-    pub(crate) fn storage_buffer(&self, context: &Context, id: usize) -> Option<BufferId> {
+    /// See `DrawObjects::storage_buffer`.
+    #[must_use]
+    pub fn storage_buffer(&self, context: &Context, id: usize) -> Option<BufferId> {
         context.mesh(self)?.storage_buffer(id)
     }
 
-    /// See [`DrawObjects::has_instances`].
+    /// See `DrawObjects::has_instances`.
     #[must_use]
-    pub(crate) fn has_instances(&self, context: &Context) -> bool {
+    pub fn has_instances(&self, context: &Context) -> bool {
         context.mesh(self).is_some_and(DrawObjects::has_instances)
     }
 
     /// Replaces the vertex attributes with a copy of those of `other`
     /// ([`copy_shared_attributes`]), which the next upload binds.
-    pub(crate) fn share_vertex_attributes(&self, context: &mut Context, other: &Mesh) {
+    pub fn share_vertex_attributes(&self, context: &mut Context, other: &Mesh) {
         if self.key == other.key {
             return;
         }
@@ -833,14 +832,14 @@ impl Mesh {
         }
     }
 
-    /// See [`DrawObjects::texture`].
+    /// See `DrawObjects::texture`.
     #[must_use]
-    pub(crate) fn texture<'c>(&self, context: &'c Context, slot: usize) -> Option<&'c SharedTexture> {
+    pub fn texture<'c>(&self, context: &'c Context, slot: usize) -> Option<&'c SharedTexture> {
         context.mesh(self)?.texture(slot)
     }
 
-    /// See [`DrawObjects::set_texture`].
-    pub(crate) fn set_texture(&self, context: &mut Context, slot: usize, texture: Option<&SharedTexture>) {
+    /// See `DrawObjects::set_texture`.
+    pub fn set_texture(&self, context: &mut Context, slot: usize, texture: Option<&SharedTexture>) {
         if let Some(objects) = context.mesh_mut(self) {
             objects.set_texture(slot, texture);
         }
@@ -853,8 +852,8 @@ impl Mesh {
         }
     }
 
-    /// See [`DrawObjects::set_cull_face_mode`].
-    pub(crate) fn set_cull_face_mode(&self, context: &mut Context, cull_face_mode: CullFaceMode) {
+    /// See `DrawObjects::set_cull_face_mode`.
+    pub fn set_cull_face_mode(&self, context: &mut Context, cull_face_mode: CullFaceMode) {
         if let Some(objects) = context.mesh_mut(self) {
             objects.set_cull_face_mode(cull_face_mode);
         }
@@ -862,7 +861,7 @@ impl Mesh {
 
     /// Makes `atlases` what gives the mesh the textures of its tile's glyph
     /// and icon atlases before each draw.
-    pub(crate) fn set_atlases(&self, context: &mut Context, atlases: Option<AtlasBinding>) {
+    pub fn set_atlases(&self, context: &mut Context, atlases: Option<AtlasBinding>) {
         if let Some(objects) = context.mesh_mut(self) {
             objects.atlases = atlases;
         }
@@ -879,7 +878,7 @@ fn sampled_slots(program: &Program) -> impl Iterator<Item = usize> + use<> {
 /// context's store: the copy reads the same vertices, so draws of either
 /// bind the same buffers.
 #[must_use]
-pub(crate) fn copy_shared_attributes(attrs: &VertexAttributeArray) -> VertexAttributeArray {
+pub fn copy_shared_attributes(attrs: &VertexAttributeArray) -> VertexAttributeArray {
     let mut copy = VertexAttributeArray::new();
     for (name, attr) in attrs.iter() {
         debug_assert!(attr.shared().is_some(), "a copied attribute has values of its own");

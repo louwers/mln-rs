@@ -35,7 +35,7 @@ use crate::layer::paint_property_binder::InterleavedVertexBuffer;
 /// the render thread can move the data out (`BucketGeometry`), after which
 /// `len` still counts it.
 #[derive(Clone, Debug)]
-pub(crate) struct GeometryVec<T> {
+pub struct GeometryVec<T> {
     data: Data<T>,
     /// What `BucketGeometry` keeps the vector's stored geometry under. A
     /// copy keeps it, so the stored geometry of either serves both.
@@ -71,7 +71,7 @@ impl<T> GeometryVec<T> {
     }
 
     /// The data, to fill. Not after it is moved out.
-    pub(crate) fn get_mut(&mut self) -> &mut Vec<T>
+    pub fn get_mut(&mut self) -> &mut Vec<T>
     where
         T: bytemuck::Pod,
     {
@@ -80,7 +80,8 @@ impl<T> GeometryVec<T> {
     }
 
     /// The element count, which stays when the data is moved out.
-    pub(crate) fn len(&self) -> usize {
+    #[must_use]
+    pub fn len(&self) -> usize {
         match &self.data {
             Data::Vec(v) => v.len(),
             #[cfg(target_family = "wasm")]
@@ -89,17 +90,21 @@ impl<T> GeometryVec<T> {
         }
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
+    /// Whether the vector holds no element.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// True once the data has moved to the context's store.
-    pub(crate) fn is_moved(&self) -> bool {
+    #[must_use]
+    pub fn is_moved(&self) -> bool {
         matches!(self.data, Data::Moved { .. })
     }
 
     /// The data, empty once it is moved out.
-    pub(crate) fn data(&self) -> Cow<'_, [T]>
+    #[must_use]
+    pub fn data(&self) -> Cow<'_, [T]>
     where
         T: bytemuck::Pod,
     {
@@ -144,7 +149,7 @@ impl<T: bytemuck::Pod> Data<T> {
 
 impl<T: bytemuck::Pod> GeometryVec<T> {
     /// Frees the data, which nothing will draw. `len` still counts it.
-    pub(crate) fn discard(&mut self) {
+    pub fn discard(&mut self) {
         self.take();
     }
 
@@ -205,7 +210,7 @@ impl<T: bytemuck::Pod> mln_wire::Wire for GeometryVec<T> {
 /// the bucket's vector it was made of. The tile keeps one per layout result,
 /// so it lives as long as the buckets it was made from.
 #[derive(Clone, Default)]
-pub(crate) struct BucketGeometry {
+pub struct BucketGeometry {
     vertices: Kept<SharedVertices>,
     indexes: Kept<SharedIndexes>,
     /// The vertices a layer made of a bucket's vector.
@@ -361,9 +366,10 @@ impl<'a> GeometryUpload<'a> {
 }
 
 /// The vertices that a bucket's upload made of `vec`, one of its vectors,
-/// with [`GeometryUpload::derive_vertices`], which its tile's `geometry`
+/// with `GeometryUpload::derive_vertices`, which its tile's `geometry`
 /// keeps.
-pub(crate) fn derived_vertices<V>(geometry: &BucketGeometry, vec: &GeometryVec<V>) -> Option<SharedVertices> {
+#[must_use]
+pub fn derived_vertices<V>(geometry: &BucketGeometry, vec: &GeometryVec<V>) -> Option<SharedVertices> {
     let derived = geometry.derived.get(vec.key);
     debug_assert!(derived.is_some(), "vertices that the bucket's upload didn't derive");
     derived.cloned()
@@ -371,7 +377,7 @@ pub(crate) fn derived_vertices<V>(geometry: &BucketGeometry, vec: &GeometryVec<V
 
 /// Vertices of `context`'s store holding a copy of `vertices`, which the
 /// draws that bind them don't change: draws replace such vertices instead.
-pub(crate) fn copied_vertices<V: bytemuck::Pod>(context: &mut Context, vertices: &[V]) -> SharedVertices {
+pub fn copied_vertices<V: bytemuck::Pod>(context: &mut Context, vertices: &[V]) -> SharedVertices {
     context.add_vertices(vertices.to_vec())
 }
 
@@ -383,7 +389,8 @@ pub(crate) fn copied_indexes(indexes: &[u16]) -> DrawIndexes {
 
 /// The vertices that a bucket's upload moved `vec`, one of its vectors,
 /// into, which its tile's `geometry` keeps.
-pub(crate) fn bucket_vertices<V>(geometry: &BucketGeometry, vec: &GeometryVec<V>) -> Option<SharedVertices> {
+#[must_use]
+pub fn bucket_vertices<V>(geometry: &BucketGeometry, vec: &GeometryVec<V>) -> Option<SharedVertices> {
     let vertices = geometry.vertices(vec);
     debug_assert!(vertices.is_some(), "vertices that the bucket's upload didn't move");
     vertices.cloned()
@@ -391,7 +398,8 @@ pub(crate) fn bucket_vertices<V>(geometry: &BucketGeometry, vec: &GeometryVec<V>
 
 /// The indexes that a bucket's upload moved `vec`, one of its vectors,
 /// into, which its tile's `geometry` keeps and its draws share.
-pub(crate) fn bucket_indexes(geometry: &BucketGeometry, vec: &GeometryVec<u16>) -> Option<SharedIndexes> {
+#[must_use]
+pub fn bucket_indexes(geometry: &BucketGeometry, vec: &GeometryVec<u16>) -> Option<SharedIndexes> {
     let indexes = geometry.indexes.get(vec.key);
     debug_assert!(indexes.is_some(), "indexes that the bucket's upload didn't move");
     indexes.cloned()
@@ -401,7 +409,7 @@ pub(crate) fn bucket_indexes(geometry: &BucketGeometry, vec: &GeometryVec<u16>) 
 /// bucket's upload moved, which its tile's `geometry` keeps, or a copy in
 /// `context`'s store of the values that feature state rewrites, which stay
 /// in the bucket, and which the draws copy again each time they change.
-pub(crate) fn paint_vertices(
+pub fn paint_vertices(
     context: &mut Context,
     geometry: &BucketGeometry,
     buffer: &InterleavedVertexBuffer,

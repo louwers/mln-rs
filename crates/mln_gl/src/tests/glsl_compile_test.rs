@@ -9,7 +9,7 @@
 
 use std::collections::BTreeSet;
 
-use mln_engine::shaders::{PROGRAMS, STANDING, projection_variants};
+use mln_builtins::shaders::{every_program, projection_variants, stands};
 use mln_gfx::RendererBackend as _;
 use mln_gfx::gpu::ShaderKey;
 use mln_gfx::shaders::program::Program;
@@ -46,7 +46,7 @@ fn headless_backend(api: Api) -> Option<RendererBackend> {
 /// Every program the renderer draws with that has GLSL ES, with its GLSL
 /// ES.
 fn programs() -> impl Iterator<Item = (&'static Program, &'static GlslEsSource)> {
-    PROGRAMS.iter().filter_map(|&program| Some((program, program.sources.glsl_es?)))
+    every_program().filter_map(|program| Some((program, program.sources.glsl_es?)))
 }
 
 /// The names after `HAS_UNIFORM_u_` in a shader's GLSL.
@@ -102,7 +102,7 @@ fn variants(program: &'static Program) -> Vec<Variant> {
                 what: format!("{} ({variant:?}, {})", program.name, ["attributes", "uniforms"][i]),
                 key: program.variant_key(&parameters, property_set, variant),
                 uniforms: i == 1,
-                flat: !variant.stands() && STANDING.contains(&program),
+                flat: !variant.stands() && stands(program),
             });
         }
     }

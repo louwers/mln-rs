@@ -227,23 +227,23 @@ impl Iterator for TileCover {
 /// The parameters of a tile cover. They own a copy of the transform state,
 /// which C++ holds by reference.
 #[derive(Clone, Debug)]
-pub(crate) struct TileCoverParameters {
-    pub(crate) view: View,
-    pub(crate) tile_lod_min_radius: f64,
-    pub(crate) tile_lod_scale: f64,
-    pub(crate) tile_lod_pitch_threshold: f64,
-    pub(crate) tile_lod_mode: TileLodMode,
+pub struct TileCoverParameters {
+    pub view: View,
+    pub tile_lod_min_radius: f64,
+    pub tile_lod_scale: f64,
+    pub tile_lod_pitch_threshold: f64,
+    pub tile_lod_mode: TileLodMode,
     /// The zoom the source loads at the center of the view, shifted for its
     /// tile size and not yet clamped to its zoom range; the level of detail
     /// of the globe and of terrain falls off from it, as GL JS's does.
-    pub(crate) requested_zoom: Option<f64>,
+    pub requested_zoom: Option<f64>,
     /// Whether the source rounds zooms to whole tiles, as raster sources do,
     /// instead of flooring them.
-    pub(crate) round_zoom: bool,
+    pub round_zoom: bool,
     /// The highest the source's content may reach above the ground, in
     /// meters, such as its largest `symbol-height-offset`. On the globe,
     /// tiles under content this high stay while the content is in view.
-    pub(crate) max_content_elevation: f64,
+    pub max_content_elevation: f64,
 }
 
 impl TileCoverParameters {
@@ -822,7 +822,8 @@ pub(crate) fn globe_level_cover(
     globe::level_cover(state, z, zoom_range, overscaled_z)
 }
 
-pub(crate) fn tile_cover(
+#[must_use]
+pub fn tile_cover(
     state: &TileCoverParameters,
     z: u8,
     zoom_range: Range<u8>,

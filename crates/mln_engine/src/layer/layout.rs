@@ -24,9 +24,8 @@ use crate::layer::bucket::Bucket;
 use crate::layer::bucket_parameters::BucketParameters;
 use crate::layer::filter_groups::FilterGroups;
 use crate::layer::layer_type::EvaluatedLayer;
-use crate::layer::paint_property_binder::{LayerBinders, PaintBinders};
+use crate::layer::paint_property_binder::{LayerBinders, PaintBinders, PatternLayerMap};
 use crate::layer::tile_layout::Resolved;
-use crate::layout::pattern_layout::PatternLayerMap;
 use crate::map::MapMode;
 use crate::query::feature_index::FeatureIndexBuilder;
 use crate::text::atlas::ImagePositions;
@@ -59,7 +58,7 @@ pub trait Layout<T: StyleLayerType>: Send + Sized + 'static {
 
 /// The layer a layout reads: its tile data and its name.
 #[derive(Clone)]
-pub(crate) struct SourceLayer {
+pub struct SourceLayer {
     pub(crate) data: TileData,
     pub(crate) name: String,
 }
@@ -80,7 +79,7 @@ impl SourceLayer {
 
 /// What a tile's layouts read apart from their group, and where they record
 /// the glyphs and images they need.
-pub(crate) struct LayoutParameters<'a> {
+pub struct LayoutParameters<'a> {
     pub(crate) bucket_parameters: &'a BucketParameters,
     /// The style's font faces, and its fallback faces after them.
     pub(crate) font_faces: Option<&'a Arc<FontFaces>>,
@@ -106,19 +105,19 @@ impl<'a, T: StyleLayerType> LayoutCx<'a, T> {
     /// The layers of the group, its leader first, whose style the layout's
     /// layout properties and filter are.
     #[must_use]
-    pub(crate) fn layers(&self) -> &'a [Arc<EvaluatedLayer<T>>] {
+    pub fn layers(&self) -> &'a [Arc<EvaluatedLayer<T>>] {
         self.layers
     }
 
     /// The tile.
     #[must_use]
-    pub(crate) fn tile(&self) -> OverscaledTileID {
+    pub fn tile(&self) -> OverscaledTileID {
         self.parameters.bucket_parameters.tile_id
     }
 
     /// The tile's zoom.
     #[must_use]
-    pub(crate) fn zoom(&self) -> f32 {
+    pub fn zoom(&self) -> f32 {
         f32::from(self.tile().overscaled_z)
     }
 
@@ -143,7 +142,7 @@ impl<'a, T: StyleLayerType> LayoutCx<'a, T> {
     /// What the layout properties evaluate with: the tile's zoom and the
     /// style's global state.
     #[must_use]
-    pub(crate) fn parameters(&self) -> PropertyEvaluationParameters {
+    pub fn parameters(&self) -> PropertyEvaluationParameters {
         let mut parameters = PropertyEvaluationParameters::new(self.zoom());
         parameters.global_state = self.global_state().cloned();
         parameters
@@ -164,25 +163,25 @@ impl<'a, T: StyleLayerType> LayoutCx<'a, T> {
 
     /// The images that exist, which `image` expressions branch on.
     #[must_use]
-    pub(crate) fn available_images(&self) -> &'a VecSet<String> {
+    pub fn available_images(&self) -> &'a VecSet<String> {
         self.parameters.available_images
     }
 
     /// Where `image` expressions record the images they find unavailable.
     #[must_use]
-    pub(crate) fn unavailable_images(&self) -> &'a UnavailableImages {
+    pub fn unavailable_images(&self) -> &'a UnavailableImages {
         self.parameters.unavailable_images
     }
 
     /// The tile's source layer.
-    pub(crate) fn source_layer(&self) -> Result<TileLayer<'a>, Error> {
+    pub fn source_layer(&self) -> Result<TileLayer<'a>, Error> {
         self.source_layer.layer()
     }
 
     /// What the leader's filter evaluates with apart from the feature: the
     /// tile's zoom and id and the style's global state.
     #[must_use]
-    pub(crate) fn filter_context(&self) -> EvaluationContext<'a> {
+    pub fn filter_context(&self) -> EvaluationContext<'a> {
         let parameters = self.parameters.bucket_parameters;
         EvaluationContext::new(self.zoom())
             .with_canonical_tile_id(Some(&parameters.tile_id.canonical))
@@ -191,7 +190,7 @@ impl<'a, T: StyleLayerType> LayoutCx<'a, T> {
 
     /// The features of `layer`, the tile's source layer, that the leader's
     /// filter selects, evaluated with `context` ([`filter_context`](Self::filter_context)).
-    pub(crate) fn select(&mut self, layer: &TileLayer<'_>, context: EvaluationContext<'a>) -> Selection<'a> {
+    pub fn select(&mut self, layer: &TileLayer<'_>, context: EvaluationContext<'a>) -> Selection<'a> {
         let leader = &self.layers[0].style;
         let filter = &leader.filter;
         let passes = |feature: &dyn GeometryTileFeature| {
@@ -202,7 +201,7 @@ impl<'a, T: StyleLayerType> LayoutCx<'a, T> {
     }
 
     /// Asks for the style's image `id`, as `kind`, unless it is asked for.
-    pub(crate) fn need_image(&mut self, id: &str, kind: ImageType) {
+    pub fn need_image(&mut self, id: &str, kind: ImageType) {
         if !self.parameters.image_dependencies.contains_key(id) {
             self.parameters.image_dependencies.insert(id.to_owned(), kind);
         }
@@ -216,7 +215,7 @@ impl<'a, T: StyleLayerType> LayoutCx<'a, T> {
 
 /// The features of a tile's source layer that a filter selects
 /// ([`LayoutCx::select`]).
-pub(crate) struct Selection<'a> {
+pub struct Selection<'a> {
     /// Whether the filter selects each feature, where feature groups
     /// answered it; `None` where it evaluates each feature.
     selected: Option<Vec<bool>>,
@@ -227,7 +226,7 @@ pub(crate) struct Selection<'a> {
 impl Selection<'_> {
     /// The indexes of the selected features of `layer`, in feature order,
     /// decoding only those that the filter evaluates.
-    pub(crate) fn indexes(&self, layer: &TileLayer<'_>) -> Result<Vec<usize>, Error> {
+    pub fn indexes(&self, layer: &TileLayer<'_>) -> Result<Vec<usize>, Error> {
         let mut indexes = Vec::new();
         for i in 0..layer.len() {
             let selects = match &self.selected {
@@ -245,7 +244,7 @@ impl Selection<'_> {
     /// that its feature group's evaluation rejected, which needn't decode.
     #[inline]
     #[must_use]
-    pub(crate) fn may_select(&self, index: usize) -> bool {
+    pub fn may_select(&self, index: usize) -> bool {
         self.selected.as_ref().is_none_or(|selected| selected[index])
     }
 
@@ -253,7 +252,7 @@ impl Selection<'_> {
     /// [`may_select`](Self::may_select).
     #[inline]
     #[must_use]
-    pub(crate) fn selects(&self, feature: &dyn GeometryTileFeature) -> bool {
+    pub fn selects(&self, feature: &dyn GeometryTileFeature) -> bool {
         self.selected.is_some() || self.filter.evaluate(&EvaluationContext { feature: Some(feature), ..self.context })
     }
 }
@@ -271,19 +270,19 @@ pub struct BuildCx<'a, T: StyleLayerType> {
 impl<'a, T: StyleLayerType> BuildCx<'a, T> {
     /// The group's layers by id, the first of each id kept.
     #[must_use]
-    pub(crate) fn layers_by_id(&self) -> VecMap<String, Arc<EvaluatedLayer<T>>> {
+    pub fn layers_by_id(&self) -> VecMap<String, Arc<EvaluatedLayer<T>>> {
         layers_by_id(self.layers)
     }
 
     /// The tile.
     #[must_use]
-    pub(crate) fn tile(&self) -> OverscaledTileID {
+    pub fn tile(&self) -> OverscaledTileID {
         self.parameters.tile_id
     }
 
     /// The tile's id, without its overscaling.
     #[must_use]
-    pub(crate) fn canonical(&self) -> &'a CanonicalTileID {
+    pub fn canonical(&self) -> &'a CanonicalTileID {
         &self.parameters.tile_id.canonical
     }
 
@@ -295,7 +294,7 @@ impl<'a, T: StyleLayerType> BuildCx<'a, T> {
 
     /// How the map renders.
     #[must_use]
-    pub(crate) fn mode(&self) -> MapMode {
+    pub fn mode(&self) -> MapMode {
         self.parameters.mode
     }
 
@@ -307,7 +306,7 @@ impl<'a, T: StyleLayerType> BuildCx<'a, T> {
 
     /// How finely geometry splits to follow the globe's curve.
     #[must_use]
-    pub(crate) fn subdivision_granularity(&self) -> SubdivisionGranularitySetting {
+    pub fn subdivision_granularity(&self) -> SubdivisionGranularitySetting {
         self.parameters.subdivision_granularity
     }
 
@@ -320,20 +319,20 @@ impl<'a, T: StyleLayerType> BuildCx<'a, T> {
 
     /// Where the resolved patterns are, or none.
     #[must_use]
-    pub(crate) fn pattern_positions(&self) -> &'a ImagePositions {
+    pub fn pattern_positions(&self) -> &'a ImagePositions {
         static NONE: std::sync::LazyLock<ImagePositions> = std::sync::LazyLock::new(ImagePositions::default);
         self.resolved.map_or(&NONE, |resolved| &resolved.patterns)
     }
 
     /// The tile's source layer.
-    pub(crate) fn source_layer(&self) -> Result<TileLayer<'a>, Error> {
+    pub fn source_layer(&self) -> Result<TileLayer<'a>, Error> {
         self.source_layer.layer()
     }
 
     /// Binders of type `P` for each layer of the group, of its evaluated
     /// paint values at the tile's zoom.
     #[must_use]
-    pub(crate) fn binders<P>(&self) -> LayerBinders<P>
+    pub fn binders<P>(&self) -> LayerBinders<P>
     where
         P: PaintBinders<Paint = <T::PaintProperties as PaintSet>::Evaluated>,
     {
@@ -347,7 +346,7 @@ impl<'a, T: StyleLayerType> BuildCx<'a, T> {
     /// section reads; `patterns` the feature's patterns by layer, which the
     /// values take where the resolved patterns put them. A layer whose
     /// vertices draw neither passes `None` for both.
-    pub(crate) fn populate<P: PaintBinders>(
+    pub fn populate<P: PaintBinders>(
         &self,
         binders: &mut LayerBinders<P>,
         index: usize,
@@ -366,16 +365,14 @@ impl<'a, T: StyleLayerType> BuildCx<'a, T> {
     /// Adds `geometry`, the geometry of the feature at `index`, to the
     /// tile's feature index, which queries search. A layer type that places
     /// its features leaves them out: queries find what placement shows.
-    pub(crate) fn index(&mut self, index: usize, geometry: &GeometryCollection) {
+    pub fn index(&mut self, index: usize, geometry: &GeometryCollection) {
         let leader = &self.layers[0].style;
         self.feature_index.insert(geometry, index, &leader.source_layer, &leader.id);
     }
 }
 
 /// The group's layers by id, the first of each id kept.
-pub(crate) fn layers_by_id<T: StyleLayerType>(
-    group: &[Arc<EvaluatedLayer<T>>],
-) -> VecMap<String, Arc<EvaluatedLayer<T>>> {
+pub fn layers_by_id<T: StyleLayerType>(group: &[Arc<EvaluatedLayer<T>>]) -> VecMap<String, Arc<EvaluatedLayer<T>>> {
     let mut layers = VecMap::new();
     for layer in group {
         layers.entry(layer.style.id.clone()).or_insert_with(|| Arc::clone(layer));

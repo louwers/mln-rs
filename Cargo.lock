@@ -2544,11 +2544,23 @@ dependencies = [
 name = "mln-rs-builtins"
 version = "0.0.18"
 dependencies = [
+ "bytemuck",
+ "earcut",
+ "etagere",
+ "geo-types",
  "geojson",
+ "glam",
+ "js-sys",
  "log",
  "mln-rs-engine",
  "mln-rs-geojson",
+ "mln-rs-geometry",
+ "mln-rs-gfx",
+ "mln-rs-pixelmatch",
  "mln-rs-style",
+ "mln-rs-webgpu",
+ "mln-rs-wire",
+ "mlt-core",
  "parking_lot",
  "serde_json",
 ]
@@ -2611,6 +2623,7 @@ version = "0.0.18"
 dependencies = [
  "gpu-allocator",
  "log",
+ "mln-rs-builtins",
  "mln-rs-engine",
  "mln-rs-gfx",
  "mln-rs-glsl",
@@ -2777,6 +2790,7 @@ dependencies = [
  "libc",
  "libloading",
  "log",
+ "mln-rs-builtins",
  "mln-rs-engine",
  "mln-rs-gfx",
  "parking_lot",
@@ -2790,6 +2804,7 @@ dependencies = [
 name = "mln-rs-glsl"
 version = "0.0.18"
 dependencies = [
+ "mln-rs-builtins",
  "mln-rs-engine",
  "mln-rs-gfx",
  "naga",
@@ -2832,6 +2847,7 @@ dependencies = [
  "block2 0.6.2",
  "bytemuck",
  "log",
+ "mln-rs-builtins",
  "mln-rs-engine",
  "mln-rs-gfx",
  "objc2 0.6.5",
@@ -2983,6 +2999,7 @@ dependencies = [
  "gpu-allocator",
  "libc",
  "log",
+ "mln-rs-builtins",
  "mln-rs-engine",
  "mln-rs-gfx",
  "mln-rs-glsl",
@@ -3005,6 +3022,7 @@ version = "0.0.18"
 dependencies = [
  "js-sys",
  "log",
+ "mln-rs-builtins",
  "mln-rs-engine",
  "mln-rs-gfx",
  "mln-rs-gl",
@@ -3050,6 +3068,7 @@ version = "0.0.18"
 dependencies = [
  "js-sys",
  "log",
+ "mln-rs-builtins",
  "mln-rs-engine",
  "mln-rs-gfx",
  "parking_lot",

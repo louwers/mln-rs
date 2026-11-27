@@ -24,13 +24,12 @@ pub const GROUND_DEPTH: ProgramTexture =
 /// reads texel by texel, without a sampler. It is at slot 2, which the
 /// sources name, so that a program that reads the ground keeps slots 0 and 1
 /// for its own textures.
-pub(crate) const GROUND_DEM: ProgramTexture = ProgramTexture::texels("ground_dem", Stages::Vertex);
+pub const GROUND_DEM: ProgramTexture = ProgramTexture::texels("ground_dem", Stages::Vertex);
 
 const TERRAIN_DRAWABLE: ProgramBuffer = ProgramBuffer::storage::<TerrainDrawableUBO>("drawableVector", Stages::Vertex);
 
 /// How the terrain's surface stands, and its fog.
-pub(crate) const TERRAIN_SURFACE: ProgramBuffer =
-    ProgramBuffer::uniform::<TerrainSurfaceUBO>("terrain", 0, Stages::Vertex);
+pub const TERRAIN_SURFACE: ProgramBuffer = ProgramBuffer::uniform::<TerrainSurfaceUBO>("terrain", 0, Stages::Vertex);
 
 /// The terrain's surface: a grid over a tile, raised by its DEM, with the
 /// tile's drape over it, which the fragment stage samples.

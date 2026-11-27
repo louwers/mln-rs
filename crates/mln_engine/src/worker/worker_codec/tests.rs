@@ -401,29 +401,11 @@ fn mlt_tiles_cross() {
 }
 
 /// Pattern layers cross with their images: the worker's image request
-/// reaches the tile, the binders' vertices come back, and the layout's
-/// pattern positions with them.
+/// reaches the tile, and the layout comes back as a job run directly makes
+/// it.
 #[test]
 fn pattern_layouts_cross() {
-    let registry = crate::tests::builtin_registry();
-    let layers: Vec<_> =
-        [FILL_PATTERN, LINE_PATTERN, EXTRUSION_PATTERN].iter().map(|json| layer_of(&registry, json, 0.0)).collect();
-    let result = cross_of(&registry, &layers, &tile_data());
-    let extrusion = result
-        .layer_render_data
-        .get("extrusion-pattern")
-        .unwrap()
-        .bucket
-        .downcast_ref::<crate::buckets::fill_extrusion_bucket::FillExtrusionBucket>()
-        .unwrap();
-    let binders = extrusion.paint_property_binders.get("extrusion-pattern").unwrap();
-    assert!(matches!(
-        binders.fill_extrusion_pattern.kind,
-        crate::layer::paint_property_binder::CrossFadedPaintPropertyBinderKind::Composite { .. }
-    ));
-    let buffer = &binders.interleaved_vertex_buffer;
-    assert_ne!(buffer.vertex_count, 0);
-    assert_eq!(buffer.shared_vertex_vector.data().len(), buffer.vertex_count * buffer.stride);
+    cross(&layers(&[FILL_PATTERN, LINE_PATTERN, EXTRUSION_PATTERN]), &tile_data());
 }
 
 /// GeoJSON tiles cross as their features: each geometry type, properties

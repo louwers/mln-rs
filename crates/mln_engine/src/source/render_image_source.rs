@@ -12,11 +12,11 @@ use mln_style::range::Range;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::{Source, constants};
 
-use crate::buckets::raster_bucket::{RasterLayoutVertex, StoredQuads};
 use crate::camera::TileCoordinate;
 use crate::camera::tile_coordinate::TileCoordinatePoint;
 use crate::draw::context::Context;
 use crate::draw::identity::SimpleIdentity;
+use crate::draw::quads::{RasterLayoutVertex, StoredQuads};
 use crate::draw::segment::SegmentBase;
 use crate::layer::layer_drawing::MadeFrom;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
@@ -122,23 +122,23 @@ fn image_warp(corners: &GeometryCoordinates) -> ImageWarp {
 
 /// Where the raster shader puts the unit square that a draw's vertices span
 /// (0 to `EXTENT` on both axes), in its tile's units: onto the quad of four
-/// corners, warped by an [`ImageWarp`]. The shader evaluates the warp per
+/// corners, warped by an `ImageWarp`. The shader evaluates the warp per
 /// vertex and interpolates the texture coordinates projectively, so a
 /// projective warp draws exactly on two triangles.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct ImageQuad {
+pub struct ImageQuad {
     /// The top left corner's x and y, and the top right's.
-    pub(crate) coords_top: [f32; 4],
+    pub coords_top: [f32; 4],
     /// The bottom left corner's x and y, and the bottom right's.
-    pub(crate) coords_bottom: [f32; 4],
+    pub coords_bottom: [f32; 4],
     /// The warp's perspective terms and its blend towards the bilinear warp,
     /// then padding.
-    pub(crate) warp: [f32; 4],
+    pub warp: [f32; 4],
 }
 
 impl ImageQuad {
     /// The quad of a tile itself, which draws the vertices where they are.
-    pub(crate) const TILE: ImageQuad = {
+    pub const TILE: ImageQuad = {
         let extent = constants::EXTENT as f32;
         ImageQuad {
             coords_top: [0.0, 0.0, extent, 0.0],
@@ -263,7 +263,7 @@ impl ImageTile {
 
     /// The mesh in the context's stores, once its upload moved it.
     #[must_use]
-    pub(crate) fn quads(&self) -> Option<&StoredQuads> {
+    pub fn quads(&self) -> Option<&StoredQuads> {
         match &self.mesh {
             Mesh::Stored(quads) => Some(quads),
             Mesh::Data { vertices, .. } => {

@@ -1,15 +1,28 @@
-//! The built-ins that a map starts with: the style specification's source
-//! types ([`sources`]), through the engine's source type contract
-//! (`mln_engine::source`), and [`register_builtins`], which fills a
-//! registry with them, the specification's expression functions and the
-//! built-in layer types.
+//! The built-ins that a map starts with: the style specification's layer
+//! types ([`layers`]) and source types ([`sources`]), through the engine's
+//! layer and source type contracts (`mln_engine::layer`,
+//! `mln_engine::source`), and [`register_builtins`], which fills a registry
+//! with them, the specification's expression functions and the layer types
+//! that the engine holds.
 
 use std::sync::{Arc, LazyLock};
 
 use mln_engine::{Registry, RegistryBuilder};
 use mln_style::expression::functions::{RegisterError, register_builtin_functions};
 
+#[cfg(feature = "gpu-conformance")]
+pub mod conformance;
+pub mod layers;
+pub mod shaders;
 pub mod sources;
+
+/// The `log` targets of the layer types' records, which name the event
+/// that `mln_c` reports them under (`mln_c::logging`).
+mod log_target {
+    pub(crate) const GENERAL: &str = "mln_builtins::general";
+    pub(crate) const RENDER: &str = "mln_builtins::render";
+    pub(crate) const STYLE: &str = "mln_builtins::style";
+}
 
 /// Adds the style specification's expression functions, layer types and
 /// source types and the custom layer type. Fails for a name that an earlier
@@ -17,6 +30,7 @@ pub mod sources;
 pub fn register_builtins(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
     register_builtin_functions(builder.functions_mut())?;
     mln_engine::register_layer_types(builder)?;
+    layers::register_layer_types(builder)?;
     sources::register_source_types(builder)
 }
 

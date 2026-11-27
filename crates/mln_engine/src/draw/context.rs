@@ -40,7 +40,10 @@ use crate::draw::vertex_attribute::Uniforms;
 use crate::draw::vertices::{SharedVertices, TypedVertices, VertexStore, Vertices};
 use crate::log_target;
 
-pub(crate) struct Context {
+/// What the renderer draws with: its device, and the stores of the
+/// textures, vertices, indexes, meshes and targets that draws share, which
+/// the GPU objects of each are made from and released with.
+pub struct Context {
     device: Device,
     caps: Caps,
     global_uniform_buffers: UniformBufferArray,
@@ -87,7 +90,8 @@ pub(crate) struct Context {
 impl Context {
     /// The renderer's state over a `Gpu` of `caps`, for draws at
     /// `pixel_ratio` device pixels per logical pixel.
-    pub(crate) fn new(caps: Caps, pixel_ratio: f32) -> Context {
+    #[must_use]
+    pub fn new(caps: Caps, pixel_ratio: f32) -> Context {
         Context {
             device: Device::default(),
             caps,
@@ -117,7 +121,8 @@ impl Context {
     }
 
     /// What the backend's device allows, and how the renderer draws on it.
-    pub(crate) fn caps(&self) -> &Caps {
+    #[must_use]
+    pub fn caps(&self) -> &Caps {
         &self.caps
     }
 
@@ -146,14 +151,14 @@ impl Context {
     }
 
     /// The rendering stats, to count what the renderer makes and does.
-    pub(crate) fn rendering_stats(&mut self) -> &mut RenderingStats {
+    pub fn rendering_stats(&mut self) -> &mut RenderingStats {
         &mut self.device.stats
     }
 
     /// Logs `message`, why something of the frame being encoded failed on
     /// the GPU, and keeps it as the frame's failure unless one came first
-    /// ([`Device::fail`]).
-    pub(crate) fn fail(&mut self, message: String) {
+    /// (`Device::fail`).
+    pub fn fail(&mut self, message: String) {
         self.device.fail(message);
     }
 
@@ -210,7 +215,7 @@ impl Context {
 
     /// Keeps `indexes` for the draws that share them, while a clone of the
     /// returned handle lasts.
-    pub(crate) fn add_indexes(&mut self, indexes: Indexes) -> SharedIndexes {
+    pub fn add_indexes(&mut self, indexes: Indexes) -> SharedIndexes {
         self.indexes.add(indexes, &self.device.queue)
     }
 
@@ -290,10 +295,10 @@ impl Context {
     /// The indexes of quads four vertices apart, two triangles each, which
     /// the draws that draw such quads share: they stay in the store while a
     /// draw holds them.
-    pub(crate) fn quad_indexes(&mut self) -> SharedIndexes {
+    pub fn quad_indexes(&mut self) -> SharedIndexes {
         let held = self.quad_indexes.upgrade();
         let indexes = held.unwrap_or_else(|| {
-            self.add_indexes(Indexes::new(crate::render::static_data::RenderStaticData::fill_extrusion_wall_indices()))
+            self.add_indexes(Indexes::new(crate::render::static_data::RenderStaticData::quads_indices()))
         });
         self.quad_indexes = indexes.downgrade();
         indexes
@@ -312,7 +317,7 @@ impl Context {
 
     /// Keeps `vertices` for the draws that share them, while a clone of the
     /// returned handle lasts.
-    pub(crate) fn add_vertices<V: bytemuck::Pod>(&mut self, vertices: Vec<V>) -> SharedVertices {
+    pub fn add_vertices<V: bytemuck::Pod>(&mut self, vertices: Vec<V>) -> SharedVertices {
         self.vertices.add(vertices, &self.device.queue)
     }
 
@@ -320,7 +325,7 @@ impl Context {
     /// does, as dynamic vertices, which the holder of the returned handle
     /// updates ([`update_vertices`](Self::update_vertices)), and whose
     /// storage stays across uploads for the next update to fill.
-    pub(crate) fn add_dynamic_vertices<V: bytemuck::Pod>(&mut self, vertices: &[V]) -> TypedVertices<V> {
+    pub fn add_dynamic_vertices<V: bytemuck::Pod>(&mut self, vertices: &[V]) -> TypedVertices<V> {
         self.vertices.add_dynamic(vertices, &self.device.queue)
     }
 
@@ -335,7 +340,8 @@ impl Context {
     }
 
     /// The vertices of `shared`.
-    pub(crate) fn vertices(&self, shared: &SharedVertices) -> Option<&Vertices> {
+    #[must_use]
+    pub fn vertices(&self, shared: &SharedVertices) -> Option<&Vertices> {
         self.vertices.get(shared)
     }
 
@@ -348,14 +354,14 @@ impl Context {
     /// Replaces the vertices of `typed` with a copy of `data`, as many, which
     /// the next upload writes over their buffer's. Returns false, leaving
     /// them be, for another number of vertices.
-    pub(crate) fn update_vertices<V: bytemuck::Pod>(&mut self, typed: &TypedVertices<V>, data: &[V]) -> bool {
+    pub fn update_vertices<V: bytemuck::Pod>(&mut self, typed: &TypedVertices<V>, data: &[V]) -> bool {
         self.vertices.update(typed, data)
     }
 
     /// The buffer of the vertices of `shared`, made of them by their first
-    /// upload and written over after an update, as [`Vertices::upload`]
+    /// upload and written over after an update, as `Vertices::upload`
     /// says.
-    pub(crate) fn upload_vertices(
+    pub fn upload_vertices(
         &mut self,
         gpu: &mut dyn Gpu,
         shared: &SharedVertices,
@@ -364,27 +370,28 @@ impl Context {
     }
 
     /// A texture without a size, made by its first upload or
-    /// [`create_texture`](Self::create_texture), which the context keeps
+    /// `create_texture`, which the context keeps
     /// while a clone of the returned handle lasts.
-    pub(crate) fn add_texture(&mut self) -> SharedTexture {
+    pub fn add_texture(&mut self) -> SharedTexture {
         self.add_texture_with(|_| {})
     }
 
     /// A texture that `setup` sets up, as [`add_texture`](Self::add_texture)
     /// makes it.
-    pub(crate) fn add_texture_with(&mut self, setup: impl FnOnce(&mut TextureMut<'_>)) -> SharedTexture {
+    pub fn add_texture_with(&mut self, setup: impl FnOnce(&mut TextureMut<'_>)) -> SharedTexture {
         let mut texture = Texture2D::new();
         setup(&mut TextureMut::new(&mut texture));
         self.textures.add(texture, &self.device.queue)
     }
 
     /// The texture of `handle`.
-    pub(crate) fn texture(&self, handle: &SharedTexture) -> Option<&Texture2D> {
+    #[must_use]
+    pub fn texture(&self, handle: &SharedTexture) -> Option<&Texture2D> {
         self.textures.get(handle)
     }
 
     /// The texture of `handle`, to set up.
-    pub(crate) fn texture_mut(&mut self, handle: &SharedTexture) -> Option<TextureMut<'_>> {
+    pub fn texture_mut(&mut self, handle: &SharedTexture) -> Option<TextureMut<'_>> {
         Some(TextureMut::new(self.textures.get_mut(handle)?))
     }
 
@@ -406,7 +413,7 @@ impl Context {
     /// to the whole texture of `handle`, first making it of that size. Empty
     /// `data` leaves the texels unspecified, and an empty size makes no
     /// texture.
-    pub(crate) fn upload_texture_data(
+    pub fn upload_texture_data(
         &mut self,
         gpu: &mut dyn Gpu,
         handle: &SharedTexture,
@@ -469,7 +476,7 @@ impl Context {
     /// The key of the variant of `program` that reads its properties of
     /// `uniforms` from their uniforms, for `projection`, at the context's
     /// pixel ratio.
-    pub(crate) fn shader_key(
+    pub fn shader_key(
         &mut self,
         program: &'static Program,
         uniforms: Uniforms,
@@ -620,7 +627,7 @@ impl Context {
     /// Destroys what the context made and what the renderer released, and
     /// tells the custom layers' hosts that it stopped. What drops later
     /// still goes to the queue, and goes with the `Gpu`.
-    pub(crate) fn tear_down(&mut self, gpu: &mut dyn Gpu) {
+    pub fn tear_down(&mut self, gpu: &mut dyn Gpu) {
         self.global_uniform_buffers = UniformBufferArray::new();
         self.default_vertex_buffers.clear();
         // The meshes first, which hold what the other stores keep.

@@ -1,31 +1,32 @@
 use mln_style::constants;
 
-use crate::buckets::fill_extrusion_bucket::FillExtrusionStaticVertex;
-use crate::buckets::raster_bucket::RasterLayoutVertex;
+use crate::draw::quads::RasterLayoutVertex;
 use crate::draw::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 
-/// The most walls whose quads a segment draws: as many as its 16-bit
-/// indices reach.
-const FILL_EXTRUSION_SEGMENT_WALLS: usize = MAX_SEGMENT_VERTICES / 4;
+/// The most quads a segment draws: as many as its 16-bit indices reach.
+const SEGMENT_QUADS: usize = MAX_SEGMENT_VERTICES / 4;
 
 /// The vertices and indices of the geometry the layers share.
-pub(crate) struct RenderStaticData;
+pub struct RenderStaticData;
 
 impl RenderStaticData {
     /// The tile's four corners, as position-only vertices (`a_pos`).
     #[must_use]
-    pub(crate) fn tile_vertices() -> Vec<[i16; 2]> {
+    pub fn tile_vertices() -> Vec<[i16; 2]> {
         let extent = constants::EXTENT as i16;
         vec![[0, 0], [extent, 0], [0, extent], [extent, extent]]
     }
 
+    /// The two triangles of a quad of four vertices: top left, top right,
+    /// bottom left, bottom right.
     #[must_use]
-    pub(crate) fn quad_triangle_indices() -> Vec<u16> {
+    pub fn quad_triangle_indices() -> Vec<u16> {
         vec![0, 1, 2, 1, 2, 3]
     }
 
+    /// The quad of a whole tile that samples a whole image.
     #[must_use]
-    pub(crate) fn raster_vertices() -> Vec<RasterLayoutVertex> {
+    pub fn raster_vertices() -> Vec<RasterLayoutVertex> {
         use geometry::Point;
 
         let e = constants::EXTENT as i16;
@@ -38,28 +39,15 @@ impl RenderStaticData {
         ]
     }
 
+    /// The segment that draws [`raster_vertices`](Self::raster_vertices) with
+    /// [`quad_triangle_indices`](Self::quad_triangle_indices).
     #[must_use]
-    pub(crate) fn raster_segments() -> Vec<SegmentBase> {
+    pub fn raster_segments() -> Vec<SegmentBase> {
         vec![SegmentBase::with_lengths(0, 0, 4, 6)]
     }
 
     #[must_use]
-    pub(crate) fn fill_extrusion_vertices() -> Vec<FillExtrusionStaticVertex> {
-        vec![[1, 0], [1, 1], [0, 0], [0, 1]]
-    }
-
-    #[must_use]
-    pub(crate) fn fill_extrusion_strip_indices() -> Vec<u16> {
-        // ┌──────┐
-        // │ 0  1 │ Counter-Clockwise winding order.
-        // │      │ Triangle 1: 0 => 2 => 1
-        // │ 2  3 │ Triangle 2: 1 => 2 => 3
-        // └──────┘
-        vec![0, 2, 1, 3]
-    }
-
-    #[must_use]
-    pub(crate) fn fill_extrusion_triangle_indices() -> Vec<u16> {
+    pub(crate) fn quad_indices() -> Vec<u16> {
         // ┌──────┐
         // │ 0  1 │ Counter-Clockwise winding order.
         // │      │ Triangle 1: 0 => 2 => 1
@@ -68,78 +56,32 @@ impl RenderStaticData {
         vec![0, 2, 1, 1, 2, 3]
     }
 
-    /// A segment that draws `instance_count` fill-extrusion walls as a
-    /// triangle strip.
+    /// The triangles of the quads that a segment of `quads_segments` draws,
+    /// each quad four vertices after the last's, as `quad_indices` draws the
+    /// quad.
     #[must_use]
-    pub(crate) fn fill_extrusion_segment(instance_count: usize) -> SegmentBase {
-        SegmentBase { instance_count, ..SegmentBase::with_lengths(0, 0, 4, 4) }
+    pub fn quads_indices() -> Vec<u16> {
+        let quad = Self::quad_indices();
+        (0..SEGMENT_QUADS as u16).flat_map(|wall| quad.iter().map(move |&index| 4 * wall + index)).collect()
     }
 
-    /// The triangles of the walls that a segment of
-    /// `fill_extrusion_wall_segments` draws, each wall's quad four vertices
-    /// after the last's, as `fill_extrusion_triangle_indices` draws the quad.
+    /// The segments that draw `quads` quads that are in the vertex buffer,
+    /// one after the other, from the indices of `quads_indices`.
     #[must_use]
-    pub(crate) fn fill_extrusion_wall_indices() -> Vec<u16> {
-        let quad = Self::fill_extrusion_triangle_indices();
-        (0..FILL_EXTRUSION_SEGMENT_WALLS as u16)
-            .flat_map(|wall| quad.iter().map(move |&index| 4 * wall + index))
-            .collect()
-    }
-
-    /// The segments that draw `walls` fill-extrusion walls whose quads are in
-    /// the vertex buffer, one after the other, from the indices of
-    /// `fill_extrusion_wall_indices`.
-    #[must_use]
-    pub(crate) fn fill_extrusion_wall_segments(walls: usize) -> Vec<SegmentBase> {
-        (0..walls)
-            .step_by(FILL_EXTRUSION_SEGMENT_WALLS)
+    pub fn quads_segments(quads: usize) -> Vec<SegmentBase> {
+        (0..quads)
+            .step_by(SEGMENT_QUADS)
             .map(|first| {
-                let count = FILL_EXTRUSION_SEGMENT_WALLS.min(walls - first);
+                let count = SEGMENT_QUADS.min(quads - first);
                 SegmentBase::with_lengths(4 * first, 0, 4 * count, 6 * count)
             })
             .collect()
     }
 
-    /// The corners of the quad that an instanced fill outline draws a
-    /// segment with: x picks the segment's start (0) or end (1), y its side.
+    /// The segment that draws [`tile_vertices`](Self::tile_vertices) with
+    /// [`quad_triangle_indices`](Self::quad_triangle_indices).
     #[must_use]
-    pub(crate) fn fill_outline_vertices() -> Vec<[i16; 2]> {
-        vec![[0, 0], [0, 1], [1, 0], [1, 1]]
-    }
-
-    #[must_use]
-    pub(crate) fn quad_strip_indices() -> Vec<u16> {
-        vec![0, 1, 2, 3]
-    }
-
-    /// A segment that draws `instance_count` fill outline segments, as
-    /// triangle-strip quads of `fill_outline_vertices` and `quad_strip_indices`.
-    #[must_use]
-    pub(crate) fn fill_outline_segment(instance_count: usize) -> SegmentBase {
-        SegmentBase { instance_count, ..SegmentBase::with_lengths(0, 0, 4, 4) }
-    }
-
-    #[must_use]
-    pub(crate) fn tile_triangle_segments() -> Vec<SegmentBase> {
-        vec![SegmentBase::with_lengths(0, 0, 4, 6)]
-    }
-
-    // dem-heatmap
-    #[must_use]
-    pub(crate) fn heatmap_texture_vertices() -> Vec<crate::buckets::heatmap_bucket::HeatmapTextureLayoutVertex> {
-        use geometry::Point;
-
-        use crate::buckets::heatmap_bucket::HeatmapBucket;
-        vec![
-            HeatmapBucket::texture_vertex(Point::new(0, 0)),
-            HeatmapBucket::texture_vertex(Point::new(1, 0)),
-            HeatmapBucket::texture_vertex(Point::new(0, 1)),
-            HeatmapBucket::texture_vertex(Point::new(1, 1)),
-        ]
-    }
-
-    #[must_use]
-    pub(crate) fn heatmap_texture_segments() -> Vec<SegmentBase> {
+    pub fn tile_triangle_segments() -> Vec<SegmentBase> {
         vec![SegmentBase::with_lengths(0, 0, 4, 6)]
     }
 }

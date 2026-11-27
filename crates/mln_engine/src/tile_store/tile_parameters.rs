@@ -11,7 +11,7 @@ use crate::text::glyph::FontFaces;
 use crate::tile_store::TileLodMode;
 
 /// What a source's update gives its tiles.
-pub(crate) struct TileParameters<'a> {
+pub struct TileParameters<'a> {
     pub(crate) pixel_ratio: f32,
     pub(crate) view: &'a View,
     /// The map's zoom range, which tiles load within.

@@ -25,8 +25,10 @@ pub struct ImagePosition {
 }
 
 impl ImagePosition {
+    /// The texels of padding around an image in its atlas.
     pub const PADDING: u16 = 1;
 
+    /// The position of `image` at `rect` of its atlas, padding included.
     #[must_use]
     pub fn new(rect: RectU16, image: &Impl) -> Self {
         ImagePosition {
@@ -51,6 +53,7 @@ impl ImagePosition {
         ]
     }
 
+    /// The bottom-right corner inside the padding.
     #[must_use]
     pub fn br(&self) -> [u16; 2] {
         [
@@ -59,6 +62,7 @@ impl ImagePosition {
         ]
     }
 
+    /// The top-left and the bottom-right corners inside the padding.
     #[must_use]
     pub fn tlbr(&self) -> [u16; 4] {
         let tl = self.tl();
@@ -66,6 +70,8 @@ impl ImagePosition {
         [tl[0], tl[1], br[0], br[1]]
     }
 
+    /// The image's size in pixels: its texels inside the padding, over its
+    /// pixel ratio.
     #[must_use]
     pub fn display_size(&self) -> [f32; 2] {
         [

@@ -72,13 +72,13 @@ impl<T: StyleLayerType> TileInput<T> for DemTiles {
 /// type `B`, with the layer's values it was laid out with and the rest of
 /// what the layout's contents hold for the tile's draws.
 pub struct LayerBucket<'a, T: StyleLayerType, B> {
-    pub(crate) bucket: &'a B,
+    pub bucket: &'a B,
     /// The bucket's identity, which tells apart what layers made of it.
     pub(crate) id: SimpleIdentity,
     /// The index of the bucket among the layout's buckets.
     pub(crate) bucket_index: usize,
     /// The values of the layer that the bucket was laid out with.
-    pub(crate) layer: &'a EvaluatedLayer<T>,
+    pub layer: &'a EvaluatedLayer<T>,
     contents: &'a GeometryContents,
 }
 
@@ -110,7 +110,7 @@ impl<'a, T: StyleLayerType, B> LayerBucket<'a, T, B> {
     /// The geometry of the layout's buckets in the context's stores, which
     /// the draws bind.
     #[must_use]
-    pub(crate) fn geometry(self) -> &'a BucketGeometry {
+    pub fn geometry(self) -> &'a BucketGeometry {
         &self.contents.bucket_geometry
     }
 
@@ -122,13 +122,13 @@ impl<'a, T: StyleLayerType, B> LayerBucket<'a, T, B> {
 
     /// Where the pattern `pattern` is in the tile's icon atlas.
     #[must_use]
-    pub(crate) fn pattern(self, pattern: &str) -> Option<ImagePosition> {
+    pub fn pattern(self, pattern: &str) -> Option<ImagePosition> {
         self.contents.pattern_positions()?.get(pattern).cloned()
     }
 
     /// The textures of the tile's glyph and icon atlases.
     #[must_use]
-    pub(crate) fn atlas_textures(self) -> &'a TileAtlasTextures {
+    pub fn atlas_textures(self) -> &'a TileAtlasTextures {
         &self.contents.textures
     }
 }
@@ -148,15 +148,16 @@ pub enum RasterTile<'a> {
 impl<'a> RasterTile<'a> {
     /// The identity of the image, by which a layer keeps its texture.
     #[must_use]
-    pub(crate) fn id(self) -> SimpleIdentity {
+    pub fn id(self) -> SimpleIdentity {
         match self {
             RasterTile::Tile(raster) => raster.id(),
             RasterTile::Image(image) => image.id(),
         }
     }
 
+    /// The tile's image.
     #[must_use]
-    pub(crate) fn image(self) -> &'a PremultipliedImage {
+    pub fn image(self) -> &'a PremultipliedImage {
         match self {
             RasterTile::Tile(raster) => &raster.image,
             RasterTile::Image(image) => &image.image,
@@ -167,7 +168,7 @@ impl<'a> RasterTile<'a> {
     /// itself, or on an image source's quad. Every tile of a source draws on
     /// the same quad.
     #[must_use]
-    pub(crate) fn quad(self) -> ImageQuad {
+    pub fn quad(self) -> ImageQuad {
         match self {
             RasterTile::Tile(_) => ImageQuad::TILE,
             RasterTile::Image(image) => image.quad,

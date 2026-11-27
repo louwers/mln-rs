@@ -18,23 +18,25 @@ use crate::draw::vertices::{SharedVertices, Vertices};
 /// in each of `stride` bytes, from the vertex `vertex_offset` on, as
 /// `data_type`.
 #[derive(Clone)]
-pub(crate) struct SharedAttribute {
-    pub(crate) vertices: SharedVertices,
+pub struct SharedAttribute {
+    pub vertices: SharedVertices,
     pub(crate) data_type: AttributeDataType,
-    pub(crate) offset: u32,
+    pub offset: u32,
     pub(crate) vertex_offset: u32,
-    pub(crate) stride: u32,
+    pub stride: u32,
 }
 
 impl SharedAttribute {
     /// The attribute that reads `vertices` at `offset` in each of `stride`
     /// bytes, from the first vertex on, as `data_type`.
-    pub(crate) fn new(vertices: SharedVertices, data_type: AttributeDataType, offset: u32, stride: u32) -> Self {
+    #[must_use]
+    pub fn new(vertices: SharedVertices, data_type: AttributeDataType, offset: u32, stride: u32) -> Self {
         SharedAttribute { vertices, data_type, offset, vertex_offset: 0, stride }
     }
 
     /// The attribute, reading from the vertex `vertex_offset` on.
-    pub(crate) fn starting_at(self, vertex_offset: u32) -> Self {
+    #[must_use]
+    pub fn starting_at(self, vertex_offset: u32) -> Self {
         SharedAttribute { vertex_offset, ..self }
     }
 }
@@ -133,7 +135,7 @@ impl VertexAttribute {
 
 /// The paint properties a draw reads from their uniforms instead, by name.
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct Uniforms {
+pub struct Uniforms {
     names: [&'static str; MAX_ATTRIBUTES],
     len: usize,
 }
@@ -167,9 +169,9 @@ impl FromIterator<&'static str> for Uniforms {
 }
 
 /// Vertex attributes by the names of the program's attributes they bind to,
-/// each in a slot of the array, which [`slot_of`](Self::slot_of) finds.
+/// each in a slot of the array, which `slot_of` finds.
 #[derive(Default)]
-pub(crate) struct VertexAttributeArray {
+pub struct VertexAttributeArray {
     attrs: [Option<Box<(&'static str, VertexAttribute)>>; MAX_ATTRIBUTES],
     /// Which names its slots hold ([`layout`](Self::layout)).
     layout: u64,
@@ -182,8 +184,9 @@ fn new_layout() -> u64 {
 }
 
 impl VertexAttributeArray {
+    /// An array without attributes.
     #[must_use]
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self::default()
     }
 
@@ -203,6 +206,13 @@ impl VertexAttributeArray {
     #[must_use]
     pub(crate) fn get(&self, name: &str) -> Option<&VertexAttribute> {
         self.at(self.slot_of(name)?)
+    }
+
+    /// Where the attribute `name` reads vertices of the context's store, if
+    /// the array has it and it does.
+    #[must_use]
+    pub fn shared(&self, name: &str) -> Option<&SharedAttribute> {
+        self.get(name)?.shared()
     }
 
     /// The attribute in `slot`.
@@ -234,7 +244,7 @@ impl VertexAttributeArray {
 
     /// Makes the attribute `name` read vertices of the context's store as
     /// `shared` says.
-    pub(crate) fn set_shared(&mut self, name: &'static str, shared: SharedAttribute) {
+    pub fn set_shared(&mut self, name: &'static str, shared: SharedAttribute) {
         self.set(name, VertexAttribute::Shared(shared));
     }
 
@@ -255,7 +265,7 @@ impl VertexAttributeArray {
 
     /// Where the attributes that read vertices of the context's store read
     /// them, to change.
-    pub(crate) fn shared_mut(&mut self) -> impl Iterator<Item = &mut SharedAttribute> {
+    pub fn shared_mut(&mut self) -> impl Iterator<Item = &mut SharedAttribute> {
         self.attrs.iter_mut().filter_map(|attr| match &mut attr.as_mut()?.1 {
             VertexAttribute::Shared(shared) => Some(shared),
             VertexAttribute::Own { .. } => None,

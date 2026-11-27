@@ -24,7 +24,9 @@ use crate::tile::{OverscaledTileID, UnwrappedTileID};
 use crate::tile_store::contents::Contents;
 use crate::tile_store::tile::Tile;
 
-pub(crate) struct RenderTile {
+/// A tile of a source that the frame draws: its id, its projection, and
+/// what of its contents the layers draw.
+pub struct RenderTile {
     pub(crate) id: UnwrappedTileID,
     /// The projection contract for this tile; `matrix` is its main matrix.
     pub(crate) projection: ProjectionData,
@@ -60,7 +62,8 @@ impl RenderTile {
     }
 
     /// The layer's translation in tile units, rotated for its anchor.
-    pub(crate) fn tile_unit_translation(
+    #[must_use]
+    pub fn tile_unit_translation(
         id: &UnwrappedTileID,
         translation: [f32; 2],
         anchor: TranslateAnchorType,
@@ -103,7 +106,7 @@ impl RenderTile {
 /// tile store, or an image source's image, which each of the source's
 /// tiles draws.
 #[derive(Clone, Copy)]
-pub(crate) enum TileContent<'a> {
+pub enum TileContent<'a> {
     Tile(&'a Contents),
     Image(&'a ImageTile),
 }
@@ -260,7 +263,7 @@ impl<'a, T: Layer> FrameTile<'a, T> {
     }
 
     /// [`data`](Self::data), if it was laid out to draw in `pass`.
-    pub(crate) fn data_for_pass(self, pass: RenderPass) -> Option<TileData<'a, T>> {
+    pub fn data_for_pass(self, pass: RenderPass) -> Option<TileData<'a, T>> {
         self.data.filter(|&data| <T::Input as Find<T::Style>>::passes(data) & pass != RenderPass::None)
     }
 

@@ -21,7 +21,7 @@ use crate::tile_store::store::TileStore;
 use crate::tile_store::tile_parameters::TileParameters;
 use crate::worker::job::SourceKey;
 
-pub(crate) struct RenderTileParameters<'a> {
+pub struct RenderTileParameters<'a> {
     pub(crate) transform: &'a TransformParameters,
     /// Whether a layer of the frame draws the source's tiles in
     /// [`TileOrder::ByY`], which `update_render_tiles` then sorts them in.
@@ -29,7 +29,7 @@ pub(crate) struct RenderTileParameters<'a> {
 }
 
 /// What every render source has, whatever its type.
-pub(crate) struct RenderSourceBase {
+pub struct RenderSourceBase {
     pub(crate) style_source: Source,
     pub(crate) enabled: bool,
 }
@@ -50,7 +50,7 @@ pub enum TileOrder {
     ByY,
 }
 
-pub(crate) trait RenderSource {
+pub trait RenderSource {
     fn base(&self) -> &RenderSourceBase;
 
     fn is_loaded(&self, store: &TileStore) -> bool;

@@ -65,11 +65,34 @@
 //! [`query_radius`](Layer::query_radius), and keeps those the layer
 //! [`hit`](Layer::hit)s.
 //!
+//! # Buckets
+//!
+//! A bucket keeps its vertices and indexes in [`GeometryVec`]s and its
+//! data-driven paint values in binders ([`binders`], declared with
+//! `paint_property_binders!`), which it names in its
+//! [`upload`](Bucket::upload): the engine moves them into the context's
+//! stores, where a layer's tile value reads them
+//! ([`bucket_vertices`], [`bucket_indexes`], [`paint_vertices`]), and
+//! rewrites the binders' values where feature state changes.
+//!
 //! The layer and every hook but the layout's run on the renderer's thread;
 //! the layout and the bucket are `Send`, and a bucket crosses to a tile
 //! worker with memory of its own through the worker codec.
 
 pub mod bucket;
+
+/// The binders of a layer type's data-driven paint values: what a bucket
+/// keeps of each feature's values for its layers' draws, which feature
+/// state rewrites, and the macro that declares a type's binders.
+pub mod binders {
+    pub use crate::layer::paint_property_binder::{
+        BinderValue, CrossFadedPaintPropertyBinder, InterleavedVertexBuffer, InterleavedVertexData, LayerBinders,
+        PaintBinders, PaintPropertyBinder, PaintPropertyBinderBase, PatternDependency, PatternLayerMap,
+        bind_paint_property, shared_paint,
+    };
+    pub use crate::layer::paint_property_statistics::StatisticValue;
+    pub use crate::paint_property_binders;
+}
 pub(crate) mod bucket_geometry;
 pub(crate) mod bucket_parameters;
 pub(crate) mod filter_groups;
@@ -84,8 +107,12 @@ pub(crate) mod tile_input;
 pub(crate) mod tile_layout;
 
 pub use crate::layer::bucket::{Bucket, Upload};
+pub use crate::layer::bucket_geometry::{
+    BucketGeometry, GeometryVec, bucket_indexes, bucket_vertices, copied_vertices, derived_vertices, paint_vertices,
+};
+pub use crate::layer::layer_drawing::BucketChanges;
 pub use crate::layer::layer_type::EvaluatedLayer;
-pub use crate::layer::layout::{BuildCx, Layout, LayoutCx};
+pub use crate::layer::layout::{BuildCx, Layout, LayoutCx, layers_by_id};
 pub use crate::layer::render_layer::{
     EvaluateCx, Evaluation, Layer, LayerValues, OnTerrain, PrepareCx, TileCx, UpdateCx,
 };
@@ -96,6 +123,7 @@ pub use crate::query::feature_index::QueryRegion;
 #[doc(hidden)]
 pub use crate::render::terrain::SurfaceLight;
 pub use crate::render::tile::FrameTile;
+pub use crate::source::render_image_source::ImageQuad;
 pub use crate::source::render_source::TileOrder;
 pub use crate::source::{DemTiles, RasterTiles};
 pub use crate::tile_store::dem::DemContents;

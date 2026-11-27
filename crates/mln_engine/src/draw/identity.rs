@@ -11,7 +11,7 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 /// Ordering and equality compare the id. Use `Option<SimpleIdentity>` for an
 /// identity that may be absent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct SimpleIdentity {
+pub struct SimpleIdentity {
     unique_id: NonZeroU64,
 }
 

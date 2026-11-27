@@ -59,25 +59,25 @@ pub(crate) enum DrawsInto {
 /// target's size and scale, the light and ground, and what it draws into.
 #[derive(Clone)]
 pub struct LayerFrame<'a> {
-    pub(crate) view: &'a View,
+    pub view: &'a View,
     pub(crate) transform_params: &'a TransformParameters,
     /// Whether a gesture or an animation moves the camera: draws favor speed
     /// over crispness then.
-    pub(crate) camera_moving: bool,
-    pub(crate) light: &'a EvaluatedLight,
-    pub(crate) pixel_ratio: f32,
-    pub(crate) renderable_size: Size,
-    pub(crate) pixels_to_gl_units: [f32; 2],
+    pub camera_moving: bool,
+    pub light: &'a EvaluatedLight,
+    pub pixel_ratio: f32,
+    pub renderable_size: Size,
+    pub pixels_to_gl_units: [f32; 2],
     /// Whether the frame draws terrain, under which 2D layers draw without
     /// depth.
-    pub(crate) terrain: bool,
+    pub terrain: bool,
     /// Whether a group drawn as a whole ([`Group::composite`]) can draw
     /// with the frame's depth and stencil: the frame has them, and a pass can
     /// draw into them together with the layer composite's texture.
-    pub(crate) composites_with_frame_depth: bool,
+    pub composites_with_frame_depth: bool,
     /// The ground that the layers that stand on terrain stand on, where the
     /// frame has terrain and such layers.
-    pub(crate) ground: Option<Rc<FrameGround>>,
+    pub ground: Option<Rc<FrameGround>>,
     pub(crate) into: DrawsInto,
 }
 
@@ -114,9 +114,9 @@ impl LayerFrame<'_> {
         matches!(self.into, DrawsInto::Drape { lit: true })
     }
 
-    /// See [`TransformParameters::projection_data_for_tile`].
+    /// See `TransformParameters::projection_data_for_tile`.
     #[must_use]
-    pub(crate) fn projection_data_for_tile(&self, tile_id: &UnwrappedTileID, aligned: bool) -> ProjectionData {
+    pub fn projection_data_for_tile(&self, tile_id: &UnwrappedTileID, aligned: bool) -> ProjectionData {
         self.transform_params.projection_data_for_tile(tile_id, aligned)
     }
 
@@ -125,7 +125,7 @@ impl LayerFrame<'_> {
     /// flipped upside down turns every triangle round. The globe's
     /// projection draws the right way up in either mode.
     #[must_use]
-    pub(crate) fn cull_back_faces(&self) -> CullFaceMode {
+    pub fn cull_back_faces(&self) -> CullFaceMode {
         let turned = self.view.viewport_mode() == ViewportMode::FlippedY && !self.view.is_globe();
         let winding = if turned { CullFaceWindingType::Clockwise } else { CullFaceWindingType::CounterClockwise };
         CullFaceMode { winding, ..CullFaceMode::back_ccw() }
@@ -505,7 +505,7 @@ impl Group {
 
     /// Makes the draws composite onto the frame as `composite` says, or
     /// draw straight onto it for `None`.
-    pub(crate) fn composite(&mut self, composite: Option<Composite>) -> &mut Self {
+    pub fn composite(&mut self, composite: Option<Composite>) -> &mut Self {
         self.composite = composite;
         self
     }
@@ -956,7 +956,7 @@ impl DrawGroups {
 /// [`PaintParameters::current_layer`], which [`DrawOrder::step`] moves to
 /// the next group's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum DrawOrder {
+pub enum DrawOrder {
     /// The layers' order, bottom to top, with the depth going down by one
     /// after each group, to 0.
     BottomUp,

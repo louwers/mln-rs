@@ -1,4 +1,4 @@
-use mln_engine::shaders::{PROGRAMS, projection_variants};
+use mln_builtins::shaders::{every_program, projection_variants};
 use mln_gfx::shaders::program::Program;
 use mln_gfx::shaders::source::GlslSource;
 use mln_glsl::variants::variants;
@@ -7,7 +7,7 @@ use crate::ShaderCompiler;
 
 /// Every program the renderer draws with that has GLSL, with its GLSL.
 fn programs() -> impl Iterator<Item = (&'static Program, &'static GlslSource)> {
-    PROGRAMS.iter().filter_map(|&program| Some((program, program.sources.glsl?)))
+    every_program().filter_map(|program| Some((program, program.sources.glsl?)))
 }
 
 /// The first bytes of a DXIL container.

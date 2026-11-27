@@ -243,7 +243,7 @@ pub(crate) fn dem_height(
 /// The ground under a tile's points, as a frame drew it: what the layers
 /// whose points the CPU places, as symbols, stand on.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct TileGround<'a> {
+pub struct TileGround<'a> {
     ground: &'a TerrainElevation,
     tile: UnwrappedTileID,
 }
@@ -258,7 +258,8 @@ impl<'a> TileGround<'a> {
     /// units of the tile, in meters with the exaggeration
     /// ([`Elevation::surface_at`]); 0 where none drew, as on flat ground. A
     /// point past the tile's edges reads the ground there.
-    pub(crate) fn height(&self, point: glam::Vec2) -> f32 {
+    #[must_use]
+    pub fn height(&self, point: glam::Vec2) -> f32 {
         let tiles = f64::from(1u32 << self.tile.canonical.z);
         let extent = f64::from(mln_style::constants::EXTENT);
         let tile = DVec2::new(f64::from(self.tile.canonical.x), f64::from(self.tile.canonical.y));

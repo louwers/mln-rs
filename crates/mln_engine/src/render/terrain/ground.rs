@@ -32,7 +32,7 @@ const DEPTH_STENCIL: TextureFormat = TextureFormat::Depth24PlusStencil8;
 
 /// The ground of a frame: the ground its surface drew, and, where a layer
 /// hides behind it, the texture of its depth.
-pub(crate) struct FrameGround {
+pub struct FrameGround {
     elevation: Arc<TerrainElevation>,
     depth: Option<SharedTexture>,
 }
@@ -50,45 +50,44 @@ impl FrameGround {
     }
 
     /// The ground under the points of `tile`.
-    pub(crate) fn tile(&self, tile: UnwrappedTileID) -> TileGround<'_> {
+    #[must_use]
+    pub fn tile(&self, tile: UnwrappedTileID) -> TileGround<'_> {
         TileGround::new(&self.elevation, tile)
     }
 
     /// The texture of the ground's depth, where a layer hides behind it:
     /// each pixel's eye distance, an `f32`'s bits, least significant byte
     /// first, 0 where no ground drew.
-    pub(crate) fn depth(&self) -> Option<&SharedTexture> {
+    #[must_use]
+    pub fn depth(&self) -> Option<&SharedTexture> {
         self.depth.as_ref()
     }
 }
 
 /// The center of the point of a vertex of a point's quad at `a1`, the
 /// point's position, doubled, plus the quad's corner (`add_point_quads`).
-pub(crate) fn point_center(a1: [i16; 2]) -> [i16; 2] {
+#[must_use]
+pub fn point_center(a1: [i16; 2]) -> [i16; 2] {
     a1.map(|value| value >> 1)
 }
 
 /// The heights of the ground under a draw's vertices, which an attribute or
 /// storage buffer of its reads, and the ground they are of.
 #[derive(Default)]
-pub(crate) struct GroundHeights(Option<(Weak<TerrainElevation>, TypedVertices<f32>)>);
+pub struct GroundHeights(Option<(Weak<TerrainElevation>, TypedVertices<f32>)>);
 
 impl GroundHeights {
     /// Whether they are of `ground`, which stays the frame's ground while
     /// its `Arc` does.
-    pub(crate) fn are_of(&self, ground: &FrameGround) -> bool {
+    #[must_use]
+    pub fn are_of(&self, ground: &FrameGround) -> bool {
         self.0.as_ref().is_some_and(|(of, _)| Weak::ptr_eq(of, &Arc::downgrade(ground.elevation())))
     }
 
     /// Makes them `heights`, of `ground`, through `context`: written over
     /// those they were where they fit, which their readers read still, else
     /// in new vertices, which it returns for the readers to read.
-    pub(crate) fn write(
-        &mut self,
-        context: &mut Context,
-        ground: &FrameGround,
-        heights: &[f32],
-    ) -> Option<SharedVertices> {
+    pub fn write(&mut self, context: &mut Context, ground: &FrameGround, heights: &[f32]) -> Option<SharedVertices> {
         let of = Arc::downgrade(ground.elevation());
         if let Some((_, vertices)) = &self.0
             && context.update_vertices(vertices, heights)
@@ -105,21 +104,23 @@ impl GroundHeights {
 
 /// The attribute of a vertex that reads its height from `heights`, an `f32`
 /// a vertex.
-pub(crate) fn height_attribute(heights: &SharedVertices) -> SharedAttribute {
+#[must_use]
+pub fn height_attribute(heights: &SharedVertices) -> SharedAttribute {
     SharedAttribute::new(heights.clone(), AttributeDataType::Float, 0, size_of::<f32>() as u32)
 }
 
 /// A tile's draw whose points stand on the ground: its mesh, and the
 /// heights of the ground under its vertices, which an attribute of theirs
 /// reads.
-pub(crate) struct StandingDraw {
-    pub(crate) mesh: Mesh,
+pub struct StandingDraw {
+    pub mesh: Mesh,
     heights: GroundHeights,
 }
 
 impl StandingDraw {
     /// The draw of `mesh`, which stands on no ground yet.
-    pub(crate) fn new(mesh: Mesh) -> Self {
+    #[must_use]
+    pub fn new(mesh: Mesh) -> Self {
         StandingDraw { mesh, heights: GroundHeights::default() }
     }
 
@@ -127,7 +128,7 @@ impl StandingDraw {
     /// heights of the ground under `centers`, the center of each vertex's
     /// point in `tile`: those of the ground they were of while it stays the
     /// frame's, else written again, through `context`.
-    pub(crate) fn stand(
+    pub fn stand(
         &mut self,
         context: &mut Context,
         ground: Option<&FrameGround>,

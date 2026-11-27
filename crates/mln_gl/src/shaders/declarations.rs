@@ -210,7 +210,7 @@ fn input_type(program: &Program, attribute: &Attribute) -> Result<&'static str, 
 mod tests {
     use std::collections::BTreeSet;
 
-    use mln_engine::shaders::PROGRAMS;
+    use mln_builtins::shaders::every_program;
     use mln_gfx::shaders::source::GlslEsSource;
 
     use super::*;
@@ -218,7 +218,7 @@ mod tests {
     /// Every program the renderer draws with that has GLSL ES, with its
     /// GLSL ES.
     fn programs() -> impl Iterator<Item = (&'static Program, &'static GlslEsSource)> {
-        PROGRAMS.iter().filter_map(|&program| Some((program, program.sources.glsl_es?)))
+        every_program().filter_map(|program| Some((program, program.sources.glsl_es?)))
     }
 
     /// The blocks of `program`'s buffers.

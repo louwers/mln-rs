@@ -7,7 +7,9 @@ use mln_gfx::shaders::source::MslSource;
 /// front of it reads of the ground's depth, within `#if defined(TERRAIN)`:
 /// whether that ground hides a point (`ground_visibility`). Its vertex
 /// function reads the ground's depth from the program's `ground_depth`.
-macro_rules! ground_visibility {
+#[doc(hidden)]
+#[macro_export]
+macro_rules! terrain_msl_ground_visibility {
     () => {
         r#"
 #if defined(TERRAIN)
@@ -52,13 +54,15 @@ static float ground_visibility(float4 clip, float view_height, texture2d<float, 
 "#
     };
 }
-pub(crate) use ground_visibility;
+pub(crate) use crate::terrain_msl_ground_visibility as ground_visibility;
 
 /// The height rule of `crate::tile::dem`, over the DEM tile a draw reads: its
 /// RGBA8 texels behind a one-texel border, decoded by a `TerrainSurfaceUBO`.
 /// A macro, so that `concat!` puts it in the sources of the programs that
 /// read the DEM.
-macro_rules! ground_height {
+#[doc(hidden)]
+#[macro_export]
+macro_rules! terrain_msl_ground_height {
     () => {
         r#"
 
@@ -97,14 +101,15 @@ static float ground_height(float2 pos, float4 dem_coords, texture2d<float, acces
 "#
     };
 }
-#[cfg(feature = "gpu-conformance")]
-pub(crate) use ground_height;
+pub(crate) use crate::terrain_msl_ground_height as ground_height;
 
 /// How a hillshade shades its slopes: `hillshade_color`, which shades a
 /// slope by the lights of a `HillshadeEvaluatedPropsUBO`. A macro, so that
 /// `concat!` puts it in the sources of the hillshade and of the terrain's
 /// surface.
-macro_rules! hillshade_shading {
+#[doc(hidden)]
+#[macro_export]
+macro_rules! terrain_msl_hillshade_shading {
     () => {
         r"
 #define PI 3.141592653589793
@@ -258,7 +263,7 @@ static half4 hillshade_color(float2 deriv, device const HillshadeTilePropsUBO& t
 "
     };
 }
-pub(crate) use hillshade_shading;
+pub(crate) use crate::terrain_msl_hillshade_shading as hillshade_shading;
 
 /// The terrain's surface: a tile's grid, raised to the heights of the tile's
 /// DEM with its skirts lowered and projected through the tile's entry of

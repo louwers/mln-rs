@@ -61,7 +61,7 @@ pub(crate) fn compute(
 /// D3D12 and WebGPU do with it: clip z from -w to w becomes `2z - w`, so that
 /// OpenGL clips what was below 0 and writes the depth range times the old z
 /// over w.
-pub(crate) fn zero_to_one_clip_z(matrix: &mut DMat4) {
+pub fn zero_to_one_clip_z(matrix: &mut DMat4) {
     matrix.set_row(2, 2.0 * matrix.row(2) - matrix.row(3));
 }
 

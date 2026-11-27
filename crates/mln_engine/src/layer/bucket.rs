@@ -18,7 +18,9 @@ use crate::layer::paint_property_binder::{LayerBinders, PaintBinders};
 use crate::tile::TileLayer;
 
 /// The state of each feature of a source layer, by the feature's id.
-pub(crate) type FeatureStates = mln_style::hash::HashMap<String, mln_style::feature::FeatureState>;
+pub type FeatureStates = mln_style::hash::HashMap<String, mln_style::feature::FeatureState>;
+/// The state of each feature of each source layer, by source layer and
+/// feature id.
 pub type LayerFeatureStates = mln_style::hash::HashMap<String, FeatureStates>;
 
 /// What a layout makes of a tile for a group of layers: the vertices,
@@ -53,11 +55,12 @@ enum Kind<'a> {
     FeatureState { states: &'a FeatureStates, layer: &'a TileLayer<'a>, layer_id: &'a str, rewrote: bool },
 }
 
-#[cfg(test)]
 impl<'a> Upload<'a> {
     /// The upload of a bucket whose geometry `geometry` keeps, into
-    /// `context`'s stores, sharing what `copies` keep.
-    pub(crate) fn geometry(
+    /// `context`'s stores, sharing what `copies` keep: what the engine
+    /// makes as a bucket reaches the render thread, for a type's tests of
+    /// its buckets.
+    pub fn geometry(
         geometry: &'a mut BucketGeometry,
         copies: &'a [&'a BucketGeometry],
         context: &'a mut Context,
@@ -72,7 +75,7 @@ impl Upload<'_> {
     /// upload rewrites the binders' values that read feature state, and
     /// moves nothing.
     #[must_use]
-    pub(crate) fn caps(&self) -> Option<&Caps> {
+    pub fn caps(&self) -> Option<&Caps> {
         match &self.kind {
             Kind::Geometry(geometry) => Some(geometry.caps()),
             Kind::FeatureState { .. } => None,
@@ -81,7 +84,7 @@ impl Upload<'_> {
 
     /// Names `vec`, vertices that the bucket's draws read
     /// ([`bucket_vertices`](crate::layer::bucket_geometry::bucket_vertices)).
-    pub(crate) fn vec<V: bytemuck::Pod>(&mut self, vec: &mut GeometryVec<V>) {
+    pub fn vec<V: bytemuck::Pod>(&mut self, vec: &mut GeometryVec<V>) {
         if let Kind::Geometry(geometry) = &mut self.kind {
             geometry.move_vertices(vec);
         }
@@ -89,7 +92,7 @@ impl Upload<'_> {
 
     /// Names `indexes`, which the bucket's draws draw
     /// ([`bucket_indexes`](crate::layer::bucket_geometry::bucket_indexes)).
-    pub(crate) fn indexes(&mut self, indexes: &mut GeometryVec<u16>) {
+    pub fn indexes(&mut self, indexes: &mut GeometryVec<u16>) {
         if let Kind::Geometry(geometry) = &mut self.kind {
             geometry.move_indexes(indexes);
         }
@@ -98,7 +101,7 @@ impl Upload<'_> {
     /// Keeps the vertices that `make` makes of the data of `vec`, for
     /// [`derived_vertices`](crate::layer::bucket_geometry::derived_vertices).
     /// Before `vec` is named.
-    pub(crate) fn derive<V: bytemuck::Pod, D: bytemuck::Pod>(
+    pub fn derive<V: bytemuck::Pod, D: bytemuck::Pod>(
         &mut self,
         vec: &GeometryVec<V>,
         make: impl FnOnce(&[V]) -> Vec<D>,
@@ -111,7 +114,7 @@ impl Upload<'_> {
     /// Names `binders`, whose values the bucket's draws read
     /// ([`paint_vertices`](crate::layer::bucket_geometry::paint_vertices)).
     /// Values that feature state rewrites stay with the bucket.
-    pub(crate) fn binders<P: PaintBinders>(&mut self, binders: &mut LayerBinders<P>) {
+    pub fn binders<P: PaintBinders>(&mut self, binders: &mut LayerBinders<P>) {
         for (layer_id, binders) in binders.iter_mut() {
             self.paint(layer_id, binders);
         }
@@ -153,7 +156,7 @@ impl<B> Stored<B> {
 }
 
 /// What the engine does with a bucket, whatever its type.
-pub(crate) trait ErasedBucket: Any + Send {
+pub trait ErasedBucket: Any + Send {
     /// The bucket's identity.
     fn id(&self) -> SimpleIdentity;
 
@@ -177,7 +180,7 @@ pub(crate) trait ErasedBucket: Any + Send {
     fn clone_bucket(&self) -> Box<dyn ErasedBucket>;
 
     /// Writes the bucket for its layer type's
-    /// [`read_bucket`](crate::layer::layer_type::ErasedLayerType::read_bucket).
+    /// `read_bucket`.
     fn write_wire(&self, w: &mut Writer);
 }
 

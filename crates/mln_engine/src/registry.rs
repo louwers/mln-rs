@@ -19,15 +19,6 @@ use crate::layer::layer_type::{ErasedLayerType, entry};
 use crate::layer::render_layer::Layer;
 use crate::layer::tile_input::input::Find;
 use crate::layers::custom::RenderCustomLayer;
-use crate::layers::render_background_layer::RenderBackgroundLayer;
-use crate::layers::render_circle_layer::RenderCircleLayer;
-use crate::layers::render_color_relief_layer::RenderColorReliefLayer;
-use crate::layers::render_fill_extrusion_layer::RenderFillExtrusionLayer;
-use crate::layers::render_fill_layer::RenderFillLayer;
-use crate::layers::render_heatmap_layer::RenderHeatmapLayer;
-use crate::layers::render_hillshade_layer::RenderHillshadeLayer;
-use crate::layers::render_line_layer::RenderLineLayer;
-use crate::layers::render_raster_layer::RenderRasterLayer;
 use crate::placement::{ErasedPlacement, Placement, participant};
 use crate::source::erased::{self, ErasedSourceType};
 use crate::source::{SourceSummary, SourceType, kind};
@@ -123,20 +114,11 @@ fn style_half(layer_type: &'static dyn ErasedLayerType) -> &'static dyn ErasedSt
     layer_type.style()
 }
 
-/// Adds the built-in layer types and the custom layer type, which the engine
-/// holds: `mln_builtins`'s `register_builtins` calls it. Fails for a name
-/// that an earlier call took.
+/// Adds the layer types that the engine holds, the symbol and custom layer
+/// types: `mln_builtins`'s `register_builtins` calls it with the other
+/// built-in layer types'. Fails for a name that an earlier call took.
 pub fn register_layer_types(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
-    builder.add_layer_type::<RenderFillLayer>()?;
-    builder.add_layer_type::<RenderLineLayer>()?;
-    builder.add_layer_type::<RenderCircleLayer>()?;
     builder.add_placing_layer_type::<SymbolPlacement>()?;
-    builder.add_layer_type::<RenderRasterLayer>()?;
-    builder.add_layer_type::<RenderBackgroundLayer>()?;
-    builder.add_layer_type::<RenderHillshadeLayer>()?;
-    builder.add_layer_type::<RenderColorReliefLayer>()?;
-    builder.add_layer_type::<RenderFillExtrusionLayer>()?;
-    builder.add_layer_type::<RenderHeatmapLayer>()?;
     builder.add_layer_type::<RenderCustomLayer>()
 }
 
@@ -183,7 +165,8 @@ impl Registry {
         self.style.functions()
     }
 
-    pub(crate) fn layer_type(&self, name: &str) -> Option<&'static dyn ErasedLayerType> {
+    #[must_use]
+    pub fn layer_type(&self, name: &str) -> Option<&'static dyn ErasedLayerType> {
         self.layer_types.get(name).copied()
     }
 

@@ -9,7 +9,7 @@
 
 use std::collections::BTreeSet;
 
-use mln_engine::shaders::{PROGRAMS, projection_variants};
+use mln_builtins::shaders::{every_program, projection_variants};
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::gpu::VertexStep;
 use mln_gfx::projection_variant::ProjectionVariant;
@@ -28,7 +28,7 @@ use crate::Id;
 
 /// Every program the renderer draws with that has MSL, with its MSL.
 fn sources() -> impl Iterator<Item = (&'static Program, &'static MslSource)> {
-    PROGRAMS.iter().filter_map(|&program| Some((program, program.sources.msl?)))
+    every_program().filter_map(|program| Some((program, program.sources.msl?)))
 }
 
 fn device() -> Id<dyn MTLDevice> {

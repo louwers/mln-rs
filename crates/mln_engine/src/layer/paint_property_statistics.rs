@@ -4,7 +4,7 @@ use mln_style::color::Color;
 
 /// The value types a binder keeps statistics for: only `float` tracks a
 /// maximum (the C++ `PaintPropertyStatistics<float>` specialization).
-pub(crate) trait StatisticValue {
+pub trait StatisticValue {
     /// `Some(value)` for `float`, `None` for the types whose statistics are
     /// the empty primary template.
     fn statistic(&self) -> Option<f32>;
@@ -23,7 +23,7 @@ impl StatisticValue for Color {
 }
 
 #[derive(Clone, Debug, mln_wire::Wire)]
-pub(crate) struct PaintPropertyStatistics<T> {
+pub struct PaintPropertyStatistics<T> {
     max: Option<f32>,
     #[wire(skip)]
     _t: PhantomData<T>,
@@ -39,7 +39,7 @@ impl<T: StatisticValue> PaintPropertyStatistics<T> {
     /// The largest value added; always `None` for value types other than
     /// `f32`.
     #[must_use]
-    pub(crate) fn max(&self) -> Option<f32> {
+    pub fn max(&self) -> Option<f32> {
         self.max
     }
 

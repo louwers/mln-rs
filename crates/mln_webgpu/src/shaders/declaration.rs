@@ -280,9 +280,9 @@ impl Structs {
 
 #[cfg(test)]
 mod tests {
-    use mln_engine::layers::circle::programs::CIRCLE;
-    use mln_engine::layers::fill::ubo::FillDrawableUBO;
-    use mln_engine::layers::fill_extrusion::programs::FILL_EXTRUSION_PULLED;
+    use mln_builtins::layers::circle::programs::CIRCLE;
+    use mln_builtins::layers::fill::ubo::FillDrawableUBO;
+    use mln_builtins::layers::fill_extrusion::programs::FILL_EXTRUSION_PULLED;
     use mln_engine::shaders::programs::CLIPPING_MASK;
     use mln_gfx::projection_variant::ProjectionVariant;
     use mln_gfx::shaders::program::Property;

@@ -97,3 +97,13 @@ pub struct LatLngAltitude {
     pub location: LatLng,
     pub altitude: f64,
 }
+
+/// The latitudes of the north and the south edges of `id`, in degrees.
+#[must_use]
+pub fn lat_range(id: &crate::tile::UnwrappedTileID) -> [f32; 2] {
+    let latlng0 = LatLng::from_unwrapped_tile(id.canonical.z, id.canonical.x, id.canonical.y, id.wrap);
+    let below =
+        crate::tile::UnwrappedTileID::new(id.canonical.z, i64::from(id.canonical.x), i64::from(id.canonical.y) + 1);
+    let latlng1 = LatLng::from_unwrapped_tile(below.canonical.z, below.canonical.x, below.canonical.y, below.wrap);
+    [latlng0.latitude() as f32, latlng1.latitude() as f32]
+}

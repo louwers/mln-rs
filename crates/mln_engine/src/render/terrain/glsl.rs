@@ -6,7 +6,9 @@ use mln_gfx::shaders::source::GlslSource;
 /// What the terrain variant of a program that hides behind the ground in
 /// front of it reads of the ground's depth, within `#ifdef TERRAIN` of its
 /// vertex stage: whether that ground hides a point (`ground_visibility`).
-macro_rules! ground_visibility {
+#[doc(hidden)]
+#[macro_export]
+macro_rules! terrain_glsl_ground_visibility {
     () => {
         r"
 #ifdef TERRAIN
@@ -51,13 +53,15 @@ float ground_visibility(const vec4 clip, const float view_height) {
 "
     };
 }
-pub(crate) use ground_visibility;
+pub(crate) use crate::terrain_glsl_ground_visibility as ground_visibility;
 
 /// The height rule of `crate::tile::dem`, over the DEM tile a draw reads: its
 /// RGBA8 texels behind a one-texel border, decoded by the terrain's uniform
 /// block, `terrain`. A macro, so that `concat!` puts it in the vertex stages
 /// that read the DEM.
-macro_rules! ground_height {
+#[doc(hidden)]
+#[macro_export]
+macro_rules! terrain_glsl_ground_height {
     () => {
         r"
 
@@ -93,12 +97,13 @@ float ground_height(const vec2 pos, const vec4 dem_coords) {
 "
     };
 }
-#[cfg(feature = "gpu-conformance")]
-pub(crate) use ground_height;
+pub(crate) use crate::terrain_glsl_ground_height as ground_height;
 
 /// `fogged`, which covers a color of the surface with the fog of the
 /// terrain's uniform block, `terrain`.
-macro_rules! terrain_fog {
+#[doc(hidden)]
+#[macro_export]
+macro_rules! terrain_glsl_terrain_fog {
     () => {
         r"
 
@@ -125,12 +130,13 @@ vec4 fogged(const vec4 color, const float view_depth) {
 "
     };
 }
-#[cfg(feature = "gpu-conformance")]
-pub(crate) use terrain_fog;
+pub(crate) use crate::terrain_glsl_terrain_fog as terrain_fog;
 
 /// The surface's and the probe's vertex prelude: the terrain's fog, the
 /// height rule, and the height of the surface's vertices.
-macro_rules! terrain_props {
+#[doc(hidden)]
+#[macro_export]
+macro_rules! terrain_glsl_terrain_props {
     () => {
         concat!(
             terrain_fog!(),
@@ -149,15 +155,16 @@ float surface_height(const vec2 pos, const vec4 dem_coords) {
         )
     };
 }
-#[cfg(feature = "gpu-conformance")]
-pub(crate) use terrain_props;
+pub(crate) use crate::terrain_glsl_terrain_props as terrain_props;
 
 /// How a hillshade shades its slopes: `hillshade`, which writes to
 /// `out_color` a slope shaded by the lights of `props`, a
 /// `HillshadeEvaluatedPropsUBO`. A macro, so that `concat!` puts it in the fragment stages of the
 /// hillshade and of the terrain's surface, which shades a drape of a
 /// hillshade's slopes.
-macro_rules! hillshade_shading {
+#[doc(hidden)]
+#[macro_export]
+macro_rules! terrain_glsl_hillshade_shading {
     () => {
         r"
 #define PI 3.141592653589793
@@ -309,7 +316,7 @@ void hillshade(vec2 deriv, const HillshadeTilePropsUBO tileProps) {
 "
     };
 }
-pub(crate) use hillshade_shading;
+pub(crate) use crate::terrain_glsl_hillshade_shading as hillshade_shading;
 
 /// The terrain's surface: a tile's grid, raised to the heights of the tile's
 /// DEM with its skirts lowered and projected through the tile's entry of

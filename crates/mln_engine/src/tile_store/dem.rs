@@ -17,7 +17,7 @@ use crate::tile_store::raster::Masking;
 pub struct DemContents {
     id: SimpleIdentity,
     dem: DEMData,
-    pub(crate) masking: Masking,
+    pub masking: Masking,
     /// Counts the backfills of the DEM's border, after which what is made of
     /// the DEM is made again.
     generation: u64,
@@ -32,18 +32,18 @@ impl DemContents {
     /// The contents' identity, by which the layers and the terrain keep what
     /// they make of them.
     #[must_use]
-    pub(crate) fn id(&self) -> SimpleIdentity {
+    pub fn id(&self) -> SimpleIdentity {
         self.id
     }
 
     #[must_use]
-    pub(crate) fn dem(&self) -> &DEMData {
+    pub fn dem(&self) -> &DEMData {
         &self.dem
     }
 
     /// The number of times the DEM's border changed.
     #[must_use]
-    pub(crate) fn generation(&self) -> u64 {
+    pub fn generation(&self) -> u64 {
         self.generation
     }
 
@@ -57,7 +57,7 @@ impl DemContents {
 
     /// Whether there is a DEM to draw.
     #[must_use]
-    pub(crate) fn has_data(&self) -> bool {
+    pub fn has_data(&self) -> bool {
         self.dem.image().valid()
     }
 

@@ -1,12 +1,12 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use mln_engine::conformance::{
+use mln_builtins::conformance::{
     clip_mask_and_background, custom_layers, depth_only, drawn_vertex_texels, foreign_ids, imported_textures,
     instanced_walls, invalid_calls, mipmapped_targets, pulled_walls, readbacks, resources_in_use, terrain_heights,
     topologies, transparent_replace, vertex_layouts, written_vertex_texels,
 };
-use mln_engine::layers::fill_extrusion::programs::FILL_EXTRUSION_INSTANCED;
+use mln_builtins::layers::fill_extrusion::programs::FILL_EXTRUSION_INSTANCED;
 use mln_gfx::Rgba;
 use mln_gfx::gpu::{BufferUsage, ColorAttachment};
 use objc2::runtime::NSObjectProtocol as _;

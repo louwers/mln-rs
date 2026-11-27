@@ -8,9 +8,9 @@ use mln_style::constants::EXTENT;
 use mln_style::types::TranslateAnchorType;
 
 use crate::camera::{ProjectionData, View};
+use crate::draw::cast_matrix;
 use crate::draw::draws::LayerFrame;
 use crate::geo::constants::M2PI;
-use crate::layers::cast_matrix;
 use crate::render::paint_parameters::TransformParameters;
 use crate::render::tile::RenderTile;
 use crate::tile::UnwrappedTileID;
@@ -53,7 +53,8 @@ pub(crate) fn tile_matrix(
     clippy::too_many_arguments,
     reason = "the tile, the frame and the translation, origin, clipping and alignment options of its projection"
 )]
-pub(crate) fn projection_data(
+#[must_use]
+pub fn projection_data(
     tile_id: &UnwrappedTileID,
     frame: &LayerFrame<'_>,
     translation: [f32; 2],
@@ -76,8 +77,9 @@ pub(crate) fn projection_data(
     data
 }
 
+/// The block that a program reads `data`, a tile's projection, from.
 #[must_use]
-pub(crate) fn to_projection_ubo(data: &ProjectionData) -> ProjectionUBO {
+pub fn to_projection_ubo(data: &ProjectionData) -> ProjectionUBO {
     // The anchor's offset goes into the matrix in f64, where the camera's
     // large translation cancels it exactly; the anchor is zero on Mercator.
     let anchor = data.sphere_anchor;
@@ -99,7 +101,7 @@ pub(crate) fn to_projection_ubo(data: &ProjectionData) -> ProjectionUBO {
 /// `latitude_scale` is the cosine of the center latitude on the globe and 1
 /// on Mercator.
 #[must_use]
-pub(crate) fn globe_extrude_scale(tile_id: &UnwrappedTileID, zoom: f32, latitude_scale: f64) -> f32 {
+pub fn globe_extrude_scale(tile_id: &UnwrappedTileID, zoom: f32, latitude_scale: f64) -> f32 {
     (f64::from(tile_id.pixels_to_tile_units(1.0, zoom)) / (f64::from(EXTENT) * (1u64 << tile_id.canonical.z) as f64)
         * M2PI
         * latitude_scale) as f32

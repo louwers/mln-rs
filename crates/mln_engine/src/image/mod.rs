@@ -26,5 +26,6 @@ pub mod sprite;
 mod webp_reader;
 
 pub use image::decode_image;
+pub use image_store::{ImageStore, ImageType};
 pub use png_reader::decode_png;
 pub use png_writer::encode_png;

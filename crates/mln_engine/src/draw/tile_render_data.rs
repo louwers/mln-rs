@@ -5,7 +5,7 @@ use crate::draw::store::SharedTexture;
 /// pages its glyphs and images are on, and their GPU textures, which the
 /// atlas makes in the frame's upload.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct TileAtlasTextures {
+pub struct TileAtlasTextures {
     glyph_page: Option<PageId>,
     icon_page: Option<PageId>,
     glyph: Option<SharedTexture>,
@@ -34,7 +34,7 @@ impl TileAtlasTextures {
     }
 
     /// The icon and pattern page's texture, once uploaded.
-    pub(crate) fn icon(&self) -> Option<&SharedTexture> {
+    pub fn icon(&self) -> Option<&SharedTexture> {
         self.icon.as_ref()
     }
 }

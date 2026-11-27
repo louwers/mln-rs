@@ -22,9 +22,10 @@ naga.workspace = true
 
 # The programs, which the tests compile.
 [target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dev-dependencies]
-mln_engine = { package = "mln-rs-engine", path = "../mln_engine", features = [
+mln_builtins = { package = "mln-rs-builtins", path = "../mln_builtins", features = [
   "gpu-conformance",
 ] }
+mln_engine = { package = "mln-rs-engine", path = "../mln_engine" }
 
 [features]
 # `variants`, the sets of defines that the backends' tests compile each
