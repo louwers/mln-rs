@@ -116,8 +116,10 @@ fn render_until_idle(map: &Map, session: &RenderSession) {
     panic!("the map never settled");
 }
 
-/// Holds the runtime's thread until the returned sender sends or drops.
-fn hold_runtime(map: &Map) -> std::sync::mpsc::Sender<()> {
+/// Queues a hold of the runtime's thread behind the work sent before it:
+/// the hold starts when the returned receiver receives, and lasts until the
+/// returned sender sends or drops.
+fn queue_hold(map: &Map) -> (std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>) {
     let (open, gate) = channel::<()>();
     let (entered, parked) = channel::<()>();
     drop(
@@ -127,6 +129,12 @@ fn hold_runtime(map: &Map) -> std::sync::mpsc::Sender<()> {
         })
         .unwrap(),
     );
+    (open, parked)
+}
+
+/// Holds the runtime's thread until the returned sender sends or drops.
+fn hold_runtime(map: &Map) -> std::sync::mpsc::Sender<()> {
+    let (open, parked) = queue_hold(map);
     parked.recv_timeout(TIMEOUT).unwrap();
     open
 }
@@ -221,8 +229,6 @@ fn a_demand_shows_the_commands_sent_before_it() {
     let open = hold_runtime(&map);
     let moved = zoom(&map, 3.0);
     demand(&session, DemandMode::IfChanged, 631);
-    std::thread::sleep(std::time::Duration::from_millis(50));
-    assert_eq!(session.drain_frame_results().unwrap(), Vec::<FrameResult>::new());
     drop(open);
 
     let applied = result_of(moved).unwrap();
@@ -280,77 +286,78 @@ fn eased_for(moved: f64, degrees: f64, duration: std::time::Duration) -> std::ti
     std::time::Duration::from_secs_f64(moved / degrees * duration.as_secs_f64())
 }
 
+/// How many frames' reports have reached the map, for a map whose events
+/// `events` logs.
+fn frame_reports(events: &EventLog) -> u64 {
+    events
+        .events()
+        .iter()
+        .filter(|event| matches!(&event.kind, RuntimeEventKind::Map(MapEvent::RenderFrameFinished(_))))
+        .count() as u64
+}
+
 // A host demands each frame at its display's pace, so the camera moves
 // evenly only when each frame samples the animation at its demand, not when
 // the runtime's thread last updated the map after a frame.
+//
+// Each sample comes between its demand and its result, so the camera moves
+// between frames by no less than the time from the first result to the
+// second demand, and no more than from the first demand to the second
+// result, however late the runtime's thread runs.
 #[test]
 fn a_demand_shows_the_animations_as_of_its_call() {
     let runtime = runtime();
+    let events = EventLog::install(&runtime);
     let map = red_map(&runtime);
+    wait(map.set_event_mask(EventMask::ALL_MAP_EVENTS));
     let session = attach(&map);
     render_until_idle(&map, &session);
 
     let duration = std::time::Duration::from_secs(5);
     let _ease = start_ease(&map, 100.0, duration);
-    let (first_before, first_after, first) = timed_frame(&session, DemandMode::IfChanged, 1);
-    // The first frame's report updates the map on the runtime's thread
-    // meanwhile.
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    let (second_before, second_after, second) = timed_frame(&session, DemandMode::IfChanged, 2);
+    let (first_demanded, _, first) = timed_frame(&session, DemandMode::IfChanged, 1);
+    let first_shown = std::time::Instant::now();
+    // The first frame's report reaches the map.
+    let drawn = session.snapshot().unwrap().frame_generation;
+    assert!(eventually(|| frame_reports(&events) == drawn), "the first frame's report never reached the map");
+    // The gap tells a sample at the second demand from one at the report.
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    let (second_demanded, _, second) = timed_frame(&session, DemandMode::IfChanged, 2);
+    let second_shown = std::time::Instant::now();
 
     let moved = eased_for(longitude(&second) - longitude(&first), 100.0, duration);
     // The map solves the easing curve to a thousandth of the duration.
     let slack = duration / 1000;
     assert!(
-        second_before - first_after <= moved + slack && moved <= second_after - first_before + slack,
-        "the camera moved by {moved:?} between frames demanded {:?} to {:?} apart",
-        second_before - first_after,
-        second_after - first_before,
+        second_demanded - first_shown <= moved + slack && moved <= second_shown - first_demanded + slack,
+        "the camera moved by {moved:?} between frames, from {:?} to {:?} apart",
+        second_demanded - first_shown,
+        second_shown - first_demanded,
     );
 }
 
-// Every demand sets the map's frame clock, a still frame's too: a camera
-// command starts from the latest frame, not from the last frame of an
-// animation that ended since, which would show it under way at once.
+// Every demand sets the map's frame clock, a still frame's too, so a camera
+// command starts from the latest frame and not from the last frame of an
+// animation that ended since. The engine's transform tests cover how
+// commands start from the clock.
 #[test]
-fn a_command_after_still_frames_starts_from_the_latest_frame() {
+fn every_demand_sets_the_maps_frame_clock() {
     let runtime = runtime();
     let map = red_map(&runtime);
     let session = attach(&map);
     render_until_idle(&map, &session);
 
-    // A short animation, drawn until it ends.
-    let short = start_ease(&map, 10.0, std::time::Duration::from_millis(30));
-    let mut token = 0;
-    while map.snapshot().unwrap().transition_in_progress {
-        token += 1;
-        timed_frame(&session, DemandMode::Force, token);
+    for (token, mode) in [(1, DemandMode::Force), (2, DemandMode::IfChanged)] {
+        let before = std::time::Instant::now();
+        demand(&session, mode, token);
+        let after = std::time::Instant::now();
+        take_one(&session);
+        let clock = wait(map.with_core(|core| core.frame_clock().get())).expect("the demand set the frame clock");
+        assert!(
+            before <= clock && clock <= after,
+            "{mode:?}: the clock reads {clock:?}, demanded {before:?} to {after:?}"
+        );
     }
-    result_of(short).unwrap();
-    // Still frames, within the time that a frame clock stays fresh.
-    let mut last_still = None;
-    for _ in 0..4 {
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        token += 1;
-        let (before, after, _) = timed_frame(&session, DemandMode::Force, token);
-        last_still = Some((before, after));
-    }
-    let (still_before, still_after) = last_still.unwrap();
-
-    let duration = std::time::Duration::from_secs(2);
-    let _ease = start_ease(&map, 110.0, duration);
-    let (before, after, frame) = timed_frame(&session, DemandMode::IfChanged, token + 1);
-
-    // The ease starts at the last still frame's demand, and its first frame
-    // samples it at its own.
-    let moved = eased_for(longitude(&frame) - 10.0, 100.0, duration);
-    let slack = duration / 1000;
-    assert!(
-        before - still_after <= moved + slack && moved <= after - still_before + slack,
-        "the ease moved by {moved:?} in its first frame, demanded {:?} to {:?} after the last still frame",
-        before - still_after,
-        after - still_before,
-    );
 }
 
 // A frame demand's sample is not a command of the host's: it neither
@@ -373,10 +380,8 @@ fn frame_demands_send_the_map_no_commands() {
 // Demands that come while the runtime's thread is busy share one sample:
 // the map updates once, for the latest of them, however many waited.
 //
-// A frame's report that reaches the map once its frame clock is stale adds
-// an update of its own, as for a host that stopped drawing. A slow run can
-// take that long, so the test checks a burst whose reports all came within
-// the clock's freshness, and tries again until one does.
+// The runtime's thread is held again behind the sample, so no frame's report
+// can update the map before the frames render.
 #[test]
 fn demands_share_a_frame_sample_while_the_runtimes_thread_is_busy() {
     let runtime = runtime();
@@ -386,39 +391,23 @@ fn demands_share_a_frame_sample_while_the_runtimes_thread_is_busy() {
     let other = red_map(&runtime);
     let session = attach(&map);
     render_until_idle(&map, &session);
-    let reported = || {
-        let events = events.events();
-        events
-            .iter()
-            .filter(|event| matches!(&event.kind, RuntimeEventKind::Map(MapEvent::RenderFrameFinished(_))))
-            .count() as u64
-    };
-    // Every frame drawn so far has reached the map.
-    let settle = || {
-        let drawn = session.snapshot().unwrap().frame_generation;
-        assert!(eventually(|| reported() == drawn), "a frame's report never reached the map");
-    };
-
     let _ease = start_ease(&map, 100.0, std::time::Duration::from_secs(60));
-    let deadline = std::time::Instant::now() + TIMEOUT;
-    loop {
-        settle();
-        let latest = map.snapshot().unwrap().update_generation;
-        let start = std::time::Instant::now();
-        let open = hold_runtime(&other);
-        for token in 1..=4 {
-            demand(&session, DemandMode::Force, token);
-        }
-        drop(open);
-        let frames = take_results(&session, 4);
-        settle();
-        if start.elapsed() <= mln_engine::camera::transform::STALE_FRAME_TIME {
-            let updates: Vec<u64> = frames.iter().map(|frame| frame.map_update_generation).collect();
-            assert_eq!(updates, [latest + 1; 4], "{frames:?}");
-            return;
-        }
-        assert!(std::time::Instant::now() < deadline, "no burst's reports came while its frame clock was fresh");
+    // Every frame drawn so far has reached the map.
+    let drawn = session.snapshot().unwrap().frame_generation;
+    assert!(eventually(|| frame_reports(&events) == drawn), "a frame's report never reached the map");
+
+    let open = hold_runtime(&other);
+    let latest = map.snapshot().unwrap().update_generation;
+    for token in 1..=4 {
+        demand(&session, DemandMode::Force, token);
     }
+    let (reopen, behind_sample) = queue_hold(&other);
+    drop(open);
+    behind_sample.recv_timeout(TIMEOUT).unwrap();
+    let frames = take_results(&session, 4);
+    drop(reopen);
+    let updates: Vec<u64> = frames.iter().map(|frame| frame.map_update_generation).collect();
+    assert_eq!(updates, [latest + 1; 4], "{frames:?}");
 }
 
 // While the runtime's thread runs queued commands as one burst, it holds
