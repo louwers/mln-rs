@@ -19,8 +19,9 @@ use crate::expression::{
 use crate::feature::{Value, ValueObject};
 use crate::filter::{Filter, convert_filter};
 use crate::log_target;
+use crate::member::Members;
 use crate::property::table::{SetPropertyError, StyleProperty};
-use crate::registry::StyleRegistry;
+use crate::registry::{MemberValue, StyleRegistry};
 use crate::types::VisibilityType;
 
 mod convert;
@@ -167,7 +168,25 @@ impl Layer {
         }
 
         self.style.serialize_properties(&mut result);
+        self.style.base().members.serialize(&mut result);
         Value::Object(result)
+    }
+
+    /// The layer's extension members.
+    #[must_use]
+    pub fn members(&self) -> &Members {
+        &self.style.base().members
+    }
+
+    /// Sets the extension member `name` to `value`, or with `None` unsets
+    /// it, copying the style data only when the member changes.
+    pub(crate) fn set_member(&mut self, name: &str, value: Option<MemberValue>) {
+        let held = self.members().json(name);
+        if held == value.as_ref().map(|(json, _)| json) {
+            return;
+        }
+        let mut value = value;
+        self.mutate_base(&mut |base| base.members.set(name, value.take()));
     }
 
     /// A layer named `id` with this layer's members and properties but its

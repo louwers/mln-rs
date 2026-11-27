@@ -1,5 +1,6 @@
 //! The registrations that a runtime, its renderers and its tile workers
-//! share: the expression functions, the layer types and the source types.
+//! share: the expression functions, the layer types, the source types and
+//! the extension members.
 //!
 //! An app fills a [`RegistryBuilder`] by explicit calls, `mln_builtins`'s
 //! `register_builtins` first, and builds the [`Registry`] once. Tile workers
@@ -12,6 +13,7 @@ use mln_style::collections::VecMap;
 use mln_style::expression::Functions;
 use mln_style::expression::functions::RegisterError;
 use mln_style::layer::{ErasedStyleLayerType, StyleLayerType};
+use mln_style::member::{ErasedMember, Member, Place};
 use mln_style::source::StyleSourceType;
 use mln_style::{Source, StyleRegistry};
 
@@ -32,6 +34,7 @@ pub struct RegistryBuilder {
     layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
     placing_types: VecMap<&'static str, MakePlacement>,
     source_types: VecMap<&'static str, &'static dyn ErasedSourceType>,
+    members: Vec<&'static dyn ErasedMember>,
 }
 
 impl std::fmt::Debug for RegistryBuilder {
@@ -41,6 +44,7 @@ impl std::fmt::Debug for RegistryBuilder {
             .field("layer_types", &self.layer_types.keys().collect::<Vec<_>>())
             .field("placing_types", &self.placing_types.keys().collect::<Vec<_>>())
             .field("source_types", &self.source_types.keys().collect::<Vec<_>>())
+            .field("members", &self.members.iter().map(|member| member.name()).collect::<Vec<_>>())
             .finish()
     }
 }
@@ -102,9 +106,26 @@ impl RegistryBuilder {
         Ok(())
     }
 
+    /// Adds the extension member `member`, which gives the style's members
+    /// of its place and name a type. Fails for a place and name that an
+    /// earlier member took.
+    pub fn add_member<T: Send + Sync + 'static>(&mut self, member: &'static Member<T>) -> Result<(), RegisterError> {
+        let taken = |added: &&dyn ErasedMember| added.place() == member.place() && added.name() == member.name();
+        if self.members.iter().any(taken) {
+            let place = match member.place() {
+                Place::Root => "root",
+                Place::Layer => "layer",
+            };
+            return Err(RegisterError::Duplicate(format!("{place} member {}", member.name())));
+        }
+        self.members.push(member);
+        Ok(())
+    }
+
     #[must_use]
     pub fn build(self) -> Arc<Registry> {
-        Registry::new(Arc::new(self.functions), self.layer_types, self.placing_types, self.source_types)
+        let RegistryBuilder { functions, layer_types, placing_types, source_types, members } = self;
+        Registry::new(Arc::new(functions), layer_types, placing_types, source_types, members)
     }
 }
 
@@ -112,9 +133,9 @@ fn style_half(layer_type: &'static dyn ErasedLayerType) -> &'static dyn ErasedSt
     layer_type.style()
 }
 
-/// The expression functions, layer types and source types that a style
-/// parses against, its renderer draws and its tile workers lay out, built by
-/// a [`RegistryBuilder`]. It doesn't change once built.
+/// The expression functions, layer types, source types and extension
+/// members that a style parses against, its renderer draws and its tile
+/// workers lay out, built by a [`RegistryBuilder`]. It doesn't change once built.
 ///
 /// A map and the renderer and tile workers that draw it must be given
 /// registries filled by the same calls: they identify functions, layer
@@ -138,10 +159,11 @@ impl Registry {
         layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
         placing_types: VecMap<&'static str, MakePlacement>,
         source_types: VecMap<&'static str, &'static dyn ErasedSourceType>,
+        members: Vec<&'static dyn ErasedMember>,
     ) -> Arc<Registry> {
         let style_halves = layer_types.values().map(|&layer_type| style_half(layer_type));
         let style_source_halves = source_types.values().map(|&source_type| source_type.style());
-        let style = StyleRegistry::new(functions, style_halves, style_source_halves);
+        let style = StyleRegistry::new(functions, style_halves, style_source_halves, members);
         Arc::new(Registry { style: Arc::new(style), layer_types, placing_types, source_types })
     }
 

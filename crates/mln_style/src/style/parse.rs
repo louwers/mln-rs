@@ -16,6 +16,7 @@ use crate::hash::{HashMap, HashSet};
 use crate::layer::{FontStack, InvalidProperty, Layer, convert_layer_with, set_paint_properties};
 use crate::light::{Light, convert_light};
 use crate::log_target;
+use crate::member::{Members, Place, is_extension_member};
 use crate::projection::{Projection, convert_projection};
 use crate::property::transition::TransitionOptions;
 use crate::registry::StyleRegistry;
@@ -43,6 +44,8 @@ pub struct Parser {
     pub(crate) sky: Option<Sky>,
     pub(crate) terrain: Option<Terrain>,
     pub(crate) projection: Projection,
+    /// The root's extension members.
+    pub(crate) members: Members,
 
     /// Default values of the root "state" property, keyed by state property
     /// name, used by the "global-state" expression.
@@ -73,6 +76,7 @@ impl Parser {
             sky: None,
             terrain: None,
             projection: Projection::new(),
+            members: Members::default(),
             global_state_defaults: GlobalStateMap::new(),
             name: String::new(),
             lat_lng: LatLng::default(),
@@ -212,6 +216,12 @@ impl Parser {
             self.font_faces = Some(Arc::new(parse_font_faces(faces)));
         }
 
+        for (name, value) in members(object) {
+            if is_extension_member(name) {
+                self.parse_member(name, value);
+            }
+        }
+
         // Call for side effect of logging warnings for invalid values.
         let _ = self.font_stacks();
 
@@ -267,6 +277,13 @@ impl Parser {
         };
 
         self.projection = converted;
+    }
+
+    fn parse_member(&mut self, name: &str, value: &Json<'_>) {
+        match self.registry.member_value(Place::Root, name, &Convertible::from(value)) {
+            Ok(value) => self.members.set(name, value),
+            Err(error) => log::warn!(target: log_target::PARSE_STYLE, "{}", error.message),
+        }
     }
 
     fn parse_state(&mut self, value: &Json<'_>) {

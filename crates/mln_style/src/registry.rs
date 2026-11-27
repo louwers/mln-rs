@@ -1,30 +1,42 @@
 //! The registrations that a style parses against: its expression functions,
-//! its layer types and its source types.
+//! its layer types, its source types and its extension members.
 
 use std::sync::Arc;
 
 use crate::collections::VecMap;
 use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
+use crate::feature::Value;
 use crate::layer::{ErasedStyleLayerType, Layer, SourceKind};
+use crate::log_target;
+use crate::member::{self, ErasedMember, Place};
 use crate::source::ErasedStyleSourceType;
 
-/// The expression functions, layer types and source types that a style's
-/// JSON, its layers' property values and its filters parse against.
+/// The expression functions, layer types, source types and extension
+/// members that a style's JSON, its layers' property values and its filters
+/// parse against.
 pub struct StyleRegistry {
     functions: Arc<Functions>,
     layer_types: VecMap<&'static str, &'static dyn ErasedStyleLayerType>,
     source_types: VecMap<&'static str, &'static dyn ErasedStyleSourceType>,
+    root_members: VecMap<&'static str, &'static dyn ErasedMember>,
+    layer_members: VecMap<&'static str, &'static dyn ErasedMember>,
 }
 
+/// A member's JSON value, and its parsed value where the registry has the
+/// member.
+pub(crate) type MemberValue = (Value, Option<Arc<dyn std::any::Any + Send + Sync>>);
+
 impl StyleRegistry {
-    /// The registry of `functions`, `layer_types` and `source_types`. A type
-    /// is known by its name: of two types of one name, the first counts.
+    /// The registry of `functions`, `layer_types`, `source_types` and
+    /// `members`. A type is known by its name, and a member by its place and
+    /// name: of two of one name, the first counts.
     #[must_use]
     pub fn new(
         functions: Arc<Functions>,
         layer_types: impl IntoIterator<Item = &'static dyn ErasedStyleLayerType>,
         source_types: impl IntoIterator<Item = &'static dyn ErasedStyleSourceType>,
+        members: impl IntoIterator<Item = &'static dyn ErasedMember>,
     ) -> Self {
         let mut layers_by_name = VecMap::new();
         for layer_type in layer_types {
@@ -34,7 +46,21 @@ impl StyleRegistry {
         for source_type in source_types {
             sources_by_name.entry(source_type.info().name).or_insert(source_type);
         }
-        StyleRegistry { functions, layer_types: layers_by_name, source_types: sources_by_name }
+        let (mut root_members, mut layer_members) = (VecMap::new(), VecMap::new());
+        for member in members {
+            let by_name = match member.place() {
+                Place::Root => &mut root_members,
+                Place::Layer => &mut layer_members,
+            };
+            by_name.entry(member.name()).or_insert(member);
+        }
+        StyleRegistry {
+            functions,
+            layer_types: layers_by_name,
+            source_types: sources_by_name,
+            root_members,
+            layer_members,
+        }
     }
 
     /// The built-in expression functions and the style halves of the
@@ -69,7 +95,7 @@ impl StyleRegistry {
             style_source_entry::<GeoJsonSourceType>(),
             style_source_entry::<ImageSourceType>(),
         ];
-        Arc::new(StyleRegistry::new(Functions::with_builtins(), layer_types, source_types))
+        Arc::new(StyleRegistry::new(Functions::with_builtins(), layer_types, source_types, []))
     }
 
     #[must_use]
@@ -95,6 +121,47 @@ impl StyleRegistry {
     /// The source types, in name order.
     pub fn source_types(&self) -> impl Iterator<Item = &'static dyn ErasedStyleSourceType> + '_ {
         self.source_types.values().copied()
+    }
+
+    /// The extension member `name` at `place`, if the registry has it.
+    #[must_use]
+    pub fn member(&self, place: Place, name: &str) -> Option<&'static dyn ErasedMember> {
+        let by_name = match place {
+            Place::Root => &self.root_members,
+            Place::Layer => &self.layer_members,
+        };
+        by_name.get(name).copied()
+    }
+
+    /// The value of the extension member `name` at `place` from `value`, or
+    /// `None` for null or undefined, which unsets it. A member the registry
+    /// lacks keeps `value` as it is, with a warning.
+    ///
+    /// # Errors
+    ///
+    /// When the registry has the member and `value` isn't one of it.
+    pub(crate) fn member_value(
+        &self,
+        place: Place,
+        name: &str,
+        value: &Convertible<'_>,
+    ) -> Result<Option<MemberValue>, Error> {
+        if value.is_undefined() {
+            return Ok(None);
+        }
+        let json = member::to_value(value);
+        let Some(member) = self.member(place, name) else {
+            let at = match place {
+                Place::Root => "the style's root",
+                Place::Layer => "a layer",
+            };
+            log::warn!(target: log_target::PARSE_STYLE, "no extension registered the member \"{name}\" of {at}");
+            return Ok(Some((json, None)));
+        };
+        match member.parse(&Convertible::from(&json), &self.functions) {
+            Ok(parsed) => Ok(Some((json, Some(parsed)))),
+            Err(error) => Err(Error::new(format!("member \"{name}\": {}", error.message))),
+        }
     }
 
     /// A layer of the type `type_` from its style JSON `value`, without its
@@ -133,6 +200,8 @@ impl std::fmt::Debug for StyleRegistry {
         f.debug_struct("StyleRegistry")
             .field("layer_types", &self.layer_types.keys().collect::<Vec<_>>())
             .field("source_types", &self.source_types.keys().collect::<Vec<_>>())
+            .field("root_members", &self.root_members.keys().collect::<Vec<_>>())
+            .field("layer_members", &self.layer_members.keys().collect::<Vec<_>>())
             .finish_non_exhaustive()
     }
 }

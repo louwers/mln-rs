@@ -18,6 +18,7 @@ mod format_section_override_test;
 mod layer_round_trip;
 mod layout_difference;
 mod m1_render_test_styles;
+mod members;
 mod position;
 mod properties;
 mod property_expression;

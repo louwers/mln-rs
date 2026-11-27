@@ -11,8 +11,10 @@
 //! (`time`), the Unicode script checks (`i18n`) and the projection's
 //! subdivision granularity.
 //!
-//! A style parses against a [`StyleRegistry`]: the expression functions and
-//! layer types its JSON, property values and filters may name.
+//! A style parses against a [`StyleRegistry`]: the expression functions,
+//! layer types and source types its JSON, property values and filters may
+//! name, and the extension members (`member`) that give the style's and its
+//! layers' `<namespace>:<name>` members a type.
 //!
 //! Versions:
 //! - A [`Style`] is a value: a version of a map's style. Its parts sit
@@ -69,6 +71,7 @@ pub mod light;
 #[rustfmt::skip]
 mod light_properties;
 pub mod math;
+pub mod member;
 pub mod padding;
 pub mod projection;
 pub mod property;

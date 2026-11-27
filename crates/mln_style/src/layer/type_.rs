@@ -19,6 +19,7 @@ use crate::expression::{Dependency, Expr, Functions};
 use crate::feature::ValueObject;
 use crate::filter::Filter;
 use crate::layer::FontStack;
+use crate::member::Members;
 use crate::property::evaluation::PropertyEvaluationParameters;
 use crate::property::table::{
     self, OwnerSlot, Properties, PropertyTable, PropertyVisitor, SetPropertyError, StyleProperty,
@@ -217,6 +218,9 @@ pub struct LayerBase {
     pub min_zoom: f32,
     pub max_zoom: f32,
     pub visibility: VisibilityType,
+    /// The layer's extension members, which tile workers don't get.
+    #[wire(skip)]
+    pub(crate) members: Members,
 }
 
 impl LayerBase {
@@ -231,7 +235,14 @@ impl LayerBase {
             min_zoom: f32::NEG_INFINITY,
             max_zoom: f32::INFINITY,
             visibility: VisibilityType::Visible,
+            members: Members::default(),
         }
+    }
+
+    /// The layer's extension members.
+    #[must_use]
+    pub fn members(&self) -> &Members {
+        &self.members
     }
 
     pub(crate) fn get_filter_dependencies(&self) -> Dependency {

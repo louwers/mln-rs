@@ -9,6 +9,7 @@ use crate::font_face::FontFaces;
 use crate::geo::LatLng;
 use crate::layer::{Layer, LayerList, SourceKind};
 use crate::light::Light;
+use crate::member::{Members, Place, is_extension_member};
 use crate::projection::Projection;
 use crate::property::transition::TransitionOptions;
 use crate::registry::StyleRegistry;
@@ -71,10 +72,11 @@ pub(crate) type ImageList = Vec<Arc<image::Impl>>;
 ///
 /// A style is a value. [`apply`](Self::apply) makes an [`Edit`]; nothing
 /// else changes it. Its parts (layers, sources, images, light, sky,
-/// terrain, projection, global state and the document's own members) sit behind
-/// their own `Arc`s, so a clone is cheap and an edit copies only the part it
-/// changes. Two versions whose part `Arc`s are the same pointer have the
-/// same part, which [`is_same_version`](Self::is_same_version) and
+/// terrain, projection, global state, extension members and the document's
+/// own members) sit behind their own `Arc`s, so a clone is cheap and an edit
+/// copies only the part it changes. Two versions whose part `Arc`s are the
+/// same pointer have the same part, which
+/// [`is_same_version`](Self::is_same_version) and
 /// [`StyleDiff::between`](crate::diff::StyleDiff::between) read.
 #[derive(Clone)]
 pub struct Style {
@@ -91,6 +93,8 @@ pub struct Style {
     sky: Option<Arc<Sky>>,
     terrain: Option<Arc<Terrain>>,
     projection: Arc<Projection>,
+    /// The root's extension members.
+    members: Arc<Members>,
     transition: TransitionOptions,
     /// What the `global-state` expressions read.
     global_state: Arc<GlobalStateMap>,
@@ -135,6 +139,7 @@ impl Style {
             sky: None,
             terrain: None,
             projection: Arc::default(),
+            members: Arc::default(),
             transition: TransitionOptions::default(),
             global_state: Arc::default(),
             global_state_defaults: Arc::default(),
@@ -207,6 +212,7 @@ impl Style {
             })
             .map(Arc::new);
         style.projection = Arc::new(std::mem::take(&mut parser.projection));
+        style.members = Arc::new(std::mem::take(&mut parser.members));
 
         style.sprites = Arc::from(std::mem::take(&mut parser.sprites));
         style.glyph_url = Arc::from(parser.glyph_url.as_str());
@@ -274,6 +280,12 @@ impl Style {
     #[must_use]
     pub fn get_projection(&self) -> &Arc<Projection> {
         &self.projection
+    }
+
+    /// The extension members of the style's root.
+    #[must_use]
+    pub fn members(&self) -> &Arc<Members> {
+        &self.members
     }
 
     /// What the style's `global-state` expressions read.
@@ -375,8 +387,9 @@ impl Style {
             }
             Edit::SetLayerProperty { layer, name, value } => {
                 let sources = Arc::clone(&self.sources);
+                let registry = Arc::clone(&self.registry);
                 self.update_layer(&layer, |target| {
-                    set_layer_property(target, &name, &value)?;
+                    set_layer_property(&registry, target, &name, &value)?;
                     check_layer_source(&sources, target)
                 })?;
             }
@@ -421,6 +434,15 @@ impl Style {
                 }
             }
             Edit::SetProjection(projection) => self.projection = Arc::new(projection),
+            Edit::SetMember { name, value } => {
+                let value = self
+                    .registry
+                    .member_value(Place::Root, &name, &Convertible::from(&value))
+                    .map_err(|error| Error::invalid_argument(error.message))?;
+                if self.members.json(&name) != value.as_ref().map(|(json, _)| json) {
+                    Arc::make_mut(&mut self.members).set(&name, value);
+                }
+            }
             Edit::SetTransition(options) => self.transition = options,
             Edit::SetGlobalState { name, value } => self.set_global_state(&name, &value),
             Edit::SetGlobalStateDefaults(defaults) => {
@@ -505,6 +527,7 @@ impl Style {
             && same_option(self.sky.as_ref(), other.sky.as_ref())
             && same_option(self.terrain.as_ref(), other.terrain.as_ref())
             && Arc::ptr_eq(&self.projection, &other.projection)
+            && Arc::ptr_eq(&self.members, &other.members)
             && self.transition == other.transition
             && Arc::ptr_eq(&self.global_state, &other.global_state)
             && Arc::ptr_eq(&self.registry, &other.registry)
@@ -592,11 +615,24 @@ fn source_not_found(id: &str) -> Error {
 }
 
 /// Sets the property `name` of `layer` to the style JSON `value`: a layer
-/// type's property or transition, or `filter`, `minzoom`, `maxzoom`,
-/// `source` or `source-layer`, where null resets the ones with a default.
-fn set_layer_property(layer: &mut Layer, name: &str, value: &serde_json::Value) -> Result<(), Error> {
+/// type's property or transition, `filter`, `minzoom`, `maxzoom`, `source`
+/// or `source-layer`, where null resets the ones with a default, or an
+/// extension member, which null unsets.
+fn set_layer_property(
+    registry: &StyleRegistry,
+    layer: &mut Layer,
+    name: &str,
+    value: &serde_json::Value,
+) -> Result<(), Error> {
     let type_info = layer.info();
     let id = layer.get_id().to_owned();
+    if is_extension_member(name) {
+        let value = registry
+            .member_value(Place::Layer, name, &Convertible::from(value))
+            .map_err(|error| Error::invalid_argument(format!("layer \"{id}\": {}", error.message)))?;
+        layer.set_member(name, value);
+        return Ok(());
+    }
     if (name == "source" || name == "source-layer") && type_info.source == SourceKind::None {
         // A layer that takes no source would ignore the value.
         return Err(Error::invalid_argument(format!("{} layer \"{id}\" does not take a {name}", type_info.name)));

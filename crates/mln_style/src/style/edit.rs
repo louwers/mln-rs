@@ -37,8 +37,9 @@ pub enum Edit {
     /// Replaces the layer with `layer`'s id.
     SetLayer(Layer),
     /// Sets a layer type's property, `<name>-transition`, `filter`,
-    /// `minzoom`, `maxzoom`, `visibility`, `source` or `source-layer` from a
-    /// style JSON value; null resets the ones that have a default.
+    /// `minzoom`, `maxzoom`, `visibility`, `source`, `source-layer` or an
+    /// extension member from a style JSON value; null resets the ones that
+    /// have a default, and unsets an extension member.
     SetLayerProperty {
         layer: String,
         name: String,
@@ -70,6 +71,13 @@ pub enum Edit {
     /// in the style and isn't a `raster-dem` source.
     SetTerrain(Option<Terrain>),
     SetProjection(Projection),
+    /// Sets the extension member `name` of the style's root from a style
+    /// JSON value; null unsets it. Fails with `InvalidArgument` for a value
+    /// that the registry's member of the name doesn't take.
+    SetMember {
+        name: String,
+        value: serde_json::Value,
+    },
     SetTransition(TransitionOptions),
     /// Sets a value that `global-state` expressions read. Null resets it to
     /// the default that the style's `state` gives.

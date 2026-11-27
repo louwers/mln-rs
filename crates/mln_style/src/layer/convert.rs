@@ -1,6 +1,7 @@
 use super::{Convertible, Error};
 use crate::layer::{Layer, PropertyScope, SourceKind};
 use crate::log_target;
+use crate::member::{Place, is_extension_member};
 use crate::registry::StyleRegistry;
 
 fn set_object_member(layer: &mut Layer, value: &Convertible<'_>, member: &str, error: &mut Error) -> bool {
@@ -126,5 +127,41 @@ pub(crate) fn convert_layer_with(
         return None;
     }
 
+    if let Some(error_) = set_members(registry, &mut layer, value, invalid) {
+        *error = error_;
+        return None;
+    }
+
     Some(layer)
+}
+
+/// Sets the extension members of `layer` from the members of its style JSON
+/// `value` whose names are those of extension members.
+fn set_members(
+    registry: &StyleRegistry,
+    layer: &mut Layer,
+    value: &Convertible<'_>,
+    invalid: InvalidProperty,
+) -> Option<Error> {
+    value.each_member(|name, member| {
+        if !is_extension_member(name) {
+            return None;
+        }
+        match registry.member_value(Place::Layer, name, member) {
+            Ok(value) => {
+                layer.set_member(name, value);
+                None
+            }
+            Err(error) => {
+                let error = Error::new(format!("layer '{}': {}", layer.get_id(), error.message));
+                match invalid {
+                    InvalidProperty::Fail => Some(error),
+                    InvalidProperty::Skip => {
+                        log::warn!(target: log_target::PARSE_STYLE, "{}", error.message);
+                        None
+                    }
+                }
+            }
+        }
+    })
 }

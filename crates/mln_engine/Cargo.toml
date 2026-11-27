@@ -183,6 +183,12 @@ path = "tests/layer_type.rs"
 # A layer type that another crate declares on the public layer contract.
 
 [[test]]
+name = "style_members"
+path = "tests/style_members.rs"
+# Extension members that another crate registers, read by a layer's
+# renderer.
+
+[[test]]
 name = "offline_download_map_test"
 path = "tests/offline_download_map.rs"
 # StubFileSource answers the download.

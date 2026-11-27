@@ -13,6 +13,7 @@ use crate::expression::GlobalStateMap;
 use crate::feature::Value;
 use crate::layer::{Layer, SourceKind, convert_layer};
 use crate::light::{Light, convert_light};
+use crate::member::is_extension_member;
 use crate::projection::{Projection, convert_projection};
 use crate::property::table::{Kind, Properties, StyleProperty, defined_properties};
 use crate::property::transition::TransitionOptions;
@@ -118,9 +119,12 @@ impl Style {
     /// value `json`.
     ///
     /// `name` is one of the layer's layout or paint
-    /// [properties](https://maplibre.org/maplibre-style-spec/layers/), or
-    /// `filter`, `minzoom`, `maxzoom`, `source` or `source-layer`. A `null`
-    /// resets any of these but `source` and `source-layer` to its default.
+    /// [properties](https://maplibre.org/maplibre-style-spec/layers/),
+    /// `filter`, `minzoom`, `maxzoom`, `source` or `source-layer`, or an
+    /// extension member (`<namespace>:<name>`). A `null` resets any of these
+    /// but `source` and `source-layer` to its default, and unsets an
+    /// extension member. The value of an extension member that the registry
+    /// lacks is kept as it is, with a warning.
     ///
     /// Fails with [`ErrorKind::NotFound`](crate::error::ErrorKind) if the style has no layer named
     /// `layer_id`, and with `InvalidArgument` if `json` isn't valid JSON,
@@ -160,6 +164,7 @@ impl Style {
                 let zoom = layer.get_max_zoom();
                 (zoom != f32::INFINITY).then_some(Value::Double(zoom.into()))
             }
+            _ if is_extension_member(name) => layer.members().json(name).cloned(),
             _ => {
                 let property = layer.get_property(name);
                 (property.get_kind() != Kind::Undefined).then(|| property.get_value().clone())
@@ -172,10 +177,12 @@ impl Style {
     /// `name` to the JSON value `json`, without reloading the style. A `null`
     /// resets it to its default, as if the style didn't set it.
     ///
-    /// `light`, `sky`, `terrain`, `projection`, `state` and `transition` change. A
-    /// `state` sets every global state property to its new default. A
-    /// `transition` keeps whether placements fade, which the style spec's
-    /// transition doesn't hold.
+    /// `light`, `sky`, `terrain`, `projection`, `state`, `transition` and the
+    /// extension members (`<namespace>:<name>`) change. A `state` sets every
+    /// global state property to its new default. A `transition` keeps
+    /// whether placements fade, which the style spec's transition doesn't
+    /// hold. The value of an extension member that the registry lacks is
+    /// kept as it is, with a warning.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](crate::error::ErrorKind) if
     /// `name` isn't a root property, or is `sources` or `layers`, or if
@@ -185,6 +192,10 @@ impl Style {
     pub fn set_root_property_json(&mut self, name: &str, json: &str) -> Result<(), Error> {
         require_root_property(name)?;
         let context = format!("style root property {}", quote(name));
+        if is_extension_member(name) {
+            let value = parse_value(json, &context)?;
+            return self.apply(Edit::SetMember { name: name.to_owned(), value });
+        }
         let value = parse(json, &context)?;
         let convertible = Convertible::from(&value);
         let mut error = crate::conversion::Error::default();
@@ -261,6 +272,9 @@ impl Style {
     /// `name` isn't a root property, or is `sources` or `layers`.
     pub fn root_property_json(&self, name: &str) -> Result<Option<String>, Error> {
         require_root_property(name)?;
+        if is_extension_member(name) {
+            return Ok(self.members().json(name).map(json_text));
+        }
         let value = match name {
             "light" => defined_properties_json(&**self.get_light()),
             "sky" => self.get_sky().and_then(|sky| defined_properties_json(&**sky)),
@@ -359,7 +373,7 @@ const ROOT_PROPERTIES: &[&str] = &[
 ];
 
 fn require_root_property(name: &str) -> Result<(), Error> {
-    if ROOT_PROPERTIES.contains(&name) {
+    if ROOT_PROPERTIES.contains(&name) || is_extension_member(name) {
         Ok(())
     } else {
         Err(Error::invalid_argument(format!("{} is not a style root property that this call takes", quote(name))))
