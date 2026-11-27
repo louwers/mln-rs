@@ -33,13 +33,13 @@ use crate::buckets::raster_bucket::{MaskQuads, RasterLayoutVertex};
 use crate::draw::context::Context;
 use crate::draw::identity::SimpleIdentity;
 use crate::draw::indexes::{DrawIndexes, Indexes, SharedIndexes};
-use crate::draw::objects::{DrawGeometry, DrawObjects, Textures};
+use crate::draw::objects::{DrawGeometry, Mesh, Textures};
 use crate::draw::segment::SegmentBase;
 use crate::draw::store::SharedTexture;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::SharedVertices;
 use crate::layer::bucket_geometry::copied_vertices;
-use crate::layer::layer_drawing::{DrawList, DrawObjectsMut, KeptDraw, TileDraws, TileObjects};
+use crate::layer::layer_drawing::{DrawList, FrameDraw, MeshMut, TileDraws, TileObjects};
 use crate::layer::layer_type::LayerType;
 use crate::layer::render_layer::{
     EvaluateCx, Evaluation, Hosted, LayerCx, LayerValues, OnTerrain, RenderLayer, TileCx, TypedLayer, UpdateCx,
@@ -66,22 +66,18 @@ const COLOR_STOPS_SLOT: usize = programs::COLOR_RELIEF.texture_slot("color_stops
 const ELEVATION_STOPS_SLOT: usize = programs::COLOR_RELIEF.texture_slot("elevation_stops");
 const IMAGE_SLOT: usize = programs::COLOR_RELIEF.texture_slot("image");
 
-/// What the layer keeps of a tile: the draw that colors its DEM, with the
+/// What the layer keeps of a tile: the mesh that colors its DEM, with the
 /// DEM's properties it was built with.
 pub(crate) struct ReliefTile {
-    draw: KeptDraw,
+    mesh: Mesh,
     tile_props: ColorReliefTilePropsUBO,
 }
 
 impl TileObjects for ReliefTile {
     type Part = ();
 
-    fn objects(&mut self, (): ()) -> Option<DrawObjectsMut<'_>> {
-        self.draw.objects(())
-    }
-
-    fn drop_bindings(&mut self) {
-        self.draw.drop_bindings();
+    fn objects(&mut self, (): ()) -> Option<MeshMut<'_>> {
+        Some((&mut self.mesh).into())
     }
 }
 
@@ -463,14 +459,14 @@ impl TypedLayer for RenderColorReliefLayer {
         draw_textures[IMAGE_SLOT] = Some(dem_texture.clone());
         draw_textures[ELEVATION_STOPS_SLOT] = Some(elevation_stops_texture.clone());
         draw_textures[COLOR_STOPS_SLOT] = Some(color_stops_texture.clone());
-        let objects = DrawObjects::new(
+        let mesh = Mesh::new(
             color_relief_shader,
             ColorMode::alpha_blended(),
             CullFaceMode::disabled(),
             geometry,
             draw_textures,
         );
-        Some(ReliefTile { draw: KeptDraw::new(objects), tile_props })
+        Some(ReliefTile { mesh, tile_props })
     }
 
     /// Makes the frame's draws of the layer, one of each of its tiles, and
@@ -530,7 +526,7 @@ impl TypedLayer for RenderColorReliefLayer {
                 (COLOR_STOPS_SLOT, color_stops_texture),
             ];
             for (slot, texture) in textures {
-                cached.draw.objects.set_texture(slot, Some(texture));
+                cached.mesh.set_texture(slot, Some(texture));
             }
             let projection = paint_parameters.projection_data_for_tile(&tile_id.to_unwrapped(), false);
             let uniforms = ReliefUniforms {
@@ -538,12 +534,12 @@ impl TypedLayer for RenderColorReliefLayer {
                 tile_props: cached.tile_props,
                 projection: to_projection_ubo(&projection),
             };
-            let draw = cached.draw.frame_draw(Some(tile_id));
+            let draw = FrameDraw::new(Some(tile_id), cached.mesh.id());
             draw_list.push(draw, uniforms);
         }
 
         let opacity = *cx.values.evaluated.paint.color_relief_opacity.uniform();
-        cx.drawing.finish(draw_list, cx.tiles, gpu, paint_parameters.context, |writer| {
+        cx.drawing.finish(draw_list, gpu, paint_parameters.context, |writer| {
             let props = ColorReliefEvaluatedPropsUBO { opacity, pad_eval0: 0.0, pad_eval1: 0.0, pad_eval2: 0.0 };
             writer.uniform(PROPS_ID, &props);
             writer.storage(DRAWABLE_ID, |uniforms| uniforms.draw_ubo);
