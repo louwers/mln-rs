@@ -13,9 +13,9 @@ use mln_engine::source::TileOperation;
 use mln_engine::storage::{Resource, Response};
 use mln_engine::tile::OverscaledTileID;
 use mln_runtime::{
-    Applied, AttachOptions, BackendType, Completion, DemandMode, Device, DeviceOptions, Error, EventMask, FrameDemand,
-    FrameDisposition, FrameResult, Map, MapOptions, RenderSession, RenderTarget, ResourceRequest, Runtime,
-    RuntimeEventKind, RuntimeOptions, SourceQueryOptions,
+    Applied, AttachOptions, Completion, DemandMode, Error, EventMask, FrameDemand, FrameDisposition, FrameResult, Map,
+    MapOptions, RenderSession, RenderTarget, ResourceRequest, Runtime, RuntimeEventKind, RuntimeOptions,
+    SourceQueryOptions,
 };
 use mln_style::Edit;
 use mln_style::geo::LatLng;
@@ -170,7 +170,7 @@ impl Host {
         let (map, created) = runtime.create_map(options).unwrap();
         created.wait().unwrap();
         let update = AtomicU64::new(wait(map.set_style_json(style)).render_update_generation);
-        let device = Device::with_backend(backend(), DeviceOptions::default()).unwrap();
+        let device = mln_headless::harness_device().unwrap();
         let target = RenderTarget::Offscreen { size: SIZE, device: Some(device) };
         let frames: Arc<(Mutex<bool>, Condvar)> = Arc::default();
         let woken = Arc::clone(&frames);
@@ -275,18 +275,6 @@ impl Drop for Host {
         if let Ok(released) = self.runtime.release() {
             let _ = released.wait();
         }
-    }
-}
-
-/// The backend that `MLN_RENDER_BACKEND` names, or WebGPU.
-fn backend() -> BackendType {
-    match std::env::var("MLN_RENDER_BACKEND").map(|backend| backend.to_ascii_lowercase()).as_deref() {
-        Ok("metal") => BackendType::Metal,
-        Ok("vulkan") => BackendType::Vulkan,
-        Ok("d3d12") => BackendType::D3D12,
-        Ok("gl") => BackendType::OpenGL,
-        Ok("webgpu") | Err(_) => BackendType::WebGPU,
-        Ok(other) => panic!("MLN_RENDER_BACKEND names no backend: {other}"),
     }
 }
 
