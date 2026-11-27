@@ -35,9 +35,10 @@ use crate::layer::layer_drawing::{DrawList, DrawObjectsMut, FrameDraw, TileDraws
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, LayerBucket, LayerUpdateParameters, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer,
+    EvaluateCx, Evaluation, LayerUpdateParameters, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer,
     RenderLayerBase, TypedLayer,
 };
+use crate::layer::tile_input::{Features, TileData};
 use crate::layers::line::dashes::{LineAtlas, LinePatternCap};
 use crate::layers::line::programs;
 use crate::layers::line::ubo::{
@@ -184,12 +185,11 @@ fn dash_atlas_texture(gpu: &mut dyn Gpu, context: &mut Context, binders: &LineBi
 }
 
 impl LayerType for Line {
-    type Layout = PatternLayout<LineLayoutSpec>;
-    type TileBucket<'a> = LayerBucket<'a, Line>;
+    type Input = Features<PatternLayout<LineLayoutSpec>>;
     const CROSSFADES: bool = true;
 
-    fn query_radius(bucket: &LineBucket, layer: &EvaluatedLayer<Line>) -> f32 {
-        bucket.query_radius(layer)
+    fn query_radius(data: TileData<'_, Line>, layer: &EvaluatedLayer<Line>) -> f32 {
+        data.bucket.query_radius(layer)
     }
 
     fn render_layer(style: Arc<LayerStyle<Line>>) -> Box<dyn RenderLayer> {
@@ -370,13 +370,13 @@ impl TypedLayer for RenderLineLayer {
         let frame = self.drawing.frame_mut();
         let paint = &self.values.evaluated.paint;
         frame.set_composite(Composite::of(*paint.line_layer_opacity.uniform(), *paint.line_layer_blend.uniform()));
-        frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.draw_id(paint_parameters).to_unwrapped()));
+        frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.draw_id().to_unwrapped()));
 
         let render_pass = RenderPass(self.values.evaluated.render_passes & !RenderPass::Opaque.underlying_type());
         for tile in render_tiles {
-            let tile_id = tile.draw_id(paint_parameters);
+            let tile_id = tile.draw_id();
 
-            let Some(render_data) = tile.bucket_for_pass(render_pass) else {
+            let Some(render_data) = tile.data_for_pass(render_pass) else {
                 self.drawing.tiles_mut().drop_value(&tile_id);
                 continue;
             };
@@ -449,7 +449,7 @@ impl TypedLayer for RenderLineLayer {
     /// with when its bucket has no per-feature patterns.
     fn update(&mut self, _params: &mut LayerUpdateParameters<'_>, tiles: &[FrameTile<'_, Line>]) {
         for tile in tiles {
-            let Some(bucket) = tile.bucket() else {
+            let Some(bucket) = tile.data() else {
                 continue;
             };
             let dasharray = bucket.layer.paint.line_dasharray.faded();
@@ -462,7 +462,7 @@ impl TypedLayer for RenderLineLayer {
         // A dashed draw asks for the layer's pattern even where it is empty.
         let layer_dasharray = self.values.evaluated.paint.line_dasharray.faded();
         for tile in tiles {
-            let Some(bucket) = tile.bucket() else {
+            let Some(bucket) = tile.data() else {
                 continue;
             };
             let laid_out = &bucket.layer.paint.line_dasharray;
@@ -532,7 +532,7 @@ impl RenderLineLayer {
         &mut self,
         gpu: &mut dyn Gpu,
         context: &mut Context,
-        tile_bucket: LayerBucket<'_, Line>,
+        tile_bucket: TileData<'_, Line>,
         binders: &LineBinders,
         evaluated: &LinePaintProperties::PossiblyEvaluated,
         pass: RenderPass,
@@ -653,7 +653,7 @@ impl RenderLineLayer {
     fn uniforms(
         layer: &EvaluatedLayer<Line>,
         tile_id: UnwrappedTileID,
-        tile_bucket: LayerBucket<'_, Line>,
+        tile_bucket: TileData<'_, Line>,
         binders: &LineBinders,
         cached: &mut LineTile,
         parameters: &PaintParameters<'_>,
