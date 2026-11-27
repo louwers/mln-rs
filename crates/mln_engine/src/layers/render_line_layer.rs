@@ -22,8 +22,7 @@ use super::{cast_matrix, refresh_paint_attributes};
 use crate::buckets::line_bucket::{LineBinders, LineBucket};
 use crate::draw::atlas_binding::AtlasBinding;
 use crate::draw::context::Context;
-use crate::draw::identity::SimpleIdentity;
-use crate::draw::objects::{DrawGeometry, DrawObjects, Textures};
+use crate::draw::objects::{DrawGeometry, Mesh, Textures};
 use crate::draw::segment::SegmentBase;
 use crate::draw::store::SharedTexture;
 use crate::draw::texture_size;
@@ -31,7 +30,7 @@ use crate::draw::texture2d::Texture2D;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::line_mesh::LineLayoutVertex;
 use crate::layer::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
-use crate::layer::layer_drawing::{DrawList, DrawObjectsMut, FrameDraw, TileDraws, TileObjects, UniformWriter};
+use crate::layer::layer_drawing::{DrawList, FrameDraw, MeshMut, TileDraws, TileObjects, UniformWriter};
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
@@ -77,9 +76,7 @@ enum LineType {
 /// What the layer keeps of a tile: the draw of its bucket's lines, as it was
 /// built for the bucket.
 pub(crate) struct LineTile {
-    /// The id of the draw's GPU objects, made with them.
-    id: SimpleIdentity,
-    objects: DrawObjects,
+    mesh: Mesh,
     line_type: LineType,
     /// The passes the draw draws in.
     pass: RenderPass,
@@ -93,12 +90,8 @@ pub(crate) struct LineTile {
 impl TileObjects for LineTile {
     type Part = ();
 
-    fn objects(&mut self, (): ()) -> Option<DrawObjectsMut<'_>> {
-        Some(DrawObjectsMut { objects: &mut self.objects, atlases: self.atlases.as_ref() })
-    }
-
-    fn drop_bindings(&mut self) {
-        self.objects.drop_bindings();
+    fn objects(&mut self, (): ()) -> Option<MeshMut<'_>> {
+        Some(MeshMut { mesh: &mut self.mesh, atlases: self.atlases.as_ref() })
     }
 }
 
@@ -352,7 +345,7 @@ impl TypedLayer for RenderLineLayer {
     fn keeps(&self, values: &LayerValues<Line>, tile: &LineTile) -> bool {
         tile.pass == render_pass(values)
             && !(matches!(tile.line_type, LineType::Gradient | LineType::GradientSdf)
-                && tile.objects.texture(IMAGE_SLOT) != self.color_ramp_texture.as_ref())
+                && tile.mesh.texture(IMAGE_SLOT) != self.color_ramp_texture.as_ref())
     }
 
     /// The draw of a tile's lines, if its bucket has any and the layer has
@@ -411,7 +404,7 @@ impl TypedLayer for RenderLineLayer {
                 continue;
             };
             let context = &mut *paint_parameters.context;
-            refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
+            refresh_paint_attributes(&mut cached.mesh, changes, |attrs| {
                 let buffer = &binders.interleaved_vertex_buffer;
                 let paint = paint_vertices(context, render_data.geometry(), buffer, binders.depends_on_feature_state());
                 binders.bind(evaluated, paint.as_ref(), attrs, &mut Uniforms::default());
@@ -425,13 +418,14 @@ impl TypedLayer for RenderLineLayer {
                 paint_parameters,
                 &self.dashes,
             ) {
-                let draw = FrameDraw { pass: cached.pass, clip: true, ..FrameDraw::new(Some(tile_id), cached.id) };
+                let draw =
+                    FrameDraw { pass: cached.pass, clip: true, ..FrameDraw::new(Some(tile_id), cached.mesh.id()) };
                 self.draw_list.push(draw, uniforms);
             }
         }
 
         let layer = &cx.values.evaluated;
-        cx.drawing.finish(&mut self.draw_list, cx.tiles, gpu, paint_parameters.context, |writer| {
+        cx.drawing.finish(&mut self.draw_list, gpu, paint_parameters.context, |writer| {
             Self::write_uniforms(layer, writer);
         });
     }
@@ -606,15 +600,8 @@ impl RenderLineLayer {
         };
         let color_mode =
             if pass == RenderPass::Translucent { ColorMode::alpha_blended() } else { ColorMode::unblended() };
-        let objects = DrawObjects::new(shader, color_mode, CullFaceMode::disabled(), draw_geometry, textures);
-        Some(LineTile {
-            id: SimpleIdentity::new(),
-            objects,
-            line_type,
-            pass,
-            dash_cap: dash_pattern_cap(bucket),
-            atlases,
-        })
+        let mesh = Mesh::new(shader, color_mode, CullFaceMode::disabled(), draw_geometry, textures);
+        Some(LineTile { mesh, line_type, pass, dash_cap: dash_pattern_cap(bucket), atlases })
     }
 
     /// The texture of the color ramp, which every gradient of the layer
@@ -701,8 +688,7 @@ impl RenderLineLayer {
                 pad2: 0.0,
             }),
             LineType::Pattern => {
-                let texture =
-                    cached.objects.texture(IMAGE_SLOT).and_then(|texture| parameters.context.texture(texture));
+                let texture = cached.mesh.texture(IMAGE_SLOT).and_then(|texture| parameters.context.texture(texture));
                 let texture_size = texture.map(Texture2D::size).unwrap_or_default();
                 uniforms.draw_ubo.set(&LinePatternDrawableUBO {
                     matrix,
@@ -757,7 +743,7 @@ impl RenderLineLayer {
                 } else {
                     let dasharray = evaluated.line_dasharray.faded();
                     let dash_pattern = line_atlas.get(dasharray.from, dasharray.to, cached.dash_cap)?;
-                    cached.objects.set_texture(dash_slot, Some(dash_pattern.texture()?));
+                    cached.mesh.set_texture(dash_slot, Some(dash_pattern.texture()?));
 
                     let pos_a = dash_pattern.from();
                     let pos_b = dash_pattern.to();
