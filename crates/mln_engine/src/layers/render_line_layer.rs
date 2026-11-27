@@ -3,7 +3,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::gpu::{Gpu, TextureFormat};
-use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
@@ -30,7 +29,7 @@ use crate::draw::texture2d::Texture2D;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::line_mesh::LineLayoutVertex;
 use crate::layer::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
-use crate::layer::layer_drawing::{DrawList, FrameDraw, MeshMut, TileDraws, TileObjects, UniformWriter};
+use crate::layer::layer_drawing::{FrameDraw, LayerDraws, MeshMut, TileDraws, TileObjects};
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
@@ -40,8 +39,8 @@ use crate::layer::tile_input::{Features, TileData};
 use crate::layers::line::dashes::{LineAtlas, LinePatternCap};
 use crate::layers::line::programs;
 use crate::layers::line::ubo::{
-    LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO,
-    LinePatternTilePropsUBO, LineSDFDrawableUBO, LineSDFTilePropsUBO, LineTilePropsUnionUBO,
+    LineDrawableUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO, LinePatternTilePropsUBO,
+    LineSDFDrawableUBO, LineSDFTilePropsUBO,
 };
 use crate::layout::pattern_layout::{LineLayoutSpec, PatternLayout};
 use crate::query::feature_index::QueryRegion;
@@ -51,11 +50,6 @@ use crate::render::pass::RenderPass;
 use crate::render::tile::FrameTile;
 use crate::render::tile_matrix::{projection_data, to_projection_ubo};
 use crate::tile::UnwrappedTileID;
-
-/// The ids of the buffers that the draws bind.
-const DRAWABLE_ID: usize = programs::LINE.buffer_id("drawableVector");
-const TILE_PROPS_ID: usize = programs::LINE_PATTERN.buffer_id("tilePropsVector");
-const PROPS_ID: usize = programs::LINE.buffer_id("props");
 
 /// The slots of the programs' textures that the draws bind.
 const DASH_SLOT: usize = programs::LINE_GRADIENT_SDF.texture_slot("image_dash");
@@ -95,11 +89,25 @@ impl TileObjects for LineTile {
     }
 }
 
-/// A draw's entries in the layer's storage buffers.
-struct LineUniforms {
-    draw_ubo: LineDrawableUnionUBO,
-    tile_props: LineTilePropsUnionUBO,
-    projection: ProjectionUBO,
+/// The blocks of a draw, of the program of its line type.
+enum LineBlocks {
+    Simple(LineDrawableUBO),
+    Gradient(LineGradientDrawableUBO),
+    Pattern(LinePatternDrawableUBO, LinePatternTilePropsUBO),
+    Sdf(LineSDFDrawableUBO, LineSDFTilePropsUBO),
+}
+
+impl LineBlocks {
+    /// Pushes `draw` of `mesh` with the blocks and `projection` into
+    /// `frame`.
+    fn push(self, frame: &mut LayerDraws, draw: FrameDraw, mesh: &Mesh, projection: &ProjectionUBO) {
+        match self {
+            LineBlocks::Simple(drawable) => frame.push_at(draw, (), mesh, projection, drawable),
+            LineBlocks::Gradient(drawable) => frame.push_at(draw, (), mesh, projection, drawable),
+            LineBlocks::Pattern(drawable, tile) => frame.push_at(draw, (), mesh, projection, (drawable, tile)),
+            LineBlocks::Sdf(drawable, tile) => frame.push_at(draw, (), mesh, projection, (drawable, tile)),
+        }
+    }
 }
 
 /// Where a dash draw samples its patterns. Where the dash array differs by
@@ -196,9 +204,6 @@ impl LayerType for Line {
 }
 
 pub(crate) struct RenderLineLayer {
-    /// The frame's draws as the update makes them.
-    draw_list: DrawList<LineUniforms>,
-
     color_ramp: Rc<PremultipliedImage>,
     /// The global-state snapshot used to generate the cached color ramp and
     /// detect when it needs to be rebuilt.
@@ -295,7 +300,6 @@ impl TypedLayer for RenderLineLayer {
 
     fn new(_values: &LayerValues<Line>) -> Self {
         RenderLineLayer {
-            draw_list: DrawList::default(),
             color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
             color_ramp_global_state: None,
             color_ramp_texture: None,
@@ -409,7 +413,7 @@ impl TypedLayer for RenderLineLayer {
                 let paint = paint_vertices(context, render_data.geometry(), buffer, binders.depends_on_feature_state());
                 binders.bind(evaluated, paint.as_ref(), attrs, &mut Uniforms::default());
             });
-            if let Some(uniforms) = Self::uniforms(
+            if let Some((blocks, projection)) = Self::uniforms(
                 &cx.values.evaluated,
                 tile_id.to_unwrapped(),
                 render_data,
@@ -420,14 +424,12 @@ impl TypedLayer for RenderLineLayer {
             ) {
                 let draw =
                     FrameDraw { pass: cached.pass, clip: true, ..FrameDraw::new(Some(tile_id), cached.mesh.id()) };
-                self.draw_list.push(draw, uniforms);
+                blocks.push(cx.drawing.frame_mut(), draw, &cached.mesh, &projection);
             }
         }
 
-        let layer = &cx.values.evaluated;
-        cx.drawing.finish(&mut self.draw_list, gpu, paint_parameters.context, |writer| {
-            Self::write_uniforms(layer, writer);
-        });
+        cx.drawing.frame_mut().block(&Self::props(&cx.values.evaluated));
+        cx.drawing.finish(gpu, paint_parameters);
     }
 
     /// Adds the dash patterns of the tiles' buckets to the layer's dash
@@ -621,7 +623,7 @@ impl RenderLineLayer {
         self.color_ramp_texture.clone()
     }
 
-    /// The entries in the layer's storage buffers of `cached`, the draw of
+    /// The blocks and the projection of `cached`, the draw of
     /// the tile `tile_id` of `tile_bucket`, whose binders are `binders`, with
     /// the layer's values
     /// `layer`: its matrix, the interpolation of the layer's values, and
@@ -636,7 +638,7 @@ impl RenderLineLayer {
         cached: &mut LineTile,
         parameters: &PaintParameters<'_>,
         line_atlas: &LineAtlas,
-    ) -> Option<LineUniforms> {
+    ) -> Option<(LineBlocks, ProjectionUBO)> {
         const NEAR_CLIPPED: bool = false;
         const IN_VIEWPORT_PIXEL_UNITS: bool = false;
         let evaluated = &layer.paint;
@@ -657,15 +659,11 @@ impl RenderLineLayer {
             false,
         );
         let matrix = cast_matrix(&projection.fallback_matrix);
-        let mut uniforms = LineUniforms {
-            draw_ubo: LineDrawableUnionUBO::default(),
-            tile_props: LineTilePropsUnionUBO::default(),
-            projection: to_projection_ubo(&projection),
-        };
+        let projection = to_projection_ubo(&projection);
         let ratio = pixel_scale / tile_id.pixels_to_tile_units(1.0, zoom);
 
-        match cached.line_type {
-            LineType::Simple => uniforms.draw_ubo.set(&LineDrawableUBO {
+        let blocks = match cached.line_type {
+            LineType::Simple => LineBlocks::Simple(LineDrawableUBO {
                 matrix,
                 ratio,
                 color_t: binders.line_color.interpolation_factor(zoom),
@@ -676,7 +674,7 @@ impl RenderLineLayer {
                 width_t: binders.line_width.interpolation_factor(zoom),
                 pad1: 0.0,
             }),
-            LineType::Gradient => uniforms.draw_ubo.set(&LineGradientDrawableUBO {
+            LineType::Gradient => LineBlocks::Gradient(LineGradientDrawableUBO {
                 matrix,
                 ratio,
                 blur_t: binders.line_blur.interpolation_factor(zoom),
@@ -690,7 +688,7 @@ impl RenderLineLayer {
             LineType::Pattern => {
                 let texture = cached.mesh.texture(IMAGE_SLOT).and_then(|texture| parameters.context.texture(texture));
                 let texture_size = texture.map(Texture2D::size).unwrap_or_default();
-                uniforms.draw_ubo.set(&LinePatternDrawableUBO {
+                let drawable = LinePatternDrawableUBO {
                     matrix,
                     ratio,
                     blur_t: binders.line_blur.interpolation_factor(zoom),
@@ -704,10 +702,10 @@ impl RenderLineLayer {
                     pad1: 0.0,
                     pad2: 0.0,
                     pad3: 0.0,
-                });
+                };
                 let pattern = evaluated.line_pattern.faded();
                 let tlbr = |id: &str| tile_bucket.pattern(id).map_or([0.0; 4], |position| cast_tlbr(position.tlbr()));
-                uniforms.tile_props.set(&LinePatternTilePropsUBO {
+                let tile_props = LinePatternTilePropsUBO {
                     pattern_from: tlbr(pattern.from.id()),
                     pattern_to: tlbr(pattern.to.id()),
                     scale: [
@@ -719,7 +717,8 @@ impl RenderLineLayer {
                     texsize: [texture_size.width as f32, texture_size.height as f32],
                     fade: crossfade.t,
                     pad1: 0.0,
-                });
+                };
+                LineBlocks::Pattern(drawable, tile_props)
             }
             LineType::Sdf | LineType::GradientSdf => {
                 // The gradient keeps its ramp in the image slot, so the dash
@@ -760,7 +759,7 @@ impl RenderLineLayer {
                     }
                 };
 
-                uniforms.draw_ubo.set(&LineSDFDrawableUBO {
+                let drawable = LineSDFDrawableUBO {
                     matrix,
                     patternscale_a: sdf.patternscale_a,
                     patternscale_b: sdf.patternscale_b,
@@ -776,22 +775,18 @@ impl RenderLineLayer {
                     floorwidth_t: binders.line_floor_width.interpolation_factor(zoom),
                     atlas_height: sdf.atlas_height,
                     pad2: 0.0,
-                });
-                uniforms.tile_props.set(&LineSDFTilePropsUBO {
-                    sdfgamma: sdf.sdfgamma,
-                    mix: crossfade.t,
-                    pad1: 0.0,
-                    pad2: 0.0,
-                });
+                };
+                let tile_props = LineSDFTilePropsUBO { sdfgamma: sdf.sdfgamma, mix: crossfade.t, pad1: 0.0, pad2: 0.0 };
+                LineBlocks::Sdf(drawable, tile_props)
             }
-        }
-        Some(uniforms)
+        };
+        Some((blocks, projection))
     }
 
-    /// Writes the layer's buffers of the frame's draws.
-    fn write_uniforms(layer: &EvaluatedLayer<Line>, writer: &mut UniformWriter<'_, LineUniforms>) {
+    /// The block of the layer's values that its draws share.
+    fn props(layer: &EvaluatedLayer<Line>) -> LineEvaluatedPropsUBO {
         let evaluated = &layer.paint;
-        let props = LineEvaluatedPropsUBO {
+        LineEvaluatedPropsUBO {
             color: evaluated.line_color.constant_or(&LinePaintProperties::Defaults::line_color()).to_float_array(),
             blur: evaluated.line_blur.constant_or(&LinePaintProperties::Defaults::line_blur()),
             opacity: evaluated.line_opacity.constant_or(&LinePaintProperties::Defaults::line_opacity()),
@@ -801,10 +796,6 @@ impl RenderLineLayer {
             floorwidth: evaluated.line_floor_width.constant_or(&LinePaintProperties::Defaults::line_floor_width()),
             pad0: 0.0,
             pad1: 0.0,
-        };
-        writer.uniform(PROPS_ID, &props);
-        writer.storage(DRAWABLE_ID, |uniforms| uniforms.draw_ubo);
-        writer.storage(TILE_PROPS_ID, |uniforms| uniforms.tile_props);
-        writer.storage(PROJECTION_ID, |uniforms| uniforms.projection);
+        }
     }
 }

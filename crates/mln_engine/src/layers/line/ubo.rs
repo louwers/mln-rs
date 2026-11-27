@@ -132,48 +132,22 @@ uniform_block! {
     }
 }
 
-/// Any line per-drawable uniform block, for consolidated UBOs: 128 bytes,
-/// the size of `LineSDFDrawableUBO`.
-#[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
+/// Any line per-drawable uniform block, as large as the largest,
+/// `LineSDFDrawableUBO`'s 128 bytes: the element of the buffer that the draws
+/// of a layer's programs write.
+#[derive(Clone, Copy, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct LineDrawableUnionUBO {
     bytes: [u8; 128],
 }
 const _: () = assert!(size_of::<LineDrawableUnionUBO>() == 8 * 16);
 
-impl Default for LineDrawableUnionUBO {
-    fn default() -> Self {
-        Self::zeroed()
-    }
-}
-
-impl LineDrawableUnionUBO {
-    /// Assigns one union member (`drawableUBOVector[i].lineDrawableUBO = ...`).
-    pub fn set<T: Pod>(&mut self, member: &T) {
-        let src = bytemuck::bytes_of(member);
-        self.bytes[..src.len()].copy_from_slice(src);
-    }
-}
-
-/// Any line per-tile uniform block, for consolidated UBOs: 64 bytes, the
-/// size of `LinePatternTilePropsUBO`.
-#[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
+/// Any line per-tile uniform block, as large as the largest,
+/// `LinePatternTilePropsUBO`'s 64 bytes: the element of the buffer that the
+/// draws of a layer's programs write.
+#[derive(Clone, Copy, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct LineTilePropsUnionUBO {
     bytes: [u8; 64],
 }
 const _: () = assert!(size_of::<LineTilePropsUnionUBO>() == 4 * 16);
-
-impl Default for LineTilePropsUnionUBO {
-    fn default() -> Self {
-        Self::zeroed()
-    }
-}
-
-impl LineTilePropsUnionUBO {
-    /// Assigns one union member.
-    pub fn set<T: Pod>(&mut self, member: &T) {
-        let src = bytemuck::bytes_of(member);
-        self.bytes[..src.len()].copy_from_slice(src);
-    }
-}
