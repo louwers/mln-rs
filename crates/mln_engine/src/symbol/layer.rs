@@ -39,9 +39,10 @@ use crate::layer::layer_drawing::{
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
-    BucketKey, BucketPlacementData, EvaluateCx, Evaluation, LayerBucket, LayerUpdateParameters, LayerValues, OnTerrain,
-    Parts, PartsMut, PlacedTile, RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer,
+    BucketKey, BucketPlacementData, EvaluateCx, Evaluation, LayerUpdateParameters, LayerValues, OnTerrain, Parts,
+    PartsMut, PlacedTile, RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer,
 };
+use crate::layer::tile_input::Features;
 use crate::layers::cast_matrix;
 use crate::query::feature_index::FeatureIndex;
 use crate::render::paint_parameters::PaintParameters;
@@ -533,8 +534,7 @@ impl SegmentGroup {
 }
 
 impl LayerType for Symbol {
-    type Layout = SymbolLayout;
-    type TileBucket<'a> = LayerBucket<'a, Symbol>;
+    type Input = Features<SymbolLayout>;
 
     fn render_layer(style: Arc<LayerStyle<Symbol>>) -> Box<dyn RenderLayer> {
         Box::new(RenderSymbolLayer::new(style))
@@ -863,7 +863,7 @@ impl RenderSymbolLayer {
             let Some(cached) = self.drawing.tiles.get_mut(&tile_id) else {
                 continue;
             };
-            let bucket = tile.bucket().map(|bucket| bucket.bucket);
+            let bucket = tile.data().map(|bucket| bucket.bucket);
             debug_assert!(bucket.is_some() || cached.draws.is_empty());
             for (index, draw) in cached.draws.iter_mut().enumerate().filter(|(_, draw)| draw.visible) {
                 let Some(uniforms) =
@@ -1014,7 +1014,7 @@ impl TypedLayer for RenderSymbolLayer {
             let Some(mut entry) = self.drawing.tiles.entry(&tile_id) else {
                 continue;
             };
-            let render_data = tile.bucket_for_pass(passes);
+            let render_data = tile.data_for_pass(passes);
             let Some(render_data) = render_data else {
                 *entry.value = None;
                 continue;
@@ -1126,7 +1126,7 @@ impl TypedLayer for RenderSymbolLayer {
                 continue;
             };
             let tile_id = tile.tile.id.overscale_to(group.overscaled_z);
-            let Some(render_data) = tile.bucket_for_pass(passes) else {
+            let Some(render_data) = tile.data_for_pass(passes) else {
                 continue;
             };
             let bucket = render_data.bucket;
@@ -1279,7 +1279,7 @@ impl TypedLayer for RenderSymbolLayer {
         };
         let translates = self.symbol_translates();
         for tile in tiles {
-            let Some(bucket) = tile.bucket() else {
+            let Some(bucket) = tile.data() else {
                 continue;
             };
             let key = BucketKey { source, tile: tile.id(), slot: tile.tile.slot(), bucket: bucket.bucket_index };
