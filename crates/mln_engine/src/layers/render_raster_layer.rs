@@ -5,7 +5,6 @@
 
 use std::mem::offset_of;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use mln_gfx::gpu::ShaderKey;
 use mln_gfx::projection_variant::ProjectionVariant;
@@ -13,7 +12,6 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
-use mln_style::layer::LayerStyle;
 use mln_style::layers::Raster;
 use mln_style::types::{RasterResamplingType, ResamplingType, TranslateAnchorType};
 
@@ -29,10 +27,7 @@ use crate::draw::store::SharedTexture;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::SharedVertices;
 use crate::layer::bucket_geometry::copied_vertices;
-use crate::layer::layer_type::LayerType;
-use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, Hosted, LayerValues, OnTerrain, PrepareCx, RenderLayer, TileCx, TypedLayer,
-};
+use crate::layer::render_layer::{EvaluateCx, Evaluation, Layer, LayerValues, OnTerrain, PrepareCx, TileCx};
 use crate::layer::tile_input::{RasterTile, TileData};
 use crate::layers::raster::programs;
 use crate::layers::raster::ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
@@ -65,14 +60,6 @@ impl StaticGeometry {
             indexes: context.add_indexes(Indexes::new(RenderStaticData::quad_triangle_indices())),
             segments: RenderStaticData::raster_segments(),
         }
-    }
-}
-
-impl LayerType for Raster {
-    type Input = RasterTiles;
-
-    fn render_layer(style: Arc<LayerStyle<Raster>>) -> Box<dyn RenderLayer> {
-        Hosted::<RenderRasterLayer>::boxed(style)
     }
 }
 
@@ -259,8 +246,9 @@ fn raster_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
     attrs
 }
 
-impl TypedLayer for RenderRasterLayer {
-    type Type = Raster;
+impl Layer for RenderRasterLayer {
+    type Style = Raster;
+    type Input = RasterTiles;
     type Tile = ImageDraw;
     const TERRAIN: OnTerrain = OnTerrain::Drapes;
 
@@ -279,8 +267,8 @@ impl TypedLayer for RenderRasterLayer {
     fn tile(
         &mut self,
         cx: &mut TileCx<'_, '_, Self>,
-        tile: FrameTile<'_, Raster>,
-        data: TileData<'_, Raster>,
+        tile: FrameTile<'_, RenderRasterLayer>,
+        data: TileData<'_, RenderRasterLayer>,
         previous: Option<ImageDraw>,
     ) -> Option<ImageDraw> {
         let sampler = Self::sampler_state(cx.values);
@@ -332,7 +320,12 @@ impl TypedLayer for RenderRasterLayer {
 
     /// Pushes the frame's draws of the layer, one of each of its tiles,
     /// which put the tiles' vertices on their source's quad.
-    fn prepare(&mut self, cx: &mut PrepareCx<'_, '_, Self>, render_tiles: &[FrameTile<'_, Raster>], out: &mut Draws) {
+    fn prepare(
+        &mut self,
+        cx: &mut PrepareCx<'_, '_, Self>,
+        render_tiles: &[FrameTile<'_, RenderRasterLayer>],
+        out: &mut Draws,
+    ) {
         if cx.base.projection_variant == ProjectionVariant::Mercator {
             self.globe_meshes.clear();
         }
