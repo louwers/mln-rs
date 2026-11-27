@@ -10,8 +10,6 @@ use std::sync::Arc;
 
 use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::bindings::PROJECTION_ID;
-use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
@@ -39,7 +37,7 @@ use crate::draw::store::SharedTexture;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::SharedVertices;
 use crate::layer::bucket_geometry::copied_vertices;
-use crate::layer::layer_drawing::{DrawList, FrameDraw, MeshMut, TileDraws, TileObjects};
+use crate::layer::layer_drawing::{FrameDraw, MeshMut, TileDraws, TileObjects};
 use crate::layer::layer_type::LayerType;
 use crate::layer::render_layer::{
     EvaluateCx, Evaluation, Hosted, LayerCx, LayerValues, OnTerrain, RenderLayer, TileCx, TypedLayer, UpdateCx,
@@ -55,11 +53,6 @@ use crate::render::tile_matrix::to_projection_ubo;
 use crate::source::DemTiles;
 use crate::tile::dem::DemUnpack;
 use crate::tile_store::dem::DemContents;
-
-/// The ids of the buffers that the draws bind.
-const DRAWABLE_ID: usize = programs::COLOR_RELIEF.buffer_id("drawableVector");
-const TILE_PROPS_ID: usize = programs::COLOR_RELIEF.buffer_id("tilePropsVector");
-const PROPS_ID: usize = programs::COLOR_RELIEF.buffer_id("props");
 
 /// The slots of the programs' textures that the draws bind.
 const COLOR_STOPS_SLOT: usize = programs::COLOR_RELIEF.texture_slot("color_stops");
@@ -81,13 +74,6 @@ impl TileObjects for ReliefTile {
     }
 }
 
-/// A draw's entries in the layer's storage buffers.
-struct ReliefUniforms {
-    draw_ubo: ColorReliefDrawableUBO,
-    tile_props: ColorReliefTilePropsUBO,
-    projection: ProjectionUBO,
-}
-
 impl LayerType for ColorRelief {
     type Input = DemTiles;
 
@@ -97,9 +83,6 @@ impl LayerType for ColorRelief {
 }
 
 pub(crate) struct RenderColorReliefLayer {
-    /// The frame's draws as the update makes them.
-    draw_list: DrawList<ReliefUniforms>,
-
     // Color ramp data
     color_ramp_size: u32,
     color_ramp_changed: bool,
@@ -322,7 +305,6 @@ impl TypedLayer for RenderColorReliefLayer {
         // Initialize color ramp data with RGBA format (4 floats per stop)
         let color_ramp_size = 256;
         let mut layer = RenderColorReliefLayer {
-            draw_list: DrawList::default(),
             color_ramp_size,
             color_ramp_changed: true,
             color_ramp_global_state: None,
@@ -482,7 +464,7 @@ impl TypedLayer for RenderColorReliefLayer {
             self.globe_meshes.clear();
         }
         self.update_ramp_textures(gpu, paint_parameters.context);
-        let RenderColorReliefLayer { draw_list, elevation_stops_texture, color_stops_texture, dem_textures, .. } = self;
+        let RenderColorReliefLayer { elevation_stops_texture, color_stops_texture, dem_textures, .. } = self;
 
         // Skip rendering if color ramp textures aren't ready
         let (Some(elevation_stops_texture), Some(color_stops_texture)) =
@@ -529,23 +511,16 @@ impl TypedLayer for RenderColorReliefLayer {
                 cached.mesh.set_texture(slot, Some(texture));
             }
             let projection = paint_parameters.projection_data_for_tile(&tile_id.to_unwrapped(), false);
-            let uniforms = ReliefUniforms {
-                draw_ubo: ColorReliefDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) },
-                tile_props: cached.tile_props,
-                projection: to_projection_ubo(&projection),
-            };
+            let drawable = ColorReliefDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) };
             let draw = FrameDraw::new(Some(tile_id), cached.mesh.id());
-            draw_list.push(draw, uniforms);
+            let projection = to_projection_ubo(&projection);
+            cx.drawing.frame_mut().push_at(draw, (), &cached.mesh, &projection, (drawable, cached.tile_props));
         }
 
         let opacity = *cx.values.evaluated.paint.color_relief_opacity.uniform();
-        cx.drawing.finish(draw_list, gpu, paint_parameters.context, |writer| {
-            let props = ColorReliefEvaluatedPropsUBO { opacity, pad_eval0: 0.0, pad_eval1: 0.0, pad_eval2: 0.0 };
-            writer.uniform(PROPS_ID, &props);
-            writer.storage(DRAWABLE_ID, |uniforms| uniforms.draw_ubo);
-            writer.storage(TILE_PROPS_ID, |uniforms| uniforms.tile_props);
-            writer.storage(PROJECTION_ID, |uniforms| uniforms.projection);
-        });
+        let props = ColorReliefEvaluatedPropsUBO { opacity, pad_eval0: 0.0, pad_eval1: 0.0, pad_eval2: 0.0 };
+        cx.drawing.frame_mut().block(&props);
+        cx.drawing.finish(gpu, paint_parameters);
     }
 
     /// Drops the DEM textures and quads of the tiles the frame doesn't draw,
