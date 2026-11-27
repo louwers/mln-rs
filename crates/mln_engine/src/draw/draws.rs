@@ -813,7 +813,7 @@ impl Draws {
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
         order: DrawOrder,
-        in_pass: Option<&mut dyn FnMut(&mut dyn Gpu, &mut PaintParameters<'_>)>,
+        in_pass: Option<&mut InPass<'_>>,
     ) {
         if self.started {
             self.main.render(gpu, parameters);
@@ -824,6 +824,9 @@ impl Draws {
         }
     }
 }
+
+/// What [`Draws::render`] runs where the main group draws, in the open pass.
+pub(crate) type InPass<'a> = dyn FnMut(&mut dyn Gpu, &mut PaintParameters<'_>) + 'a;
 
 /// One mesh and a frame's draw of it, with the buffers it binds: a draw of
 /// the engine's own.
