@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use mln_engine::Registry;
 use mln_engine::camera::{BoundOptions, ProjectionMode};
 use mln_engine::exec::pool::Pool;
 use mln_engine::exec::queue::Queue;
@@ -47,6 +48,7 @@ impl Impl {
     /// A frontend, file source and map for a test with `metadata`, loading
     /// through a [`proxy_loader`].
     pub(crate) fn new(
+        registry: &Arc<Registry>,
         metadata: &TestMetadata,
         resource_options: &ResourceOptions,
         impl_options: ImplOptions,
@@ -59,13 +61,12 @@ impl Impl {
             cache_path: resource_options.cache_path.clone(),
             ..mln_engine::storage::ResourceOptions::default()
         };
-        let registry = mln_builtins::registry();
         let mut frontend =
             HeadlessFrontend::new(metadata.size, metadata.pixel_ratio, queue, pool).map_err(|e| e.to_string())?;
         if impl_options.tile_worker_codec > 0 {
             let count = impl_options.tile_worker_codec;
-            let instances = Arc::clone(&registry);
-            let workers = RemoteWorkers::new(Arc::clone(&registry), move |replies| {
+            let instances = Arc::clone(registry);
+            let workers = RemoteWorkers::new(Arc::clone(registry), move |replies| {
                 Box::new(ThreadWorkerInstances::new(count, instances, &replies))
             });
             frontend.renderer().set_tile_workers(workers);
@@ -84,7 +85,7 @@ impl Impl {
                 },
                 ..Default::default()
             },
-            Arc::clone(&registry),
+            Arc::clone(registry),
             pool,
         )
         .map_err(|e| e.to_string())?;
@@ -444,13 +445,16 @@ impl TestRunnerImpl for Impl {
 }
 
 /// The factory `TestRunner::run` uses for `maps[key]`, on the runner's
-/// queue.
-pub fn factory() -> ImplFactory {
+/// queue, whose maps draw with `registry`'s layer and source types: the
+/// built-in ones, and those of the crates whose tests run.
+pub fn factory(registry: Arc<Registry>) -> ImplFactory {
     Box::new(
-        |metadata: &TestMetadata,
-         resource_options: &ResourceOptions,
-         impl_options: &ImplOptions,
-         queue: &Queue<()>,
-         pool: &Pool| { Ok(Box::new(Impl::new(metadata, resource_options, *impl_options, queue, pool)?)) },
+        move |metadata: &TestMetadata,
+              resource_options: &ResourceOptions,
+              impl_options: &ImplOptions,
+              queue: &Queue<()>,
+              pool: &Pool| {
+            Ok(Box::new(Impl::new(&registry, metadata, resource_options, *impl_options, queue, pool)?))
+        },
     )
 }
