@@ -2,6 +2,7 @@ use crate::color::Color;
 use crate::expression::value::to_mbgl_value;
 use crate::expression::{Formatted, Image, Value as ExpressionValue};
 use crate::feature::Value;
+use crate::geo::LatLng;
 use crate::padding::Padding;
 use crate::property::color_ramp::ColorRampPropertyValue;
 use crate::property::table::{Kind, StyleProperty};
@@ -90,6 +91,13 @@ impl ValueFactory for Position {
 impl ValueFactory for Rotation {
     fn make_value(&self) -> Value {
         Value::Double(self.get_angle())
+    }
+}
+
+/// `[longitude, latitude]`, as the style spec writes a coordinate.
+impl ValueFactory for LatLng {
+    fn make_value(&self) -> Value {
+        Value::Array(vec![Value::Double(self.longitude()), Value::Double(self.latitude())])
     }
 }
 

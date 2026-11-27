@@ -6,6 +6,8 @@
 use geometry::Point;
 
 use crate::color::Color;
+use crate::constants::{DEGREES_MAX, LONGITUDE_MAX};
+use crate::geo::{LatLng, WrapMode};
 use crate::padding::Padding;
 use crate::range::Range;
 
@@ -106,6 +108,18 @@ impl Interpolate for Padding {
     }
 }
 
+/// Interpolates the latitude, and the longitude the shorter way around, which
+/// crosses the antimeridian when that's shorter. The result's longitude is
+/// wrapped into -180 to 180.
+impl Interpolate for LatLng {
+    fn interpolate(&self, to: &Self, t: f64) -> Self {
+        let from = self.longitude();
+        let delta = (to.longitude() - from + LONGITUDE_MAX).rem_euclid(DEGREES_MAX) - LONGITUDE_MAX;
+        let latitude = self.latitude().interpolate(&to.latitude(), t);
+        LatLng::saturating(latitude, from + delta * t, WrapMode::Wrapped)
+    }
+}
+
 // `Uninterpolated` specializations: the result is `a`.
 
 impl Interpolate for bool {
@@ -159,6 +173,34 @@ mod tests {
         assert_eq!(a.interpolate(&b, 0.3), (f64::from(a) * 0.7 + f64::from(b) * 0.3) as f32);
         let arr = [a, b];
         assert_eq!(arr.interpolate(&[b, a], 0.3), arr.interpolate_f32(&[b, a], 0.3f32));
+    }
+
+    fn lat_lng(lat: f64, lon: f64) -> LatLng {
+        LatLng::new(lat, lon).unwrap()
+    }
+
+    #[test]
+    fn lat_lng_interpolates_each_coordinate() {
+        assert_eq!(lat_lng(10.0, 20.0).interpolate(&lat_lng(30.0, 60.0), 0.25), lat_lng(15.0, 30.0));
+        assert_eq!(lat_lng(10.0, 20.0).interpolate(&lat_lng(30.0, 60.0), 0.0), lat_lng(10.0, 20.0));
+        assert_eq!(lat_lng(10.0, 20.0).interpolate(&lat_lng(30.0, 60.0), 1.0), lat_lng(30.0, 60.0));
+    }
+
+    #[test]
+    fn lat_lng_crosses_the_antimeridian_when_shorter() {
+        // East across it, and west.
+        assert_eq!(lat_lng(0.0, 170.0).interpolate(&lat_lng(0.0, -170.0), 0.25), lat_lng(0.0, 175.0));
+        assert_eq!(lat_lng(0.0, 170.0).interpolate(&lat_lng(0.0, -170.0), 0.75), lat_lng(0.0, -175.0));
+        assert_eq!(lat_lng(0.0, -170.0).interpolate(&lat_lng(0.0, 170.0), 0.75), lat_lng(0.0, 175.0));
+        // Not across it when the way through 0 is shorter.
+        assert_eq!(lat_lng(0.0, -80.0).interpolate(&lat_lng(0.0, 80.0), 0.5), lat_lng(0.0, 0.0));
+    }
+
+    #[test]
+    fn lat_lng_wraps_the_result() {
+        // An unwrapped endpoint takes the same path as its wrapped twin.
+        assert_eq!(lat_lng(0.0, 530.0).interpolate(&lat_lng(0.0, -170.0), 0.25), lat_lng(0.0, 175.0));
+        assert_eq!(lat_lng(0.0, 10.0).interpolate(&lat_lng(0.0, 380.0), 0.5), lat_lng(0.0, 15.0));
     }
 
     #[test]

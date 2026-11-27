@@ -15,7 +15,7 @@ pub enum WrapMode {
     Wrapped,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, mln_wire::Wire)]
 pub struct LatLng {
     lat: f64,
     lon: f64,

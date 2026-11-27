@@ -10,6 +10,7 @@ use crate::expression::locale::collator::Collator;
 use crate::expression::type_::Type;
 use crate::expression::{EvaluationContext, Expr};
 use crate::feature::{Value as MbglValue, ValueObject};
+use crate::geo::LatLng;
 use crate::padding::Padding;
 use crate::string::to_string_double;
 use crate::types::{
@@ -615,6 +616,20 @@ impl ValueConverter for Rotation {
     }
     fn from_expression_value(value: &Value) -> Option<Self> {
         f32::from_expression_value(value).map(|angle| Rotation::new(f64::from(angle)))
+    }
+}
+
+/// `[longitude, latitude]`, as the style spec writes a coordinate.
+impl ValueConverter for LatLng {
+    fn expression_type() -> Type {
+        Type::array_n(Type::Number, 2)
+    }
+    fn to_expression_value(&self) -> Value {
+        Value::Array(vec![Value::Number(self.longitude()), Value::Number(self.latitude())])
+    }
+    fn from_expression_value(value: &Value) -> Option<Self> {
+        let [longitude, latitude] = <[f64; 2]>::from_expression_value(value)?;
+        LatLng::new(latitude, longitude).ok()
     }
 }
 
