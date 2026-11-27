@@ -20,25 +20,17 @@ use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolP
 use mln_style::types::{AlignmentType, IconTextFitType, SymbolPlacementType, TextRotationAlignmentType};
 
 use crate::camera::{Projection, ProjectionData};
-use crate::draw::atlas_binding::AtlasBinding;
-use crate::draw::cast_matrix;
-use crate::draw::context::Context;
-use crate::draw::draws::{Draw, Draws, LayerFrame};
-use crate::draw::objects::{DrawGeometry, Mesh, copy_shared_attributes};
-use crate::draw::segment::SegmentBase;
-use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
-use crate::draw::vertices::{SharedVertices, TypedVertices};
-use crate::layer::bucket_geometry::{BucketGeometry, bucket_vertices, copied_indexes, paint_vertices};
-use crate::layer::layer_drawing::BucketChanges;
-use crate::layer::layer_type::EvaluatedLayer;
-use crate::layer::paint_property_binder::PaintBinders as _;
-use crate::layer::render_layer::{EvaluateCx, Evaluation, Layer, LayerValues, OnTerrain, PrepareCx};
-use crate::layer::tile_input::Features;
-use crate::render::pass::RenderPass;
-use crate::render::terrain::FrameGround;
-use crate::render::tile::{FrameTile, RenderTile};
-use crate::render::tile_matrix::{projection_data, to_projection_ubo};
-use crate::source::render_source::TileOrder;
+use crate::draw::ground::FrameGround;
+use crate::draw::{
+    AtlasBinding, Context, Draw, DrawGeometry, Draws, LayerFrame, Mesh, RenderPass, RenderTile, SegmentBase,
+    SharedAttribute, SharedVertices, TypedVertices, Uniforms, VertexAttributeArray, cast_matrix,
+    copy_shared_attributes, projection_data, to_projection_ubo,
+};
+use crate::layer::binders::PaintBinders as _;
+use crate::layer::{
+    BucketChanges, BucketGeometry, EvaluateCx, EvaluatedLayer, Evaluation, Features, FrameTile, Layer, LayerValues,
+    OnTerrain, PrepareCx, TileOrder, bucket_vertices, copied_indexes, paint_vertices,
+};
 use crate::symbol::bucket::{Buffer, PaintProperties, SymbolBucket, SymbolDynamicLayoutVertex, SymbolOpacityVertex};
 use crate::symbol::layout::SymbolLayout;
 use crate::symbol::programs;
@@ -378,8 +370,7 @@ fn refresh_draw(
 
     if copy_attributes {
         let placed = &mut draw.placed;
-        draw.mesh.update(context, |objects, context| {
-            let attrs = objects.vertex_attributes_mut();
+        draw.mesh.update_vertex_attributes(context, |attrs, context| {
             if refresh.dynamic {
                 set_projected_pos_attribute(context, buffer, layer_id, attrs, &mut placed.projected);
             }
@@ -721,7 +712,7 @@ impl Layer for RenderSymbolLayer {
         }
 
         let transform = cx.frame.view;
-        let passes = cx.base.passes;
+        let passes = cx.base.passes();
         if passes != self.draws_passes {
             cx.tiles.clear();
             self.draws_passes = passes;
@@ -796,7 +787,7 @@ impl Layer for RenderSymbolLayer {
                             sort_key: segment.sort_key,
                             type_,
                             tile_index,
-                            tile_id: tile.tile.id,
+                            tile_id: tile.render_tile().id(),
                             overscaled_z: tile_id.overscaled_z,
                             segment: Some(i),
                         });
@@ -810,7 +801,7 @@ impl Layer for RenderSymbolLayer {
                         sort_key,
                         type_,
                         tile_index,
-                        tile_id: tile.tile.id,
+                        tile_id: tile.render_tile().id(),
                         overscaled_z: tile_id.overscaled_z,
                         segment: None,
                     });
@@ -861,7 +852,7 @@ impl Layer for RenderSymbolLayer {
             let Some(tile) = render_tiles.get(group.tile_index) else {
                 continue;
             };
-            let tile_id = tile.tile.id.overscale_to(group.overscaled_z);
+            let tile_id = tile.render_tile().id().overscale_to(group.overscaled_z);
             let Some(render_data) = tile.data_for_pass(passes) else {
                 continue;
             };
@@ -932,7 +923,7 @@ impl Layer for RenderSymbolLayer {
             };
             for (program, is_halo, _) in halo_and_fill.into_iter().filter(|(_, _, drawn)| *drawn) {
                 // The draws of a tile share the atlases' textures.
-                let tile_atlases = tile_atlases.entry(tile.tile.id).or_default();
+                let tile_atlases = tile_atlases.entry(tile.render_tile().id()).or_default();
                 let draw_atlases = if is_text {
                     tile_atlases.text.get_or_insert_with(|| {
                         let text_size_is_zoom_constant =

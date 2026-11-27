@@ -54,9 +54,7 @@ fn ground_visibility(clip: vec4<f32>, view_height: f32) -> f32 {
 "
     };
 }
-pub(crate) use crate::{
-    terrain_wgsl_ground_height as ground_height, terrain_wgsl_ground_visibility as ground_visibility,
-};
+pub(crate) use crate::terrain_wgsl_ground_height as ground_height;
 
 /// The height rule of `crate::tile::dem`, over the DEM tile a draw reads: its
 /// RGBA8 texels behind a one-texel border, decoded by a `TerrainSurfaceUBO`.

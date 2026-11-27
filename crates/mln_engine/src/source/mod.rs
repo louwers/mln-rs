@@ -139,6 +139,7 @@ use crate::tile_store::inbox::{InboxSender, TileEvent};
 pub use crate::tile_store::loading::TileTimes;
 pub use crate::tile_store::tile::{TileNecessity, TileOperation};
 use crate::tile_store::tile_mut::{CopyAnswer, TileMut};
+pub use crate::worker::job::SourceKey;
 use crate::worker::job::TileKey;
 
 pub(crate) mod erased;

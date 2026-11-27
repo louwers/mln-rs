@@ -11,9 +11,9 @@ use mln_style::types::{
 use super::collision::{CollisionBoundaries, PartCollision, icon_overlap, text_overlap};
 use super::{BucketPlacementData, PlacedTile, SymbolTranslate};
 use crate::camera::{ProjectionData, TileProjector, View};
+use crate::draw::RenderTile;
+use crate::draw::ground::TerrainElevation;
 use crate::placement::{CollisionGroup, Overlap};
-use crate::render::terrain::TerrainElevation;
-use crate::render::tile::RenderTile;
 use crate::symbol::bucket::{SymbolBucket, ZoomEvaluatedSize, symbols_by_viewport_y};
 use crate::symbol::projection::{LabelPlaneProjector, SymbolHeights};
 use crate::tile::UnwrappedTileID;

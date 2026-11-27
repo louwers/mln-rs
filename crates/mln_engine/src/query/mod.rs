@@ -1,6 +1,6 @@
 pub(crate) mod feature_index;
 
-pub use feature_index::translate_query_geometry;
+pub use feature_index::{FeatureIndex, FeatureSortOrder, IndexedSubfeature, translate_query_geometry};
 use mln_style::filter::Filter;
 
 /// Options for query rendered features.

@@ -2,7 +2,7 @@
 
 use mln_gfx::shaders::source::GlslSource;
 
-use crate::render::terrain::glsl::ground_visibility;
+use crate::draw::ground::glsl::ground_visibility;
 
 /// `unpack_opacity`, a symbol's fade opacity from its packed attribute.
 macro_rules! unpack_opacity {

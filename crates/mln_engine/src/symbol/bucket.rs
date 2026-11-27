@@ -20,14 +20,12 @@ use mln_style::range::Range;
 use mln_style::types::TextWritingModeType;
 use mln_wire::payload::pod;
 
-use crate::draw::segment::SegmentBase;
-use crate::layer::bucket::{Bucket, Upload};
-use crate::layer::bucket_geometry::GeometryVec;
-use crate::layer::layer_type::EvaluatedLayer;
-use crate::layer::paint_property_binder::{PaintBinders as _, PaintPropertyBinder};
+use crate::draw::SegmentBase;
+use crate::layer::binders::{PaintBinders as _, PaintPropertyBinder};
+use crate::layer::{Bucket, EvaluatedLayer, GeometryVec, Upload};
 use crate::symbol::instance::{SymbolInstance, SymbolInstancePools, WritingMode};
+use crate::symbol::pool::PoolRange;
 use crate::symbol::quads::SymbolQuad;
-use crate::util::pool::PoolRange;
 
 crate::paint_property_binders!(
     pub struct SymbolIconBinders for SymbolPaintProperties::PossiblyEvaluated {
@@ -734,7 +732,7 @@ impl Bucket for SymbolBucket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::draw::segment::SegmentBase;
+    use crate::draw::SegmentBase;
 
     // gtest: SymbolRendering.KeepFadingSymbolsVisible
     #[test]

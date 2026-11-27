@@ -29,11 +29,13 @@ impl TileAtlasTextures {
     }
 
     /// The glyph page's texture, once uploaded.
-    pub(crate) fn glyph(&self) -> Option<&SharedTexture> {
+    #[must_use]
+    pub fn glyph(&self) -> Option<&SharedTexture> {
         self.glyph.as_ref()
     }
 
     /// The icon and pattern page's texture, once uploaded.
+    #[must_use]
     pub fn icon(&self) -> Option<&SharedTexture> {
         self.icon.as_ref()
     }

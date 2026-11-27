@@ -24,7 +24,7 @@ impl Aabb {
 
 /// A collision shape in viewport pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum Shape {
+pub enum Shape {
     Box(Aabb),
     Circle { center: Vec2, radius: f32 },
 }
@@ -32,7 +32,7 @@ pub(crate) enum Shape {
 impl Shape {
     /// The smallest box that holds the shape.
     #[must_use]
-    pub(crate) fn bounds(&self) -> Aabb {
+    pub fn bounds(&self) -> Aabb {
         match *self {
             Shape::Box(aabb) => aabb,
             Shape::Circle { center, radius } => Aabb::new(center - radius, center + radius),
@@ -42,7 +42,7 @@ impl Shape {
     /// Whether the shapes overlap. Boxes that touch overlap; circles that
     /// touch don't.
     #[must_use]
-    pub(crate) fn intersects(&self, other: &Shape) -> bool {
+    pub fn intersects(&self, other: &Shape) -> bool {
         match (self, other) {
             (Shape::Box(a), Shape::Box(b)) => a.intersects(b),
             (Shape::Circle { center: a, radius: ra }, Shape::Circle { center: b, radius: rb }) => {

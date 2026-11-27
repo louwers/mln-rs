@@ -229,6 +229,12 @@ pub struct RenderLayerBase {
 }
 
 impl RenderLayerBase {
+    /// The passes the layer draws in, as its last evaluation said.
+    #[must_use]
+    pub fn passes(&self) -> RenderPass {
+        self.passes
+    }
+
     /// Where the tiles the layer's update found are among the frame's
     /// ([`LayerUpdateParameters::found`]).
     pub(crate) fn found(&self) -> Range<usize> {
@@ -601,8 +607,9 @@ pub trait Layer: Sized + 'static {
     const FADES_TILES: bool = false;
 
     /// Whether the type's layers place their marks, with a participant in
-    /// placement that registers with the type.
-    #[doc(hidden)]
+    /// placement ([`Placement`](crate::placement::Placement)) that registers
+    /// with the type
+    /// ([`add_placing_layer_type`](crate::RegistryBuilder::add_placing_layer_type)).
     const PLACES: bool = false;
 
     /// The layer of the values `values`, before they transition.

@@ -76,10 +76,10 @@ impl RegistryBuilder {
         Ok(())
     }
 
-    /// Adds the layer type of `P`, a placement participant, whose layers
-    /// place with `P` ([`Placement`]). Fails for a name that an earlier type
-    /// took.
-    pub(crate) fn add_placing_layer_type<P: Placement>(&mut self) -> Result<(), RegisterError> {
+    /// Adds the layer type of `P`, a placement participant, both its
+    /// halves, whose layers place with `P` ([`Placement`]). Fails for a name
+    /// that an earlier type took.
+    pub fn add_placing_layer_type<P: Placement>(&mut self) -> Result<(), RegisterError> {
         const { assert!(<P::Layer as Layer>::PLACES, "a placing layer type says that it places") }
         self.add_layer_type::<P::Layer>()?;
         self.placing_types.insert(<P::Layer as Layer>::Style::INFO.name, participant::<P>);

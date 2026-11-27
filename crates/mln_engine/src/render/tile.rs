@@ -78,21 +78,41 @@ impl RenderTile {
         [id.pixels_to_tile_units(translate.x, zoom), id.pixels_to_tile_units(translate.y, zoom)]
     }
 
+    /// The id the tile draws as: its world copy of the tile.
     #[must_use]
-    pub(crate) fn overscaled_tile_id(&self) -> &OverscaledTileID {
+    pub fn id(&self) -> UnwrappedTileID {
+        self.id
+    }
+
+    /// The tile's id.
+    #[must_use]
+    pub fn overscaled_tile_id(&self) -> &OverscaledTileID {
         &self.tile_id
     }
 
     /// Where the tile is among its source's, as of its last update; `None`
     /// for a tile that isn't among a source's.
     #[must_use]
-    pub(crate) fn slot(&self) -> Option<usize> {
+    pub fn slot(&self) -> Option<usize> {
         self.slot
     }
 
+    /// Whether the tile stays only while a placement fades its marks out.
     #[must_use]
-    pub(crate) fn hold_for_fade(&self) -> bool {
+    pub fn hold_for_fade(&self) -> bool {
         self.tile_hold_for_fade
+    }
+
+    /// The tile's projection in the frame.
+    #[must_use]
+    pub fn projection(&self) -> &ProjectionData {
+        &self.projection
+    }
+
+    /// The tile's main matrix in the frame: its projection's.
+    #[must_use]
+    pub fn matrix(&self) -> &DMat4 {
+        &self.matrix
     }
 
     /// Sets the tile's projection and its standard matrix for `transform`.
@@ -255,6 +275,12 @@ impl<'a, T: Layer> FrameTile<'a, T> {
     /// anything for the layer ([`TileContent::stamp`]).
     pub(crate) fn made_from(self) -> Option<MadeFrom> {
         self.data.map(<T::Input as Find<T::Style>>::made_from)
+    }
+
+    /// The tile as the frame draws it.
+    #[must_use]
+    pub fn render_tile(self) -> &'a RenderTile {
+        self.tile
     }
 
     /// What the tile holds for the layer, if anything.

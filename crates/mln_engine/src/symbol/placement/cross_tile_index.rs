@@ -34,8 +34,8 @@ use mln_style::tile_id::CanonicalTileID;
 
 use super::BucketPlacementData;
 use crate::camera::{TileProjector, View};
+use crate::draw::ground::TerrainElevation;
 use crate::placement::PlacementBuckets;
-use crate::render::terrain::TerrainElevation;
 use crate::symbol::bucket::SymbolBucket;
 use crate::symbol::instance::{SymbolInstance, SymbolInstancePools};
 use crate::symbol::projection::SymbolHeights;
@@ -404,7 +404,7 @@ mod tests {
     use super::*;
     use crate::symbol::anchor::Anchor;
     use crate::symbol::bucket::{SymbolBucketStyle, SymbolLayoutFlags};
-    use crate::util::pool::PoolRange;
+    use crate::symbol::pool::PoolRange;
 
     fn make_symbol_instance(x: f32, y: f32, key: &str, pools: &mut SymbolInstancePools) -> SymbolInstance {
         SymbolInstance {

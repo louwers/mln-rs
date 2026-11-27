@@ -24,6 +24,7 @@ pub(crate) mod merge_lines;
 #[rustfmt::skip]
 mod msl;
 pub(crate) mod placement;
+pub(crate) mod pool;
 pub mod programs;
 pub(crate) mod projection;
 pub(crate) mod quads;

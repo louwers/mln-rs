@@ -6,7 +6,7 @@ use mln_gfx::shaders::source::Sources;
 
 use super::ubo::{SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
-use crate::render::terrain::programs::GROUND_DEPTH;
+use crate::draw::ground::GROUND_DEPTH;
 
 const SYMBOL_BUFFERS: &[ProgramBuffer] = &[
     ProgramBuffer::storage::<SymbolDrawableUBO>("drawableVector", Stages::Vertex),

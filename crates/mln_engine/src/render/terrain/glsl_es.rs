@@ -67,7 +67,6 @@ highp float ground_visibility(highp vec4 clip, highp float view_height) {
 "
     };
 }
-pub(crate) use crate::terrain_glsl_es_ground_visibility as ground_visibility;
 
 /// The height rule of `crate::tile::dem`, over the DEM tile a draw reads: its
 /// RGBA8 texels behind a one-texel border, decoded as the unpack weights

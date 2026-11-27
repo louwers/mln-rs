@@ -3,11 +3,11 @@ use mln_style::feature::GeometryCoordinate;
 use mln_style::math::deg2radf;
 use mln_style::padding::Padding;
 
-use crate::query::feature_index::IndexedSubfeature;
+use crate::query::IndexedSubfeature;
 use crate::symbol::anchor::{Anchor, segments, vertex_behind};
+use crate::symbol::pool::PoolRange;
 use crate::text::PositionedIcon;
 use crate::text::glyph::Shaping;
-use crate::util::pool::PoolRange;
 
 #[derive(Clone, Copy, Debug, PartialEq, mln_wire::Wire)]
 pub(crate) struct CollisionBox {

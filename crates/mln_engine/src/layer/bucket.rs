@@ -123,7 +123,7 @@ impl Upload<'_> {
     /// Names `binders`, the layer `layer_id`'s, as [`binders`](Self::binders)
     /// names each layer's, for a bucket that keeps a layer's binders its own
     /// way.
-    pub(crate) fn paint<P: PaintBinders>(&mut self, layer_id: &str, binders: &mut P) {
+    pub fn paint<P: PaintBinders>(&mut self, layer_id: &str, binders: &mut P) {
         let depends_on_feature_state = binders.depends_on_feature_state();
         match &mut self.kind {
             Kind::Geometry(geometry) => geometry.move_paint(binders.vertices_mut(), depends_on_feature_state),

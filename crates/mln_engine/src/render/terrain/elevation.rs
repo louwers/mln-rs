@@ -42,7 +42,10 @@ struct DrawnTile {
 /// map's camera samples it by the height rule the shaders follow, so it
 /// stands on the surface that drew. It shares the DEM tiles' images, which
 /// don't change once shared.
-pub(crate) struct TerrainElevation {
+///
+/// Outside the engine it is a read-only height lookup: through
+/// [`Elevation`], or under a tile's points ([`TileGround`]).
+pub struct TerrainElevation {
     /// Nearest the center first, then the tile under the center when none
     /// drew there ([`TerrainCover::center`]).
     tiles: Vec<DrawnTile>,
@@ -94,6 +97,34 @@ impl TerrainElevation {
             .chain(cover.center.iter().map(|tile| (tile, false)))
             .map(|(tile, drawn)| DrawnTile { id: tile.id, dem: drawn_dem(dem, tile.dem), drawn })
             .collect();
+        TerrainElevation::of_drawn(tiles, unpack, exaggeration)
+    }
+
+    /// The ground of a frame that drew `tile` alone, over `dem`, the DEM
+    /// of `dem_id`, the tile or one of its ancestors, raised by
+    /// `exaggeration`.
+    #[cfg(feature = "bench")]
+    pub(crate) fn of_tile(
+        tile: OverscaledTileID,
+        dem_id: OverscaledTileID,
+        dem: &crate::tile::dem_data::DEMData,
+        exaggeration: f32,
+    ) -> Self {
+        let (min, max) = dem.range();
+        let image = Arc::clone(dem.shared_image());
+        let dim = u32::try_from(dem.dim).unwrap_or(0);
+        let dz = tile.canonical.z.saturating_sub(dem_id.canonical.z);
+        let (tiles, mask) = ((1u32 << dz) as f32, (1u32 << dz) - 1);
+        let (x, y) = ((tile.canonical.x & mask) as f32, (tile.canonical.y & mask) as f32);
+        let coords = DemCoords { scale: 1.0 / tiles, offset: [x / tiles, y / tiles] };
+        let dem_tile = DrawnDem { id: dem_id, image, dim, coords, min, max };
+        let tiles = vec![DrawnTile { id: tile, dem: Some(dem_tile), drawn: true }];
+        TerrainElevation::of_drawn(tiles, DemUnpack::of(dem.encoding), exaggeration)
+    }
+
+    /// The ground of `tiles`, nearest the center first, decoded by `unpack`
+    /// and raised by `exaggeration`.
+    fn of_drawn(tiles: Vec<DrawnTile>, unpack: DemUnpack, exaggeration: f32) -> TerrainElevation {
         let mut index = HashMap::default();
         let mut copies = HashMap::default();
         let mut zooms = Vec::new();
@@ -250,7 +281,8 @@ pub struct TileGround<'a> {
 
 impl<'a> TileGround<'a> {
     /// The ground of `ground` under the points of `tile`.
-    pub(crate) fn new(ground: &'a TerrainElevation, tile: UnwrappedTileID) -> Self {
+    #[must_use]
+    pub fn new(ground: &'a TerrainElevation, tile: UnwrappedTileID) -> Self {
         TileGround { ground, tile }
     }
 

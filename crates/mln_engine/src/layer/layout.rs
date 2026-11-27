@@ -123,19 +123,19 @@ impl<'a, T: StyleLayerType> LayoutCx<'a, T> {
 
     /// How the map renders.
     #[must_use]
-    pub(crate) fn mode(&self) -> MapMode {
+    pub fn mode(&self) -> MapMode {
         self.parameters.bucket_parameters.mode
     }
 
     /// The device pixels per logical pixel that the map draws at.
     #[must_use]
-    pub(crate) fn pixel_ratio(&self) -> f32 {
+    pub fn pixel_ratio(&self) -> f32 {
         self.parameters.bucket_parameters.pixel_ratio
     }
 
     /// The style's global state, which `global-state` expressions read.
     #[must_use]
-    pub(crate) fn global_state(&self) -> Option<&'a Arc<GlobalStateMap>> {
+    pub fn global_state(&self) -> Option<&'a Arc<GlobalStateMap>> {
         self.parameters.bucket_parameters.global_state.as_ref()
     }
 
@@ -151,13 +151,13 @@ impl<'a, T: StyleLayerType> LayoutCx<'a, T> {
     /// The style's font faces, which draw text in the scripts of their
     /// ranges, and its fallback faces after them.
     #[must_use]
-    pub(crate) fn font_faces(&self) -> Option<&'a Arc<FontFaces>> {
+    pub fn font_faces(&self) -> Option<&'a Arc<FontFaces>> {
         self.parameters.font_faces
     }
 
     /// Whether the style has glyphs of its own, a `glyphs` URL.
     #[must_use]
-    pub(crate) fn has_glyphs(&self) -> bool {
+    pub fn has_glyphs(&self) -> bool {
         self.parameters.glyph_pbfs
     }
 
@@ -176,6 +176,12 @@ impl<'a, T: StyleLayerType> LayoutCx<'a, T> {
     /// The tile's source layer.
     pub fn source_layer(&self) -> Result<TileLayer<'a>, Error> {
         self.source_layer.layer()
+    }
+
+    /// The name of the tile's source layer that the layers lay out.
+    #[must_use]
+    pub fn source_layer_name(&self) -> &'a str {
+        &self.source_layer.name
     }
 
     /// What the leader's filter evaluates with apart from the feature: the
@@ -208,7 +214,7 @@ impl<'a, T: StyleLayerType> LayoutCx<'a, T> {
     }
 
     /// The glyphs and shapings the layout asks for.
-    pub(crate) fn glyphs(&mut self) -> &mut GlyphDependencies {
+    pub fn glyphs(&mut self) -> &mut GlyphDependencies {
         self.parameters.glyph_dependencies
     }
 }
@@ -288,7 +294,7 @@ impl<'a, T: StyleLayerType> BuildCx<'a, T> {
 
     /// The tile's zoom.
     #[must_use]
-    pub(crate) fn zoom(&self) -> f32 {
+    pub fn zoom(&self) -> f32 {
         f32::from(self.parameters.tile_id.overscaled_z)
     }
 
@@ -300,7 +306,7 @@ impl<'a, T: StyleLayerType> BuildCx<'a, T> {
 
     /// Whether the tile had no layout before this one.
     #[must_use]
-    pub(crate) fn first_load(&self) -> bool {
+    pub fn first_load(&self) -> bool {
         self.first_load
     }
 
@@ -313,7 +319,7 @@ impl<'a, T: StyleLayerType> BuildCx<'a, T> {
     /// What the glyphs and images the layout asked for resolved to; `None`
     /// for a layout that asked for none.
     #[must_use]
-    pub(crate) fn resolved(&self) -> Option<&'a Resolved> {
+    pub fn resolved(&self) -> Option<&'a Resolved> {
         self.resolved
     }
 

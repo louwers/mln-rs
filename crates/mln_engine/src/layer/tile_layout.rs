@@ -126,6 +126,27 @@ pub struct Resolved {
     pub(crate) missing_images: VecSet<String>,
 }
 
+impl Resolved {
+    /// Where the glyphs the layout asked for are, by font stack; `None` for
+    /// a glyph that no font has, or whose range failed.
+    #[must_use]
+    pub fn glyphs(&self) -> &GlyphPositions {
+        &self.glyphs
+    }
+
+    /// The shaping of the text the layout asked font faces to shape.
+    #[must_use]
+    pub fn shaping(&self) -> &ShapeResults {
+        &self.shaping
+    }
+
+    /// Where the icons the layout asked for are.
+    #[must_use]
+    pub fn icons(&self) -> &ImagePositions {
+        &self.icons
+    }
+}
+
 /// A tile's layer groups, as [`discover`] left them for [`build`].
 pub(crate) struct Discovered {
     /// The groups whose source layer the data has, in group order.

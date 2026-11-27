@@ -75,8 +75,9 @@ pub struct LayerBucket<'a, T: StyleLayerType, B> {
     pub bucket: &'a B,
     /// The bucket's identity, which tells apart what layers made of it.
     pub(crate) id: SimpleIdentity,
-    /// The index of the bucket among the layout's buckets.
-    pub(crate) bucket_index: usize,
+    /// The index of the bucket among the layout's buckets, which its
+    /// [`BucketKey`](crate::placement::BucketKey) names.
+    pub bucket_index: usize,
     /// The values of the layer that the bucket was laid out with.
     pub layer: &'a EvaluatedLayer<T>,
     contents: &'a GeometryContents,
@@ -114,9 +115,10 @@ impl<'a, T: StyleLayerType, B> LayerBucket<'a, T, B> {
         &self.contents.bucket_geometry
     }
 
-    /// The feature index of the layout.
+    /// The feature index of the layout, which queries of the tile's
+    /// features read.
     #[must_use]
-    pub(crate) fn feature_index(self) -> &'a Arc<FeatureIndex> {
+    pub fn feature_index(self) -> &'a Arc<FeatureIndex> {
         &self.contents.result.feature_index
     }
 

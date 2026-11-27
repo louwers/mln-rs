@@ -14,6 +14,8 @@ use mln_style::Style;
 use mln_style::collections::VecSet;
 use mln_style::constants::EXTENT;
 use mln_style::error::Error;
+use mln_style::layer::{ErasedLayerStyle, LayerStyle};
+use mln_style::layers::Symbol;
 use mln_style::property::evaluation::PropertyEvaluationParameters;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::VisibilityType;
@@ -22,15 +24,15 @@ use parking_lot::Mutex;
 use crate::Registry;
 use crate::camera::View;
 use crate::draw::dynamic_texture_atlas::DynamicTextureAtlas;
+use crate::draw::identity::SimpleIdentity;
 use crate::image::image_store::{ImageMap, ImageType};
-use crate::layer::bucket::LayerFeatureStates;
-use crate::layer::layer_type::ErasedEvaluatedLayer;
-use crate::layer::render_layer::{Hosted, RenderLayer};
+use crate::layer::bucket::{Bucket, ErasedBucket, LayerFeatureStates};
+use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
+use crate::layer::render_layer::{Hosted, Layer, RenderLayer};
 use crate::layer::tile_layout::{Dependencies, LayoutParams, Resolved};
 use crate::map::MapMode;
-use crate::placement::{
-    BucketKey, LaidBuckets, Participant, PlacementBuckets, PlacingLayer, place_alone, placing_layers,
-};
+use crate::placement::{BucketKey, LaidBuckets, Placement, PlacementBuckets, PlacingLayer};
+use crate::query::FeatureIndex;
 use crate::render::paint_parameters::TransformParameters;
 use crate::render::tile::RenderTile;
 use crate::render::update_parameters::UpdateParameters;
@@ -38,7 +40,7 @@ use crate::storage::Resource;
 use crate::symbol::bucket::SymbolBucket;
 use crate::symbol::layer::RenderSymbolLayer;
 use crate::symbol::placement::cross_tile_index::CrossTileSymbolIndex;
-use crate::symbol::placement::{HeldBuckets, PlacedTile, SymbolLayer, SymbolPlacement, symbol_translates};
+use crate::symbol::placement::{PlacedTile, SymbolLayer, SymbolPlacement, symbol_translates};
 use crate::text::glyph::{GlyphMap, get_glyph_range, style_font_faces};
 use crate::text::glyph_pbf::parse_glyph_pbf;
 use crate::text::glyph_store::ShapeResults;
@@ -206,8 +208,154 @@ impl LaidOut {
     /// The bucket of the layer `layer_id`, as a `B`; `None` for a layer
     /// without a bucket or with one of another type.
     #[must_use]
-    pub fn bucket<B: crate::layer::Bucket>(&self, layer_id: &str) -> Option<&B> {
+    pub fn bucket<B: Bucket>(&self, layer_id: &str) -> Option<&B> {
         self.result.layer_render_data.get(layer_id)?.bucket.downcast_ref()
+    }
+}
+
+/// The ground of a frame that drew `tile` alone over the DEM of `dem_id`,
+/// the tile or one of its ancestors, the image `dem` in `encoding`, raised
+/// by `exaggeration`: what the layers that stand on terrain stand on. Fails
+/// for a DEM image that isn't square.
+pub fn ground(
+    tile: OverscaledTileID,
+    dem_id: OverscaledTileID,
+    dem: &mln_style::bitmap::PremultipliedImage,
+    encoding: mln_style::tileset::RasterEncoding,
+    exaggeration: f32,
+) -> Result<crate::draw::ground::TerrainElevation, String> {
+    let dem = crate::tile::dem_data::DEMData::new(dem, encoding)?;
+    Ok(crate::draw::ground::TerrainElevation::of_tile(tile, dem_id, &dem, exaggeration))
+}
+
+/// The placing layers of `layers`, bottom to top, each by its key and its
+/// style, as a participant alone gets them.
+#[must_use]
+pub fn placing_layers(
+    layers: &[(usize, Arc<dyn ErasedLayerStyle>)],
+    cross_source_collisions: bool,
+) -> Vec<PlacingLayer> {
+    crate::placement::placing_layers(layers, cross_source_collisions)
+}
+
+/// A placement of `layers`, bottom to top, the placing layers of
+/// `participant` alone, which it prepared from `buckets`, in a continuous
+/// map after one that placed nothing, at `update`.
+pub fn place_alone<P: Placement>(
+    participant: &mut P,
+    layers: &[PlacingLayer],
+    update: &UpdateParameters,
+    buckets: &mut HeldBuckets,
+) {
+    crate::placement::place_alone(participant, layers, update, buckets);
+}
+
+impl LaidOut {
+    /// The tile laid out.
+    #[must_use]
+    pub fn id(&self) -> OverscaledTileID {
+        self.id
+    }
+
+    /// The tile's feature index, which queries of its features read.
+    #[must_use]
+    pub fn feature_index(&self) -> &Arc<FeatureIndex> {
+        &self.result.feature_index
+    }
+}
+
+/// The render tiles of `ids` in `view`, each with its matrices for the view,
+/// as a renderer finds them.
+#[must_use]
+pub fn render_tiles(ids: impl IntoIterator<Item = OverscaledTileID>, view: &View) -> Vec<RenderTile> {
+    let transform = TransformParameters::new(view);
+    ids.into_iter()
+        .map(|id| {
+            let mut render_tile = RenderTile::of_tile_id(id.to_unwrapped(), id, false);
+            render_tile.set_projection(&transform);
+            render_tile
+        })
+        .collect()
+}
+
+/// The values of a layer `style` of the type `L` at `parameters`, as the
+/// renderer evaluates them.
+#[must_use]
+pub fn evaluate<L: Layer>(
+    style: Arc<LayerStyle<L::Style>>,
+    parameters: &PropertyEvaluationParameters,
+) -> Arc<EvaluatedLayer<L::Style>> {
+    let mut render_layer = Hosted::<L>::new(style);
+    render_layer.evaluate(parameters);
+    let (_, values) = render_layer.layer_mut();
+    Arc::clone(&values.evaluated)
+}
+
+/// The copies of buckets that benchmarks' layers place, kept where a tile
+/// store would keep the buckets, by their index, which is their keys'
+/// `bucket`. The benchmarks' entry points pass no store, so the copies are
+/// the thread's, and what places one frees it ([`HeldBuckets::release`])
+/// when it drops.
+pub struct HeldBuckets(Vec<Option<Box<dyn ErasedBucket>>>);
+
+thread_local! {
+    static HELD_BUCKETS: std::cell::Cell<Vec<Option<Box<dyn ErasedBucket>>>> =
+        const { std::cell::Cell::new(Vec::new()) };
+}
+
+impl HeldBuckets {
+    /// Keeps a copy of the bucket of the layer `layer_id` of `laid_out`, if
+    /// it has one and it is a `B`, and returns its key as `tile`, the
+    /// tile's render tile, shows it.
+    pub fn hold<B: Bucket>(&mut self, laid_out: &LaidOut, layer_id: &str, tile: &RenderTile) -> Option<BucketKey> {
+        let bucket = &laid_out.result.layer_render_data.get(layer_id)?.bucket;
+        bucket.downcast_ref::<B>()?;
+        self.0.push(Some(bucket.clone_bucket()));
+        let bucket = self.0.len() - 1;
+        Some(BucketKey { bucket, slot: tile.slot(), tile: *tile.overscaled_tile_id(), source: SourceKey(0) })
+    }
+
+    /// Frees the bucket of `key`. The indexes start again once no bucket is
+    /// held.
+    pub fn release(key: &BucketKey) {
+        let mut buckets = Self::take();
+        if let Some(bucket) = buckets.0.get_mut(key.bucket) {
+            *bucket = None;
+        }
+        if buckets.0.iter().all(Option::is_none) {
+            buckets.0.clear();
+        }
+        buckets.restore();
+    }
+
+    /// The buckets, lent until `restore`.
+    #[must_use]
+    pub fn take() -> Self {
+        HeldBuckets(HELD_BUCKETS.take())
+    }
+
+    /// Gives the buckets back.
+    pub fn restore(self) {
+        HELD_BUCKETS.set(self.0);
+    }
+
+    /// The buckets as a participant reads and changes them.
+    pub fn placement(&mut self) -> PlacementBuckets<'_> {
+        PlacementBuckets::new(self)
+    }
+}
+
+impl LaidBuckets for HeldBuckets {
+    fn id(&self, key: &BucketKey) -> Option<SimpleIdentity> {
+        Some(self.0.get(key.bucket)?.as_ref()?.id())
+    }
+
+    fn bucket(&self, key: &BucketKey) -> Option<&dyn ErasedBucket> {
+        Some(&**self.0.get(key.bucket)?.as_ref()?)
+    }
+
+    fn bucket_mut(&mut self, key: &BucketKey) -> Option<&mut dyn ErasedBucket> {
+        Some(&mut **self.0.get_mut(key.bucket)?.as_mut()?)
     }
 }
 
@@ -222,15 +370,15 @@ pub struct SymbolView {
     /// Those that lead a bucket, as placement gets them.
     placing: Vec<PlacingLayer>,
     /// The participant that places them.
-    placement: Participant<SymbolPlacement>,
-    /// The indexes of the buckets `HeldBuckets` holds for the view.
-    held: Vec<usize>,
+    placement: SymbolPlacement,
+    /// The keys of the buckets `HeldBuckets` holds for the view.
+    held: Vec<BucketKey>,
 }
 
 impl Drop for SymbolView {
     fn drop(&mut self) {
-        for &index in &self.held {
-            HeldBuckets::release(index);
+        for key in &self.held {
+            HeldBuckets::release(key);
         }
     }
 }
@@ -244,15 +392,7 @@ impl SymbolView {
     /// takes from a map: a comparison builds this module against libraries
     /// whose updates have other fields.
     pub fn new(source: &str, tiles: &[&LaidOut], update: UpdateParameters) -> Result<SymbolView, Error> {
-        let transform = TransformParameters::new(&update.view);
-        let render_tiles: Vec<RenderTile> = tiles
-            .iter()
-            .map(|laid_out| {
-                let mut render_tile = RenderTile::of_tile_id(laid_out.id.to_unwrapped(), laid_out.id, false);
-                render_tile.set_projection(&transform);
-                render_tile
-            })
-            .collect();
+        let render_tiles = render_tiles(tiles.iter().map(|laid_out| laid_out.id()), &update.view);
 
         let parameters = PropertyEvaluationParameters::new(update.view.zoom() as f32);
         let mut layers = Vec::new();
@@ -262,30 +402,20 @@ impl SymbolView {
             if base.source != source || base.visibility == VisibilityType::None || layer.info().name != "symbol" {
                 continue;
             }
-            let style = mln_style::layer::LayerStyle::<mln_style::layers::Symbol>::recover(layer.style())
+            let style = LayerStyle::<Symbol>::recover(layer.style())
                 .ok_or_else(|| Error::invalid_argument(format!("no render layer for {}", layer.get_id())))?;
-            let mut render_layer = Hosted::<RenderSymbolLayer>::new(style);
-            render_layer.evaluate(&parameters);
             // As the participant collects the layer's tiles' buckets.
-            let (_, values) = render_layer.layer_mut();
-            let values = &*values.evaluated;
-            let translates = symbol_translates(values);
+            let values = evaluate::<RenderSymbolLayer>(style, &parameters);
+            let translates = symbol_translates(&values);
             let mut symbol_layer = SymbolLayer::new(layers.len(), Arc::clone(&values.style));
             let mut buckets = HeldBuckets::take();
             for (laid_out, tile) in tiles.iter().zip(&render_tiles) {
-                let Some(render_data) = laid_out.result.layer_render_data.get(layer.get_id()) else { continue };
-                let Some(index) = buckets.hold(render_data.bucket) else { continue };
-                held.push(index);
-                let key = BucketKey {
-                    bucket: index,
-                    slot: tile.slot(),
-                    tile: *tile.overscaled_tile_id(),
-                    source: SourceKey(0),
-                };
-                let held: &dyn LaidBuckets = &buckets;
-                let Some(bucket) = held.get::<SymbolBucket>(&key) else { continue };
-                let feature_index = || Some(Arc::clone(&laid_out.result.feature_index));
-                symbol_layer.add_bucket(values, &PlacedTile::new(tile), key, bucket, feature_index, translates);
+                let Some(key) = buckets.hold::<SymbolBucket>(laid_out, layer.get_id(), tile) else { continue };
+                held.push(key);
+                let laid: &dyn LaidBuckets = &buckets;
+                let Some(bucket) = laid.get::<SymbolBucket>(&key) else { continue };
+                let feature_index = || Some(Arc::clone(laid_out.feature_index()));
+                symbol_layer.add_bucket(&values, &PlacedTile::new(tile), key, bucket, feature_index, translates);
             }
             buckets.restore();
             if !symbol_layer.is_empty() {
@@ -295,7 +425,7 @@ impl SymbolView {
 
         let placing: Vec<_> = layers.iter().filter(|layer| layer.places()).map(SymbolLayer::placing).collect();
         let placing = placing_layers(&placing, update.cross_source_collisions);
-        let placement = Participant(SymbolPlacement::with_layers(layers.clone()));
+        let placement = SymbolPlacement::with_layers(layers.clone());
         Ok(SymbolView { update: Arc::new(update), layers, placing, placement, held })
     }
 
@@ -309,8 +439,7 @@ impl SymbolView {
         let mut added = 0;
         let mut buckets = HeldBuckets::take();
         for layer in self.layers.iter().rev() {
-            let mut buckets = PlacementBuckets::new(&mut buckets);
-            let result = layer.index(&mut index.0, longitude, &self.update.view, &mut buckets);
+            let result = layer.index(&mut index.0, longitude, &self.update.view, &mut buckets.placement());
             if result.buckets_added {
                 added += 1;
             }
@@ -327,10 +456,10 @@ impl SymbolView {
     #[must_use]
     pub fn place(&mut self) -> usize {
         let mut buckets = HeldBuckets::take();
-        self.placement.0.prepare_alone(&self.placing, &buckets);
-        let shown = place_alone(&mut self.placement, &self.placing, &self.update, &mut buckets);
+        self.placement.prepare_alone(&self.placing, &buckets);
+        place_alone(&mut self.placement, &self.placing, &self.update, &mut buckets);
         buckets.restore();
-        shown
+        self.placement.shown()
     }
 }
 

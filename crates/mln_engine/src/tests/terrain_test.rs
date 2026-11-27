@@ -1290,8 +1290,8 @@ fn assert_glyphs_draw_in_circles(dem: fn() -> Response, pitch_with_map: bool) {
     use crate::symbol::instance::WritingMode;
     use crate::symbol::placement::collision::{self, LabelRun, PartCollision};
     use crate::symbol::placement::collision_feature::{CollisionBox, CollisionFeature};
+    use crate::symbol::pool::PoolRange;
     use crate::symbol::projection::{LabelPlaneProjector, LineLabelAlignment, SymbolHeights, reproject_line_labels};
-    use crate::util::pool::PoolRange;
 
     let mut load = TerrainLoad::new((0, 14), 100.0);
     load.transform.jump_to(&CameraOptions { pitch: Some(60.0), ..Default::default() });

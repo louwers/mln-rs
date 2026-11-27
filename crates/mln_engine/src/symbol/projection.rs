@@ -12,7 +12,7 @@ use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::types::SymbolHeightAnchorType;
 
 use crate::camera::{ProjectedTilePoint, TileProjector, View};
-use crate::render::terrain::{TerrainElevation, TileGround};
+use crate::draw::ground::{TerrainElevation, TileGround};
 use crate::symbol::bucket::{
     PlacedSymbol, PlacedSymbolPools, SymbolBucket, SymbolDynamicLayoutVertex, SymbolSizeBinder, ZoomEvaluatedSize,
 };
@@ -766,8 +766,8 @@ mod tests {
     };
     use crate::camera::transform::Transform;
     use crate::camera::{ConstrainMode, TileProjector, TransformState, View, ViewportMode};
+    use crate::symbol::pool::PoolRange;
     use crate::tile::{OverscaledTileID, UnwrappedTileID};
-    use crate::util::pool::PoolRange;
 
     /// A 512 px square map at zoom 0, where tile 0/0/0 fills the viewport
     /// and a pixel is 16 tile units.

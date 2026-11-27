@@ -120,22 +120,32 @@ pub(crate) type QueryResults = HashMap<String, Vec<Feature>>;
 /// A feature of a feature index or a collision index, which a query looks
 /// up in its tile's data.
 #[derive(Clone, Debug, PartialEq, mln_wire::Wire)]
-pub(crate) struct IndexedSubfeature {
-    pub(crate) index: usize,
-    pub(crate) source_layer_name: Arc<str>,
-    pub(crate) bucket_leader_id: Arc<str>,
-    pub(crate) sort_index: usize,
-    // Only used for symbol features
-    pub(crate) bucket_instance_id: u32,
-    pub(crate) collision_group_id: u16,
-    /// The overlap mode the symbol was placed with. It's set only in a
-    /// collision index, so the worker codec doesn't carry it.
+pub struct IndexedSubfeature {
+    /// The feature's index in its source layer.
+    pub index: usize,
+    /// The feature's source layer.
+    pub source_layer_name: Arc<str>,
+    /// The id of the layer that leads the bucket the feature is in.
+    pub bucket_leader_id: Arc<str>,
+    /// Where the feature is among those the bucket indexed, which results
+    /// sort by.
+    pub sort_index: usize,
+    /// The record of the bucket of a feature in a collision index
+    /// ([`Item::record`](crate::placement::Item::record)); 0 elsewhere.
+    pub bucket_instance_id: u32,
+    /// The id of the collision group a collision index placed the feature
+    /// in; 0 elsewhere.
+    pub collision_group_id: u16,
+    /// How a collision index placed the feature's shapes. Only a collision
+    /// index sets it, so the worker codec doesn't carry it.
     #[wire(skip)]
-    pub(crate) overlap_mode: Overlap,
+    pub overlap_mode: Overlap,
 }
 
-/// A shared order of feature indices that queries sort symbol features by.
-pub(crate) type FeatureSortOrder = Option<Arc<Vec<usize>>>;
+/// A shared order of feature indices that queries sort a bucket's features
+/// by, for a bucket whose features sort by their position; `None` for the
+/// order they were indexed in.
+pub type FeatureSortOrder = Option<Arc<Vec<usize>>>;
 
 /// A box of a feature index: one ring of a feature.
 #[derive(Clone, Debug, PartialEq)]
@@ -260,7 +270,7 @@ fn build_tree(boxes: &[Bounds]) -> Option<RTree<i32>> {
 }
 
 /// A tile's features by their bounding boxes, and the tile data they are in.
-pub(crate) struct FeatureIndex {
+pub struct FeatureIndex {
     /// Indexes `boxes`, once a query has built it; `None` when there are
     /// none.
     tree: OnceLock<Option<RTree<i32>>>,

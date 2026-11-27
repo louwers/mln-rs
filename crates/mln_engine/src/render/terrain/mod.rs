@@ -58,8 +58,7 @@ pub(crate) use cover::{ElevationRanges, TerrainCover};
 #[cfg(test)]
 pub(crate) use cover::{REMEMBERED_RANGES, TerrainTile, terrain_tile_size};
 pub(crate) use drapes::Drapes;
-pub(crate) use elevation::TerrainElevation;
-pub use elevation::TileGround;
+pub use elevation::{TerrainElevation, TileGround};
 pub(crate) use fog::terrain_fog;
 pub use ground::{FrameGround, GroundHeights, StandingDraw, height_attribute, point_center};
 use mln_gfx::gpu::Gpu;

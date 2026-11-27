@@ -108,7 +108,8 @@ pub(crate) mod tile_layout;
 
 pub use crate::layer::bucket::{Bucket, Upload};
 pub use crate::layer::bucket_geometry::{
-    BucketGeometry, GeometryVec, bucket_indexes, bucket_vertices, copied_vertices, derived_vertices, paint_vertices,
+    BucketGeometry, GeometryVec, bucket_indexes, bucket_vertices, copied_indexes, copied_vertices, derived_vertices,
+    paint_vertices,
 };
 pub use crate::layer::layer_drawing::BucketChanges;
 pub use crate::layer::layer_type::EvaluatedLayer;
@@ -117,6 +118,7 @@ pub use crate::layer::render_layer::{
     EvaluateCx, Evaluation, Layer, LayerValues, OnTerrain, PrepareCx, TileCx, UpdateCx,
 };
 pub use crate::layer::tile_input::{Features, LayerBucket, NoTiles, RasterTile, TileData, TileInput};
+pub use crate::layer::tile_layout::Resolved;
 #[doc(hidden)]
 pub use crate::layers::custom::EndedHosts;
 pub use crate::query::feature_index::QueryRegion;

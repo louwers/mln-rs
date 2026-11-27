@@ -16,21 +16,22 @@ use crate::tile::OverscaledTileID;
 pub struct BucketChanges {
     /// The values of the paint properties that read feature state.
     pub paint: bool,
-    /// A symbol bucket's opacities, which placement sets.
-    pub(crate) opacity: bool,
-    /// A symbol bucket's positions of labels along lines or at variable
-    /// anchors.
-    pub(crate) dynamic: bool,
-    /// The order of a symbol bucket's triangles.
-    pub(crate) sort: bool,
+    /// The opacities that placement sets.
+    pub opacity: bool,
+    /// The positions that placement moves, such as of labels along lines or
+    /// at variable anchors.
+    pub dynamic: bool,
+    /// The order of the bucket's triangles.
+    pub sort: bool,
 }
 
 impl BucketChanges {
-    pub(crate) const ALL: BucketChanges = BucketChanges { paint: true, opacity: true, dynamic: true, sort: true };
+    /// Everything changed.
+    pub const ALL: BucketChanges = BucketChanges { paint: true, opacity: true, dynamic: true, sort: true };
 
     /// Whether anything changed.
     #[must_use]
-    pub(crate) fn any(self) -> bool {
+    pub fn any(self) -> bool {
         self != BucketChanges::default()
     }
 }
@@ -50,7 +51,7 @@ pub struct ChangedBuckets(HashMap<SimpleIdentity, BucketChanges>);
 
 impl ChangedBuckets {
     /// Records that `changes` of the bucket `bucket` changed.
-    pub(crate) fn mark(&mut self, bucket: SimpleIdentity, changes: BucketChanges) {
+    pub fn mark(&mut self, bucket: SimpleIdentity, changes: BucketChanges) {
         if changes.any() {
             *self.0.entry(bucket).or_default() |= changes;
         }
@@ -335,7 +336,7 @@ impl<T> TileMap<T> {
 
     /// Drops the tiles' values and their previous ones. The tiles' entries
     /// stay.
-    pub(crate) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.values.fill_with(Slot::default);
     }
 

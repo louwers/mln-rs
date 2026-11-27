@@ -35,16 +35,15 @@ use self::cross_tile_index::CrossTileSymbolIndex;
 use self::tile::TilePlacementState;
 use self::vertices::Shown;
 use crate::camera::{ProjectionData, View};
-use crate::layer::layer_drawing::BucketChanges;
-use crate::layer::layer_type::EvaluatedLayer;
+use crate::draw::RenderTile;
+use crate::draw::ground::TerrainElevation;
+use crate::layer::{BucketChanges, EvaluatedLayer, FrameTile};
 use crate::map::MapMode;
 use crate::placement::{
     BucketKey, CollectCx, CollisionGroup, CollisionIndex, CommitCx, LaidBuckets, PlaceCx, Placed, PlacedSymbolData,
     Placement, PlacingLayer, PrepareCx, Prepared, RetainedQueryData, Shape, UpdateCx,
 };
-use crate::query::feature_index::FeatureIndex;
-use crate::render::terrain::TerrainElevation;
-use crate::render::tile::{FrameTile, RenderTile};
+use crate::query::FeatureIndex;
 use crate::symbol::bucket::{SortKeyRange, SymbolBucket};
 use crate::symbol::instance::SymbolInstance;
 use crate::symbol::layer::RenderSymbolLayer;
@@ -192,11 +191,11 @@ impl PlacedTile {
     #[must_use]
     pub(crate) fn new(tile: &RenderTile) -> PlacedTile {
         PlacedTile {
-            id: tile.id,
+            id: tile.id(),
             overscaled_id: *tile.overscaled_tile_id(),
             hold_for_fade: tile.hold_for_fade(),
-            projection: tile.projection,
-            matrix: tile.matrix,
+            projection: *tile.projection(),
+            matrix: *tile.matrix(),
         }
     }
 }
@@ -542,9 +541,10 @@ impl Placement for SymbolPlacement {
             let Some(bucket) = tile.data() else {
                 continue;
             };
-            let key = BucketKey { source, tile: tile.id(), slot: tile.tile.slot(), bucket: bucket.bucket_index };
+            let key =
+                BucketKey { source, tile: tile.id(), slot: tile.render_tile().slot(), bucket: bucket.bucket_index };
             let feature_index = || Some(Arc::clone(bucket.feature_index()));
-            let placed_tile = PlacedTile::new(tile.tile);
+            let placed_tile = PlacedTile::new(tile.render_tile());
             symbol_layer.add_bucket(layer.values, &placed_tile, key, bucket.bucket, feature_index, translates);
         }
         !symbol_layer.placement_data.is_empty()
@@ -703,11 +703,6 @@ impl Placement for SymbolPlacement {
             self.current = Symbols::default();
         }
     }
-
-    #[cfg(feature = "bench")]
-    fn shown(&self) -> usize {
-        self.current.placements.values().filter(|placement| placement.placed()).count()
-    }
 }
 
 impl<'a> Placer<'a> {
@@ -787,69 +782,7 @@ impl<'a> Placer<'a> {
     }
 }
 
-/// The copies of symbol buckets that benchmarks' layers place, kept
-/// where a tile store would keep the buckets, by their index, which is
-/// their keys' `bucket`. The benchmarks' entry points pass no store, so the
-/// copies are the thread's, and the view that places one frees it
-/// ([`HeldBuckets::release`]) when it drops.
-#[cfg(feature = "bench")]
-pub(crate) struct HeldBuckets(Vec<Option<Box<dyn crate::layer::bucket::ErasedBucket>>>);
-
-#[cfg(feature = "bench")]
-thread_local! {
-    static HELD_BUCKETS: std::cell::Cell<Vec<Option<Box<dyn crate::layer::bucket::ErasedBucket>>>> =
-        const { std::cell::Cell::new(Vec::new()) };
-}
-
-#[cfg(feature = "bench")]
-impl HeldBuckets {
-    /// Keeps a copy of `bucket`, if it is a symbol bucket, and returns its
-    /// index.
-    pub(crate) fn hold(&mut self, bucket: &dyn crate::layer::bucket::ErasedBucket) -> Option<usize> {
-        bucket.downcast_ref::<SymbolBucket>()?;
-        self.0.push(Some(bucket.clone_bucket()));
-        Some(self.0.len() - 1)
-    }
-
-    /// Frees the bucket at `index`. The indexes start again once no bucket
-    /// is held.
-    pub(crate) fn release(index: usize) {
-        let mut buckets = Self::take();
-        if let Some(bucket) = buckets.0.get_mut(index) {
-            *bucket = None;
-        }
-        if buckets.0.iter().all(Option::is_none) {
-            buckets.0.clear();
-        }
-        buckets.restore();
-    }
-
-    /// The buckets, lent until `restore`.
-    pub(crate) fn take() -> Self {
-        HeldBuckets(HELD_BUCKETS.take())
-    }
-
-    pub(crate) fn restore(self) {
-        HELD_BUCKETS.set(self.0);
-    }
-}
-
-#[cfg(feature = "bench")]
-impl LaidBuckets for HeldBuckets {
-    fn id(&self, key: &BucketKey) -> Option<crate::draw::identity::SimpleIdentity> {
-        Some(self.0.get(key.bucket)?.as_ref()?.id())
-    }
-
-    fn bucket(&self, key: &BucketKey) -> Option<&dyn crate::layer::bucket::ErasedBucket> {
-        Some(&**self.0.get(key.bucket)?.as_ref()?)
-    }
-
-    fn bucket_mut(&mut self, key: &BucketKey) -> Option<&mut dyn crate::layer::bucket::ErasedBucket> {
-        Some(&mut **self.0.get_mut(key.bucket)?.as_mut()?)
-    }
-}
-
-/// What the benchmarks run of the participant (`bench.rs`).
+/// What the benchmarks run of the participant (`crate::bench`).
 #[cfg(feature = "bench")]
 impl SymbolLayer {
     /// The layer `style`, by `key`, with no buckets yet.
@@ -890,6 +823,11 @@ impl SymbolPlacement {
     /// The participant of the frame's `layers`, collected.
     pub(crate) fn with_layers(layers: Vec<SymbolLayer>) -> Self {
         SymbolPlacement { active: layers.len(), layers, ..SymbolPlacement::default() }
+    }
+
+    /// How many symbols the current placement shows.
+    pub(crate) fn shown(&self) -> usize {
+        self.current.placements.values().filter(|placement| placement.placed()).count()
     }
 
     /// Readies a placement of `layers` of `buckets` after one that placed

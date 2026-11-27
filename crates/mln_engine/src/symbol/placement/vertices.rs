@@ -13,8 +13,8 @@ use super::collision::{icon_overlap, text_overlap};
 use super::context::translation;
 use super::{BucketPlacementData, JointOpacityState, Symbols, VariableOffset};
 use crate::camera::{TileProjector, View};
+use crate::draw::ground::TerrainElevation;
 use crate::placement::Overlap;
-use crate::render::terrain::TerrainElevation;
 use crate::symbol::bucket::{Buffer, SymbolBucket, SymbolBucketState};
 use crate::symbol::instance::{Justification, SymbolInstance, TextPart};
 use crate::symbol::projection::{

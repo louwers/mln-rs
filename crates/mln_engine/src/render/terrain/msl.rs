@@ -54,7 +54,6 @@ static float ground_visibility(float4 clip, float view_height, texture2d<float, 
 "#
     };
 }
-pub(crate) use crate::terrain_msl_ground_visibility as ground_visibility;
 
 /// The height rule of `crate::tile::dem`, over the DEM tile a draw reads: its
 /// RGBA8 texels behind a one-texel border, decoded by a `TerrainSurfaceUBO`.

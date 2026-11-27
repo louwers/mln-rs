@@ -95,6 +95,7 @@ pub use crate::draw::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 pub use crate::draw::store::{SharedIndexes, SharedTexture};
 pub use crate::draw::target::Target;
 pub use crate::draw::texture2d::Texture2D;
+pub use crate::draw::tile_render_data::TileAtlasTextures;
 pub use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 pub use crate::draw::vertices::{SharedVertices, TypedVertices, Vertices};
 pub use crate::render::frame_projection::zero_to_one_clip_z;
@@ -124,7 +125,7 @@ pub mod globe {
 pub mod ground {
     pub use crate::render::terrain::programs::{GROUND_DEM, GROUND_DEPTH, GROUND_HEIGHT, TERRAIN_SURFACE};
     pub use crate::render::terrain::{
-        FrameGround, GroundHeights, StandingDraw, TileGround, height_attribute, point_center,
+        FrameGround, GroundHeights, StandingDraw, TerrainElevation, TileGround, height_attribute, point_center,
     };
 
     /// The GLSL snippets of the ground: `ground_height!()`, which a program

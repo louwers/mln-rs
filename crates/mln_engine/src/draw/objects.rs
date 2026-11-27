@@ -789,6 +789,17 @@ impl Mesh {
         self.update(context, |objects, context| objects.upload(gpu, context));
     }
 
+    /// Runs `f` with the mesh's vertex attributes, to change, and the
+    /// context; `None` for a mesh whose objects went. The next upload binds
+    /// the attributes again.
+    pub fn update_vertex_attributes<R>(
+        &self,
+        context: &mut Context,
+        f: impl FnOnce(&mut VertexAttributeArray, &mut Context) -> R,
+    ) -> Option<R> {
+        self.update(context, |objects, context| f(objects.vertex_attributes_mut(), context))
+    }
+
     /// See [`DrawObjects::vertex_attributes_mut`].
     pub(crate) fn vertex_attributes_mut<'c>(&self, context: &'c mut Context) -> Option<&'c mut VertexAttributeArray> {
         context.mesh_mut(self).map(DrawObjects::vertex_attributes_mut)
@@ -845,8 +856,8 @@ impl Mesh {
         }
     }
 
-    /// See [`DrawObjects::replace_indexes`].
-    pub(crate) fn replace_indexes(&self, context: &mut Context, indexes: DrawIndexes, segments: Vec<SegmentBase>) {
+    /// Replaces the mesh's indexes and the segments drawn from them.
+    pub fn replace_indexes(&self, context: &mut Context, indexes: DrawIndexes, segments: Vec<SegmentBase>) {
         if let Some(objects) = context.mesh_mut(self) {
             objects.replace_indexes(indexes, segments);
         }

@@ -30,14 +30,13 @@ use mln_style::types::{
 };
 use mln_style::{PropertyEvaluationParameters, StyleValue as _, i18n};
 
-use crate::draw::mesh::Indexed;
-use crate::image::image_store::ImageType;
-use crate::layer::layer_type::EvaluatedLayer;
-use crate::layer::layout::{BuildCx, Layout, LayoutCx, layers_by_id};
-use crate::layer::paint_property_binder::PaintBinders as _;
+use crate::draw::Indexed;
+use crate::image::ImageType;
+use crate::layer::binders::PaintBinders as _;
+use crate::layer::{BuildCx, EvaluatedLayer, Layout, LayoutCx, layers_by_id};
 use crate::map::MapMode;
 use crate::placement::Overlap;
-use crate::query::feature_index::IndexedSubfeature;
+use crate::query::IndexedSubfeature;
 use crate::symbol::anchor::Anchor;
 use crate::symbol::bucket::{
     Buffer, PaintProperties, PlacedSymbol, QuadCorner, SortKeyRange, SymbolBucket, SymbolBucketState,
@@ -53,15 +52,14 @@ use crate::symbol::instance::{
 use crate::symbol::merge_lines::merge_lines;
 use crate::symbol::placement::collision::{icon_overlap, text_overlap};
 use crate::symbol::placement::collision_feature::{AlongLine, BoxLayout, CollisionBox, CollisionFeature};
+use crate::symbol::pool::PoolRange;
 use crate::symbol::quads::{SymbolQuad, SymbolQuads, glyph_quads, icon_quads};
 use crate::text::atlas::ImagePositions;
 use crate::text::constants::ONE_EM;
 use crate::text::glyph::{GlyphID, GlyphIDType, GlyphPositions, Shaping};
-use crate::text::glyph_store::ShapeResults;
 use crate::text::shaping::{PositionedIcon, ShapingOptions, anchor_justification, shape_text};
 use crate::text::tagged_string::{SectionIndex, SectionOptions};
-use crate::text::{ShapedText, TaggedString, shape_arabic, starts_right_to_left};
-use crate::util::pool::PoolRange;
+use crate::text::{ShapeResults, ShapedText, TaggedString, shape_arabic, starts_right_to_left};
 
 /// Whether `text-field` is set: a constant that is not empty, or an
 /// expression.
@@ -491,7 +489,7 @@ impl SymbolLayout {
             symbol_instance_pools: SymbolInstancePools::default(),
             sort_key_ranges: Vec::new(),
             compare_text: VecMap::new(),
-            source_layer_name: Arc::from(cx.source_layer.name.as_str()),
+            source_layer_name: Arc::from(cx.source_layer_name()),
             overscaling,
             zoom,
             canonical_id: tile_id.canonical,
@@ -1286,9 +1284,9 @@ impl Layout<Symbol> for SymbolLayout {
     fn build(mut self, cx: &mut BuildCx<'_, Symbol>) -> Result<Option<SymbolBucket>, Error> {
         if let Some(resolved) = cx.resolved() {
             if self.has_font_text {
-                self.finalize_symbols(&resolved.shaping);
+                self.finalize_symbols(resolved.shaping());
             }
-            self.prepare_symbols(&resolved.glyphs, &resolved.icons);
+            self.prepare_symbols(resolved.glyphs(), resolved.icons());
             if self.symbols.is_empty() {
                 return Ok(None);
             }

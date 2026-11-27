@@ -37,7 +37,6 @@ pub mod symbol;
 pub mod text;
 pub mod tile;
 pub mod tile_store;
-mod util;
 pub mod worker;
 
 pub use layers::custom::{

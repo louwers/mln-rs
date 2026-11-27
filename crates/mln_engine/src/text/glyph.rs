@@ -468,6 +468,13 @@ pub fn style_font_faces(
 /// The texts that each font face of each font stack shapes.
 pub type ShapeRequests = VecMap<FontStack, VecMap<GlyphIDType, BTreeSet<Vec<char>>>>;
 
+/// Each font-face text of each font stack, shaped by its face: what
+/// [`ShapeRequests`] resolve to.
+pub type ShapeResults = VecMap<FontStack, VecMap<GlyphIDType, BTreeMap<Vec<char>, Arc<crate::text::ShapedText>>>>;
+
+/// The glyphs and the shapings of text that a layout asks for: the
+/// glyphs of each font stack, by id, and the texts each font face of each
+/// font stack shapes.
 #[derive(Clone, Debug, Default, PartialEq, mln_wire::Wire)]
 pub struct GlyphDependencies {
     pub glyphs: VecMap<FontStack, GlyphIDs>,

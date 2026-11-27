@@ -57,7 +57,7 @@ impl Indexed<'_> {
 
     /// [`Indexed::add`] into segments of one sort key, which a draw orders
     /// by: a mesh continues the last segment only if it has `sort_key`.
-    pub(crate) fn add_keyed<V: Copy, const N: usize>(
+    pub fn add_keyed<V: Copy, const N: usize>(
         &mut self,
         vertices: &mut Vec<V>,
         first: usize,

@@ -59,6 +59,7 @@ use crate::render::events::RendererEvent;
 use crate::storage::{FileSource, Request, Resource, Response};
 use crate::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
 use crate::text::font_stack::FontStack;
+pub(crate) use crate::text::glyph::ShapeResults;
 use crate::text::glyph::{
     FontData, FontFace, FontFaces, Glyph, GlyphDependencies, GlyphID, GlyphIDType, GlyphMap, GlyphRange, ShapeRequests,
     get_glyph_range,
@@ -71,9 +72,6 @@ use crate::text::tiny_sdf::transform_raster_to_sdf;
 use crate::text::weight::REGULAR_WEIGHT;
 use crate::text::{BiDiRun, ShapedText, visual_runs};
 use crate::tile_store::inbox::{InboxSender, TileEvent, Waker};
-
-/// Each font-face text of each font stack, shaped by its face.
-pub(crate) type ShapeResults = VecMap<FontStack, VecMap<GlyphIDType, BTreeMap<Vec<char>, Arc<ShapedText>>>>;
 
 /// What a glyph range's response brought.
 pub(crate) enum GlyphData {

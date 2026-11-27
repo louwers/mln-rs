@@ -39,7 +39,7 @@ fn find_viewport_padding(view: &View, map_mode: MapMode) -> f32 {
 
 /// How a shape may overlap the shapes placed before it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum Overlap {
+pub enum Overlap {
     /// Collides with every shape.
     #[default]
     Never,
@@ -53,12 +53,11 @@ pub(crate) enum Overlap {
 /// collisions, those of every layer; without, those of its own layer's
 /// source.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct CollisionGroup(Option<u16>);
+pub struct CollisionGroup(Option<u16>);
 
 impl CollisionGroup {
     /// The group of every shape, as with the map's cross-source collisions.
-    #[cfg(test)]
-    pub(crate) const ALL: CollisionGroup = CollisionGroup(None);
+    pub const ALL: CollisionGroup = CollisionGroup(None);
 
     /// The id of the group's shapes in the grid: 0 for every group.
     fn id(self) -> u16 {
@@ -97,31 +96,31 @@ impl<'a> CollisionGroups<'a> {
 
 /// What a shape inserted in a [`CollisionIndex`] stands for.
 #[derive(Clone, Copy)]
-pub(crate) struct Item<'a> {
+pub struct Item<'a> {
     /// The feature, as queries return it.
-    pub(crate) feature: &'a IndexedSubfeature,
+    pub feature: &'a IndexedSubfeature,
     /// The record of the feature's bucket ([`CollisionIndex::retain`]),
     /// which queries look the feature up in.
-    pub(crate) record: u32,
+    pub record: u32,
     /// How the shape was placed, which a later shape placed with
     /// [`Overlap::Cooperative`] reads.
-    pub(crate) overlap: Overlap,
+    pub overlap: Overlap,
     /// Whether the shape stays out of the way of the shapes placed after
     /// it: they don't collide with it, and queries still find it.
-    pub(crate) ignore_placement: bool,
+    pub ignore_placement: bool,
 }
 
 /// What queries of a placement read of a bucket whose shapes it placed.
 #[derive(Debug)]
-pub(crate) struct RetainedQueryData {
-    pub(crate) bucket_instance_id: u32,
-    pub(crate) feature_index: Option<Arc<FeatureIndex>>,
-    pub(crate) tile_id: OverscaledTileID,
+pub struct RetainedQueryData {
+    pub bucket_instance_id: u32,
+    pub feature_index: Option<Arc<FeatureIndex>>,
+    pub tile_id: OverscaledTileID,
     /// The tile's source, whose feature state queries return.
-    pub(crate) source: SourceKey,
+    pub source: SourceKey,
     /// The order of the bucket's features as the bucket last sorted them,
     /// for a bucket whose features sort by their position.
-    pub(crate) feature_sort_order: FeatureSortOrder,
+    pub feature_sort_order: FeatureSortOrder,
 }
 
 /// The shapes a placement places, in viewport pixels plus
@@ -129,7 +128,7 @@ pub(crate) struct RetainedQueryData {
 /// later shapes collide with, and one of the shapes placed with
 /// [`Item::ignore_placement`], which they don't. It keeps the query data of
 /// the buckets whose shapes it holds.
-pub(crate) struct CollisionIndex {
+pub struct CollisionIndex {
     view: View,
     /// The viewport's size, in pixels.
     size: DVec2,
@@ -147,7 +146,9 @@ pub(crate) struct CollisionIndex {
 }
 
 impl CollisionIndex {
-    pub(crate) fn new(view: &View, map_mode: MapMode) -> Self {
+    /// An empty collision index of `view` in `map_mode`.
+    #[must_use]
+    pub fn new(view: &View, map_mode: MapMode) -> Self {
         CollisionIndex::reusing(view, map_mode, None)
     }
 
@@ -187,20 +188,23 @@ impl CollisionIndex {
     }
 
     /// The view the index places in.
-    pub(crate) fn view(&self) -> &View {
+    #[must_use]
+    pub fn view(&self) -> &View {
         &self.view
     }
 
     /// How far the grid reaches past each edge of the viewport, in pixels:
     /// where a shape at the viewport's top-left corner is.
-    pub(crate) fn viewport_padding(&self) -> f32 {
+    #[must_use]
+    pub fn viewport_padding(&self) -> f32 {
         self.viewport_padding
     }
 
     /// Where `x` and `y`, a point in normalized device coordinates (y up),
     /// are in the grid (y down).
     #[inline]
-    pub(crate) fn to_grid(&self, x: f64, y: f64) -> Vec2 {
+    #[must_use]
+    pub fn to_grid(&self, x: f64, y: f64) -> Vec2 {
         let viewport_padding = f64::from(self.viewport_padding);
         Vec2::new(
             (f64::midpoint(x, 1.0) * self.size.x + viewport_padding) as f32,
@@ -211,7 +215,8 @@ impl CollisionIndex {
     /// Whether `bounds` are wholly outside the viewport, in its padding or
     /// past it.
     #[inline]
-    pub(crate) fn is_offscreen(&self, bounds: &Aabb) -> bool {
+    #[must_use]
+    pub fn is_offscreen(&self, bounds: &Aabb) -> bool {
         bounds.max.x < self.viewport_padding
             || bounds.min.x >= self.screen_right_boundary
             || bounds.max.y < self.viewport_padding
@@ -221,7 +226,8 @@ impl CollisionIndex {
     /// Whether `bounds` reach into the grid. A shape outside it can't place,
     /// though [`collides`](Self::collides) doesn't say so.
     #[inline]
-    pub(crate) fn is_inside_grid(&self, bounds: &Aabb) -> bool {
+    #[must_use]
+    pub fn is_inside_grid(&self, bounds: &Aabb) -> bool {
         bounds.max.x >= 0.0
             && bounds.min.x < self.grid_right_boundary
             && bounds.max.y >= 0.0
@@ -231,7 +237,8 @@ impl CollisionIndex {
     /// Whether `shape`, placed with `overlap`, collides with a shape of
     /// `group` placed before it.
     #[inline]
-    pub(crate) fn collides(&self, shape: &Shape, overlap: Overlap, group: CollisionGroup) -> bool {
+    #[must_use]
+    pub fn collides(&self, shape: &Shape, overlap: Overlap, group: CollisionGroup) -> bool {
         match overlap {
             Overlap::Never => self.collision_grid.any(shape, |feature| group.has(feature)),
             Overlap::Always => false,
@@ -243,7 +250,7 @@ impl CollisionIndex {
 
     /// Inserts `shapes`, which stand for `item`, in `group`.
     #[inline]
-    pub(crate) fn insert(&mut self, shapes: &[Option<Shape>], item: &Item<'_>, group: CollisionGroup) {
+    pub fn insert(&mut self, shapes: &[Option<Shape>], item: &Item<'_>, group: CollisionGroup) {
         let grid = if item.ignore_placement { &mut self.ignored_grid } else { &mut self.collision_grid };
         for shape in shapes.iter().flatten() {
             let feature = IndexedSubfeature {
@@ -258,13 +265,13 @@ impl CollisionIndex {
 
     /// Keeps `data` for queries of the features of the bucket of `record`,
     /// unless the index keeps the bucket's already.
-    pub(crate) fn retain(&mut self, record: u32, data: impl FnOnce() -> RetainedQueryData) {
+    pub fn retain(&mut self, record: u32, data: impl FnOnce() -> RetainedQueryData) {
         self.retained_query_data.entry(record).or_insert_with(data);
     }
 
     /// Has queries return the features of the bucket of `record` in
     /// `order`, if the index keeps its query data.
-    pub(crate) fn set_query_order(&mut self, record: u32, order: &FeatureSortOrder) {
+    pub fn set_query_order(&mut self, record: u32, order: &FeatureSortOrder) {
         if let Some(retained) = self.retained_query_data.get_mut(&record) {
             retained.feature_sort_order.clone_from(order);
         }

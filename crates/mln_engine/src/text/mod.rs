@@ -46,7 +46,7 @@ pub use bidi::{BiDiRun, starts_right_to_left, visual_runs};
 pub use face::FontFile;
 pub use glyph::{
     Bounds, Glyph, GlyphID, GlyphIDType, GlyphMap, GlyphMetrics, GlyphPosition, GlyphPositions, GlyphRange,
-    PositionedGlyph, PositionedLine, Shaping,
+    PositionedGlyph, PositionedLine, ShapeResults, Shaping,
 };
 pub use glyph_cache::GlyphCache;
 pub use shaper::{GlyphAdjust, ShapedText, Shaper};

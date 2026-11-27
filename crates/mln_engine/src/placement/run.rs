@@ -48,30 +48,20 @@ pub(crate) trait ErasedPlacement {
     fn update(&mut self, cx: &mut UpdateCx<'_>);
     fn forget_buckets(&mut self);
     fn forget_placement(&mut self);
-    #[cfg(feature = "bench")]
-    fn shown(&self) -> usize;
 }
-
-/// A [`Placement`] as the engine calls it.
-pub(crate) struct Participant<P>(pub(crate) P);
 
 /// A new participant of `P`'s type, as the engine calls it.
 pub(crate) fn participant<P: Placement>() -> Box<dyn ErasedPlacement> {
-    erase(P::default())
+    Box::new(P::default())
 }
 
-/// `placement`, as the engine calls it.
-pub(crate) fn erase<P: Placement>(placement: P) -> Box<dyn ErasedPlacement> {
-    Box::new(Participant(placement))
-}
-
-impl<P: Placement> ErasedPlacement for Participant<P> {
+impl<P: Placement> ErasedPlacement for P {
     fn layer_type(&self) -> &'static str {
         <<P::Layer as Layer>::Style as StyleLayerType>::INFO.name
     }
 
     fn begin_frame(&mut self) {
-        self.0.begin_frame();
+        Placement::begin_frame(self);
     }
 
     fn collect(
@@ -90,44 +80,39 @@ impl<P: Placement> ErasedPlacement for Participant<P> {
         let tiles = tiles
             .map(|tiles| tiles.at::<P::Layer>(tiles.found(base.found()), &base.style.base().id))
             .unwrap_or_default();
-        self.0.collect(&CollectCx { key, values, source }, &tiles)
+        Placement::collect(self, &CollectCx { key, values, source }, &tiles)
     }
 
     fn prepare(&mut self, layers: &[PlacingLayer], cx: &mut PrepareCx<'_>) -> Prepared {
-        self.0.prepare(layers, cx)
+        Placement::prepare(self, layers, cx)
     }
 
     fn begin(&mut self, cx: &mut PlaceCx<'_>) {
-        self.0.begin(cx);
+        Placement::begin(self, cx);
     }
 
     fn place_crossing(&mut self, layers: &[PlacingLayer], cx: &mut PlaceCx<'_>) {
-        self.0.place_crossing(layers, cx);
+        Placement::place_crossing(self, layers, cx);
     }
 
     fn place(&mut self, layer: &PlacingLayer, cx: &mut PlaceCx<'_>) {
-        self.0.place(layer, cx);
+        Placement::place(self, layer, cx);
     }
 
     fn commit(&mut self, cx: &mut CommitCx<'_>) -> Placed {
-        self.0.commit(cx)
+        Placement::commit(self, cx)
     }
 
     fn update(&mut self, cx: &mut UpdateCx<'_>) {
-        self.0.update(cx);
+        Placement::update(self, cx);
     }
 
     fn forget_buckets(&mut self) {
-        self.0.forget_buckets();
+        Placement::forget_buckets(self);
     }
 
     fn forget_placement(&mut self) {
-        self.0.forget_placement();
-    }
-
-    #[cfg(feature = "bench")]
-    fn shown(&self) -> usize {
-        self.0.shown()
+        Placement::forget_placement(self);
     }
 }
 
@@ -454,19 +439,17 @@ pub(crate) fn placing_layers(
 
 /// A placement of `layers`, bottom to top, the placing layers of
 /// `participant` alone, which the benchmarks prepared from `buckets`, in a
-/// continuous map after one that placed nothing. Returns how many items it
-/// shows.
+/// continuous map after one that placed nothing.
 #[cfg(feature = "bench")]
 pub(crate) fn place_alone(
     participant: &mut dyn ErasedPlacement,
     layers: &[PlacingLayer],
     update_parameters: &UpdateParameters,
     buckets: &mut dyn LaidBuckets,
-) -> usize {
+) {
     let order: Vec<(usize, PlacingLayer)> = layers.iter().rev().map(|layer| (0, *layer)).collect();
     let inputs = PlacementInputs::new(update_parameters, None);
     let prev = PlacementState::new_default();
     let placement = PlacementState::create(inputs, update_parameters.time_point, Some(prev));
-    run(placement, &mut [&mut *participant], &order, &[layers.to_vec()], buckets);
-    participant.shown()
+    run(placement, &mut [participant], &order, &[layers.to_vec()], buckets);
 }
