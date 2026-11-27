@@ -1,8 +1,10 @@
+//! Ports `test/text/calculate_tile_distances.test.cpp`.
+
 use geometry::Point;
 use mln_style::feature::GeometryCoordinates;
 
-use crate::symbol::anchor::Anchor;
-use crate::symbol::layout::SymbolLayout;
+use crate::layers::symbol::anchor::Anchor;
+use crate::layers::symbol::layout::SymbolLayout;
 
 // gtest: calculateTileDistances.Point
 #[test]

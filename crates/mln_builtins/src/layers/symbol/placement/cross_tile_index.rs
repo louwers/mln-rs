@@ -27,19 +27,19 @@ use std::sync::Arc;
 
 use geometry::Point;
 use glam::{I64Vec2, Vec2};
+use mln_engine::camera::{TileProjector, View};
+use mln_engine::draw::ground::TerrainElevation;
+use mln_engine::placement::PlacementBuckets;
+use mln_engine::tile::OverscaledTileID;
 use mln_style::collections::VecMap;
 use mln_style::constants::EXTENT;
 use mln_style::hash::HashSet;
 use mln_style::tile_id::CanonicalTileID;
 
 use super::BucketPlacementData;
-use crate::camera::{TileProjector, View};
-use crate::draw::ground::TerrainElevation;
-use crate::placement::PlacementBuckets;
-use crate::symbol::bucket::SymbolBucket;
-use crate::symbol::instance::{SymbolInstance, SymbolInstancePools};
-use crate::symbol::projection::SymbolHeights;
-use crate::tile::OverscaledTileID;
+use crate::layers::symbol::bucket::SymbolBucket;
+use crate::layers::symbol::instance::{SymbolInstance, SymbolInstancePools};
+use crate::layers::symbol::projection::SymbolHeights;
 
 /// What adding a layer to the index changed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -402,9 +402,9 @@ mod tests {
     use mln_style::types::ProjectionDefinition;
 
     use super::*;
-    use crate::symbol::anchor::Anchor;
-    use crate::symbol::bucket::{SymbolBucketStyle, SymbolLayoutFlags};
-    use crate::symbol::pool::PoolRange;
+    use crate::layers::symbol::anchor::Anchor;
+    use crate::layers::symbol::bucket::{SymbolBucketStyle, SymbolLayoutFlags};
+    use crate::layers::symbol::pool::PoolRange;
 
     fn make_symbol_instance(x: f32, y: f32, key: &str, pools: &mut SymbolInstancePools) -> SymbolInstance {
         SymbolInstance {
@@ -447,7 +447,7 @@ mod tests {
     }
 
     fn camera_at(lat: f64, lon: f64, zoom: f64, globe: bool) -> View {
-        let mut state = crate::camera::TransformState::default();
+        let mut state = mln_engine::camera::TransformState::default();
         state.set_size(Size { width: 512, height: 512 });
         if globe {
             state.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));

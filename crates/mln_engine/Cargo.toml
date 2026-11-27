@@ -86,7 +86,6 @@ parking_lot.workspace = true
 percent-encoding.workspace = true
 pmtiles.workspace = true
 png.workspace = true
-polylabel.workspace = true
 rusqlite = { workspace = true, optional = true }
 serde_json.workspace = true
 skrifa.workspace = true

@@ -30,10 +30,6 @@ pub mod render;
 pub mod shaders;
 pub mod source;
 pub mod storage;
-// The symbol layer type's render half, with its programs, public for the
-// backends' tests, which compile them. Not API.
-#[doc(hidden)]
-pub mod symbol;
 pub mod text;
 pub mod tile;
 pub mod tile_store;

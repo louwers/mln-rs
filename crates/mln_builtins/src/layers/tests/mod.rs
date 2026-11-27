@@ -1,13 +1,15 @@
 //! Tests of the layer types' buckets, layouts and meshes.
 
-// Ports test/gl/bucket.test.cpp (circle, fill, line; on the WebGPU headless
-// backend) and test/renderer/fill_bucket.test.cpp.
+// Ports test/gl/bucket.test.cpp (circle, fill, line, symbol; on the WebGPU
+// headless backend) and test/renderer/fill_bucket.test.cpp.
 mod bucket_test;
+mod calculate_tile_distances;
 mod fixture_log;
 mod gtest_fill_mesh;
 mod gtest_subdivision;
 // Ports test/layout/sort_key.test.cpp.
 mod sort_key_test;
+mod terrain_labels_test;
 
 /// Runs `f` with the `Gpu` of a headless WebGPU backend and a context over
 /// it, which it then tears down. Skipped where no WebGPU adapter is

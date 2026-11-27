@@ -1,8 +1,7 @@
 //! The GLSL, for Vulkan and D3D12, of the symbols' programs.
 
+use mln_engine::draw::ground::glsl::ground_visibility;
 use mln_gfx::shaders::source::GlslSource;
-
-use crate::draw::ground::glsl::ground_visibility;
 
 /// `unpack_opacity`, a symbol's fade opacity from its packed attribute.
 macro_rules! unpack_opacity {

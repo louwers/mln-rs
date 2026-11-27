@@ -9,6 +9,19 @@ use std::sync::Arc;
 
 use geometry::Point;
 use glam::Vec2;
+use mln_engine::draw::Indexed;
+use mln_engine::image::ImageType;
+use mln_engine::layer::binders::PaintBinders as _;
+use mln_engine::layer::{BuildCx, EvaluatedLayer, Layout, LayoutCx, layers_by_id};
+use mln_engine::map::MapMode;
+use mln_engine::placement::Overlap;
+use mln_engine::query::IndexedSubfeature;
+use mln_engine::text::atlas::ImagePositions;
+use mln_engine::text::constants::ONE_EM;
+use mln_engine::text::glyph::{GlyphID, GlyphIDType, GlyphPositions, Shaping};
+use mln_engine::text::shaping::{PositionedIcon, ShapingOptions, anchor_justification, shape_text};
+use mln_engine::text::tagged_string::{SectionIndex, SectionOptions};
+use mln_engine::text::{ShapeResults, ShapedText, TaggedString, shape_arabic, starts_right_to_left};
 use mln_style::collections::VecMap;
 use mln_style::constants::{EXTENT, TILE_SIZE_D};
 use mln_style::error::Error;
@@ -30,36 +43,23 @@ use mln_style::types::{
 };
 use mln_style::{PropertyEvaluationParameters, StyleValue as _, i18n};
 
-use crate::draw::Indexed;
-use crate::image::ImageType;
-use crate::layer::binders::PaintBinders as _;
-use crate::layer::{BuildCx, EvaluatedLayer, Layout, LayoutCx, layers_by_id};
-use crate::map::MapMode;
-use crate::placement::Overlap;
-use crate::query::IndexedSubfeature;
-use crate::symbol::anchor::Anchor;
-use crate::symbol::bucket::{
+use crate::layers::symbol::anchor::Anchor;
+use crate::layers::symbol::bucket::{
     Buffer, PaintProperties, PlacedSymbol, QuadCorner, SortKeyRange, SymbolBucket, SymbolBucketState,
     SymbolBucketStyle, SymbolLayoutFlags, SymbolSizeBinder, max_height_offset,
 };
-use crate::symbol::clip_lines::clip_lines;
-use crate::symbol::feature::SymbolFeature;
-use crate::symbol::get_anchors::{LineLabel, get_anchors, get_center_anchor};
-use crate::symbol::instance::{
+use crate::layers::symbol::clip_lines::clip_lines;
+use crate::layers::symbol::feature::SymbolFeature;
+use crate::layers::symbol::get_anchors::{LineLabel, get_anchors, get_center_anchor};
+use crate::layers::symbol::instance::{
     IconPart, Justification, LaidOutSymbol, ShapedTextOrientations, SymbolInstance, SymbolInstancePools, SymbolQuadSet,
     TextPart, TextRuns, WritingMode,
 };
-use crate::symbol::merge_lines::merge_lines;
-use crate::symbol::placement::collision::{icon_overlap, text_overlap};
-use crate::symbol::placement::collision_feature::{AlongLine, BoxLayout, CollisionBox, CollisionFeature};
-use crate::symbol::pool::PoolRange;
-use crate::symbol::quads::{SymbolQuad, SymbolQuads, glyph_quads, icon_quads};
-use crate::text::atlas::ImagePositions;
-use crate::text::constants::ONE_EM;
-use crate::text::glyph::{GlyphID, GlyphIDType, GlyphPositions, Shaping};
-use crate::text::shaping::{PositionedIcon, ShapingOptions, anchor_justification, shape_text};
-use crate::text::tagged_string::{SectionIndex, SectionOptions};
-use crate::text::{ShapeResults, ShapedText, TaggedString, shape_arabic, starts_right_to_left};
+use crate::layers::symbol::merge_lines::merge_lines;
+use crate::layers::symbol::placement::collision::{icon_overlap, text_overlap};
+use crate::layers::symbol::placement::collision_feature::{AlongLine, BoxLayout, CollisionBox, CollisionFeature};
+use crate::layers::symbol::pool::PoolRange;
+use crate::layers::symbol::quads::{SymbolQuad, SymbolQuads, glyph_quads, icon_quads};
 
 /// Whether `text-field` is set: a constant that is not empty, or an
 /// expression.
@@ -88,7 +88,7 @@ struct GlyphTypeSpan {
 /// faces, which have no name, come before the PBFs only for the text they
 /// can't shape (`i18n::char_in_supported_script`); in a style without PBFs,
 /// they and then the device's fonts draw the rest, if the faces include
-/// them ([`FontFace::system`](crate::text::glyph::FontFace::system)), except
+/// them ([`FontFace::system`](mln_engine::text::glyph::FontFace::system)), except
 /// the characters that line breaking and vertical writing place on their
 /// own, such as spaces and CJK (`i18n::breaks_or_stands_upright`). Else the
 /// rest takes its glyphs one at a time, from PBFs or local fonts
@@ -106,11 +106,11 @@ struct GlyphTypeTable {
 }
 
 impl GlyphTypeTable {
-    fn new(stack: &[String], faces: &crate::text::glyph::FontFaces, glyph_pbfs: bool) -> Self {
+    fn new(stack: &[String], faces: &mln_engine::text::glyph::FontFaces, glyph_pbfs: bool) -> Self {
         let named =
             stack.iter().flat_map(|name| faces.iter().filter(move |face| !name.is_empty() && face.name == *name));
         let fallbacks = faces.iter().filter(|face| face.name.is_empty());
-        let candidates: Vec<&crate::text::glyph::FontFace> = named.chain(fallbacks).collect();
+        let candidates: Vec<&mln_engine::text::glyph::FontFace> = named.chain(fallbacks).collect();
         // The ranges as far as a code point reaches.
         let ranges = || {
             candidates.iter().flat_map(|face| &face.ranges).filter_map(|&(first, last)| {
@@ -177,13 +177,13 @@ impl GlyphTypeTable {
 /// The glyph type tables of the font stacks that one layout's text uses, a
 /// few at most, so it searches them in order.
 struct GlyphTypeTables {
-    faces: Option<Arc<crate::text::glyph::FontFaces>>,
+    faces: Option<Arc<mln_engine::text::glyph::FontFaces>>,
     glyph_pbfs: bool,
     tables: Vec<(Vec<String>, GlyphTypeTable)>,
 }
 
 impl GlyphTypeTables {
-    fn new(faces: Option<Arc<crate::text::glyph::FontFaces>>, glyph_pbfs: bool) -> Self {
+    fn new(faces: Option<Arc<mln_engine::text::glyph::FontFaces>>, glyph_pbfs: bool) -> Self {
         GlyphTypeTables { faces: faces.filter(|faces| !faces.is_empty()), glyph_pbfs, tables: Vec::new() }
     }
 
@@ -1637,10 +1637,10 @@ impl SymbolLayout {
 mod tests {
     use std::num::NonZeroU16;
 
+    use mln_engine::text::glyph::{FontFace, FontFaces, GlyphIDType};
     use mln_style::i18n::char_in_supported_script;
 
     use super::{BASELINE_OFFSET, GlyphTypeTable, SymbolAnchorType, SymbolLayout, evaluate_radial_offset};
-    use crate::text::glyph::{FontFace, FontFaces, GlyphIDType};
 
     #[test]
     fn variable_offset_distinguishes_cartesian_and_radial_offsets() {

@@ -22,7 +22,6 @@ use crate::layers::custom::RenderCustomLayer;
 use crate::placement::{ErasedPlacement, Placement, participant};
 use crate::source::erased::{self, ErasedSourceType};
 use crate::source::{SourceSummary, SourceType, kind};
-use crate::symbol::placement::SymbolPlacement;
 
 /// Makes a renderer's participant of a placing layer type.
 type MakePlacement = fn() -> Box<dyn ErasedPlacement>;
@@ -114,11 +113,10 @@ fn style_half(layer_type: &'static dyn ErasedLayerType) -> &'static dyn ErasedSt
     layer_type.style()
 }
 
-/// Adds the layer types that the engine holds, the symbol and custom layer
-/// types: `mln_builtins`'s `register_builtins` calls it with the other
-/// built-in layer types'. Fails for a name that an earlier call took.
+/// Adds the layer type that the engine holds, the custom layer type:
+/// `mln_builtins`'s `register_builtins` calls it with the built-in layer
+/// types'. Fails for a name that an earlier call took.
 pub fn register_layer_types(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
-    builder.add_placing_layer_type::<SymbolPlacement>()?;
     builder.add_layer_type::<RenderCustomLayer>()
 }
 

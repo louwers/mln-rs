@@ -1,7 +1,7 @@
 use mln_style::feature::GeometryCoordinate;
 use mln_style::hash::HashMap;
 
-use crate::symbol::feature::SymbolFeature;
+use crate::layers::symbol::feature::SymbolFeature;
 
 /// A line's end: the index of its feature's text among the distinct texts,
 /// and the end point.
@@ -97,12 +97,12 @@ pub(crate) fn merge_lines(features: &mut [SymbolFeature]) {
 #[cfg(test)]
 mod tests {
     use geometry::Point;
+    use mln_engine::text::glyph::GlyphIDType;
+    use mln_engine::text::{SectionOptions, TaggedString};
     use mln_style::feature::{GeometryCollection, GeometryCoordinates, GeometryTileFeature, Value};
     use mln_style::geometry::FeatureType;
 
     use super::*;
-    use crate::text::glyph::GlyphIDType;
-    use crate::text::{SectionOptions, TaggedString};
 
     struct StubGeometryTileFeature;
 

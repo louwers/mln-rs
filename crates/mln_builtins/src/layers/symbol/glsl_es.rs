@@ -1,11 +1,11 @@
 //! The GLSL ES, for OpenGL, of the symbols' programs.
 
+use mln_engine::draw::ground::glsl_es::ground_visibility;
 use mln_gfx::shaders::block::{Block, UniformBlock};
 use mln_gfx::shaders::source::Precision::Low;
 use mln_gfx::shaders::source::{GlslEsDeclarations, GlslEsSource};
 
 use super::ubo::SymbolDrawableUBO;
-use crate::draw::ground::glsl_es::ground_visibility;
 
 /// The symbols' tile properties have `is_halo` too.
 const SYMBOL_NAMES: &[(&Block, &str, &str)] = &[(SymbolDrawableUBO::BLOCK, "is_halo", "u_is_halo_pass")];

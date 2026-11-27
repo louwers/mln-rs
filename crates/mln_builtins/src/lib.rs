@@ -10,6 +10,9 @@ use std::sync::{Arc, LazyLock};
 use mln_engine::{Registry, RegistryBuilder};
 use mln_style::expression::functions::{RegisterError, register_builtin_functions};
 
+#[cfg(feature = "bench")]
+#[doc(hidden)]
+pub mod bench;
 #[cfg(feature = "gpu-conformance")]
 pub mod conformance;
 pub mod layers;

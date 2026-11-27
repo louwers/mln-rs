@@ -2,7 +2,8 @@
 //! types, whose style halves are `mln_style`'s, so that the tests' styles
 //! parse as they are. Each draws one color: a geometry layer a quad at each
 //! of its features' points, a raster or raster-dem layer and a background
-//! each tile's square. They meet terrain, blend, turn with the map and read
+//! each tile's square. A symbol layer asks for the glyphs of its text and its
+//! icons, as the built-in type does, and doesn't place. They meet terrain, blend, turn with the map and read
 //! feature state as the built-in types do as far as the engine's tests need,
 //! and no further: what the built-in types draw is their own tests'.
 
@@ -16,9 +17,13 @@ use mln_gfx::shaders::program::{Program, ProgramBuffer, Projection, Stages};
 use mln_gfx::shaders::source::{Sources, WgslSource};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_style::error::Error;
+use mln_style::expression::EvaluationContext;
 use mln_style::expression::functions::RegisterError;
+use mln_style::feature::GeometryTileFeature;
 use mln_style::layer::{PaintSet, StyleLayerType};
-use mln_style::layers::{Background, Circle, ColorRelief, Fill, FillExtrusion, Heatmap, Hillshade, Line, Raster};
+use mln_style::layers::{
+    Background, Circle, ColorRelief, Fill, FillExtrusion, Heatmap, Hillshade, Line, Raster, Symbol,
+};
 use mln_style::range::Range;
 use mln_style::types::{HillshadeIlluminationAnchorType, TranslateAnchorType};
 
@@ -43,6 +48,7 @@ use crate::render::tile::FrameTile;
 use crate::render::tile_matrix::{projection_data, to_projection_ubo};
 use crate::shaders::programs::POS;
 use crate::source::{DemTiles, RasterTiles};
+use crate::text::glyph::GlyphID;
 use crate::tile::OverscaledTileID;
 use crate::tile_store::tile_cover::{TileCoverParameters, tile_cover};
 
@@ -53,6 +59,7 @@ pub(crate) fn register_layer_types(builder: &mut RegistryBuilder) -> Result<(), 
     builder.add_layer_type::<TestFeatures<Circle>>()?;
     builder.add_layer_type::<TestFeatures<Heatmap>>()?;
     builder.add_layer_type::<TestFeatures<FillExtrusion>>()?;
+    builder.add_layer_type::<TestFeatures<Symbol>>()?;
     builder.add_layer_type::<TestRaster>()?;
     builder.add_layer_type::<TestDem<Hillshade>>()?;
     builder.add_layer_type::<TestDem<ColorRelief>>()?;
@@ -159,10 +166,20 @@ pub(crate) trait TestGeometry: StyleLayerType + Sized {
     fn drapes_by_bearing(_paint: &<Self::PaintProperties as PaintSet>::Evaluated) -> bool {
         false
     }
+
+    /// Whether a layout of `group` may ask for glyphs or images.
+    fn needs_resources(group: &[Arc<EvaluatedLayer<Self>>]) -> bool {
+        group.iter().any(|layer| Self::pattern(layer).is_some())
+    }
+
+    /// Asks for what `feature`, which the layout selects, draws with but
+    /// the group's pattern.
+    fn need(_cx: &mut LayoutCx<'_, Self>, _feature: &dyn GeometryTileFeature) {}
 }
 
 pub(crate) use binders::{
     TestCircleBinders, TestFillBinders, TestFillExtrusionBinders, TestHeatmapBinders, TestLineBinders,
+    TestSymbolBinders,
 };
 
 /// The binders of one data-driven paint value of each geometry type, which
@@ -175,6 +192,7 @@ mod binders {
     use mln_style::layers::fill_layer_properties::FillPaintProperties;
     use mln_style::layers::heatmap_layer_properties::HeatmapPaintProperties;
     use mln_style::layers::line_layer_properties::LinePaintProperties;
+    use mln_style::layers::symbol_layer_properties::SymbolPaintProperties;
 
     use crate::layer::paint_property_binder::PaintPropertyBinder;
 
@@ -205,6 +223,12 @@ mod binders {
     crate::paint_property_binders!(
         pub struct TestFillExtrusionBinders for FillExtrusionPaintProperties::PossiblyEvaluated {
             fill_extrusion_color: PaintPropertyBinder<Color> => ["color"],
+        }
+    );
+
+    crate::paint_property_binders!(
+        pub struct TestSymbolBinders for SymbolPaintProperties::PossiblyEvaluated {
+            text_color: PaintPropertyBinder<Color> => ["color"],
         }
     );
 }
@@ -243,6 +267,41 @@ impl TestGeometry for FillExtrusion {
     const VOLUME: bool = true;
 }
 
+impl TestGeometry for Symbol {
+    type Binders = TestSymbolBinders;
+
+    fn needs_resources(_group: &[Arc<EvaluatedLayer<Self>>]) -> bool {
+        true
+    }
+
+    /// Asks for the glyphs of the feature's text, in the stack of its
+    /// section or of `text-font`, the images of its text's image sections,
+    /// and its icon, as the leader's layout evaluates them.
+    fn need(cx: &mut LayoutCx<'_, Self>, feature: &dyn GeometryTileFeature) {
+        let layout = cx.layers()[0].style.layout.evaluate(&cx.parameters());
+        let context = EvaluationContext::with_zoom_feature(cx.zoom(), Some(feature))
+            .with_available_images(Some(cx.available_images()))
+            .with_unavailable_images(Some(cx.unavailable_images()));
+        let text = layout.text_field.evaluate(&context);
+        let font_stack: Vec<String> = layout.text_font.evaluate(&context);
+        for section in &text.sections {
+            if let Some(image) = &section.image {
+                if !image.empty() {
+                    cx.need_image(image.id(), ImageType::Icon);
+                }
+                continue;
+            }
+            let stack = section.font_stack.clone().unwrap_or_else(|| font_stack.clone());
+            let ids = section.text.chars().filter_map(GlyphID::from_char);
+            cx.glyphs().glyphs.entry(stack).or_default().extend(ids);
+        }
+        let icon = layout.icon_image.evaluate(&context);
+        if !icon.empty() {
+            cx.need_image(icon.id(), ImageType::Icon);
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Pod, Zeroable)]
 #[repr(C)]
 pub(crate) struct TestVertex {
@@ -277,7 +336,7 @@ impl<S: TestGeometry> Layout<S> for TestLayout<S> {
     type Bucket = TestBucket<S::Binders>;
 
     fn needs_resources(group: &[Arc<EvaluatedLayer<S>>]) -> bool {
-        group.iter().any(|layer| S::pattern(layer).is_some())
+        S::needs_resources(group)
     }
 
     fn new(cx: &mut LayoutCx<'_, S>) -> Result<Self, Error> {
@@ -290,7 +349,12 @@ impl<S: TestGeometry> Layout<S> for TestLayout<S> {
         let selection = cx.select(&tile_layer, cx.filter_context());
         let mut features = Vec::new();
         for i in 0..tile_layer.len() {
-            if selection.may_select(i) && selection.selects(&tile_layer.feature(i)?) {
+            if !selection.may_select(i) {
+                continue;
+            }
+            let feature = tile_layer.feature(i)?;
+            if selection.selects(&feature) {
+                S::need(cx, &feature);
                 features.push(i);
             }
         }

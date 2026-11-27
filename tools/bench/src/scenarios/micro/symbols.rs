@@ -12,8 +12,9 @@
 
 use std::sync::Arc;
 
+use mln_builtins::bench::{SymbolIndex, SymbolView};
 use mln_engine::UpdateParameters;
-use mln_engine::bench::{LaidOut, SymbolIndex, SymbolView};
+use mln_engine::bench::LaidOut;
 use mln_engine::camera::TransformState;
 use mln_engine::map::MapMode;
 use mln_engine::tile_store::TileLodMode;

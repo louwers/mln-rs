@@ -1,8 +1,7 @@
 //! The WGSL of the symbols' programs.
 
+use mln_engine::draw::ground::wgsl::ground_visibility;
 use mln_gfx::shaders::source::WgslSource;
-
-use crate::draw::ground::wgsl::ground_visibility;
 
 /// `unpack_opacity`, a symbol's fade opacity from its packed attribute.
 macro_rules! unpack_opacity {

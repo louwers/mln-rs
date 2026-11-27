@@ -1,13 +1,11 @@
-// The parts of test/gl/bucket.test.cpp of the engine's stores, raster masks
-// and symbol buckets (on the WebGPU headless backend).
+// The parts of test/gl/bucket.test.cpp of the engine's stores and raster
+// masks (on the WebGPU headless backend).
 mod bucket_test;
 // Cameras that move faster than the network answers.
 mod fast_camera_test;
 mod fixture_log;
 mod gtest_sky;
 mod gtest_tile_mesh;
-// The symbol parts of test/layout/sort_key.test.cpp.
-mod sort_key_test;
 // gtests-data: the test/tile gtests that need the renderer's tiles or
 // the camera's transform (tests/tile/main.rs lists them).
 mod tile;
@@ -60,7 +58,6 @@ pub(crate) fn registry() -> std::sync::Arc<crate::Registry> {
     static REGISTRY: std::sync::LazyLock<std::sync::Arc<crate::Registry>> = std::sync::LazyLock::new(|| {
         let mut builder = crate::RegistryBuilder::new();
         mln_style::expression::functions::register_builtin_functions(builder.functions_mut())
-            .and_then(|()| builder.add_placing_layer_type::<crate::symbol::placement::SymbolPlacement>())
             .and_then(|()| builder.add_layer_type::<crate::layers::custom::RenderCustomLayer>())
             .and_then(|()| types::layers::register_layer_types(&mut builder))
             .and_then(|()| types::register_source_types(&mut builder))

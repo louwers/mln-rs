@@ -5,11 +5,10 @@
 
 use std::borrow::Cow;
 
+use mln_engine::text::TaggedString;
 use mln_style::expression::image::Image;
 use mln_style::feature::{GeometryCollection, GeometryTileFeature, Identifier, PropertyMap, Value};
 use mln_style::geometry::FeatureType;
-
-use crate::text::TaggedString;
 
 #[derive(Clone, Debug)]
 pub(crate) struct SymbolFeature {

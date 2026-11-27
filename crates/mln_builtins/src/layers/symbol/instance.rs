@@ -4,16 +4,16 @@
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
+use mln_engine::text::anchor_justification;
+use mln_engine::text::glyph::Shaping;
 use mln_style::feature::GeometryCoordinates;
 use mln_style::types::{SymbolAnchorType, TextJustifyType, TextWritingModeType, VariableAnchorOffsetCollection};
 use mln_wire::payload::pod;
 
-use crate::symbol::anchor::Anchor;
-use crate::symbol::placement::collision_feature::{CollisionBox, CollisionFeature};
-use crate::symbol::pool::PoolRange;
-use crate::symbol::quads::SymbolQuads;
-use crate::text::anchor_justification;
-use crate::text::glyph::Shaping;
+use crate::layers::symbol::anchor::Anchor;
+use crate::layers::symbol::placement::collision_feature::{CollisionBox, CollisionFeature};
+use crate::layers::symbol::pool::PoolRange;
+use crate::layers::symbol::quads::SymbolQuads;
 
 /// The writing modes that a symbol's text, or a run of its quads, shows in.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, mln_wire::Wire)]

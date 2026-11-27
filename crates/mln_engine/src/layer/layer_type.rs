@@ -388,7 +388,6 @@ mod tests {
     use mln_style::property::evaluated::Evaluated;
 
     use super::*;
-    use crate::symbol::layer::RenderSymbolLayer;
     use crate::tests::types::layers::{TestBackground, TestFeatures};
 
     fn background() -> Arc<dyn ErasedEvaluatedLayer> {
@@ -419,7 +418,5 @@ mod tests {
         let layer = background();
         let circles = entry::<TestFeatures<Circle>>();
         assert!(!circles.needs_resources(std::slice::from_ref(&layer)));
-        let symbols = entry::<RenderSymbolLayer>();
-        assert!(!symbols.needs_resources(&[layer]));
     }
 }

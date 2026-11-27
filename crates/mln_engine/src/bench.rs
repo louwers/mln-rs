@@ -15,7 +15,6 @@ use mln_style::collections::VecSet;
 use mln_style::constants::EXTENT;
 use mln_style::error::Error;
 use mln_style::layer::{ErasedLayerStyle, LayerStyle};
-use mln_style::layers::Symbol;
 use mln_style::property::evaluation::PropertyEvaluationParameters;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::VisibilityType;
@@ -37,10 +36,6 @@ use crate::render::paint_parameters::TransformParameters;
 use crate::render::tile::RenderTile;
 use crate::render::update_parameters::UpdateParameters;
 use crate::storage::Resource;
-use crate::symbol::bucket::SymbolBucket;
-use crate::symbol::layer::RenderSymbolLayer;
-use crate::symbol::placement::cross_tile_index::CrossTileSymbolIndex;
-use crate::symbol::placement::{PlacedTile, SymbolLayer, SymbolPlacement, symbol_translates};
 use crate::text::glyph::{GlyphMap, get_glyph_range, style_font_faces};
 use crate::text::glyph_pbf::parse_glyph_pbf;
 use crate::text::glyph_store::ShapeResults;
@@ -359,116 +354,6 @@ impl LaidBuckets for HeldBuckets {
     }
 }
 
-/// The symbols of laid-out tiles in a view, as a renderer finds which to
-/// show: the buckets its symbol layers place and draw, each tile's matrices
-/// for the view, and the view's update.
-pub struct SymbolView {
-    update: Arc<UpdateParameters>,
-    /// The style's symbol layers that lead or draw a bucket of the tiles,
-    /// in the style's order.
-    layers: Vec<SymbolLayer>,
-    /// Those that lead a bucket, as placement gets them.
-    placing: Vec<PlacingLayer>,
-    /// The participant that places them.
-    placement: SymbolPlacement,
-    /// The keys of the buckets `HeldBuckets` holds for the view.
-    held: Vec<BucketKey>,
-}
-
-impl Drop for SymbolView {
-    fn drop(&mut self) {
-        for key in &self.held {
-            HeldBuckets::release(key);
-        }
-    }
-}
-
-impl SymbolView {
-    /// The view that `update` shows of `tiles`, laid out by the visible
-    /// symbol layers on `source` in `update`'s style. Fails for a layer the
-    /// renderer has no type for.
-    ///
-    /// The harness makes the update, since its fields are what a renderer
-    /// takes from a map: a comparison builds this module against libraries
-    /// whose updates have other fields.
-    pub fn new(source: &str, tiles: &[&LaidOut], update: UpdateParameters) -> Result<SymbolView, Error> {
-        let render_tiles = render_tiles(tiles.iter().map(|laid_out| laid_out.id()), &update.view);
-
-        let parameters = PropertyEvaluationParameters::new(update.view.zoom() as f32);
-        let mut layers = Vec::new();
-        let mut held = Vec::new();
-        for layer in update.style.get_layers() {
-            let base = layer.style().base();
-            if base.source != source || base.visibility == VisibilityType::None || layer.info().name != "symbol" {
-                continue;
-            }
-            let style = LayerStyle::<Symbol>::recover(layer.style())
-                .ok_or_else(|| Error::invalid_argument(format!("no render layer for {}", layer.get_id())))?;
-            // As the participant collects the layer's tiles' buckets.
-            let values = evaluate::<RenderSymbolLayer>(style, &parameters);
-            let translates = symbol_translates(&values);
-            let mut symbol_layer = SymbolLayer::new(layers.len(), Arc::clone(&values.style));
-            let mut buckets = HeldBuckets::take();
-            for (laid_out, tile) in tiles.iter().zip(&render_tiles) {
-                let Some(key) = buckets.hold::<SymbolBucket>(laid_out, layer.get_id(), tile) else { continue };
-                held.push(key);
-                let laid: &dyn LaidBuckets = &buckets;
-                let Some(bucket) = laid.get::<SymbolBucket>(&key) else { continue };
-                let feature_index = || Some(Arc::clone(laid_out.feature_index()));
-                symbol_layer.add_bucket(&values, &PlacedTile::new(tile), key, bucket, feature_index, translates);
-            }
-            buckets.restore();
-            if !symbol_layer.is_empty() {
-                layers.push(symbol_layer);
-            }
-        }
-
-        let placing: Vec<_> = layers.iter().filter(|layer| layer.places()).map(SymbolLayer::placing).collect();
-        let placing = placing_layers(&placing, update.cross_source_collisions);
-        let placement = SymbolPlacement::with_layers(layers.clone());
-        Ok(SymbolView { update: Arc::new(update), layers, placing, placement, held })
-    }
-
-    /// Adds the view's symbol buckets to `index`, as a renderer does before
-    /// it places them: each symbol takes the id of the same symbol in a
-    /// tile of another zoom that `index` holds, or a new one, and `index`
-    /// drops the buckets of each layer that the view no longer has. Returns
-    /// how many layers added a bucket.
-    pub fn index(&self, index: &mut SymbolIndex) -> Result<usize, Error> {
-        let longitude = self.update.view.center(mln_style::geo::WrapMode::Unwrapped).longitude() as f32;
-        let mut added = 0;
-        let mut buckets = HeldBuckets::take();
-        for layer in self.layers.iter().rev() {
-            let result = layer.index(&mut index.0, longitude, &self.update.view, &mut buckets.placement());
-            if result.buckets_added {
-                added += 1;
-            }
-        }
-        buckets.restore();
-        Ok(added)
-    }
-
-    /// Places the view's symbols, topmost layer first, each where it
-    /// collides with none placed before it, after a placement that showed
-    /// none: what a renderer does when the view changes. Returns how many
-    /// symbols it shows. Their ids come from [`SymbolView::index`]: a symbol
-    /// without one shows nowhere.
-    #[must_use]
-    pub fn place(&mut self) -> usize {
-        let mut buckets = HeldBuckets::take();
-        self.placement.prepare_alone(&self.placing, &buckets);
-        place_alone(&mut self.placement, &self.placing, &self.update, &mut buckets);
-        buckets.restore();
-        self.placement.shown()
-    }
-}
-
-/// The renderer's cross-tile symbol index: the symbols of the tiles that
-/// it shows, by layer, with the ids that keep a symbol the same across
-/// tiles of different zooms.
-#[derive(Default)]
-pub struct SymbolIndex(CrossTileSymbolIndex);
-
 /// A worker instance's codec and the map side's, between which a tile's
 /// job and its reply cross as frames of bytes
 /// (`worker::worker_codec`), as in the browser build.
@@ -752,14 +637,8 @@ mod tests {
 
     use geo_types::{Geometry, LineString, Point};
     use mln_style::feature::{Feature, Identifier, PropertyMap, Value};
-    use mln_style::geo::LatLng;
-    use mln_style::size::Size;
-    use mln_style::time::Instant;
 
     use super::*;
-    use crate::camera::TransformState;
-    use crate::map::TerrainOptions;
-    use crate::tile_store::TileLodMode;
 
     fn feature(id: u64, geometry: Geometry<i16>) -> Feature<i16, Arc<PropertyMap>> {
         let mut properties = PropertyMap::new();
@@ -785,43 +664,6 @@ mod tests {
             }"#,
         )
         .unwrap()
-    }
-
-    /// The update of a continuous map of `style` at pixel ratio 1, of
-    /// `width` × `height` pixels centered on 0, 0 at `zoom`.
-    fn update(style: &Style, zoom: f64, (width, height): (u32, u32)) -> UpdateParameters {
-        let mut state = TransformState::default();
-        state.set_size(Size::new(width, height));
-        state.set_lat_lng_zoom(&LatLng::new(0.0, 0.0).unwrap(), zoom);
-        UpdateParameters {
-            style_loaded: true,
-            mode: MapMode::Continuous,
-            pixel_ratio: 1.0,
-            time_point: Some(Instant::now()),
-            view: state.view().clone(),
-            min_zoom: state.min_zoom(),
-            max_zoom: state.limits().max_zoom,
-            camera_moving: false,
-            style: Arc::new(style.clone()),
-            font_faces: None,
-            sprite_loaded: true,
-            feature_states: Arc::default(),
-            file_source: None,
-            prefetch_zoom_delta: 0,
-            still_image_request: false,
-            still_image_request_id: 0,
-            update_id: 0,
-            cross_source_collisions: true,
-            fast_pfor_enabled: false,
-            terrain: TerrainOptions::default(),
-            elevation: None,
-            tile_lod_min_radius: 3.0,
-            tile_lod_scale: 1.0,
-            tile_lod_pitch_threshold: mln_style::math::deg2rad(60.0),
-            tile_lod_zoom_shift: 0.0,
-            tile_lod_mode: TileLodMode::Default,
-            subdivision_granularity: style.get_projection().get_subdivision_granularity(),
-        }
     }
 
     /// A line and a point, both named.
@@ -862,37 +704,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(lines.run(data).unwrap().buckets(), 1);
-    }
-
-    #[test]
-    fn places_the_symbols_it_indexes() {
-        let (style, data, glyphs) = (style(), data(), glyphs());
-        let symbols = |zoom| {
-            let layout = TileLayout::overscaled(
-                &crate::tests::registry(),
-                &style,
-                "s",
-                |type_| type_ == "symbol",
-                (0, 0, 0),
-                zoom,
-                &data,
-                |_| Some(glyphs.clone()),
-            )
-            .unwrap();
-            layout.run(data.clone()).unwrap()
-        };
-        let (before, after) = (symbols(0), symbols(1));
-        let zoomed_out = SymbolView::new("s", &[&before], update(&style, 0.0, (512, 512))).unwrap();
-        let mut zoomed_in = SymbolView::new("s", &[&after], update(&style, 1.0, (1024, 1024))).unwrap();
-
-        // Unindexed symbols show nowhere.
-        assert_eq!(zoomed_in.place(), 0);
-        let mut index = SymbolIndex::default();
-        assert_eq!(zoomed_out.index(&mut index).unwrap(), 1);
-        assert_eq!(zoomed_in.index(&mut index).unwrap(), 1);
-        // Indexing a view again adds nothing.
-        assert_eq!(zoomed_in.index(&mut index).unwrap(), 0);
-        assert_eq!(zoomed_in.place(), 2);
     }
 
     #[test]

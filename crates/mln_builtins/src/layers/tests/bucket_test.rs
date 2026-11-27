@@ -9,6 +9,7 @@ use mln_engine::layer::{
 };
 use mln_engine::tile::OverscaledTileID;
 use mln_style::PropertyEvaluationParameters;
+use mln_style::collections::VecMap;
 use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::feature::{GeometryCollection, GeometryTileFeature, Identifier, PropertyMap, Value};
 use mln_style::geometry::FeatureType;
@@ -16,8 +17,10 @@ use mln_style::layer::{LayerStyle, convert_layer};
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionLayoutProperties;
 use mln_style::layers::fill_layer_properties::FillPaintProperties;
 use mln_style::layers::line_layer_properties::LineLayoutProperties;
+use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::layers::{Fill, Line};
 use mln_style::property::evaluated::Evaluated;
+use mln_style::property::value::PropertyValue;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
 
@@ -28,6 +31,8 @@ use crate::layers::fill::bucket::FillBucket;
 use crate::layers::fill_extrusion::bucket::{FillExtrusionBucket, tile_units_per_meter};
 use crate::layers::line::bucket::LineBucket;
 use crate::layers::line::mesh::LineLayoutVertex;
+use crate::layers::symbol::bucket::{SymbolBucket, SymbolBucketStyle, SymbolLayoutFlags};
+use crate::layers::symbol::instance::SymbolInstancePools;
 use crate::layers::tessellator::Tessellator;
 
 struct StubGeometryTileFeature {
@@ -171,6 +176,40 @@ fn empty_line_bucket(layout: LineLayoutProperties::PossiblyEvaluated) -> LineBuc
 fn circle_bucket() {
     // A bucket uploads once, until it changes.
     let mut bucket = CircleBucket::default();
+
+    with_context(|_, context| {
+        upload(&mut bucket, &mut BucketGeometry::default(), context);
+    });
+}
+
+// gtest: Buckets.SymbolBucket
+#[test]
+fn symbol_bucket() {
+    let layout = Arc::new(SymbolLayoutProperties::PossiblyEvaluated::default());
+    let (instances, pools) = (Vec::new(), SymbolInstancePools::default());
+    let mut bucket = SymbolBucket::new(
+        SymbolBucketStyle {
+            layout,
+            paint_properties: &VecMap::new(),
+            text_size: &PropertyValue::Constant(16.0),
+            icon_size: &PropertyValue::Constant(1.0),
+            zoom: 0.0,
+            tile_pixel_ratio: 1.0,
+            leader_id: Arc::from("test"),
+        },
+        SymbolLayoutFlags::default(),
+        instances,
+        pools,
+        Vec::new(),
+    );
+    assert!(!bucket.has_icon_data());
+    assert!(!bucket.has_sdf_icon_data());
+    assert!(!bucket.has_text_data());
+    assert!(!bucket.has_data());
+
+    bucket.state.text.segments.push(SegmentBase::new(0, 0));
+    assert!(bucket.has_text_data());
+    assert!(bucket.has_data());
 
     with_context(|_, context| {
         upload(&mut bucket, &mut BucketGeometry::default(), context);

@@ -1,13 +1,12 @@
 use glam::Vec2;
+use mln_engine::text::PositionedIcon;
+use mln_engine::text::atlas::{ImagePosition, ImagePositions, RectU16};
+use mln_engine::text::constants::ONE_EM;
+use mln_engine::text::glyph::Shaping;
 use mln_style::image::ImageStretch;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::math::deg2radf;
 use mln_style::types::{SymbolPlacementType, TextRotationAlignmentType};
-
-use crate::text::PositionedIcon;
-use crate::text::atlas::{ImagePosition, ImagePositions, RectU16};
-use crate::text::constants::ONE_EM;
-use crate::text::glyph::Shaping;
 
 /// A glyph's or an icon's quad, relative to its symbol's anchor.
 #[derive(Clone, Debug, PartialEq)]
@@ -324,13 +323,13 @@ pub(crate) fn glyph_quads(
 
 #[cfg(test)]
 mod tests {
+    use mln_engine::text::glyph::{Bounds, GlyphID, GlyphMetrics, PositionedGlyph, PositionedLine};
     use mln_style::bitmap::PremultipliedImage;
     use mln_style::image::Impl as ImageImpl;
     use mln_style::size::Size;
     use mln_style::types::{IconTextFitType, SymbolAnchorType};
 
     use super::*;
-    use crate::text::glyph::{Bounds, GlyphID, GlyphMetrics, PositionedGlyph, PositionedLine};
 
     /// gtest `EXPECT_FLOAT_EQ`: within 4 ULPs.
     fn assert_float_eq(actual: f32, expected: f32) {

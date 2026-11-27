@@ -6,7 +6,7 @@ use mln_engine::shaders::projection_variants as variants;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program::Program;
 
-use crate::layers::{background, circle, color_relief, fill, fill_extrusion, heatmap, hillshade, line, raster};
+use crate::layers::{background, circle, color_relief, fill, fill_extrusion, heatmap, hillshade, line, raster, symbol};
 
 /// The programs the built-in layer types draw with, and, with the
 /// `gpu-conformance` feature, those the conformance cases draw with.
@@ -39,6 +39,9 @@ pub static PROGRAMS: &[&Program] = &[
     &hillshade::programs::HILLSHADE,
     &hillshade::programs::HILLSHADE_PREPARE,
     &color_relief::programs::COLOR_RELIEF,
+    &symbol::programs::SYMBOL_ICON,
+    &symbol::programs::SYMBOL_SDF,
+    &symbol::programs::SYMBOL_TEXT_AND_ICON,
     #[cfg(feature = "gpu-conformance")]
     &crate::conformance::programs::VERTEX_TEXEL,
     #[cfg(feature = "gpu-conformance")]
@@ -57,6 +60,9 @@ pub static STANDING: &[&Program] = &[
     &fill_extrusion::programs::FILL_EXTRUSION_PATTERN,
     &fill_extrusion::programs::FILL_EXTRUSION_PATTERN_INSTANCED,
     &fill_extrusion::programs::FILL_EXTRUSION_PATTERN_WALL,
+    &symbol::programs::SYMBOL_ICON,
+    &symbol::programs::SYMBOL_SDF,
+    &symbol::programs::SYMBOL_TEXT_AND_ICON,
 ];
 
 /// Every program a map of the built-ins draws with: the engine's
@@ -66,10 +72,10 @@ pub fn every_program() -> impl Iterator<Item = &'static Program> {
 }
 
 /// Whether `program`, one of [`every_program`], has variants that stand on
-/// terrain.
+/// terrain: the engine's programs have none.
 #[must_use]
 pub fn stands(program: &Program) -> bool {
-    mln_engine::shaders::STANDING.contains(&program) || STANDING.contains(&program)
+    STANDING.contains(&program)
 }
 
 /// The projection variants of `program`, one of [`every_program`].

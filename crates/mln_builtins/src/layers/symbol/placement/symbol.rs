@@ -4,16 +4,16 @@
 use std::num::NonZeroU32;
 
 use glam::Vec2;
+use mln_engine::placement::Overlap;
+use mln_engine::text::anchor_alignment;
 use mln_style::types::{SymbolAnchorType, TextWritingModeType};
 
 use super::collision::{self, LabelRun, PartCollision, PlacedFeatureResult};
 use super::collision_feature::CollisionFeature;
 use super::context::PlacementContext;
 use super::{JointPlacement, Placer, VariableOffset};
-use crate::placement::Overlap;
-use crate::symbol::instance::{IconPart, SymbolInstance, TextPart};
-use crate::symbol::projection::evaluate_size_for_feature;
-use crate::text::anchor_alignment;
+use crate::layers::symbol::instance::{IconPart, SymbolInstance, TextPart};
+use crate::layers::symbol::projection::evaluate_size_for_feature;
 
 impl VariableOffset {
     /// The shift of the label from its anchor, along the label's own axes.

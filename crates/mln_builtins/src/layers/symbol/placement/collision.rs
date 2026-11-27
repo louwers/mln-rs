@@ -3,15 +3,15 @@
 
 use geometry::Point;
 use glam::{DMat4, DVec4, Vec2};
+use mln_engine::camera::{ProjectedTilePoint, TileProjector};
+use mln_engine::placement::{Aabb, CollisionGroup, CollisionIndex, Item, Overlap, Shape};
 use mln_style::constants::EXTENT;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::types::IconOverlapType;
 
 use super::collision_feature::{CollisionBox, CollisionFeature};
-use crate::camera::{ProjectedTilePoint, TileProjector};
-use crate::placement::{Aabb, CollisionGroup, CollisionIndex, Item, Overlap, Shape};
-use crate::symbol::bucket::{PlacedSymbol, PlacedSymbolPools};
-use crate::symbol::projection::{
+use crate::layers::symbol::bucket::{PlacedSymbol, PlacedSymbolPools};
+use crate::layers::symbol::projection::{
     LabelPlaneProjector, LineLabel, LinePlacer, PlacedGlyph, SymbolHeights, TileDistance, tile_skew_vectors,
 };
 

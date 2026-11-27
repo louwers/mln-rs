@@ -6,6 +6,19 @@
 
 use glam::dcamera::rh::proj::opengl::orthographic;
 use glam::{DMat4, DVec3};
+use mln_engine::camera::{Projection, ProjectionData};
+use mln_engine::draw::ground::FrameGround;
+use mln_engine::draw::{
+    AtlasBinding, Context, Draw, DrawGeometry, Draws, LayerFrame, Mesh, RenderPass, RenderTile, SegmentBase,
+    SharedAttribute, SharedVertices, TypedVertices, Uniforms, VertexAttributeArray, cast_matrix,
+    copy_shared_attributes, projection_data, to_projection_ubo,
+};
+use mln_engine::layer::binders::PaintBinders as _;
+use mln_engine::layer::{
+    BucketChanges, BucketGeometry, EvaluateCx, EvaluatedLayer, Evaluation, Features, FrameTile, Layer, LayerValues,
+    OnTerrain, PrepareCx, TileOrder, bucket_vertices, copied_indexes, paint_vertices,
+};
+use mln_engine::tile::{OverscaledTileID, UnwrappedTileID};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
@@ -19,24 +32,13 @@ use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
 use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
 use mln_style::types::{AlignmentType, IconTextFitType, SymbolPlacementType, TextRotationAlignmentType};
 
-use crate::camera::{Projection, ProjectionData};
-use crate::draw::ground::FrameGround;
-use crate::draw::{
-    AtlasBinding, Context, Draw, DrawGeometry, Draws, LayerFrame, Mesh, RenderPass, RenderTile, SegmentBase,
-    SharedAttribute, SharedVertices, TypedVertices, Uniforms, VertexAttributeArray, cast_matrix,
-    copy_shared_attributes, projection_data, to_projection_ubo,
+use crate::layers::symbol::bucket::{
+    Buffer, PaintProperties, SymbolBucket, SymbolDynamicLayoutVertex, SymbolOpacityVertex,
 };
-use crate::layer::binders::PaintBinders as _;
-use crate::layer::{
-    BucketChanges, BucketGeometry, EvaluateCx, EvaluatedLayer, Evaluation, Features, FrameTile, Layer, LayerValues,
-    OnTerrain, PrepareCx, TileOrder, bucket_vertices, copied_indexes, paint_vertices,
-};
-use crate::symbol::bucket::{Buffer, PaintProperties, SymbolBucket, SymbolDynamicLayoutVertex, SymbolOpacityVertex};
-use crate::symbol::layout::SymbolLayout;
-use crate::symbol::programs;
-use crate::symbol::projection::{gl_coord_matrix, label_plane_matrix};
-use crate::symbol::ubo::{SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO};
-use crate::tile::{OverscaledTileID, UnwrappedTileID};
+use crate::layers::symbol::layout::SymbolLayout;
+use crate::layers::symbol::programs;
+use crate::layers::symbol::projection::{gl_coord_matrix, label_plane_matrix};
+use crate::layers::symbol::ubo::{SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO};
 
 /// The slots of the programs' textures that the draws bind.
 const GROUND_DEPTH_SLOT: usize = programs::SYMBOL_SDF.texture_slot("ground_depth");
@@ -157,7 +159,7 @@ fn set_binder_attributes(
 
 /// The attributes of the layout vertices.
 fn set_layout_attributes(geometry: &BucketGeometry, buffer: &Buffer, attribs: &mut VertexAttributeArray) {
-    let layout_size = size_of::<crate::symbol::bucket::SymbolLayoutVertex>() as u32;
+    let layout_size = size_of::<crate::layers::symbol::bucket::SymbolLayoutVertex>() as u32;
     let Some(layout_data) = bucket_vertices(geometry, &buffer.attribute_data) else {
         return;
     };
@@ -178,7 +180,7 @@ fn set_layout_attributes(geometry: &BucketGeometry, buffer: &Buffer, attribs: &m
 /// Sets the symbols' heights to the layout vertices' `symbol-height-offset`s,
 /// of `layout_data`.
 fn set_height_offset_attribute(layout_data: SharedVertices, attribs: &mut VertexAttributeArray) {
-    let layout_size = size_of::<crate::symbol::bucket::SymbolLayoutVertex>() as u32;
+    let layout_size = size_of::<crate::layers::symbol::bucket::SymbolLayoutVertex>() as u32;
     attribs.set_shared("height_offset", SharedAttribute::new(layout_data, AttributeDataType::Float, 28, layout_size));
 }
 

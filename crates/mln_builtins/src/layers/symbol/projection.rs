@@ -7,18 +7,18 @@ use std::iter;
 
 use geometry::Point;
 use glam::{DMat4, DVec2, DVec3, DVec4, Vec2};
+use mln_engine::camera::{ProjectedTilePoint, TileProjector, View};
+use mln_engine::draw::ground::{TerrainElevation, TileGround};
+use mln_engine::text::constants::ONE_EM;
+use mln_engine::tile::UnwrappedTileID;
 use mln_style::feature::GeometryCoordinate;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::types::SymbolHeightAnchorType;
 
-use crate::camera::{ProjectedTilePoint, TileProjector, View};
-use crate::draw::ground::{TerrainElevation, TileGround};
-use crate::symbol::bucket::{
+use crate::layers::symbol::bucket::{
     PlacedSymbol, PlacedSymbolPools, SymbolBucket, SymbolDynamicLayoutVertex, SymbolSizeBinder, ZoomEvaluatedSize,
 };
-use crate::symbol::instance::WritingMode;
-use crate::text::constants::ONE_EM;
-use crate::tile::UnwrappedTileID;
+use crate::layers::symbol::instance::WritingMode;
 
 /// The directions on screen that a pitched, unrotated label's east and south
 /// axes take, as unit vectors, or zero where an axis is edge-on.
@@ -756,6 +756,9 @@ mod tests {
 
     use geometry::Point;
     use glam::Vec2;
+    use mln_engine::camera::transform::Transform;
+    use mln_engine::camera::{ConstrainMode, TileProjector, TransformState, View, ViewportMode};
+    use mln_engine::tile::{OverscaledTileID, UnwrappedTileID};
     use mln_style::geo::LatLng;
     use mln_style::size::Size;
     use mln_style::tile_id::CanonicalTileID;
@@ -764,10 +767,7 @@ mod tests {
         LabelPlaneProjector, LineLabel, LineLabelAlignment, LinePlacer, PlacedGlyph, PlacedSymbol, PlacedSymbolPools,
         SymbolHeights, SymbolSizeBinder, TileDistance, Unplaced, WritingMode, reproject_line_labels,
     };
-    use crate::camera::transform::Transform;
-    use crate::camera::{ConstrainMode, TileProjector, TransformState, View, ViewportMode};
-    use crate::symbol::pool::PoolRange;
-    use crate::tile::{OverscaledTileID, UnwrappedTileID};
+    use crate::layers::symbol::pool::PoolRange;
 
     /// A 512 px square map at zoom 0, where tile 0/0/0 fills the viewport
     /// and a pixel is 16 tile units.

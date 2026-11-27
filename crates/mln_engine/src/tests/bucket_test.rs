@@ -1,61 +1,12 @@
-use std::sync::Arc;
-
 use geometry::Point;
-use mln_style::collections::VecMap;
-use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
-use mln_style::property::value::PropertyValue;
 use mln_style::tile_id::CanonicalTileID;
 
 use super::with_context;
-use crate::draw::context::Context;
 use crate::draw::indexes::DrawIndexes;
 use crate::draw::quads::{RasterLayoutVertex, StoredQuads, mask_quads};
 use crate::draw::segment::SegmentBase;
-use crate::layer::bucket::{Bucket, Upload};
-use crate::layer::bucket_geometry::BucketGeometry;
-use crate::symbol::bucket::{SymbolBucket, SymbolBucketStyle, SymbolLayoutFlags};
-use crate::symbol::instance::SymbolInstancePools;
 use crate::tile_store::raster::Masking;
 use crate::tile_store::tile_mask::TileMask;
-
-/// Uploads `bucket`, keeping its geometry in `geometry`, through `context`.
-fn upload(bucket: &mut impl Bucket, geometry: &mut BucketGeometry, context: &mut Context) {
-    bucket.upload(&mut Upload::geometry(geometry, &[], context));
-}
-
-// gtest: Buckets.SymbolBucket
-#[test]
-fn symbol_bucket() {
-    let layout = Arc::new(SymbolLayoutProperties::PossiblyEvaluated::default());
-    let (instances, pools) = (Vec::new(), SymbolInstancePools::default());
-    let mut bucket = SymbolBucket::new(
-        SymbolBucketStyle {
-            layout,
-            paint_properties: &VecMap::new(),
-            text_size: &PropertyValue::Constant(16.0),
-            icon_size: &PropertyValue::Constant(1.0),
-            zoom: 0.0,
-            tile_pixel_ratio: 1.0,
-            leader_id: Arc::from("test"),
-        },
-        SymbolLayoutFlags::default(),
-        instances,
-        pools,
-        Vec::new(),
-    );
-    assert!(!bucket.has_icon_data());
-    assert!(!bucket.has_sdf_icon_data());
-    assert!(!bucket.has_text_data());
-    assert!(!bucket.has_data());
-
-    bucket.state.text.segments.push(SegmentBase::new(0, 0));
-    assert!(bucket.has_text_data());
-    assert!(bucket.has_data());
-
-    with_context(|_, context| {
-        upload(&mut bucket, &mut BucketGeometry::default(), context);
-    });
-}
 
 // gtest: Buckets.RasterBucket
 #[test]

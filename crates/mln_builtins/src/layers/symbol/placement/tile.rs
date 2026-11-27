@@ -6,6 +6,8 @@ use std::collections::BTreeSet;
 use std::num::NonZeroU32;
 
 use glam::{DMat4, Vec2};
+use mln_engine::placement::{LaidBuckets, Overlap, PlacedSymbolData, PlacingLayer, Shape};
+use mln_engine::tile::UnwrappedTileID;
 use mln_style::constants::EXTENT;
 use mln_style::types::{SymbolAnchorType, SymbolPlacementType};
 
@@ -13,10 +15,8 @@ use super::collision::{self, CollisionBoundaries, IntersectStatus};
 use super::collision_feature::CollisionBox;
 use super::context::PlacementContext;
 use super::{JointPlacement, PlacedBucket, Placer, SymbolPlacement, VariableOffset};
-use crate::placement::{LaidBuckets, Overlap, PlacedSymbolData, PlacingLayer, Shape};
-use crate::symbol::bucket::SymbolBucket;
-use crate::symbol::instance::SymbolInstance;
-use crate::tile::UnwrappedTileID;
+use crate::layers::symbol::bucket::SymbolBucket;
+use crate::layers::symbol::instance::SymbolInstance;
 
 /// What a tile placement keeps besides the placement's own state.
 #[derive(Default)]

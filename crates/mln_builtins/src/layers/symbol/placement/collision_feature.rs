@@ -1,13 +1,13 @@
 use glam::Vec2;
+use mln_engine::query::IndexedSubfeature;
+use mln_engine::text::PositionedIcon;
+use mln_engine::text::glyph::Shaping;
 use mln_style::feature::GeometryCoordinate;
 use mln_style::math::deg2radf;
 use mln_style::padding::Padding;
 
-use crate::query::IndexedSubfeature;
-use crate::symbol::anchor::{Anchor, segments, vertex_behind};
-use crate::symbol::pool::PoolRange;
-use crate::text::PositionedIcon;
-use crate::text::glyph::Shaping;
+use crate::layers::symbol::anchor::{Anchor, segments, vertex_behind};
+use crate::layers::symbol::pool::PoolRange;
 
 #[derive(Clone, Copy, Debug, PartialEq, mln_wire::Wire)]
 pub(crate) struct CollisionBox {

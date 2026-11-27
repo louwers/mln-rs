@@ -2,6 +2,11 @@
 //! layer.
 
 use glam::Vec2;
+use mln_engine::camera::{ProjectionData, TileProjector, View};
+use mln_engine::draw::RenderTile;
+use mln_engine::draw::ground::TerrainElevation;
+use mln_engine::placement::{CollisionGroup, Overlap};
+use mln_engine::tile::UnwrappedTileID;
 use mln_style::constants::{EXTENT, TILE_SIZE_D};
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::types::{
@@ -10,13 +15,8 @@ use mln_style::types::{
 
 use super::collision::{CollisionBoundaries, PartCollision, icon_overlap, text_overlap};
 use super::{BucketPlacementData, PlacedTile, SymbolTranslate};
-use crate::camera::{ProjectionData, TileProjector, View};
-use crate::draw::RenderTile;
-use crate::draw::ground::TerrainElevation;
-use crate::placement::{CollisionGroup, Overlap};
-use crate::symbol::bucket::{SymbolBucket, ZoomEvaluatedSize, symbols_by_viewport_y};
-use crate::symbol::projection::{LabelPlaneProjector, SymbolHeights};
-use crate::tile::UnwrappedTileID;
+use crate::layers::symbol::bucket::{SymbolBucket, ZoomEvaluatedSize, symbols_by_viewport_y};
+use crate::layers::symbol::projection::{LabelPlaneProjector, SymbolHeights};
 
 /// A symbol layer's `*-translate` in the tile's units.
 pub(crate) fn translation(

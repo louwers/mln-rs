@@ -367,11 +367,7 @@ fn symbol_layouts_cross_with_their_glyphs_and_images() {
         panic!("expected the layout");
     };
     assert_eq!(output.deps.images.keys().collect::<Vec<_>>(), ["interstate_1"]);
-    for (_, render_data) in output.result.layer_render_data.iter() {
-        let symbols = render_data.bucket.downcast_ref::<crate::symbol::bucket::SymbolBucket>().unwrap();
-        assert!(symbols.has_text_data() && symbols.has_icon_data());
-        assert!(!symbols.state.symbol_instances.is_empty());
-    }
+    assert_eq!(output.result.layer_render_data.len(), 2);
 }
 
 /// A text color in a format section overrides the paint property, which

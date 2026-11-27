@@ -19,6 +19,10 @@ doctest = false
 # `conformance`, the frames that the backends' tests draw through their
 # `Gpu`, with the built-in layer types' programs and the engine's.
 gpu-conformance = []
+# `bench`, the entry points to the built-in layer types' stages that the
+# benchmarks (tools/bench) measure, over the engine's. Not API: hidden from
+# the documentation.
+bench = ["mln_engine/bench"]
 
 [dependencies]
 bytemuck = { workspace = true, features = ["extern_crate_alloc"] }
@@ -34,6 +38,7 @@ mln_gfx.workspace = true
 mln_style.workspace = true
 mln_wire = { workspace = true, features = ["geo-types", "glam", "parking_lot"] }
 parking_lot.workspace = true
+polylabel.workspace = true
 serde_json.workspace = true
 
 # `conformance::host_writes`'s bytes in a JS array.

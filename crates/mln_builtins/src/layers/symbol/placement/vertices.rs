@@ -7,21 +7,21 @@ use std::num::NonZeroU32;
 
 use geometry::Point;
 use glam::Vec2;
+use mln_engine::camera::{TileProjector, View};
+use mln_engine::draw::ground::TerrainElevation;
+use mln_engine::placement::Overlap;
+use mln_engine::text::constants::ONE_EM;
 use mln_style::types::{AlignmentType, IconTextFitType, TextRotationAlignmentType, TextWritingModeType};
 
 use super::collision::{icon_overlap, text_overlap};
 use super::context::translation;
 use super::{BucketPlacementData, JointOpacityState, Symbols, VariableOffset};
-use crate::camera::{TileProjector, View};
-use crate::draw::ground::TerrainElevation;
-use crate::placement::Overlap;
-use crate::symbol::bucket::{Buffer, SymbolBucket, SymbolBucketState};
-use crate::symbol::instance::{Justification, SymbolInstance, TextPart};
-use crate::symbol::projection::{
+use crate::layers::symbol::bucket::{Buffer, SymbolBucket, SymbolBucketState};
+use crate::layers::symbol::instance::{Justification, SymbolInstance, TextPart};
+use crate::layers::symbol::projection::{
     LabelPlaneProjector, LineLabelAlignment, SymbolHeights, add_dynamic_attributes, evaluate_size_for_feature,
     hide_glyphs, reproject_line_labels, tile_skew_vectors,
 };
-use crate::text::constants::ONE_EM;
 
 /// Appends `n` copies of `value` to `v`.
 fn extend<T: Copy>(v: &mut Vec<T>, n: usize, value: T) {
@@ -266,7 +266,7 @@ impl Shown<'_> {
         } else {
             (Vec2::X, Vec2::Y)
         };
-        let shifted_anchor = |offset: &VariableOffset, run: &crate::symbol::bucket::PlacedSymbol| {
+        let shifted_anchor = |offset: &VariableOffset, run: &crate::layers::symbol::bucket::PlacedSymbol| {
             let label_plane = label_plane.raised(run.height_offset);
             let tile_anchor = run.anchor_point;
             let projected = if pitch_with_map {
@@ -430,7 +430,7 @@ fn set_run_opacity(
     buffer: &mut Buffer,
     run: usize,
     hidden: bool,
-    vertex: crate::symbol::bucket::SymbolOpacityVertex,
+    vertex: crate::layers::symbol::bucket::SymbolOpacityVertex,
     heights: SymbolHeights<'_>,
 ) {
     let run = &mut buffer.placed_symbols[run];

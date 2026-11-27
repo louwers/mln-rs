@@ -25,6 +25,17 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use glam::DMat4;
+use mln_engine::camera::{ProjectionData, View};
+use mln_engine::draw::RenderTile;
+use mln_engine::draw::ground::TerrainElevation;
+use mln_engine::layer::{BucketChanges, EvaluatedLayer, FrameTile};
+use mln_engine::map::MapMode;
+use mln_engine::placement::{
+    BucketKey, CollectCx, CollisionGroup, CollisionIndex, CommitCx, LaidBuckets, PlaceCx, Placed, PlacedSymbolData,
+    Placement, PlacingLayer, PrepareCx, Prepared, RetainedQueryData, Shape, UpdateCx,
+};
+use mln_engine::query::FeatureIndex;
+use mln_engine::tile::{OverscaledTileID, UnwrappedTileID};
 use mln_style::hash::{HashMap, HashSet};
 use mln_style::layer::{ErasedLayerStyle as _, LayerStyle};
 use mln_style::layers::Symbol;
@@ -34,20 +45,9 @@ use self::context::{BucketOptions, PlacementContext};
 use self::cross_tile_index::CrossTileSymbolIndex;
 use self::tile::TilePlacementState;
 use self::vertices::Shown;
-use crate::camera::{ProjectionData, View};
-use crate::draw::RenderTile;
-use crate::draw::ground::TerrainElevation;
-use crate::layer::{BucketChanges, EvaluatedLayer, FrameTile};
-use crate::map::MapMode;
-use crate::placement::{
-    BucketKey, CollectCx, CollisionGroup, CollisionIndex, CommitCx, LaidBuckets, PlaceCx, Placed, PlacedSymbolData,
-    Placement, PlacingLayer, PrepareCx, Prepared, RetainedQueryData, Shape, UpdateCx,
-};
-use crate::query::FeatureIndex;
-use crate::symbol::bucket::{SortKeyRange, SymbolBucket};
-use crate::symbol::instance::SymbolInstance;
-use crate::symbol::layer::RenderSymbolLayer;
-use crate::tile::{OverscaledTileID, UnwrappedTileID};
+use crate::layers::symbol::bucket::{SortKeyRange, SymbolBucket};
+use crate::layers::symbol::instance::SymbolInstance;
+use crate::layers::symbol::layer::RenderSymbolLayer;
 
 /// The opacity of a symbol's text or icon, and whether it fades in or out.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -812,7 +812,7 @@ impl SymbolLayer {
         index: &mut CrossTileSymbolIndex,
         lng: f32,
         view: &View,
-        buckets: &mut crate::placement::PlacementBuckets<'_>,
+        buckets: &mut mln_engine::placement::PlacementBuckets<'_>,
     ) -> cross_tile_index::AddLayerResult {
         index.index_layer(self.id(), &self.placement_data, lng, view, None, buckets)
     }

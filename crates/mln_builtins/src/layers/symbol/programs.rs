@@ -1,12 +1,12 @@
 //! The symbols' programs.
 
+use mln_engine::draw::ground::GROUND_DEPTH;
 use mln_gfx::gfx_types::AttributeDataType::{Float, Float4, Short4, UShort2, UShort4};
 use mln_gfx::shaders::program::{Attribute, Program, ProgramBuffer, ProgramTexture, Projection, Property, Stages};
 use mln_gfx::shaders::source::Sources;
 
 use super::ubo::{SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO};
 use super::{glsl, glsl_es, msl, wgsl};
-use crate::draw::ground::GROUND_DEPTH;
 
 const SYMBOL_BUFFERS: &[ProgramBuffer] = &[
     ProgramBuffer::storage::<SymbolDrawableUBO>("drawableVector", Stages::Vertex),

@@ -126,13 +126,6 @@ impl LayoutBuckets {
         self.layers.len()
     }
 
-    /// The bucket of the layer `layer_id`, out of the layout.
-    #[cfg(test)]
-    pub(crate) fn into_bucket(mut self, layer_id: &str) -> Option<Box<dyn ErasedBucket>> {
-        let index = self.laid[self.find(layer_id)?].bucket;
-        Some(self.buckets.swap_remove(index))
-    }
-
     #[cfg(test)]
     #[must_use]
     pub(crate) fn contains_key(&self, layer_id: &str) -> bool {

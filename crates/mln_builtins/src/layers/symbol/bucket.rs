@@ -7,6 +7,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use glam::Vec2;
+use mln_engine::draw::SegmentBase;
+use mln_engine::layer::binders::{PaintBinders as _, PaintPropertyBinder};
+use mln_engine::layer::{Bucket, EvaluatedLayer, GeometryVec, Upload};
 use mln_style::collections::VecMap;
 use mln_style::color::Color;
 use mln_style::expression::EvaluationContext;
@@ -20,14 +23,11 @@ use mln_style::range::Range;
 use mln_style::types::TextWritingModeType;
 use mln_wire::payload::pod;
 
-use crate::draw::SegmentBase;
-use crate::layer::binders::{PaintBinders as _, PaintPropertyBinder};
-use crate::layer::{Bucket, EvaluatedLayer, GeometryVec, Upload};
-use crate::symbol::instance::{SymbolInstance, SymbolInstancePools, WritingMode};
-use crate::symbol::pool::PoolRange;
-use crate::symbol::quads::SymbolQuad;
+use crate::layers::symbol::instance::{SymbolInstance, SymbolInstancePools, WritingMode};
+use crate::layers::symbol::pool::PoolRange;
+use crate::layers::symbol::quads::SymbolQuad;
 
-crate::paint_property_binders!(
+mln_engine::paint_property_binders!(
     pub struct SymbolIconBinders for SymbolPaintProperties::PossiblyEvaluated {
         icon_opacity: PaintPropertyBinder<f32> => ["opacity"],
         icon_color: PaintPropertyBinder<Color> => ["fill_color"],
@@ -37,7 +37,7 @@ crate::paint_property_binders!(
     }
 );
 
-crate::paint_property_binders!(
+mln_engine::paint_property_binders!(
     pub struct SymbolTextBinders for SymbolPaintProperties::PossiblyEvaluated {
         text_opacity: PaintPropertyBinder<f32> => ["opacity"],
         text_color: PaintPropertyBinder<Color> => ["fill_color"],
@@ -731,8 +731,9 @@ impl Bucket for SymbolBucket {
 
 #[cfg(test)]
 mod tests {
+    use mln_engine::draw::SegmentBase;
+
     use super::*;
-    use crate::draw::SegmentBase;
 
     // gtest: SymbolRendering.KeepFadingSymbolsVisible
     #[test]

@@ -1,7 +1,7 @@
 //! The engine's programs: its own ([`programs`]), the blocks they read
 //! ([`ubo`]) and their text in each language, and every program it draws
-//! with ([`PROGRAMS`]): those, the symbol layer type's and the terrain's
-//! ([`terrain`]). A layer type's programs are in its own module.
+//! with ([`PROGRAMS`]): those and the terrain's ([`terrain`]). A layer
+//! type's programs are in its own module.
 
 // The built-in programs' WGSL and MSL started as MapLibre Native's, and
 // read the vertices and blocks this renderer makes.
@@ -134,16 +134,11 @@ pub mod terrain {
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::program::Program;
 
-use crate::symbol;
-
-/// The programs the engine draws with: its own and the symbol layer
-/// type's. Each crate of layer types lists its own (in
-/// `mln_builtins`, `mln_builtins::shaders::PROGRAMS`).
+/// The programs the engine draws with: its own and the terrain's. Each
+/// crate of layer types lists its own (in `mln_builtins`,
+/// `mln_builtins::shaders::PROGRAMS`).
 pub static PROGRAMS: &[&Program] = &[
     &programs::CLIPPING_MASK,
-    &symbol::programs::SYMBOL_ICON,
-    &symbol::programs::SYMBOL_SDF,
-    &symbol::programs::SYMBOL_TEXT_AND_ICON,
     &programs::GLOBE_DEPTH,
     &programs::SKY,
     &programs::ATMOSPHERE,
@@ -152,14 +147,9 @@ pub static PROGRAMS: &[&Program] = &[
     &crate::render::terrain::programs::TERRAIN_DEPTH,
 ];
 
-/// Those of [`PROGRAMS`] with variants that stand on terrain
-/// ([`ProjectionVariant::stands`]): the programs of a layer type that
-/// stands on terrain ([`OnTerrain::Stands`](crate::layer::OnTerrain::Stands)).
-pub static STANDING: &[&Program] =
-    &[&symbol::programs::SYMBOL_ICON, &symbol::programs::SYMBOL_SDF, &symbol::programs::SYMBOL_TEXT_AND_ICON];
-
 /// The projection variants of a program: those that stand on terrain too,
-/// for one that `stands`, such as one of [`STANDING`].
+/// for one that `stands`, a program of a layer type that stands on terrain
+/// ([`OnTerrain::Stands`](crate::layer::OnTerrain::Stands)).
 #[must_use]
 pub fn projection_variants(stands: bool) -> &'static [ProjectionVariant] {
     const ALL: [ProjectionVariant; 4] = [
