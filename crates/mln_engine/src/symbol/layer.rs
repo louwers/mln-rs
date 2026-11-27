@@ -625,12 +625,12 @@ impl RenderSymbolLayer {
             debug_assert!(bucket.is_some() || cached.draws.is_empty());
             for draw in cached.draws.iter().filter(|draw| draw.visible) {
                 let Some((blocks, projection)) = bucket
-                    .and_then(|bucket| Self::uniforms(layer_id, layer, &tile_id, bucket, draw, frame, cx.context))
+                    .and_then(|bucket| Self::uniforms(layer_id, layer, &tile_id, bucket, draw, frame, cx.res.context))
                 else {
                     continue;
                 };
                 if let Some(depth) = depth {
-                    draw.mesh.set_texture(cx.context, GROUND_DEPTH_SLOT, Some(depth));
+                    draw.mesh.set_texture(cx.res.context, GROUND_DEPTH_SLOT, Some(depth));
                 }
                 let opaque = passes & RenderPass::Opaque != RenderPass::None;
                 let frame_draw = Draw { order: draw.mesh.seq(), opaque, ..Draw::DEFAULT };
@@ -776,7 +776,7 @@ impl TypedLayer for RenderSymbolLayer {
             if let Some(cached) = entry.value.as_mut().filter(|cached| !cached.draws.is_empty()) {
                 // The draws that read the same attributes are next to each
                 // other, as the update builds them.
-                let (context, geometry) = (&mut *cx.context, render_data.geometry());
+                let (context, geometry) = (&mut *cx.res.context, render_data.geometry());
                 for draws in cached.draws.chunk_by_mut(|a, b| a.attributes_key() == b.attributes_key()) {
                     refresh_draws(context, draws, geometry, bucket, layer_id, evaluated, refresh);
                 }
@@ -897,7 +897,7 @@ impl TypedLayer for RenderSymbolLayer {
             let mut uniforms = Uniforms::default();
             let mut vertex_attribs = VertexAttributeArray::new();
             let placed = update_tile_attributes(
-                cx.context,
+                cx.res.context,
                 render_data.geometry(),
                 buffer,
                 layer_id,
@@ -975,10 +975,10 @@ impl TypedLayer for RenderSymbolLayer {
                     segments: segments.iter().map(SegmentBase::copy).collect(),
                     instances: None,
                 };
-                let shader = cx.context.shader_key(program, uniforms, symbol_projection_variant);
+                let shader = cx.res.context.shader_key(program, uniforms, symbol_projection_variant);
                 let textures = draw_atlases.textures(&shader);
-                let mesh = Mesh::new(cx.context, shader, color_mode, CullFaceMode::disabled(), geometry, textures);
-                mesh.set_atlases(cx.context, Some(draw_atlases.clone()));
+                let mesh = Mesh::new(cx.res.context, shader, color_mode, CullFaceMode::disabled(), geometry, textures);
+                mesh.set_atlases(cx.res.context, Some(draw_atlases.clone()));
 
                 let draw = SymbolDraw {
                     mesh,

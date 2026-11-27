@@ -1,7 +1,7 @@
 //! Textures of a layer's own that its draws draw into ahead of a frame and
 //! that its other draws sample: [`Target`]s.
 //!
-//! A layer makes a target of a size and keeps it. In a frame it pushes the
+//! A layer makes a target of a size ([`Resources::target`]) and keeps it. In a frame it pushes the
 //! draws into the target into the target's group of its draws
 //! ([`Draws::target`](crate::draw::draws::Draws::target)), and binds the
 //! target's [`texture`](Target::texture) to the draws that sample it. The
@@ -18,7 +18,7 @@ use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType
 use mln_gfx::{Rgba, Size};
 
 use crate::draw::context::Context;
-use crate::draw::resources::GpuTexture;
+use crate::draw::resources::{GpuTexture, Resources};
 use crate::draw::store::{Shared, SharedTexture, TargetKey};
 use crate::render::paint_parameters::{OpenPass, PaintParameters};
 use crate::render::pass::RenderPass;
@@ -47,10 +47,8 @@ pub(crate) struct TargetObjects {
 }
 
 impl Target {
-    /// A target of `size`, whose texture's channels are of `type_`, or of
-    /// the type the backend draws into for it
-    /// ([`Context::render_target_type`]). Its texture is sampled linearly
-    /// and clamped to its edges.
+    /// See [`Resources::target`]: of the type the backend draws into for
+    /// `type_` ([`Context::render_target_type`]).
     pub(crate) fn new(context: &mut Context, size: Size, type_: TextureChannelDataType) -> Target {
         let format = texture_format(TexturePixelType::RGBA, context.render_target_type(type_));
         let texture = context.add_texture_with(|texture| {
@@ -81,7 +79,8 @@ impl Target {
 
     /// Makes the target of `size` from now on: of another size, it then
     /// holds nothing.
-    pub(crate) fn set_size(&self, context: &mut Context, size: Size) {
+    pub(crate) fn set_size(&self, res: &mut Resources<'_>, size: Size) {
+        let context = &mut *res.context;
         let Some(objects) = context.target_mut(self).filter(|objects| objects.size != size) else {
             return;
         };
@@ -95,8 +94,8 @@ impl Target {
     /// whose draws into it were written, until a frame fails to draw them,
     /// or the target changes size.
     #[must_use]
-    pub(crate) fn holds(&self, context: &Context) -> bool {
-        context.target(self).is_some_and(|objects| objects.holds)
+    pub(crate) fn holds(&self, res: &Resources<'_>) -> bool {
+        res.context.target(self).is_some_and(|objects| objects.holds)
     }
 
     /// Clears the target to opaque black and its depth to 1, and runs

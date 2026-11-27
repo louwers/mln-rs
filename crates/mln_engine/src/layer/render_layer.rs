@@ -21,6 +21,7 @@ use smallvec::SmallVec;
 use crate::camera::View;
 use crate::draw::context::Context;
 use crate::draw::draws::{DrawOrder, Draws, Group, LayerFrame, LendAt, Lent};
+use crate::draw::resources::Resources;
 use crate::layer::bucket::ErasedBucket;
 use crate::layer::layer_drawing::{ChangedBuckets, TileMap};
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
@@ -384,8 +385,8 @@ pub(crate) struct PrepareCx<'a, 'f, L: TypedLayer> {
     /// those the frame draws, in id order: those it picked, or a drape's
     /// tile. Empty for another layer.
     pub(crate) picked: &'a [OverscaledTileID],
-    pub(crate) gpu: &'a mut dyn Gpu,
-    pub(crate) context: &'a mut Context,
+    /// What the layer makes its meshes and targets with.
+    pub(crate) res: Resources<'a>,
     pub(crate) frame: &'a LayerFrame<'f>,
 }
 
@@ -393,8 +394,8 @@ pub(crate) struct PrepareCx<'a, 'f, L: TypedLayer> {
 pub(crate) struct TileCx<'a, 'f, L: TypedLayer> {
     pub(crate) base: &'a RenderLayerBase,
     pub(crate) values: &'a LayerValues<L::Type>,
-    pub(crate) gpu: &'a mut dyn Gpu,
-    pub(crate) context: &'a mut Context,
+    /// What the layer makes its meshes and targets with.
+    pub(crate) res: Resources<'a>,
     /// The frame the value is made in: the map's, or for a layer that
     /// drapes, the drape's that first draws it, whose value every drape
     /// the tile overlaps draws.
@@ -674,7 +675,8 @@ impl<L: TypedLayer> Hosted<L> {
                 // A new value copies its bucket as it is.
                 entry.take_changes();
                 let previous = entry.take_previous();
-                *entry.value = layer.tile(&mut TileCx { base, values, gpu, context, frame }, tile, data, previous);
+                let res = Resources::new(&mut *gpu, &mut *context);
+                *entry.value = layer.tile(&mut TileCx { base, values, res, frame }, tile, data, previous);
             }
         }
     }
@@ -709,8 +711,8 @@ impl<L: TypedLayer> Hosted<L> {
             DrawsFor::Drape(draws, tile) => (draws, std::slice::from_ref(tile)),
         };
         draws.begin();
-        let context = &mut *parameters.context;
-        layer.prepare(&mut PrepareCx { base, values, tiles: map, picked, gpu, context, frame: &frame }, tiles, draws);
+        let res = Resources::new(&mut *gpu, &mut *parameters.context);
+        layer.prepare(&mut PrepareCx { base, values, tiles: map, picked, res, frame: &frame }, tiles, draws);
         let paint_params = parameters.own_paint_params();
         let clip_tiles = tiles.iter().map(|tile| tile.draw_id().to_unwrapped());
         draws.finish(gpu, parameters.context, paint_params.as_ref(), clip_tiles);
@@ -721,13 +723,14 @@ impl<L: TypedLayer> Hosted<L> {
 /// of `parameters`, where the frame has them to lend: in a pass, the open
 /// one. A lend that fails fails the frame.
 fn lend<L: TypedLayer>(layer: &mut L, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, at: LendAt) {
-    let Some(frame) = parameters.lent_frame else { return };
+    let Some(projection) = parameters.lent_projection else { return };
+    let frame = parameters.frame();
     let layer_depth = match at {
         LendAt::BeforePasses => None,
         LendAt::Pass if parameters.pass_target().is_some() => Some(f64::from(parameters.layer_depth())),
         LendAt::Pass => return,
     };
-    let lent = gpu.lend(&mut |raw| layer.lend(at, Lent { raw, frame: &frame, layer_depth }));
+    let lent = gpu.lend(&mut |raw| layer.lend(at, Lent { raw, frame: &frame, projection: &projection, layer_depth }));
     if let Err(error) = lent {
         parameters.context.fail(format!("Lending a layer the frame's commands failed: {error}"));
     }

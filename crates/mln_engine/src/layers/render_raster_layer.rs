@@ -284,7 +284,7 @@ impl TypedLayer for RenderRasterLayer {
         previous: Option<ImageDraw>,
     ) -> Option<ImageDraw> {
         let sampler = Self::sampler_state(cx.values);
-        let context = &mut *cx.context;
+        let context = &mut *cx.res.context;
         let raster_shader = context.shader_key(&programs::RASTER, Uniforms::default(), cx.base.projection_variant);
         let static_geometry = self.static_geometry.get_or_insert_with(|| StaticGeometry::new(context));
         let tile_id = tile.draw_id();
@@ -341,7 +341,7 @@ impl TypedLayer for RenderRasterLayer {
             let kept = cx.tiles.get_mut(&tile.id()).map(|kept| &*kept);
             // Kept draws keep their textures, so a changed filter is applied
             // to the textures themselves.
-            if let Some(mut texture) = kept.and_then(|kept| cx.context.texture_mut(&kept.texture)) {
+            if let Some(mut texture) = kept.and_then(|kept| cx.res.context.texture_mut(&kept.texture)) {
                 texture.set_sampler(sampler);
             }
             raster_draw(kept.map(|kept| &kept.mesh), tile.draw_id(), cx.frame, out.main());

@@ -14,7 +14,7 @@ use crate::draw::context::Context;
 use crate::draw::draws::{DrawGroups, DrawOrder};
 use crate::exec::event_queue::Waker;
 use crate::exec::pool::Pool;
-use crate::layers::custom::{CustomLayerFrame, end_hosts};
+use crate::layers::custom::end_hosts;
 use crate::render::clip_masks::ClipMasks;
 use crate::render::events::{RenderMode, RendererEvent, RendererEvents};
 use crate::render::frame::Frame;
@@ -649,12 +649,7 @@ impl Encoder {
         let depth_range_size = draw_groups.depth_range_size();
         let clip_depth = parameters.context.caps().clip_depth;
         let frame_projection = frame_projection::compute(&frame.transform, depth_range_size, clip_depth, frame.terrain);
-        parameters.lent_frame = Some(CustomLayerFrame {
-            view: state.map_view(pixel_ratio),
-            projection: frame_projection,
-            width: renderable_size.width,
-            height: renderable_size.height,
-        });
+        parameters.lent_projection = Some(frame_projection);
         draw(orchestrator, gpu, &mut parameters, &frame, image, draw_groups.count, depth_range_size);
         orchestrator.terrain().count(parameters.context);
         let start_rendering = Instant::now();

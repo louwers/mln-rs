@@ -33,12 +33,11 @@ use mln_gfx::shaders::program::{BufferKind, Program, Projection};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::{CullFaceWindingType, DepthMaskType};
 
-use crate::camera::{ProjectionData, View, ViewportMode};
+use crate::camera::{FrameProjection, ProjectionData, View, ViewportMode};
 use crate::draw::context::Context;
 use crate::draw::identity::SimpleIdentity;
 use crate::draw::objects::{DrawBuffers, Mesh};
 use crate::draw::target::Target;
-use crate::layers::custom::CustomLayerFrame;
 use crate::render::layer_composite::Composite;
 use crate::render::light::EvaluatedLight;
 use crate::render::paint_parameters::{Composited, PaintParameters, StencilClear, TransformParameters};
@@ -648,8 +647,10 @@ pub(crate) struct Lent<'a> {
     /// and in a pass the same crate's `CustomLayerPass`, whose docs say what
     /// the layer may change.
     pub(crate) raw: &'a mut dyn Any,
-    /// The frame, and where it draws the map.
-    pub(crate) frame: &'a CustomLayerFrame,
+    /// The frame.
+    pub(crate) frame: &'a LayerFrame<'a>,
+    /// Where the frame draws the map, and the depth it writes there.
+    pub(crate) projection: &'a FrameProjection,
     /// The depth that the frame's 2D layers write at the layer's place in
     /// the layers' order, in a pass; `None` before the passes.
     pub(crate) layer_depth: Option<f64>,

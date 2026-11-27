@@ -235,10 +235,10 @@ pub(crate) struct PaintParameters<'a> {
     pub(crate) symbol_fade_change: f32,
 
     pub(crate) scissor_rect: ScissorRect,
-    /// The frame as the frame lends layers the backend's commands
-    /// ([`Lent::frame`](crate::draw::draws::Lent::frame)), set before the
-    /// first lend.
-    pub(crate) lent_frame: Option<crate::layers::custom::CustomLayerFrame>,
+    /// Where the frame draws the map as it lends layers the backend's
+    /// commands ([`Lent::projection`](crate::draw::draws::Lent::projection)),
+    /// set before the first lend.
+    pub(crate) lent_projection: Option<crate::camera::FrameProjection>,
 }
 
 impl<'a> PaintParameters<'a> {
@@ -297,7 +297,7 @@ impl<'a> PaintParameters<'a> {
             opaque_pass_cutoff: 0,
             symbol_fade_change: frame.symbol_fade_change,
             scissor_rect,
-            lent_frame: None,
+            lent_projection: None,
         }
     }
 
@@ -356,7 +356,7 @@ impl<'a> PaintParameters<'a> {
             // A drape draws no symbols, and keeps no fade of theirs.
             symbol_fade_change: 1.0,
             scissor_rect: ScissorRect { x: 0, y: 0, width: size.width, height: size.height },
-            lent_frame: None,
+            lent_projection: None,
         }
     }
 

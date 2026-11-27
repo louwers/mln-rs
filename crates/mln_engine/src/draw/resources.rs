@@ -1,16 +1,61 @@
 //! What the renderer makes its buffers and textures with on its backend's
 //! `Gpu`, with the rendering stats that count them and the queue that they
-//! go to when they drop.
+//! go to when they drop, and the handle a layer makes its meshes and
+//! targets with ([`Resources`]).
 
 use std::rc::Rc;
 
-use mln_gfx::Size;
-use mln_gfx::gpu::{BufferDesc, BufferUsage, Gpu, GpuError, TextureDesc, TextureFormat, TextureId, TextureUsage};
+use mln_gfx::cull_face_mode::CullFaceMode;
+use mln_gfx::gpu::{
+    BufferDesc, BufferUsage, Gpu, GpuError, ShaderKey, TextureDesc, TextureFormat, TextureId, TextureUsage,
+};
 use mln_gfx::rendering_stats::RenderingStats;
+use mln_gfx::types::TextureChannelDataType;
+use mln_gfx::{ColorMode, Size};
 
 use crate::draw::buffer::{self, Buffer};
+use crate::draw::context::Context;
+use crate::draw::objects::{DrawGeometry, Mesh, Textures};
 use crate::draw::release::{Release, ReleaseQueue};
+use crate::draw::target::Target;
 use crate::log_target;
+
+/// The renderer's GPU resources, as a layer's hooks make and read them: the
+/// meshes it draws ([`mesh`](Self::mesh)) and the targets its draws draw
+/// into ([`target`](Self::target)). What it makes stays while the layer
+/// keeps its handle.
+pub(crate) struct Resources<'a> {
+    pub(crate) gpu: &'a mut dyn Gpu,
+    pub(crate) context: &'a mut Context,
+}
+
+impl<'a> Resources<'a> {
+    pub(crate) fn new(gpu: &'a mut dyn Gpu, context: &'a mut Context) -> Self {
+        Resources { gpu, context }
+    }
+
+    /// The mesh of `geometry`, drawn with `shader` in `color_mode` and
+    /// `cull_face_mode`, binding `textures`.
+    #[must_use]
+    pub(crate) fn mesh(
+        &mut self,
+        shader: ShaderKey,
+        color_mode: ColorMode,
+        cull_face_mode: CullFaceMode,
+        geometry: DrawGeometry,
+        textures: Textures,
+    ) -> Mesh {
+        Mesh::new(self.context, shader, color_mode, cull_face_mode, geometry, textures)
+    }
+
+    /// A target of `size`, whose texture's channels are of `type_`, or of
+    /// the type the backend draws into for it. Its texture is sampled
+    /// linearly and clamped to its edges.
+    #[must_use]
+    pub(crate) fn target(&mut self, size: Size, type_: TextureChannelDataType) -> Target {
+        Target::new(self.context, size, type_)
+    }
+}
 
 /// A texture of the context's `Gpu`, which goes to the context's release
 /// queue when it drops, as a [`Buffer`] does.

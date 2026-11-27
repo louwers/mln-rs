@@ -348,8 +348,8 @@ impl TypedLayer for RenderColorReliefLayer {
         if !dem.has_data() {
             return None;
         }
-        let context = &mut *cx.context;
-        self.update_ramp_textures(cx.gpu, context);
+        let context = &mut *cx.res.context;
+        self.update_ramp_textures(cx.res.gpu, context);
         let RenderColorReliefLayer {
             color_ramp_size,
             elevation_stops_texture,
@@ -424,8 +424,7 @@ impl TypedLayer for RenderColorReliefLayer {
         draw_textures[IMAGE_SLOT] = Some(dem_texture.texture.clone());
         draw_textures[ELEVATION_STOPS_SLOT] = Some(elevation_stops_texture.clone());
         draw_textures[COLOR_STOPS_SLOT] = Some(color_stops_texture.clone());
-        let mesh = Mesh::new(
-            context,
+        let mesh = cx.res.mesh(
             color_relief_shader,
             ColorMode::alpha_blended(),
             CullFaceMode::disabled(),
@@ -445,7 +444,7 @@ impl TypedLayer for RenderColorReliefLayer {
         if cx.base.projection_variant == ProjectionVariant::Mercator {
             self.globe_meshes.clear();
         }
-        self.update_ramp_textures(cx.gpu, cx.context);
+        self.update_ramp_textures(cx.res.gpu, cx.res.context);
         let RenderColorReliefLayer { elevation_stops_texture, color_stops_texture, .. } = self;
 
         // Skip rendering if color ramp textures aren't ready
@@ -474,7 +473,7 @@ impl TypedLayer for RenderColorReliefLayer {
             let Some(cached) = cx.tiles.get_mut(&tile.id()) else {
                 continue;
             };
-            let context = &mut *cx.context;
+            let context = &mut *cx.res.context;
             let dem_texture = &cached.dem.texture;
             if let Some(mut texture) = context.texture_mut(dem_texture) {
                 texture.set_sampler(dem_sampler);

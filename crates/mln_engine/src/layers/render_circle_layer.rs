@@ -16,7 +16,7 @@ use super::{cast_matrix, refresh_paint_attributes};
 use crate::buckets::circle_bucket::{CircleBinders, CircleLayoutVertex};
 use crate::camera::{TileCoordinate, TileProjector};
 use crate::draw::draws::{Draw, Draws, LayerFrame};
-use crate::draw::objects::{DrawGeometry, Mesh, Textures};
+use crate::draw::objects::{DrawGeometry, Textures};
 use crate::draw::segment::SegmentBase;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::layer::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
@@ -231,7 +231,7 @@ impl TypedLayer for RenderCircleLayer {
         }
         let (vertices, indexes) =
             (bucket_vertices(geometry, &bucket.vertices)?, bucket_indexes(geometry, &bucket.triangles)?);
-        let context = &mut *cx.context;
+        let context = &mut *cx.res.context;
         let paint =
             paint_vertices(context, geometry, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state());
         let mut uniforms = Uniforms::default();
@@ -248,8 +248,7 @@ impl TypedLayer for RenderCircleLayer {
         );
         let vertex_count = if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() };
         let shader = context.shader_key(&programs::CIRCLE, uniforms, cx.base.projection_variant);
-        let mesh = Mesh::new(
-            context,
+        let mesh = cx.res.mesh(
             shader,
             ColorMode::alpha_blended(),
             CullFaceMode::disabled(),
@@ -292,7 +291,7 @@ impl TypedLayer for RenderCircleLayer {
             let Some(draw) = entry.value.as_mut() else {
                 continue;
             };
-            let context = &mut *cx.context;
+            let context = &mut *cx.res.context;
             refresh_paint_attributes(&draw.mesh, context, changes, |context, attrs| {
                 let geometry = render_data.geometry();
                 let buffer = &binders.interleaved_vertex_buffer;

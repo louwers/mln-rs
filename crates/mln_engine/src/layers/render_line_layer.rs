@@ -366,7 +366,7 @@ impl TypedLayer for RenderLineLayer {
 
     /// Pushes the frame's draws of the layer, those of each of its tiles.
     fn prepare(&mut self, cx: &mut PrepareCx<'_, '_, Self>, render_tiles: &[FrameTile<'_, Line>], out: &mut Draws) {
-        self.dashes.upload(cx.gpu, cx.context);
+        self.dashes.upload(cx.res.gpu, cx.res.context);
         let paint = &cx.values.evaluated.paint;
         out.main().composite(Composite::of(*paint.line_layer_opacity.uniform(), *paint.line_layer_blend.uniform()));
 
@@ -392,7 +392,7 @@ impl TypedLayer for RenderLineLayer {
             let Some(cached) = entry.value.as_mut() else {
                 continue;
             };
-            let context = &mut *cx.context;
+            let context = &mut *cx.res.context;
             refresh_paint_attributes(&cached.mesh, context, changes, |context, attrs| {
                 let buffer = &binders.interleaved_vertex_buffer;
                 let paint = paint_vertices(context, render_data.geometry(), buffer, binders.depends_on_feature_state());
@@ -513,7 +513,7 @@ impl RenderLineLayer {
         evaluated: &LinePaintProperties::PossiblyEvaluated,
         pass: RenderPass,
     ) -> Option<LineTile> {
-        let (gpu, context) = (&mut *cx.gpu, &mut *cx.context);
+        let (gpu, context) = (&mut *cx.res.gpu, &mut *cx.res.context);
         let (bucket, geometry) = (tile_bucket.bucket, tile_bucket.geometry());
         let buffer = &binders.interleaved_vertex_buffer;
         let paint = paint_vertices(context, geometry, buffer, binders.depends_on_feature_state());

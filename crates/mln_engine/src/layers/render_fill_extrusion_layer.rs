@@ -404,7 +404,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
         let render_data = tile.data_for_pass(RENDER_PASS)?;
         let binders = render_data.bucket.paint_property_binders.get(cx.base.style.base().id.as_str())?;
         let has_pattern = !cx.values.unevaluated.fill_extrusion_pattern.is_undefined();
-        let walls = Walls::of(cx.context, has_pattern);
+        let walls = Walls::of(cx.res.context, has_pattern);
         let (program, wall_program) = match (has_pattern, walls) {
             (false, Walls::Instanced) => (&programs::FILL_EXTRUSION, &programs::FILL_EXTRUSION_INSTANCED),
             (false, Walls::Quads) => (&programs::FILL_EXTRUSION, &programs::FILL_EXTRUSION_WALL),
@@ -419,7 +419,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
         let opacity = opacity(layer);
         let composite = composite(layer, has_pattern, cx.frame);
 
-        let context = &mut *cx.context;
+        let context = &mut *cx.res.context;
         let static_vertices = &*self
             .static_data_vertices
             .get_or_insert_with(|| copied_vertices(context, &RenderStaticData::fill_extrusion_vertices()));
@@ -453,7 +453,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
         out: &mut Draws,
     ) {
         let has_pattern = !cx.values.unevaluated.fill_extrusion_pattern.is_undefined();
-        let walls = Walls::of(cx.context, has_pattern);
+        let walls = Walls::of(cx.res.context, has_pattern);
         let layer = &*cx.values.evaluated;
         let opacity = opacity(layer);
         let composite = composite(layer, has_pattern, cx.frame);
@@ -479,7 +479,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
             let Some(cached) = entry.value.as_mut() else {
                 continue;
             };
-            let context = &mut *cx.context;
+            let context = &mut *cx.res.context;
             if changes.paint {
                 cached.refresh_paint(context, walls, render_data, binders, &layer.paint);
             }

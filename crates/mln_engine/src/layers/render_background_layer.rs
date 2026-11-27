@@ -18,6 +18,7 @@ use crate::draw::context::Context;
 use crate::draw::draws::{Depth, Draw, Draws, LayerFrame};
 use crate::draw::indexes::DrawIndexes;
 use crate::draw::objects::{DrawGeometry, Mesh, Textures, raw_vertices};
+use crate::draw::resources::Resources;
 use crate::draw::segment::SegmentBase;
 use crate::draw::vertex_attribute::Uniforms;
 use crate::layer::layer_type::LayerType;
@@ -158,7 +159,8 @@ impl TypedLayer for RenderBackgroundLayer {
     /// of a tile it keeps none of.
     fn prepare(&mut self, cx: &mut PrepareCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Background>], out: &mut Draws) {
         let RenderBackgroundLayer { patterns } = self;
-        let PrepareCx { base, values, tiles, picked, gpu, context, frame } = cx;
+        let PrepareCx { base, values, tiles, picked, res, frame } = cx;
+        let Resources { gpu, context } = res;
         let layer = &*values.evaluated;
         let evaluated = &layer.paint;
         let built_for = Self::built_for(values);

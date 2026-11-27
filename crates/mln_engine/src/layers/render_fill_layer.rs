@@ -598,7 +598,7 @@ impl TypedLayer for RenderFillLayer {
         let render_data = tile.data_for_pass(RENDER_PASS)?;
         let binders = render_data.bucket.paint_property_binders.get(&cx.base.style.base().id)?;
         let pattern = !cx.values.unevaluated.fill_pattern.is_undefined();
-        let outlines = Outlines::of(cx.context, pattern);
+        let outlines = Outlines::of(cx.res.context, pattern);
         // The outlines draw as lines, or as quads on a device that draws no
         // `LINE_WIDTH` lines and rasterizes on the GPU.
         let (fill_program, outline_program) = match (pattern, outlines) {
@@ -612,10 +612,10 @@ impl TypedLayer for RenderFillLayer {
         };
 
         if outlines == Outlines::Instanced && self.outline_quad.is_none() {
-            self.outline_quad = Some(OutlineQuad::new(cx.context));
+            self.outline_quad = Some(OutlineQuad::new(cx.res.context));
         }
         if outlines == Outlines::Pulled && self.pulled_indexes.is_none() {
-            self.pulled_indexes = Some(cx.context.quad_indexes());
+            self.pulled_indexes = Some(cx.res.context.quad_indexes());
         }
 
         let mut builder = TileBuilder {
@@ -628,7 +628,7 @@ impl TypedLayer for RenderFillLayer {
             pulled_indexes: self.pulled_indexes.as_ref().filter(|_| outlines == Outlines::Pulled),
             fill_depth: &mut self.fill_depth,
         };
-        builder.build(cx.context, render_data, binders, &render_data.layer.paint)
+        builder.build(cx.res.context, render_data, binders, &render_data.layer.paint)
     }
 
     /// Pushes the frame's draws of the layer, those of each of its tiles.
@@ -656,7 +656,7 @@ impl TypedLayer for RenderFillLayer {
             let Some(cached) = entry.value.as_mut() else {
                 continue;
             };
-            let context = &mut *cx.context;
+            let context = &mut *cx.res.context;
             let geometry = render_data.geometry();
             // Reads the paint attributes, and returns the vertices they
             // read.
@@ -707,7 +707,7 @@ impl TypedLayer for RenderFillLayer {
                     draw,
                     outline,
                     cx.frame,
-                    cx.context,
+                    cx.res.context,
                 ) else {
                     continue;
                 };
