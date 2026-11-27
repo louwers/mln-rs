@@ -19,7 +19,6 @@ use mln_style::color::Color;
 use mln_style::expression::{
     Dependency, EvaluationContext, GlobalStateMap, from_expression_value, global_state_refs_intersect,
 };
-use mln_style::layer::LayerStyle;
 use mln_style::layers::ColorRelief;
 use mln_style::property::color_ramp::ColorRampPropertyValue;
 use mln_style::size::Size;
@@ -37,10 +36,7 @@ use crate::draw::store::SharedTexture;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::SharedVertices;
 use crate::layer::bucket_geometry::copied_vertices;
-use crate::layer::layer_type::LayerType;
-use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, Hosted, LayerValues, OnTerrain, PrepareCx, RenderLayer, TileCx, TypedLayer,
-};
+use crate::layer::render_layer::{EvaluateCx, Evaluation, Layer, LayerValues, OnTerrain, PrepareCx, TileCx};
 use crate::layer::tile_input::TileData;
 use crate::layers::color_relief::programs;
 use crate::layers::color_relief::ubo::{ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO};
@@ -72,14 +68,6 @@ struct DemTexture {
     id: SimpleIdentity,
     generation: u64,
     texture: SharedTexture,
-}
-
-impl LayerType for ColorRelief {
-    type Input = DemTiles;
-
-    fn render_layer(style: Arc<LayerStyle<ColorRelief>>) -> Box<dyn RenderLayer> {
-        Hosted::<RenderColorReliefLayer>::boxed(style)
-    }
 }
 
 pub(crate) struct RenderColorReliefLayer {
@@ -281,8 +269,9 @@ fn color_relief_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeA
     attrs
 }
 
-impl TypedLayer for RenderColorReliefLayer {
-    type Type = ColorRelief;
+impl Layer for RenderColorReliefLayer {
+    type Style = ColorRelief;
+    type Input = DemTiles;
     type Tile = ReliefTile;
     const TERRAIN: OnTerrain = OnTerrain::Drapes;
 
@@ -341,8 +330,8 @@ impl TypedLayer for RenderColorReliefLayer {
     fn tile(
         &mut self,
         cx: &mut TileCx<'_, '_, Self>,
-        tile: FrameTile<'_, ColorRelief>,
-        dem: TileData<'_, ColorRelief>,
+        tile: FrameTile<'_, RenderColorReliefLayer>,
+        dem: TileData<'_, RenderColorReliefLayer>,
         previous: Option<ReliefTile>,
     ) -> Option<ReliefTile> {
         if !dem.has_data() {
@@ -438,7 +427,7 @@ impl TypedLayer for RenderColorReliefLayer {
     fn prepare(
         &mut self,
         cx: &mut PrepareCx<'_, '_, Self>,
-        render_tiles: &[FrameTile<'_, ColorRelief>],
+        render_tiles: &[FrameTile<'_, RenderColorReliefLayer>],
         out: &mut Draws,
     ) {
         if cx.base.projection_variant == ProjectionVariant::Mercator {
