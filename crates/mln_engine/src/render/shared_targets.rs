@@ -10,7 +10,8 @@
 //! its layers' own targets ([`Draws::target`](crate::draw::Draws::target)),
 //! and before the layers that read it, so that a layer reads a target as
 //! every layer routed into it draws it in the frame, wherever they are among
-//! the layers.
+//! the layers. Layers read the targets for their draws over the map, in the
+//! map's frame, not in a drape.
 //!
 //! A route that doesn't fit is refused, with a warning, and the layer draws
 //! on the map: a route into a target the frame doesn't have, of a layer
@@ -193,24 +194,6 @@ impl Warnings {
     }
 }
 
-/// What a layer's draws read the shared targets through: the map's frame's
-/// reads count toward the order of the targets' passes, a drape's don't,
-/// since every drape draws after the passes.
-pub(crate) enum TargetReads<'a> {
-    Map(&'a mut SharedTargets),
-    Drape(&'a SharedTargets),
-}
-
-impl TargetReads<'_> {
-    /// See [`SharedTargets::read`] and [`SharedTargets::get`].
-    pub(crate) fn read(&mut self, id: &str, name: &str) -> Option<SharedTexture> {
-        match self {
-            TargetReads::Map(targets) => targets.read(id, name),
-            TargetReads::Drape(targets) => targets.get(name),
-        }
-    }
-}
-
 /// What the frame draws before its passes, in this order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Run {
@@ -363,8 +346,8 @@ impl SharedTargets {
         false
     }
 
-    /// The texture of the target `name`, which the layer `id` reads: in the
-    /// map's frame, for the layer whose draws the frame makes, which orders
+    /// The texture of the target `name`, which the layer `id` reads in the
+    /// map's frame: for the layer whose draws the frame makes, which orders
     /// the target's pass before them. `None`, with a warning, for a name the
     /// frame has no target of.
     pub(crate) fn read(&mut self, id: &str, name: &str) -> Option<SharedTexture> {
@@ -378,12 +361,6 @@ impl SharedTargets {
             read.push(index);
         }
         Some(self.targets[index].2.texture().clone())
-    }
-
-    /// The texture of the target `name`, which a drape reads: the drape
-    /// draws after every target's pass.
-    pub(crate) fn get(&self, name: &str) -> Option<SharedTexture> {
-        self.index(name).map(|index| self.targets[index].2.texture().clone())
     }
 
     fn index(&self, name: &str) -> Option<usize> {

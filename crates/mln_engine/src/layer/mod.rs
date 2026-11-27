@@ -67,8 +67,8 @@
 //! ([`RegistryBuilder::add_router`](crate::RegistryBuilder::add_router)),
 //! declares the frames' shared targets from the style, such as from its
 //! extension members ([`mln_style::member`]), and routes layers into them,
-//! and a layer reads one in its [`prepare`](Layer::prepare)
-//! ([`PrepareCx::read_target`]). The engine draws each target's pass before
+//! and a layer reads one in its [`prepare`](Layer::prepare) for the map's
+//! frame ([`PrepareCx::read_target`]). The engine draws each target's pass before
 //! the frame's, after the passes of the targets its layers read, and refuses
 //! the routes that don't fit, whose layers draw on the map.
 //!

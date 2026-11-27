@@ -3,9 +3,11 @@
 //! and route layers of the built-in types into one instead of the map
 //! (`test:destination`), and its `test.copy` layers draw one back onto the
 //! map, or into another target. Each test compares a style that draws
-//! through targets with one that draws the same layers on the map.
+//! through targets with one that draws the same layers on the map; over
+//! terrain, its `test.drape-probe` and `test.stand-probe` layers, which drape
+//! and stand on the ground, record what they read.
 
-use std::sync::Once;
+use std::sync::{Arc, Once};
 
 use mln_engine::RegistryBuilder;
 use mln_engine::draw::{
@@ -14,10 +16,11 @@ use mln_engine::draw::{
 };
 use mln_engine::exec::pool::Pool;
 use mln_engine::exec::queue::Queue;
-use mln_engine::layer::{FrameTile, Layer, LayerValues, NoTiles, PrepareCx, Router, Routes};
+use mln_engine::layer::{FrameTile, Layer, LayerValues, NoTiles, OnTerrain, PrepareCx, Router, Routes};
 use mln_engine::map::{Map, MapMode, MapOptions};
 use mln_engine::shaders::programs::LAYER_COMPOSITE;
 use mln_engine::shaders::ubo::{LayerCompositeBlendMode, LayerCompositeUBO};
+use mln_engine::storage::{FileSource, Resource, Responder, Response};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::types::TextureChannelDataType;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
@@ -132,6 +135,70 @@ impl Layer for CopyLayer {
     }
 }
 
+/// The style half of the probes, layers without a source that read their
+/// `test:source` target and draw nothing: `test.drape-probe`'s drape over
+/// terrain, and `test.stand-probe`'s stand on its ground and hide behind it.
+struct Probe<const DRAPES: bool>;
+
+impl<const DRAPES: bool> StyleLayerType for Probe<DRAPES> {
+    const INFO: LayerTypeInfo = LayerTypeInfo {
+        name: if DRAPES { "test.drape-probe" } else { "test.stand-probe" },
+        source: SourceKind::None,
+        from_json: true,
+    };
+    const PROPERTIES: &'static PropertyTable = &PROPERTIES;
+
+    type LayoutProperties = NoProperties;
+    type PaintProperties = NoProperties;
+    type Extra = ();
+
+    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
+        None
+    }
+}
+
+/// What a probe saw as it made its draws.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Seen {
+    /// Whether it read its target.
+    read: bool,
+    /// Whether its draws stand on the ground.
+    stands: bool,
+    /// Whether the frame's ground has the depth that it hides behind.
+    ground_depth: bool,
+}
+
+/// What the probes saw, by layer id, in the order they made their draws.
+static SEEN: Mutex<Vec<(String, Seen)>> = Mutex::new(Vec::new());
+
+/// What the probe `id` saw, in the order it made its draws.
+fn seen(id: &str) -> Vec<Seen> {
+    SEEN.lock().iter().filter(|(probe, _)| probe == id).map(|(_, seen)| *seen).collect()
+}
+
+struct ProbeLayer<const DRAPES: bool>;
+
+impl<const DRAPES: bool> Layer for ProbeLayer<DRAPES> {
+    type Style = Probe<DRAPES>;
+    type Input = NoTiles;
+    type Tile = ();
+
+    const TERRAIN: OnTerrain = if DRAPES { OnTerrain::Drapes } else { OnTerrain::Stands { hides_behind_ground: true } };
+
+    fn new(_values: &LayerValues<Probe<DRAPES>>) -> Self {
+        ProbeLayer
+    }
+
+    fn prepare(&mut self, cx: &mut PrepareCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Self>], _out: &mut Draws) {
+        let style = cx.values().style();
+        let (id, source) = (style.id.clone(), style.members().get(&SOURCE).map(|Name(name)| name.clone()));
+        let read = source.is_some_and(|source| cx.read_target(&source).is_some());
+        let stands = cx.base.projection_variant.stands();
+        let ground_depth = cx.frame().ground.as_ref().is_some_and(|ground| ground.depth().is_some());
+        SEEN.lock().push((id, Seen { read, stands, ground_depth }));
+    }
+}
+
 /// The messages of the warnings logged so far.
 fn warnings() -> Vec<String> {
     static WARNINGS: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -179,6 +246,15 @@ struct Fixture {
 
 impl Fixture {
     fn new(style: &str, pixel_ratio: f32) -> Fixture {
+        Fixture::with_file_source(style, pixel_ratio, None)
+    }
+
+    /// A map of `style` whose tiles are DEM tiles of sea level everywhere.
+    fn over_dem(style: &str) -> Fixture {
+        Fixture::with_file_source(style, 1.0, Some(Arc::new(SeaLevel::new())))
+    }
+
+    fn with_file_source(style: &str, pixel_ratio: f32, file_source: Option<Arc<dyn FileSource>>) -> Fixture {
         warnings();
         let mut builder = RegistryBuilder::new();
         mln_builtins::register_builtins(&mut builder).unwrap();
@@ -186,11 +262,17 @@ impl Fixture {
         builder.add_member(&DESTINATION).unwrap();
         builder.add_member(&SOURCE).unwrap();
         builder.add_layer_type::<CopyLayer>().unwrap();
+        builder.add_layer_type::<ProbeLayer<true>>().unwrap();
+        builder.add_layer_type::<ProbeLayer<false>>().unwrap();
         builder.add_router(&ROUTER);
         let (queue, pool) = (Queue::new(), Pool::new(2));
         let mut frontend = HeadlessFrontend::new(SIZE, pixel_ratio, &queue, &pool).expect("a headless frontend");
         let options = MapOptions { map_mode: MapMode::Static, size: SIZE, pixel_ratio, ..Default::default() };
-        let mut map = Map::new(options, builder.build(), &pool).unwrap();
+        let mut map = match file_source {
+            Some(file_source) => Map::with_file_source(file_source, options, builder.build(), &pool),
+            None => Map::new(options, builder.build(), &pool),
+        }
+        .unwrap();
         frontend.attach(&mut map);
         map.load_style_json(style);
         Fixture { frontend, map, _queue: queue, _pool: pool }
@@ -203,6 +285,34 @@ impl Fixture {
     /// Sets the property `name` of the layer `layer` to `json`.
     fn set(&mut self, layer: &str, name: &str, json: &str) {
         self.map.edit_style(|style| style.set_layer_property_json(layer, name, json)).unwrap();
+    }
+}
+
+/// A file source whose every resource is a DEM tile of sea level
+/// everywhere.
+struct SeaLevel(Arc<Vec<u8>>);
+
+impl SeaLevel {
+    fn new() -> SeaLevel {
+        // In the Mapbox encoding, (1 · 65536 + 134 · 256 + 160) · 0.1 −
+        // 10000 = 0 m.
+        let mut dem = PremultipliedImage::new(Size::new(8, 8));
+        for texel in dem.data.as_chunks_mut::<4>().0 {
+            *texel = [1, 134, 160, 255];
+        }
+        SeaLevel(Arc::new(mln_engine::image::encode_png(&dem)))
+    }
+}
+
+impl FileSource for SeaLevel {
+    fn load(&self, _resource: &Resource, responder: Responder) {
+        let mut response = Response::new();
+        response.data = Some(Arc::clone(&self.0));
+        responder.send(response);
+    }
+
+    fn can_request(&self, _resource: &Resource) -> bool {
+        true
     }
 }
 
@@ -435,4 +545,40 @@ fn a_reader_of_an_undeclared_target_draws_nothing() {
     let layers = [BACKGROUND.to_owned(), layer(FILL, Some("t"), ""), copy("lost", "elsewhere", None)];
     assert_eq!(0, distance(&render(&style(Some(r#"["t"]"#), &layers)), &background));
     assert_warned("lost", "reads nothing");
+}
+
+/// A style of `layers` over the shapes and a terrain of the DEM tiles'
+/// source, which declares the target `t`.
+fn terrain_style(layers: &[String]) -> String {
+    let dem = r#""dem":{"type":"raster-dem","tiles":["dem/{z}/{x}/{y}.png"],"tileSize":256,"maxzoom":10}"#;
+    format!(
+        r#"{{"version":8,"zoom":0.5,"test:targets":["t"],"terrain":{{"source":"dem"}},"sources":{{{SHAPES},{dem}}},"layers":[{}]}}"#,
+        layers.join(",")
+    )
+}
+
+#[test]
+fn a_layer_reads_no_target_in_a_drape() {
+    let layers = |id: &str| {
+        let probe = format!(r#"{{"id":"{id}","type":"test.drape-probe","test:source":"t"}}"#);
+        vec![BACKGROUND.to_owned(), layer(FILL, Some("t"), ""), probe]
+    };
+    Fixture::over_dem(&terrain_style(&layers("draped"))).render();
+    let draped = seen("draped");
+    assert!(!draped.is_empty(), "the probe made no draws in a drape");
+    assert!(draped.iter().all(|seen| !seen.read), "a drape read a target: {draped:?}");
+    // Without terrain, the probe reads the target in the map's frame.
+    render(&style(Some(r#"["t"]"#), &layers("flat")));
+    assert!(seen("flat").iter().any(|seen| seen.read));
+}
+
+#[test]
+fn a_standing_layer_whose_route_is_refused_for_a_cycle_stands_on_the_ground() {
+    // The probe would draw `t` from `t`, and is the frame's only layer that
+    // stands.
+    let probe = layer(r#"{"id":"standing","type":"test.stand-probe","test:source":"t"}"#, Some("t"), "");
+    Fixture::over_dem(&terrain_style(&[BACKGROUND.to_owned(), probe])).render();
+    assert_warned("standing", "draws on the map");
+    let last = seen("standing").last().copied().expect("the probe made its draws");
+    assert_eq!(Seen { read: true, stands: true, ground_depth: true }, last);
 }

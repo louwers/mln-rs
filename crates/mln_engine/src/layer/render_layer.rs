@@ -32,7 +32,7 @@ use crate::layer::tile_input::{TileData, TileInput};
 use crate::query::feature_index::QueryRegion;
 use crate::render::paint_parameters::PaintParameters;
 use crate::render::pass::RenderPass;
-use crate::render::shared_targets::{SharedTargets, TargetReads};
+use crate::render::shared_targets::SharedTargets;
 use crate::render::terrain::{SurfaceLight, TerrainElevation, TileGround};
 use crate::render::tile::{FoundTile, FrameTile, RenderTile, TILE_BOUNDS, TileContent, TileStamp, overlaps};
 use crate::render::update_parameters::UpdateParameters;
@@ -447,20 +447,20 @@ pub struct PrepareCx<'a, 'f, L: Layer> {
     /// What the layer makes its meshes and targets with.
     pub res: Resources<'a>,
     pub frame: &'a LayerFrame<'f>,
-    /// The frame's shared targets.
-    pub(crate) targets: TargetReads<'a>,
+    /// The frame's shared targets, in the map's frame.
+    pub(crate) targets: Option<&'a mut SharedTargets>,
 }
 
 impl<'a, L: Layer> PrepareCx<'a, '_, L> {
     /// The texture of the frame's shared target `name`
     /// ([`Router`](crate::layer::Router)), which the layer's
     /// draws sample: its texel at `(x, y)` is what the layers routed into it
-    /// drew at the frame's device pixel `(x, y)`. In the map's frame, the
-    /// read orders the target's pass before the layer's draws; a drape draws
-    /// after every target's pass. `None`, with a warning, for a name that the
-    /// frame has no target of.
+    /// drew at the frame's device pixel `(x, y)`; the read orders the
+    /// target's pass before the layer's draws. A layer reads the targets only
+    /// in the map's frame, for its draws over the map: `None` in a drape,
+    /// and, with a warning, for a name that the frame has no target of.
     pub fn read_target(&mut self, name: &str) -> Option<SharedTexture> {
-        self.targets.read(&self.base.style.base().id, name)
+        self.targets.as_deref_mut()?.read(&self.base.style.base().id, name)
     }
 
     /// The layer's values of the last update.
@@ -566,10 +566,10 @@ pub struct DrapeTile<'a> {
     pub(crate) tiles: &'a [OverscaledTileID],
 }
 
-/// The draws a layer makes in a frame: the map's, or a drape's, into the
-/// drape's draws of the layer.
+/// The draws a layer makes in a frame: the map's, which read the frame's
+/// shared targets, or a drape's, into the drape's draws of the layer.
 enum DrawsFor<'d> {
-    Map,
+    Map(&'d mut SharedTargets),
     Drape(&'d mut Draws, &'d OverscaledTileID),
 }
 
@@ -906,11 +906,10 @@ impl<L: Layer> Hosted<L> {
         parameters: &mut PaintParameters<'_>,
         tiles: &[FrameTile<'_, L>],
         into: DrawsFor<'_>,
-        targets: TargetReads<'_>,
     ) {
         if self.values.evaluated.render_passes == RenderPass::None.underlying_type() {
             match into {
-                DrawsFor::Map => self.draws.begin(),
+                DrawsFor::Map(_) => self.draws.begin(),
                 DrawsFor::Drape(draws, _) => draws.begin(),
             }
             return;
@@ -918,9 +917,9 @@ impl<L: Layer> Hosted<L> {
         let frame = parameters.frame();
         self.ready_tiles(gpu, parameters.context, &frame, tiles);
         let Hosted { base, values, tiles: map, picked, draws, layer } = self;
-        let (draws, picked) = match into {
-            DrawsFor::Map => (draws, &picked[..]),
-            DrawsFor::Drape(draws, tile) => (draws, std::slice::from_ref(tile)),
+        let (draws, picked, targets) = match into {
+            DrawsFor::Map(targets) => (draws, &picked[..], Some(targets)),
+            DrawsFor::Drape(draws, tile) => (draws, std::slice::from_ref(tile), None),
         };
         draws.begin();
         let res = Resources::new(&mut *gpu, &mut *parameters.context);
@@ -1067,7 +1066,6 @@ pub trait RenderLayer {
         source: Option<FrameSourceTiles<'_>>,
         drape: DrapeTile<'_>,
         draws: &mut Draws,
-        targets: &SharedTargets,
     );
 
     /// Records that the buckets in `changed` changed, for the tiles whose
@@ -1244,14 +1242,14 @@ impl<L: Layer> RenderLayer for Hosted<L> {
             if L::PICKS_TILES && self.tiles.is_empty() {
                 self.remove_all_draws();
             } else {
-                self.draw(gpu, parameters, &[], DrawsFor::Map, TargetReads::Map(targets));
+                self.draw(gpu, parameters, &[], DrawsFor::Map(targets));
             }
             return;
         }
         match source.map(|source| (source, source.found(self.base.found.clone()))) {
             Some((source, found)) if !found.is_empty() => {
                 let tiles = source.at::<L>(found, self.id());
-                self.draw(gpu, parameters, &tiles, DrawsFor::Map, TargetReads::Map(targets));
+                self.draw(gpu, parameters, &tiles, DrawsFor::Map(targets));
             }
             _ => self.remove_all_draws(),
         }
@@ -1296,7 +1294,6 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         source: Option<FrameSourceTiles<'_>>,
         drape: DrapeTile<'_>,
         draws: &mut Draws,
-        targets: &SharedTargets,
     ) {
         // Only a layer that drapes builds the code of its draws in a drape.
         if !L::TERRAIN.drapes() {
@@ -1309,7 +1306,7 @@ impl<L: Layer> RenderLayer for Hosted<L> {
             if L::PICKS_TILES {
                 self.tiles.set_tiles(drape.tiles.iter().copied());
             }
-            self.draw(gpu, parameters, &[], DrawsFor::Drape(draws, &drape.tile), TargetReads::Drape(targets));
+            self.draw(gpu, parameters, &[], DrawsFor::Drape(draws, &drape.tile));
             return;
         }
         let tiles = match source {
@@ -1321,7 +1318,7 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         if tiles.is_empty() {
             draws.clear();
         } else {
-            self.draw(gpu, parameters, &tiles, DrawsFor::Drape(draws, &drape.tile), TargetReads::Drape(targets));
+            self.draw(gpu, parameters, &tiles, DrawsFor::Drape(draws, &drape.tile));
         }
     }
 
