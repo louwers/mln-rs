@@ -33,6 +33,7 @@ use mln_style::types::{HillshadeIlluminationAnchorType, HillshadeMethodType, Res
 use super::cast_matrix;
 use crate::buckets::raster_bucket::{MaskQuads, RasterLayoutVertex};
 use crate::draw::context::Context;
+use crate::draw::draws::{Draw, Draws, LayerFrame, SingleDraw};
 use crate::draw::identity::SimpleIdentity;
 use crate::draw::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::draw::objects::{DrawGeometry, Mesh, Textures};
@@ -41,16 +42,15 @@ use crate::draw::store::SharedTexture;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::SharedVertices;
 use crate::layer::bucket_geometry::copied_vertices;
-use crate::layer::layer_drawing::{FrameDraw, SingleDraw, TileDraws};
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, Hosted, LayerCx, LayerValues, OnTerrain, RenderLayer, TileCx, TypedLayer, UpdateCx,
+    EvaluateCx, Evaluation, Hosted, LayerValues, OnTerrain, OwnGpuWork, PrepareCx, RenderLayer, RenderLayerBase,
+    TileCx, TypedLayer, UpdateCx,
 };
 use crate::layer::tile_input::TileData;
 use crate::layers::hillshade::programs;
 use crate::layers::hillshade::ubo::{HillshadeDrawableUBO, HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO};
 use crate::render::globe::globe_tile_mesh::GlobeTileMeshCache;
-use crate::render::paint_parameters::PaintParameters;
 use crate::render::static_data::RenderStaticData;
 use crate::render::target::RenderTarget;
 use crate::render::terrain::SurfaceLight;
@@ -278,7 +278,6 @@ fn lit_by_bearing(evaluated: &EvaluatedLayer<Hillshade>) -> bool {
 impl TypedLayer for RenderHillshadeLayer {
     type Type = Hillshade;
     type Tile = Mesh;
-    type Drawing = TileDraws<Mesh>;
     const TERRAIN: OnTerrain = OnTerrain::Drapes;
     // A tile's draw holds its mask's geometry and samples its DEM's render
     // target, whose sampler each frame sets: nothing of the style's values.
@@ -300,16 +299,12 @@ impl TypedLayer for RenderHillshadeLayer {
 
     /// Lit from the viewport, the surface shades its slopes with its lights
     /// at the frame's bearing, so that its drapes don't turn with the map.
-    fn surface_light(
-        &mut self,
-        values: &LayerValues<Hillshade>,
-        parameters: &PaintParameters<'_>,
-    ) -> Option<SurfaceLight> {
+    fn surface_light(&mut self, values: &LayerValues<Hillshade>, frame: &LayerFrame<'_>) -> Option<SurfaceLight> {
         let evaluated = &values.evaluated;
         if !lit_by_bearing(evaluated) {
             return None;
         }
-        let Illumination { props, num_lights } = Self::illumination(&mut self.illumination, evaluated, parameters);
+        let Illumination { props, num_lights } = Self::illumination(&mut self.illumination, evaluated, frame);
         let paint = &evaluated.paint;
         let tile = HillshadeTilePropsUBO {
             exaggeration: *paint.hillshade_exaggeration.uniform(),
@@ -353,7 +348,7 @@ impl TypedLayer for RenderHillshadeLayer {
             mask_quads,
             ..
         } = self;
-        let context = &mut *cx.parameters.context;
+        let context = &mut *cx.context;
         let hillshade_shader =
             context.shader_key(&programs::HILLSHADE, Uniforms::default(), cx.base.projection_variant);
         let quad = static_quad(static_data_shared_vertices, static_data_indices, context);
@@ -394,23 +389,27 @@ impl TypedLayer for RenderHillshadeLayer {
         };
         let mut textures = Textures::default();
         textures[IMAGE_SLOT] = Some(render_target_texture.clone());
-        let mesh =
-            Mesh::new(hillshade_shader, ColorMode::alpha_blended(), CullFaceMode::disabled(), geometry, textures);
+        let mesh = Mesh::new(
+            context,
+            hillshade_shader,
+            ColorMode::alpha_blended(),
+            CullFaceMode::disabled(),
+            geometry,
+            textures,
+        );
         Some(mesh)
     }
 
     /// Makes the render target of each DEM it has none of, which prepares
-    /// its slopes, and the frame's draws of the layer, one of each of its
-    /// tiles, which shade the slopes, and writes the layer's buffers they
-    /// read. In a drape that the surface shades
-    /// ([`PaintParameters::drape_lit`]), they draw the slopes as they were
+    /// its slopes, and pushes the frame's draws of the layer, one of each of
+    /// its tiles, which shade the slopes. In a drape that the surface shades
+    /// ([`LayerFrame::drape_lit`]), they draw the slopes as they were
     /// prepared, without lights.
-    fn update_draws(
+    fn prepare(
         &mut self,
-        cx: LayerCx<'_, Self>,
-        gpu: &mut dyn Gpu,
-        paint_parameters: &mut PaintParameters<'_>,
+        cx: &mut PrepareCx<'_, '_, Self>,
         render_tiles: &[FrameTile<'_, Hillshade>],
+        out: &mut Draws,
     ) {
         if cx.base.projection_variant == ProjectionVariant::Mercator {
             self.globe_meshes.clear();
@@ -433,10 +432,10 @@ impl TypedLayer for RenderHillshadeLayer {
             let Some(entry) = cx.tiles.entry(&tile_id) else {
                 continue;
             };
-            let context = &mut *paint_parameters.context;
+            let context = &mut *cx.context;
             let quad = static_quad(&mut self.static_data_shared_vertices, &mut self.static_data_indices, context);
             let target =
-                dem_target(&mut self.dem_targets, gpu, context, dem, &tile_id.to_unwrapped(), self.maxzoom, quad);
+                dem_target(&mut self.dem_targets, cx.gpu, context, dem, &tile_id.to_unwrapped(), self.maxzoom, quad);
             let render_target_texture = target.render_target.texture();
             if let Some(mut texture) = context.texture_mut(render_target_texture) {
                 texture.set_sampler(SamplerState {
@@ -447,25 +446,23 @@ impl TypedLayer for RenderHillshadeLayer {
                 });
             }
 
-            let Some(kept) = entry.value.as_mut() else {
+            let Some(kept) = entry.value.as_ref() else {
                 continue;
             };
             // The DEM's render target is made again with its generation.
-            kept.set_texture(IMAGE_SLOT, Some(render_target_texture));
-            let draw = FrameDraw::new(Some(tile_id), kept.id());
-            let Illumination { num_lights, .. } = *illumination.get_or_insert_with(|| {
-                Self::illumination(&mut self.illumination, &cx.values.evaluated, paint_parameters)
-            });
-            let num_lights = if paint_parameters.drape_lit { 0 } else { num_lights };
+            kept.set_texture(context, IMAGE_SLOT, Some(render_target_texture));
+            let draw = Draw { order: kept.seq(), ..Draw::DEFAULT };
+            let Illumination { num_lights, .. } = *illumination
+                .get_or_insert_with(|| Self::illumination(&mut self.illumination, &cx.values.evaluated, cx.frame));
+            let num_lights = if cx.frame.drape_lit() { 0 } else { num_lights };
             let (blocks, projection) =
-                Self::uniforms(&cx.values.evaluated.paint, &tile_id.to_unwrapped(), num_lights, paint_parameters);
-            cx.drawing.frame_mut().push_at(draw, (), kept, &projection, blocks);
+                Self::uniforms(&cx.values.evaluated.paint, &tile_id.to_unwrapped(), num_lights, cx.frame);
+            out.main().push_at(kept, tile_id, &projection, draw, blocks);
         }
 
         if let Some(Illumination { props, .. }) = &illumination {
-            cx.drawing.frame_mut().block(props);
+            out.main().block(props);
         }
-        cx.drawing.finish(gpu, paint_parameters);
     }
 
     /// Keeps the source's maximum zoom, which the DEMs' preparation reads,
@@ -488,41 +485,46 @@ impl TypedLayer for RenderHillshadeLayer {
         self.mask_quads.clear();
     }
 
-    fn upload_render_targets(&mut self, _cx: LayerCx<'_, Self>, gpu: &mut dyn Gpu, context: &mut Context) {
-        for target in self.dem_targets.values_mut().filter(|target| !target.prepared) {
-            target.prepare.upload(gpu, context);
-        }
-    }
-
-    /// Prepares the slopes of the targets that don't hold them yet.
-    fn render_targets(&mut self, cx: LayerCx<'_, Self>, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        self.prepared_in_frame.clear();
-        if !cx.base.is_renderable {
-            return;
-        }
-        for (&dem, target) in self.dem_targets.iter_mut().filter(|(_, target)| !target.prepared) {
-            parameters.current_layer = 0;
-            let Some(mut passes) = target.render_target.begin(gpu, parameters) else {
-                continue;
-            };
-            let mut drawn = true;
-            while passes.next(parameters) {
-                drawn &= target.prepare.render(gpu, parameters);
+    /// Uploads the draws that prepare the targets that don't hold their
+    /// slopes yet, prepares those slopes, and, where the frame failed,
+    /// prepares again in the next frame the targets it prepared.
+    fn own_gpu_work(&mut self, base: &RenderLayerBase, gpu: &mut dyn Gpu, at: OwnGpuWork<'_, '_>) {
+        match at {
+            OwnGpuWork::Upload(context) => {
+                for target in self.dem_targets.values_mut().filter(|target| !target.prepared) {
+                    target.prepare.upload(gpu, context);
+                }
             }
-            // A target whose draw or pass failed prepares again in the next
-            // frame.
-            target.prepared = passes.end(gpu, parameters) && drawn;
-            if target.prepared {
-                self.prepared_in_frame.push(dem);
+            OwnGpuWork::Targets(parameters, _) => {
+                self.prepared_in_frame.clear();
+                if !base.is_renderable {
+                    return;
+                }
+                for (&dem, target) in self.dem_targets.iter_mut().filter(|(_, target)| !target.prepared) {
+                    parameters.current_layer = 0;
+                    let Some(mut passes) = target.render_target.begin(gpu, parameters) else {
+                        continue;
+                    };
+                    let mut drawn = true;
+                    while passes.next(parameters) {
+                        drawn &= target.prepare.render(gpu, parameters);
+                    }
+                    // A target whose draw or pass failed prepares again in
+                    // the next frame.
+                    target.prepared = passes.end(gpu, parameters) && drawn;
+                    if target.prepared {
+                        self.prepared_in_frame.push(dem);
+                    }
+                }
             }
-        }
-    }
-
-    fn prepare_again(&mut self) {
-        for dem in self.prepared_in_frame.drain(..) {
-            if let Some(target) = self.dem_targets.get_mut(&dem) {
-                target.prepared = false;
+            OwnGpuWork::Failed => {
+                for dem in self.prepared_in_frame.drain(..) {
+                    if let Some(target) = self.dem_targets.get_mut(&dem) {
+                        target.prepared = false;
+                    }
+                }
             }
+            OwnGpuWork::Prerender(_) | OwnGpuWork::Pass(_) => {}
         }
     }
 }
@@ -577,8 +579,9 @@ impl DemTarget {
         };
         let mut textures = Textures::default();
         textures[IMAGE_SLOT] = Some(dem.clone());
-        let mesh = Mesh::new(shader.clone(), ColorMode::unblended(), CullFaceMode::disabled(), geometry, textures);
-        let mut prepare = SingleDraw::new(mesh, FrameDraw::new(None, SimpleIdentity::new()));
+        let mesh =
+            Mesh::new(context, shader.clone(), ColorMode::unblended(), CullFaceMode::disabled(), geometry, textures);
+        let mut prepare = SingleDraw::new(mesh, Draw::DEFAULT);
         let extent = f64::from(EXTENT);
         let m =
             orthographic(0.0, extent, -extent, 0.0, -1.0, 1.0) * DMat4::from_translation(DVec3::new(0.0, -extent, 0.0));
@@ -605,17 +608,17 @@ impl RenderHillshadeLayer {
         evaluated: &HillshadePaintProperties::PossiblyEvaluated,
         tile_id: &UnwrappedTileID,
         num_lights: usize,
-        parameters: &PaintParameters<'_>,
+        frame: &LayerFrame<'_>,
     ) -> ((HillshadeDrawableUBO, HillshadeTilePropsUBO), ProjectionUBO) {
         let projection = projection_data(
             tile_id,
-            parameters,
+            frame,
             [0.0, 0.0],
             TranslateAnchorType::Viewport,
             false,
             false,
             None,
-            !parameters.camera_moving,
+            !frame.camera_moving,
         );
         let drawable = HillshadeDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) };
         let tile_props = HillshadeTilePropsUBO {
@@ -630,14 +633,14 @@ impl RenderHillshadeLayer {
         ((drawable, tile_props), to_projection_ubo(&projection))
     }
 
-    /// The illumination of the layer's evaluation `layer` at the frame's
+    /// The illumination of the layer's evaluation `layer` at `frame`'s
     /// bearing, which a viewport anchor turns its lights by. The
     /// evaluation's own is kept in `cache`, so that a turning map doesn't
     /// compute it again.
     fn illumination(
         cache: &mut Option<(Arc<EvaluatedLayer<Hillshade>>, Illumination)>,
         layer: &Arc<EvaluatedLayer<Hillshade>>,
-        parameters: &PaintParameters<'_>,
+        frame: &LayerFrame<'_>,
     ) -> Illumination {
         let evaluated = &layer.paint;
         let mut illumination = match cache {
@@ -651,7 +654,7 @@ impl RenderHillshadeLayer {
             }
         };
         if *evaluated.hillshade_illumination_anchor.uniform() == HillshadeIlluminationAnchorType::Viewport {
-            let bearing = parameters.view.angle() as f32;
+            let bearing = frame.view.angle() as f32;
             let lights = illumination.num_lights.min(illumination.props.azimuths.len());
             for azimuth in &mut illumination.props.azimuths[..lights] {
                 *azimuth -= bearing;
