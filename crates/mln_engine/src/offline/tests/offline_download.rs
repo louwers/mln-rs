@@ -1,6 +1,4 @@
-// The test that renders a map after a download is in
-// tests/offline_download_map.rs. Fixtures are read in place from
-// test/fixtures/offline_download.
+// Fixtures are read in place from test/fixtures/offline_download.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;

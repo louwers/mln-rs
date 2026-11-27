@@ -2,8 +2,8 @@
 // the camera's transform, one module per C++ file. The
 // other test/tile files are ported elsewhere: geojson_tile (geojson_tile_test),
 // vector_tile (vector_tile_test, `tile`), geometry_tile_data (`tile`),
-// tile_cache (source_test), tile_id (`tile::tile_id`), tile_lod (render_test,
-// which has the HeadlessFrontend).
+// tile_cache (source_test), tile_id (`tile::tile_id`), tile_lod
+// (mln_headless' gtest_tile_lod).
 
 mod custom_geometry_tile;
 mod custom_vector_tile;

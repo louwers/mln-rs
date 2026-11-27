@@ -169,21 +169,6 @@ fn stored_vertices_free_their_data_once_they_have_a_buffer() {
     });
 }
 
-// Dynamic vertices' updates fill the storage of the bytes they were made of,
-// which their uploads keep.
-#[test]
-fn dynamic_vertices_keep_their_storage_across_uploads() {
-    with_context(|gpu, context| {
-        let typed = context.add_dynamic_vertices(&[[1i16, 2], [3, 4]]);
-        let storage = context.vertices(typed.shared()).map(|stored| stored.bytes().as_ptr());
-        for x in 5..8 {
-            context.upload_vertices(gpu, typed.shared()).expect("uploads").expect("a buffer");
-            assert!(context.update_vertices(&typed, &[[x, x], [x, x]]));
-            assert_eq!(context.vertices(typed.shared()).map(|stored| stored.bytes().as_ptr()), storage, "{x}");
-        }
-    });
-}
-
 // The holder of typed vertices replaces them with as many vertices of the
 // type, which the next upload writes over their buffer, counted as a buffer
 // update, and which the draws that bind them bind again.

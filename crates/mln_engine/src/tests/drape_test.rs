@@ -7,9 +7,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use glam::DVec4;
+use mln_gfx::ScissorRect;
 use mln_gfx::frame::FrameTarget;
 use mln_gfx::offscreen_target::OffscreenTarget;
-use mln_gfx::{RendererBackend as _, ScissorRect};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::constants::EXTENT;
 use mln_style::geo::LatLng;
@@ -18,6 +18,7 @@ use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::{Edit, Style};
 
+use super::fake_gpu::FakeGpu;
 use super::with_context;
 use crate::camera::transform::Transform;
 use crate::camera::{CameraOptions, ConstrainMode, Elevation, View, ViewportMode};
@@ -107,9 +108,7 @@ fn a_drape_clears_its_stencil_over_its_whole_target() {
         let scissor = ScissorRect { x: 0, y: 0, width: size.width, height: size.height };
         let mut parameters =
             PaintParameters::new(context, &mut clip_masks, &mut layer_composite, false, &frame, 1.0, size, scissor);
-        if parameters.context.caps().clear_stencil_with_pass {
-            return;
-        }
+        assert!(!parameters.context.caps().clear_stencil_with_pass);
         let drape = tile(1, 3, 5, 2);
         let transform = TransformParameters::for_drape(&view, &drape);
         let (mut drape_masks, mut drape_composite) = (ClipMasks::default(), LayerComposite::default());
@@ -296,15 +295,14 @@ const ONE_TILE_UNDER_EVERY_DRAPE: &str = r#"{
 
 /// The tile and stack of each drape of a map of `style` that has a texture
 /// ([`drapes_of`]).
-fn textured_drapes(style: &str) -> Option<BTreeSet<(OverscaledTileID, usize)>> {
+fn textured_drapes(style: &str) -> BTreeSet<(OverscaledTileID, usize)> {
     drapes_of(style, |drapes| drapes.textured().into_iter().collect())
 }
 
 /// A continuous map of `style` at zoom 2 over 10° E, 10° S, seen from above
-/// over a 256 px WebGPU target, drawn until a frame of the camera on the
-/// terrain's ground is complete. Returns what `read` reads of its drapes
-/// then.
-fn drapes_of<R>(style: &str, read: impl FnOnce(&Drapes) -> R) -> Option<R> {
+/// over a 256 px target, drawn until a frame of the camera on the terrain's
+/// ground is complete. Returns what `read` reads of its drapes then.
+fn drapes_of<R>(style: &str, read: impl FnOnce(&Drapes) -> R) -> R {
     let registry = crate::tests::registry();
     let parsed = Style::from_json(registry.style(), style).expect("the style");
     let mut style = Style::new(Arc::clone(registry.style()));
@@ -318,12 +316,11 @@ fn drapes_of<R>(style: &str, read: impl FnOnce(&Drapes) -> R) -> Option<R> {
     let style = Arc::new(style);
 
     let size = Size::new(256, 256);
-    let device = super::webgpu_device()?;
-    let mut backend = mln_webgpu::RendererBackend::new(&device);
-    let mut target = OffscreenTarget::<mln_webgpu::WebGpu>::new(mln_gfx::Size::new(size.width, size.height));
+    let mut gpu = FakeGpu::default();
+    let mut target = OffscreenTarget::<FakeGpu>::new(mln_gfx::Size::new(size.width, size.height));
     let pool = crate::tests::pool();
     let mut renderer = Renderer::new(
-        backend.gpu(),
+        &gpu,
         1.0,
         crate::text::local_fonts::LocalGlyphs::default(),
         crate::tests::registry(),
@@ -372,12 +369,11 @@ fn drapes_of<R>(style: &str, read: impl FnOnce(&Drapes) -> R) -> Option<R> {
             tile_lod_mode: TileLodMode::Default,
             subdivision_granularity: SubdivisionGranularitySetting::none(),
         });
-        let gpu = backend.gpu();
-        let frame = renderer.update(gpu, &parameters).expect("a continuous map's frame");
-        let image = target.begin_frame(gpu).expect("the frame's image");
-        let drawn = renderer.render(gpu, &image, frame);
-        let handoff = target.end_frame(gpu);
-        renderer.finish_frame(gpu, drawn, handoff);
+        let frame = renderer.update(&mut gpu, &parameters).expect("a continuous map's frame");
+        let image = target.begin_frame(&mut gpu).expect("the frame's image");
+        let drawn = renderer.render(&mut gpu, &image, frame);
+        let handoff = target.end_frame(&mut gpu);
+        renderer.finish_frame(&mut gpu, drawn, handoff);
         for event in events.take() {
             match event {
                 RendererEvent::RenderFrameFinished { mode, .. } => complete = mode == RenderMode::Full,
@@ -392,8 +388,8 @@ fn drapes_of<R>(style: &str, read: impl FnOnce(&Drapes) -> R) -> Option<R> {
     }
     assert!(complete, "no frame was complete");
     let read = read(renderer.terrain().drapes());
-    target.tear_down(backend.gpu());
-    Some(read)
+    target.tear_down(&mut gpu);
+    read
 }
 
 /// A stack has a drape with a texture only in the terrain tiles where its
@@ -403,19 +399,14 @@ fn drapes_of<R>(style: &str, read: impl FnOnce(&Drapes) -> R) -> Option<R> {
 fn a_stack_has_a_drape_texture_only_where_its_layers_draw() {
     let tile = |x, y| OverscaledTileID::new(2, 0, CanonicalTileID::new(2, x, y));
     let expected = BTreeSet::from([(tile(1, 1), 0), (tile(2, 2), 1)]);
-    let Some(actual) = textured_drapes(TWO_STACKS) else {
-        return;
-    };
-    assert_eq!(expected, actual);
+    assert_eq!(expected, textured_drapes(TWO_STACKS));
 }
 
 /// The drapes that a tile overlaps draw its one value: each draws the same
 /// mesh of the world's one raster tile.
 #[test]
 fn the_drapes_a_tile_overlaps_draw_its_one_value() {
-    let Some(meshes) = drapes_of(ONE_TILE_UNDER_EVERY_DRAPE, |drapes| drapes.meshes(0)) else {
-        return;
-    };
+    let meshes = drapes_of(ONE_TILE_UNDER_EVERY_DRAPE, |drapes| drapes.meshes(0));
     assert!(meshes.len() > 1, "the tile under more than one drape: {meshes:?}");
     let first = meshes[0].1.clone();
     assert_eq!(1, first.len(), "one draw of the tile in each drape: {meshes:?}");

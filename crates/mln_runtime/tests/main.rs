@@ -22,6 +22,8 @@ mod gestures;
 mod placement;
 mod resources;
 mod sessions;
+// Shared targets through an extension of the tests' own.
+mod shared_targets;
 mod style;
 mod surfaces;
 mod surfaces_win32;
