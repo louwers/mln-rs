@@ -344,24 +344,30 @@ fn a_route_that_would_make_a_target_read_what_it_draws_draws_on_the_map() {
     assert_warned("cycle-self", "draws on the map");
 }
 
+const HEATMAP: &str = r#"{"id":"heatmap","type":"heatmap","source":"shapes","filter":["==",["geometry-type"],"Point"],
+    "paint":{"heatmap-radius":20,"heatmap-opacity":0.7}}"#;
+
+#[test]
+fn a_heatmap_drawn_into_a_target_and_read_back_draws_as_on_the_map() {
+    let expected = render(&style(None, &on_map(&[HEATMAP])));
+    let layers = [BACKGROUND.to_owned(), layer(HEATMAP, Some("t"), ""), copy("copy", "t", None)];
+    assert_draws_as(&render(&style(Some(r#"["t"]"#), &layers)), &expected);
+}
+
 #[test]
 fn layers_that_draw_on_the_map_alone_or_of_an_undeclared_target_draw_on_the_map() {
     let extrusion = r##"{"id":"extrusion","type":"fill-extrusion","source":"shapes",
         "filter":["==",["geometry-type"],"Polygon"],"paint":{"fill-extrusion-color":"#808080","fill-extrusion-height":100000}}"##;
-    let heatmap = r#"{"id":"heatmap","type":"heatmap","source":"shapes","filter":["==",["geometry-type"],"Point"],
-        "paint":{"heatmap-radius":20,"heatmap-opacity":0.7}}"#;
     let unknown = LINE.replacen(r#""id":"line""#, r#""id":"misrouted""#, 1);
-    let expected = render(&style(None, &on_map(&[extrusion, heatmap, &unknown])));
+    let expected = render(&style(None, &on_map(&[extrusion, &unknown])));
     let layers = [
         BACKGROUND.to_owned(),
         layer(extrusion, Some("t"), ""),
-        layer(heatmap, Some("t"), ""),
         layer(&unknown, Some("nowhere"), ""),
         copy("copy", "t", None),
     ];
     assert_eq!(0, distance(&render(&style(Some(r#"["t"]"#), &layers)), &expected));
     assert_warned("extrusion", "draws on the map");
-    assert_warned("heatmap", "draws on the map");
     assert_warned("misrouted", "draws on the map");
 }
 
