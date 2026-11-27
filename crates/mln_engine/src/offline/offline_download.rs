@@ -105,11 +105,11 @@ fn tile_count(definition: &OfflineRegionDefinition, round_zoom: bool, tile_size:
 }
 
 /// A task for the thread that owns a database and its downloads.
-pub type DownloadTask = Box<dyn FnOnce(&mut OfflineDatabase, &mut Downloads) + Send>;
+pub(crate) type DownloadTask = Box<dyn FnOnce(&mut OfflineDatabase, &mut Downloads) + Send>;
 
 /// Hands a task to the thread that owns the database and its downloads,
 /// which runs it after what it runs now. Any thread may call it.
-pub type Post = Arc<dyn Fn(DownloadTask) + Send + Sync>;
+pub(crate) type Post = Arc<dyn Fn(DownloadTask) + Send + Sync>;
 
 /// The downloads of a database's offline regions, by region id, on the
 /// thread that owns the database.

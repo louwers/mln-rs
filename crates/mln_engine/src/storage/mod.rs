@@ -37,11 +37,8 @@ pub mod network_status;
 #[cfg(target_vendor = "apple")]
 mod nsurlsession_transport;
 pub mod offline;
-// Public for the crate's test of a download that a map renders from
-// (tests/offline_download_map.rs). Not API.
 #[cfg(feature = "sqlite")]
-#[doc(hidden)]
-pub mod offline_database;
+pub(crate) mod offline_database;
 #[cfg(feature = "sqlite")]
 mod offline_schema;
 pub(crate) mod online_file_source;

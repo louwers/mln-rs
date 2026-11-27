@@ -14,17 +14,18 @@ use mln_engine::draw::{
     Draw, DrawGeometry, DrawIndexes, Draws, Mesh, RenderStaticData, SegmentBase, SharedTexture, Textures, Uniforms,
     raw_vertices,
 };
-use mln_engine::exec::pool::Pool;
-use mln_engine::exec::queue::Queue;
 use mln_engine::layer::{FrameTile, Layer, LayerValues, NoTiles, OnTerrain, PrepareCx, Router, Routes};
-use mln_engine::map::{Map, MapMode, MapOptions};
+use mln_engine::map::MapMode;
 use mln_engine::shaders::programs::LAYER_COMPOSITE;
 use mln_engine::shaders::ubo::{LayerCompositeBlendMode, LayerCompositeUBO};
-use mln_engine::storage::{FileSource, Resource, Responder, Response};
+use mln_engine::storage::Response;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::types::TextureChannelDataType;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
-use mln_headless::HeadlessFrontend;
+use mln_runtime::registry::register_builtins;
+use mln_runtime::{
+    AttachOptions, Map, MapOptions, RenderSession, RenderTarget, ResourceRequest, Runtime, RuntimeOptions,
+};
 use mln_style::Style;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::conversion::{Convertible, Error};
@@ -33,6 +34,8 @@ use mln_style::member::Member;
 use mln_style::property::table::{PropertyTable, PropertyVisitor};
 use mln_style::size::Size;
 use parking_lot::Mutex;
+
+use crate::support::{TestRuntime, result_of, wait};
 
 /// The style's shared targets, by name.
 struct Targets(Vec<String>);
@@ -235,30 +238,30 @@ fn assert_warned(id: &str, does: &str) {
 
 const SIZE: Size = Size::new(96, 64);
 
-/// A map of `style` at `pixel_ratio`, with the built-ins and the tests'
-/// extension, and the frontend that draws it.
+/// A still map of `style` at `pixel_ratio`, with the built-ins and the
+/// tests' extension, and the offscreen session that draws it.
 struct Fixture {
-    frontend: HeadlessFrontend,
     map: Map,
-    _queue: Queue<()>,
-    _pool: Pool,
+    session: RenderSession,
+    _runtime: TestRuntime,
 }
 
 impl Fixture {
     fn new(style: &str, pixel_ratio: f32) -> Fixture {
-        Fixture::with_file_source(style, pixel_ratio, None)
+        Fixture::with_resources(style, pixel_ratio, None)
     }
 
-    /// A map of `style` whose tiles are DEM tiles of `height` metres
+    /// A map of `style` whose resources are DEM tiles of `height` metres
     /// everywhere, a multiple of 0.1 from −10000.
     fn over_dem(style: &str, height: f64) -> Fixture {
-        Fixture::with_file_source(style, 1.0, Some(Arc::new(Dem::new(height))))
+        Fixture::with_resources(style, 1.0, Some(dem(height)))
     }
 
-    fn with_file_source(style: &str, pixel_ratio: f32, file_source: Option<Arc<dyn FileSource>>) -> Fixture {
+    /// A map of `style` whose every resource is `resource`, if any.
+    fn with_resources(style: &str, pixel_ratio: f32, resource: Option<Arc<Vec<u8>>>) -> Fixture {
         warnings();
         let mut builder = RegistryBuilder::new();
-        mln_builtins::register_builtins(&mut builder).unwrap();
+        register_builtins(&mut builder).unwrap();
         builder.add_member(&TARGETS).unwrap();
         builder.add_member(&DESTINATION).unwrap();
         builder.add_member(&SOURCE).unwrap();
@@ -266,56 +269,51 @@ impl Fixture {
         builder.add_layer_type::<ProbeLayer<true>>().unwrap();
         builder.add_layer_type::<ProbeLayer<false>>().unwrap();
         builder.add_router(&ROUTER);
-        let (queue, pool) = (Queue::new(), Pool::new(2));
-        let mut frontend = HeadlessFrontend::new(SIZE, pixel_ratio, &queue, &pool).expect("a headless frontend");
-        let options = MapOptions { map_mode: MapMode::Static, size: SIZE, pixel_ratio, ..Default::default() };
-        let mut map = match file_source {
-            Some(file_source) => Map::with_file_source(file_source, options, builder.build(), &pool),
-            None => Map::new(options, builder.build(), &pool),
+        let runtime = TestRuntime(Runtime::with_registry(&RuntimeOptions::default(), builder.build()).unwrap());
+        if let Some(resource) = resource {
+            wait(runtime.set_resource_provider(move |request: ResourceRequest| {
+                let _ = request.respond(Response { data: Some(Arc::clone(&resource)), ..Response::default() });
+            }));
         }
-        .unwrap();
-        frontend.attach(&mut map);
-        map.load_style_json(style);
-        Fixture { frontend, map, _queue: queue, _pool: pool }
+        let options = MapOptions {
+            map: mln_engine::map::MapOptions {
+                map_mode: MapMode::Static,
+                size: SIZE,
+                pixel_ratio,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let (map, created) = runtime.create_map(options).unwrap();
+        result_of(created).unwrap();
+        wait(map.set_style_json(style));
+        let target = RenderTarget::Offscreen { size: SIZE, device: None };
+        let (session, attached) = map.attach(target, AttachOptions::default()).unwrap();
+        result_of(attached).unwrap();
+        Fixture { map, session, _runtime: runtime }
     }
 
     fn render(&mut self) -> PremultipliedImage {
-        self.frontend.render(&mut self.map).expect("a still image").image
+        wait(self.map.request_still_image());
+        wait(self.session.read_texture())
     }
 
     /// Sets the property `name` of the layer `layer` to `json`.
     fn set(&mut self, layer: &str, name: &str, json: &str) {
-        self.map.edit_style(|style| style.set_layer_property_json(layer, name, json)).unwrap();
+        wait(self.map.set_style_layer_property(layer, name, json));
     }
 }
 
-/// A file source whose every resource is a DEM tile of one height
-/// everywhere.
-struct Dem(Arc<Vec<u8>>);
-
-impl Dem {
-    fn new(height: f64) -> Dem {
-        // In the Mapbox encoding, a height is (R · 65536 + G · 256 + B) ·
-        // 0.1 − 10000 metres.
-        let [_, r, g, b] = (((height + 10000.0) * 10.0).round() as u32).to_be_bytes();
-        let mut dem = PremultipliedImage::new(Size::new(8, 8));
-        for texel in dem.data.as_chunks_mut::<4>().0 {
-            *texel = [r, g, b, 255];
-        }
-        Dem(Arc::new(mln_engine::image::encode_png(&dem)))
+/// A PNG DEM tile of `height` metres everywhere.
+fn dem(height: f64) -> Arc<Vec<u8>> {
+    // In the Mapbox encoding, a height is (R · 65536 + G · 256 + B) · 0.1 −
+    // 10000 metres.
+    let [_, r, g, b] = (((height + 10000.0) * 10.0).round() as u32).to_be_bytes();
+    let mut dem = PremultipliedImage::new(Size::new(8, 8));
+    for texel in dem.data.as_chunks_mut::<4>().0 {
+        *texel = [r, g, b, 255];
     }
-}
-
-impl FileSource for Dem {
-    fn load(&self, _resource: &Resource, responder: Responder) {
-        let mut response = Response::new();
-        response.data = Some(Arc::clone(&self.0));
-        responder.send(response);
-    }
-
-    fn can_request(&self, _resource: &Resource) -> bool {
-        true
-    }
+    Arc::new(mln_engine::image::encode_png(&dem))
 }
 
 /// The image of `style` once loaded.
@@ -527,7 +525,7 @@ fn an_edit_adds_and_removes_a_route() {
 
     // A style that stops declaring the fill's target draws it on the map.
     fixture.set("edited", "test:destination", r#""t""#);
-    fixture.map.edit_style(|style| style.set_root_property_json("test:targets", "[]")).unwrap();
+    wait(fixture.map.set_style_root_property("test:targets", "[]"));
     assert_eq!(0, distance(&fixture.render(), &on_map));
     assert_warned("edited", "draws on the map");
 }

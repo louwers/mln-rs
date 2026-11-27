@@ -164,36 +164,13 @@ web-sys.workspace = true
 # Serves the styles of the DatabaseFileSource region tests, and the
 # responses of the network tests.
 httpmock.workspace = true
-# The built-in registrations of the integration tests' maps.
-mln_builtins = { package = "mln-rs-builtins", path = "../mln_builtins" }
-mln_headless = { package = "mln-rs-headless", path = "../mln_headless" }
 proptest.workspace = true
 tempfile.workspace = true
 
-# OfflineDownload.ResourceOfflineUsageUnset renders a map after the
-# download.
+# A layer type that another crate declares on the public layer contract.
 [[test]]
 name = "layer_type"
 path = "tests/layer_type.rs"
-# A layer type that another crate declares on the public layer contract.
-
-[[test]]
-name = "style_members"
-path = "tests/style_members.rs"
-# Extension members that another crate registers, read by a layer's
-# renderer.
-
-[[test]]
-name = "shared_targets"
-path = "tests/shared_targets.rs"
-# Built-in layers routed into shared targets by an extension of the test's
-# own, and read back.
-
-[[test]]
-name = "offline_download_map_test"
-path = "tests/offline_download_map.rs"
-# StubFileSource answers the download.
-required-features = ["sqlite", "stub-file-source"]
 
 [lints]
 workspace = true
