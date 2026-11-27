@@ -88,7 +88,7 @@ style_codegen = { package = "mln-rs-style-codegen", path = "tools/style-codegen"
 ab_glyph_rasterizer = { version = "0.1.10" }
 # tools/image-diff's comparison: pixelmatch's YIQ distance and antialiasing
 # detection. Without its default features, which add image codecs and a CLI.
-blazediff = { version = "8.1.2", default-features = false }
+blazediff = { version = "8.0.0", default-features = false }
 # min_const_generics: Pod for any array length (mln_gfx's UBOs).
 bytemuck = { version = "1.25.2", features = ["derive", "min_const_generics"] }
 # The buffers that pmtiles reads headers and directories from.

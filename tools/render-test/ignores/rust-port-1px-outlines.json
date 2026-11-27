@@ -1,5 +1,4 @@
 {
-  "render-tests/projection/globe/source-bounds": "WebGPU on a CPU rasterizer (lavapipe) draws fill outlines as 1 px lines, where the expected image has a 2 px outline's fringe on both sides of the edge",
   "render-tests/fill-layer-blend/luminosity": "On a CPU rasterizer (lavapipe), fill outlines are drawn as lines, whose edge pixels rasterize differently from GL JS's; this blend shows the difference on a few of them",
   "render-tests/fill-layer-blend/overlay": "On a CPU rasterizer (lavapipe), fill outlines are drawn as lines, whose edge pixels rasterize differently from GL JS's; this blend shows the difference on a few of them"
 }

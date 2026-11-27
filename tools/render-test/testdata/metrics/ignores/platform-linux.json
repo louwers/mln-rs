@@ -1,6 +1,4 @@
 {
-    "render-tests/regressions/mapbox-gl-js#5642": "Failing with mbgl-render-test",
-    "render-tests/regressions/mapbox-gl-js#7066": "Failing with mbgl-render-test",
     "render-tests/sprites/2x-screen-2x-pattern": "There are a fill pixel different from metrics on Linux",
     "location_indicator/dateline": "Would need a different baseline when ran on llvmpipe not supporting anisotropic filtering",
     "location_indicator/default": "Would need a different baseline when ran on llvmpipe not supporting anisotropic filtering",

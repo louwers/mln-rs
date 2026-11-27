@@ -7,32 +7,34 @@
 /// ones that look like antialiasing. The differences are drawn into `diff`,
 /// if given, over a faded copy of `a`.
 ///
-/// A semi-transparent pixel compares as its channels blended toward white,
-/// `255 + (c - 255) * a`, the blend that the tests' expected images and
-/// allowed differences were made with: a transparent pixel matches a white
-/// one.
+/// The buffers hold premultiplied pixels, which compare as composited over
+/// white: a transparent pixel matches a white one.
 ///
 /// # Panics
 ///
 /// If a buffer doesn't hold `width * height * 4` bytes.
 #[must_use]
 pub fn differing_pixels(a: &[u8], b: &[u8], width: u32, height: u32, threshold: f64, diff: Option<&mut [u8]>) -> u64 {
-    let (a, b) = (over_white(a), over_white(b));
-    let view = |data| blazediff::ImageView { data, width, height };
+    let image = |data| blazediff::Image { data: over_white(data), width, height };
+    let mut output = diff.is_some().then(|| blazediff::Image::new(width, height));
     let options = blazediff::DiffOptions { threshold, ..Default::default() };
-    let result =
-        blazediff::diff_rgba(view(&a), view(&b), diff, &options).expect("the buffers hold width * height pixels");
+    let result = blazediff::diff(&image(a), &image(b), output.as_mut(), &options)
+        .expect("the buffers hold width * height pixels");
+    if let (Some(diff), Some(output)) = (diff, output) {
+        diff.copy_from_slice(&output.data);
+    }
     u64::from(result.count().expect("the images have the same size"))
 }
 
-/// `image` made opaque, each channel blended toward white by the alpha.
+/// The premultiplied `image` composited over opaque white:
+/// `c + 255 * (1 - a)` per channel, at most 255 (for a color brighter than
+/// its alpha).
 fn over_white(image: &[u8]) -> Vec<u8> {
     let (pixels, _) = image.as_chunks::<4>();
     pixels
         .iter()
         .flat_map(|&[r, g, b, a]| {
-            let alpha = f64::from(a) / 255.0;
-            let blend = |c: u8| (255.0 + (f64::from(c) - 255.0) * alpha) as u8;
+            let blend = |c: u8| c.saturating_add(255 - a);
             [blend(r), blend(g), blend(b), 255]
         })
         .collect()
@@ -71,6 +73,19 @@ mod tests {
         let lighter = filled([132, 132, 132, 255]);
         assert_eq!(differing_pixels(&gray, &lighter, SIDE, SIDE, 0.1285, None), 0);
         assert_eq!(differing_pixels(&gray, &lighter, SIDE, SIDE, 0.0, None), u64::from(SIDE) * u64::from(SIDE));
+    }
+
+    #[test]
+    fn a_semi_transparent_pixel_compares_as_composited_over_white() {
+        // Half-transparent red, premultiplied, over white is (255, 127, 127).
+        let red = filled([128, 0, 0, 128]);
+        assert_eq!(differing_pixels(&red, &filled([255, 127, 127, 255]), SIDE, SIDE, 0.0, None), 0);
+        assert_eq!(
+            differing_pixels(&red, &filled([255, 128, 128, 255]), SIDE, SIDE, 0.0, None),
+            u64::from(SIDE * SIDE)
+        );
+        // Half-transparent white, premultiplied, over white is white.
+        assert_eq!(differing_pixels(&filled([128; 4]), &filled([255; 4]), SIDE, SIDE, 0.0, None), 0);
     }
 
     #[test]
