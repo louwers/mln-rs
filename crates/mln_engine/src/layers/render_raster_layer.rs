@@ -7,7 +7,7 @@ use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::gpu::{Gpu, ShaderKey};
+use mln_gfx::gpu::ShaderKey;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::texture2d::SamplerState;
@@ -22,6 +22,7 @@ use mln_style::types::{RasterResamplingType, ResamplingType, TranslateAnchorType
 use super::cast_matrix;
 use crate::buckets::raster_bucket::{MaskQuads, RasterLayoutVertex};
 use crate::draw::context::Context;
+use crate::draw::draws::{Draw, Draws, Group, LayerFrame};
 use crate::draw::identity::SimpleIdentity;
 use crate::draw::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::draw::objects::{DrawGeometry, Mesh, Textures};
@@ -30,17 +31,15 @@ use crate::draw::store::SharedTexture;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::SharedVertices;
 use crate::layer::bucket_geometry::copied_vertices;
-use crate::layer::layer_drawing::{FrameDraw, LayerDraws, TileDraws};
 use crate::layer::layer_type::LayerType;
 use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, Hosted, LayerCx, LayerValues, OnTerrain, RenderLayer, TileCx, TypedLayer, UpdateCx,
+    EvaluateCx, Evaluation, Hosted, LayerValues, OnTerrain, PrepareCx, RenderLayer, TileCx, TypedLayer, UpdateCx,
 };
 use crate::layer::tile_input::{RasterTile, TileData};
 use crate::layers::raster::programs;
 use crate::layers::raster::ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use crate::render::globe::globe_tile_mesh::GlobeTileMeshCache;
 use crate::render::layer_composite::Composite;
-use crate::render::paint_parameters::PaintParameters;
 use crate::render::static_data::RenderStaticData;
 use crate::render::tile::FrameTile;
 use crate::render::tile_matrix::{projection_data, to_projection_ubo};
@@ -136,30 +135,26 @@ impl RenderRasterLayer {
 
 impl RenderRasterLayer {
     /// The block and the projection of a draw of `tile_id`.
-    fn uniforms(tile_id: &UnwrappedTileID, parameters: &PaintParameters<'_>) -> (RasterDrawableUBO, ProjectionUBO) {
+    fn uniforms(tile_id: &UnwrappedTileID, frame: &LayerFrame<'_>) -> (RasterDrawableUBO, ProjectionUBO) {
         let projection = projection_data(
             tile_id,
-            parameters,
+            frame,
             [0.0, 0.0],
             TranslateAnchorType::Viewport,
             false,
             false,
             None,
-            !parameters.camera_moving,
+            !frame.camera_moving,
         );
         (RasterDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) }, to_projection_ubo(&projection))
     }
 
-    /// Makes the pushed draws the layer's draws of the frame, which put
-    /// their vertices on `quad`.
-    fn finish_frame_draws(
-        cx: &mut LayerCx<'_, Self>,
-        gpu: &mut dyn Gpu,
-        parameters: &mut PaintParameters<'_>,
-        quad: &ImageQuad,
-    ) {
-        let composite = Self::composite(cx.values);
-        let evaluated = &cx.values.evaluated.paint;
+    /// Gives the frame's draws of the layer of `values`, in `group`, what
+    /// they share: how they composite, and their block, which puts their
+    /// vertices on `quad`.
+    fn share_frame_draws(values: &LayerValues<Raster>, group: &mut Group, quad: &ImageQuad) {
+        let composite = Self::composite(values);
+        let evaluated = &values.evaluated.paint;
         let props = RasterEvaluatedPropsUBO {
             spin_weights: spin_weights(*evaluated.raster_hue_rotate.uniform()),
             tl_parent: [0.0, 0.0],
@@ -177,25 +172,18 @@ impl RenderRasterLayer {
             coords_bottom: quad.coords_bottom,
             image_warp: quad.warp,
         };
-        let frame = cx.drawing.frame_mut();
-        frame.set_composite(composite);
-        frame.block(&props);
-        cx.drawing.finish(gpu, parameters);
+        group.composite(composite);
+        group.block(&props);
     }
 }
 
 /// Pushes the frame's draw of the tile `tile_id`, from what the layer keeps
-/// of it, if anything, into `frame`.
-fn raster_draw(
-    kept: Option<&Mesh>,
-    tile_id: OverscaledTileID,
-    parameters: &PaintParameters<'_>,
-    frame: &mut LayerDraws,
-) {
+/// of it, if anything, into `group`.
+fn raster_draw(kept: Option<&Mesh>, tile_id: OverscaledTileID, frame: &LayerFrame<'_>, group: &mut Group) {
     if let Some(kept) = kept {
-        let draw = FrameDraw::new(Some(tile_id), kept.id());
-        let (drawable, projection) = RenderRasterLayer::uniforms(&tile_id.to_unwrapped(), parameters);
-        frame.push_at(draw, (), kept, &projection, drawable);
+        let draw = Draw { order: kept.seq(), ..Draw::DEFAULT };
+        let (drawable, projection) = RenderRasterLayer::uniforms(&tile_id.to_unwrapped(), frame);
+        group.push_at(kept, tile_id, &projection, draw, drawable);
     }
 }
 
@@ -217,11 +205,17 @@ fn contrast_factor(contrast: f32) -> f32 {
 
 /// The mesh of a raster draw of `geometry` with `shader`, which binds
 /// `texture` as both of its images.
-fn new_mesh(shader: &ShaderKey, color_mode: ColorMode, geometry: DrawGeometry, texture: &SharedTexture) -> Mesh {
+fn new_mesh(
+    context: &mut Context,
+    shader: &ShaderKey,
+    color_mode: ColorMode,
+    geometry: DrawGeometry,
+    texture: &SharedTexture,
+) -> Mesh {
     let mut textures = Textures::default();
     textures[IMAGE0_SLOT] = Some(texture.clone());
     textures[IMAGE1_SLOT] = Some(texture.clone());
-    Mesh::new(shader.clone(), color_mode, CullFaceMode::disabled(), geometry, textures)
+    Mesh::new(context, shader.clone(), color_mode, CullFaceMode::disabled(), geometry, textures)
 }
 
 /// The geometry of a raster draw of `vertex_count` vertices in `vertices`,
@@ -270,7 +264,6 @@ fn raster_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
 impl TypedLayer for RenderRasterLayer {
     type Type = Raster;
     type Tile = Mesh;
-    type Drawing = TileDraws<Mesh>;
     const TERRAIN: OnTerrain = OnTerrain::Drapes;
 
     fn new(_values: &LayerValues<Raster>) -> Self {
@@ -297,7 +290,7 @@ impl TypedLayer for RenderRasterLayer {
         data: TileData<'_, Raster>,
     ) -> Option<Mesh> {
         let sampler = Self::sampler_state(cx.values);
-        let context = &mut *cx.parameters.context;
+        let context = &mut *cx.context;
         let raster_shader = context.shader_key(&programs::RASTER, Uniforms::default(), cx.base.projection_variant);
         let static_geometry = self.static_geometry.get_or_insert_with(|| StaticGeometry::new(context));
         let tile_id = tile.draw_id();
@@ -339,19 +332,12 @@ impl TypedLayer for RenderRasterLayer {
         };
         let texture = Self::texture(&mut self.textures, sampler, context, data.id(), data.image());
         let color_mode = ColorMode::alpha_blended();
-        Some(new_mesh(&raster_shader, color_mode, draw_geometry, &texture))
+        Some(new_mesh(context, &raster_shader, color_mode, draw_geometry, &texture))
     }
 
-    /// Makes the frame's draws of the layer, one of each of its tiles, and
-    /// writes the layer's buffers they read, which put the tiles' vertices
-    /// on their source's quad.
-    fn update_draws(
-        &mut self,
-        mut cx: LayerCx<'_, Self>,
-        gpu: &mut dyn Gpu,
-        paint_parameters: &mut PaintParameters<'_>,
-        render_tiles: &[FrameTile<'_, Raster>],
-    ) {
+    /// Pushes the frame's draws of the layer, one of each of its tiles,
+    /// which put the tiles' vertices on their source's quad.
+    fn prepare(&mut self, cx: &mut PrepareCx<'_, '_, Self>, render_tiles: &[FrameTile<'_, Raster>], out: &mut Draws) {
         if cx.base.projection_variant == ProjectionVariant::Mercator {
             self.globe_meshes.clear();
         }
@@ -360,23 +346,18 @@ impl TypedLayer for RenderRasterLayer {
         // Kept draws keep their textures, so a changed filter is applied to
         // the textures themselves.
         for texture in self.textures.values() {
-            if let Some(mut texture) = paint_parameters.context.texture_mut(texture) {
+            if let Some(mut texture) = cx.context.texture_mut(texture) {
                 texture.set_sampler(sampler);
             }
         }
 
         for tile in render_tiles {
             let tile_id = tile.draw_id();
-            raster_draw(
-                cx.tiles.get_mut(&tile_id).map(|kept| &*kept),
-                tile_id,
-                paint_parameters,
-                cx.drawing.frame_mut(),
-            );
+            raster_draw(cx.tiles.get_mut(&tile_id).map(|kept| &*kept), tile_id, cx.frame, out.main());
         }
 
         let quad = render_tiles.iter().find_map(|tile| tile.data()).map_or(ImageQuad::TILE, RasterTile::quad);
-        Self::finish_frame_draws(&mut cx, gpu, paint_parameters, &quad);
+        Self::share_frame_draws(cx.values, out.main(), &quad);
     }
 
     /// Drops the textures and quads of the tiles the frame doesn't draw,
