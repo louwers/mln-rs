@@ -2580,6 +2580,7 @@ dependencies = [
  "mln-rs-engine",
  "mln-rs-gfx",
  "mln-rs-gl",
+ "mln-rs-location-puck",
  "mln-rs-mtl",
  "mln-rs-runtime",
  "mln-rs-style",

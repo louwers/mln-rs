@@ -40,6 +40,8 @@ mln_gfx.workspace = true
 mln_builtins.workspace = true
 # The custom layer type, and the custom source types' engine halves.
 mln_engine.workspace = true
+# The `org.maplibre.location-puck` layer type, which every runtime has.
+mln_location_puck.workspace = true
 # The custom geometry sources' tiles, cut as a GeoJSON source's.
 mln_runtime.workspace = true
 mln_style.workspace = true

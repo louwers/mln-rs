@@ -8,13 +8,15 @@ use mln_engine::{Registry, RegistryBuilder};
 use crate::custom_layer::CustomLayer;
 use crate::custom_source::{CustomGeometrySourceType, CustomVectorSourceType};
 
-/// The built-ins, the custom source types and the `custom` layer type.
+/// The built-ins, the custom source types, the `custom` layer type and the
+/// `org.maplibre.location-puck` layer type.
 pub(crate) fn registry() -> Arc<Registry> {
     static REGISTRY: LazyLock<Arc<Registry>> = LazyLock::new(|| {
         let mut builder = RegistryBuilder::new();
-        // Into an empty builder, the built-ins and the C API's types, whose
+        // Into an empty builder, the built-ins and the other types, whose
         // names differ, register.
         let registered = register_builtins(&mut builder)
+            .and_then(|()| mln_location_puck::register(&mut builder))
             .and_then(|()| builder.add_source_type::<CustomGeometrySourceType>())
             .and_then(|()| builder.add_source_type::<CustomVectorSourceType>())
             .and_then(|()| builder.add_layer_type::<CustomLayer>());

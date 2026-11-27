@@ -508,6 +508,34 @@ static void a_layer_requires_a_source_that_supports_its_type(void) {
   mln_test_destroy_runtime(runtime);
 }
 
+static void location_puck_layers_need_no_source(void) {
+  mln_runtime runtime = mln_test_create_runtime();
+  mln_map map = mln_test_create_styled_map(runtime);
+  add_layer(
+    map,
+    "{\"id\":\"puck\",\"type\":\"org.maplibre.location-puck\","
+    "\"paint\":{\"puck-position\":[-122.4194,37.7749]}}",
+    ""
+  );
+  const layer_probe probe = take_layer_result(runtime, map, "puck");
+  TEST_ASSERT_TRUE(probe.found);
+  TEST_ASSERT_EQUAL_STRING("org.maplibre.location-puck", probe.type);
+  TEST_ASSERT_EQUAL_size_t(0, probe.source_id_size);
+
+  MLN_TEST_AWAIT_OK(mln_map_set_style_layer_property(
+    map, MLN_BUFFER_LITERAL("puck"), MLN_BUFFER_LITERAL("puck-bearing"),
+    MLN_BUFFER_LITERAL("35"), &completion.descriptor, NULL
+  ));
+  char bearing[16];
+  MLN_TEST_OK(read_layer_property(
+    map, "puck", "puck-bearing", bearing, sizeof(bearing)
+  ));
+  TEST_ASSERT_EQUAL_STRING("35.0", bearing);
+
+  mln_test_destroy_map(map);
+  mln_test_destroy_runtime(runtime);
+}
+
 MLN_TEST_GROUP {
   RUN_TEST(layer_result_reports_scalars_and_carries_the_source_ids);
   RUN_TEST(layer_properties_and_filters_round_trip_through_json);
@@ -516,4 +544,5 @@ MLN_TEST_GROUP {
   RUN_TEST(layers_list_in_style_order_after_moves);
   RUN_TEST(source_bindings_change_only_on_layers_that_take_a_source);
   RUN_TEST(a_layer_requires_a_source_that_supports_its_type);
+  RUN_TEST(location_puck_layers_need_no_source);
 }
