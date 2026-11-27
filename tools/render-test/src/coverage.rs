@@ -88,6 +88,9 @@ pub const PITCHED: Camera = [0.0, 0.0, 10.0, 60.0, 30.0];
 /// A globe whose center is far south of features about 60° N, where a
 /// pixel spans about two thirds of the ground it does at the center.
 pub const GLOBE: Camera = [0.0, 45.0, 1.5, 0.0, 0.0];
+/// A globe closer in than [`GLOBE`], at a zoom where its tiles split
+/// geometry on the ground more coarsely than the planet's own mesh.
+pub const GLOBE_NEAR: Camera = [0.0, 45.0, 4.0, 0.0, 0.0];
 /// A globe whose eastern horizon is about 20° E.
 pub const HORIZON: Camera = [-62.0, 0.0, 0.8, 0.0, 0.0];
 /// A camera south of the hill of [`hill`], looking north at it.
@@ -306,8 +309,14 @@ pub fn assert_matches(registry: &Arc<Registry>, output: &std::path::Path, cases:
         let first = |points: &[ScreenCoordinate]| {
             points.first().map(|p| format!(" (first at {}, {})", p.x, p.y)).unwrap_or_default()
         };
+        let drawn = match (shows, scene.shows) {
+            (false, true) if coverage.shown == 0 => " (the layer draws at no tested point)",
+            (false, true) => " (the layer draws at every tested point)",
+            (true, false) => " (the layer draws where it should be hidden)",
+            _ => "",
+        };
         failed.push(format!(
-            "{name}: {} of {} shown points missed{}, {} of {} others found{}",
+            "{name}{drawn}: {} of {} shown points missed{}, {} of {} others found{}",
             coverage.missed.len(),
             coverage.shown,
             first(&coverage.missed),

@@ -5,7 +5,7 @@
 //! translated.
 
 use render_test::coverage::{
-    COLOR, FLAT, GLOBE, HORIZON, MARK, PITCHED, Scene, TERRAIN, hill, layer, line, points, scene, square,
+    COLOR, FLAT, GLOBE, GLOBE_NEAR, HORIZON, MARK, PITCHED, Scene, TERRAIN, hill, layer, line, points, scene, square,
 };
 
 fn assert_matches(cases: Vec<(&str, Scene)>) {
@@ -111,6 +111,8 @@ fn a_query_finds_a_fill_extrusion_where_it_draws() {
         ("fill-extrusion-flat", scene(FLAT, "mercator", None, &near, &extrusion(500.0))),
         ("fill-extrusion-pitched", scene(PITCHED, "mercator", None, &near, &extrusion(500.0))),
         ("fill-extrusion-globe", scene(GLOBE, "globe", None, &square(0.0, 60.0, 3.0), &extrusion(0.0))),
+        // Lower than the planet's mesh rises above a roof's coarser one.
+        ("fill-extrusion-globe-low", scene(GLOBE_NEAR, "globe", None, &square(0.0, 50.0, 3.0), &extrusion(1000.0))),
         (
             "fill-extrusion-terrain",
             scene(TERRAIN, "mercator", Some(hill()), &square(0.0, 0.007, 0.0015), &extrusion(800.0)),
