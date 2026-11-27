@@ -41,9 +41,9 @@ use crate::layer::layer_drawing::{
 use crate::layer::layer_type::LayerType;
 use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+    EvaluateCx, Evaluation, Hosted, LayerCx, LayerValues, OnTerrain, RenderLayer, TileCx, TypedLayer,
 };
-use crate::layer::tile_input::Features;
+use crate::layer::tile_input::{Features, TileData};
 use crate::layers::heatmap::programs;
 use crate::layers::heatmap::ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO, HeatmapTexturePropsUBO};
 use crate::layout::heatmap_layout::HeatmapLayout;
@@ -79,7 +79,6 @@ struct HeatmapUniforms {
 /// layer's draw of the frame, which colors the render target's heat onto it.
 #[derive(Default)]
 pub(crate) struct HeatmapDrawing {
-    tiles: TileMap<StandingDraw>,
     /// The tiles' draws into the render target.
     target: Option<LayerDraws>,
     /// The layer's draw, built on its first frame.
@@ -93,29 +92,30 @@ pub(crate) struct HeatmapDrawing {
 }
 
 impl HeatmapDrawing {
-    /// Uploads the GPU objects of the tiles' draws into the render target.
-    fn upload_target(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+    /// Uploads the GPU objects of the tiles' draws into the render target,
+    /// those of the draws in `tiles`.
+    fn upload_target(&mut self, tiles: &mut TileMap<StandingDraw>, gpu: &mut dyn Gpu, context: &mut Context) {
         if let Some(target) = &self.target {
-            target.upload(gpu, &mut self.tiles, tile_objects, context);
+            target.upload(gpu, tiles, tile_objects, context);
         }
     }
 
-    /// Draws the tiles' draws into the render target into the open pass of
-    /// `gpu`, the context's, which draws into it.
-    fn render_target(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+    /// Draws the tiles' draws into the render target, with their objects in
+    /// `tiles`, into the open pass of `gpu`, the context's, which draws into
+    /// it.
+    fn render_target(
+        &mut self,
+        tiles: &mut TileMap<StandingDraw>,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+    ) {
         if let Some(target) = &self.target {
-            target.render(&mut self.tiles, tile_objects, gpu, parameters);
+            target.render(tiles, tile_objects, gpu, parameters);
         }
     }
 }
 
-impl LayerDrawing for HeatmapDrawing {
-    type Tile = StandingDraw;
-
-    fn tiles(&mut self) -> Option<&mut TileMap<StandingDraw>> {
-        Some(&mut self.tiles)
-    }
-
+impl LayerDrawing<StandingDraw> for HeatmapDrawing {
     fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
         if let Some(frame) = &self.frame {
             visit(DrawGroup::Draws(frame));
@@ -123,7 +123,6 @@ impl LayerDrawing for HeatmapDrawing {
     }
 
     fn clear(&mut self) {
-        self.tiles.clear();
         self.texture = None;
         self.color_ramp = None;
         if let Some(target) = &mut self.target {
@@ -147,13 +146,19 @@ impl LayerDrawing for HeatmapDrawing {
         }
     }
 
-    fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+    fn upload(&mut self, _tiles: &mut TileMap<StandingDraw>, gpu: &mut dyn Gpu, context: &mut Context) {
         if let (Some(frame), Some(texture)) = (&self.frame, &mut self.texture) {
             frame.upload_one(gpu, &mut texture.objects, context);
         }
     }
 
-    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
+    fn render(
+        &mut self,
+        _tiles: &mut TileMap<StandingDraw>,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+        order: DrawOrder,
+    ) {
         if let Some(frame) = &self.frame {
             if let Some(texture) = &mut self.texture {
                 frame.render_one(&mut texture.objects, gpu, parameters);
@@ -167,14 +172,11 @@ impl LayerType for Heatmap {
     type Input = Features<HeatmapLayout>;
 
     fn render_layer(style: Arc<LayerStyle<Heatmap>>) -> Box<dyn RenderLayer> {
-        Box::new(RenderHeatmapLayer::new(style))
+        Hosted::<RenderHeatmapLayer>::boxed(style)
     }
 }
 
 pub(crate) struct RenderHeatmapLayer {
-    base: RenderLayerBase,
-    values: LayerValues<Heatmap>,
-    drawing: HeatmapDrawing,
     /// The tiles' draws into the render target as the update makes them.
     tile_draws: DrawList<HeatmapUniforms>,
     color_ramp: Rc<PremultipliedImage>,
@@ -190,22 +192,8 @@ pub(crate) struct RenderHeatmapLayer {
 }
 
 impl RenderHeatmapLayer {
-    pub(crate) fn new(impl_: Arc<LayerStyle<Heatmap>>) -> Self {
-        let (base, values) = LayerValues::new(impl_);
-        RenderHeatmapLayer {
-            base,
-            values,
-            drawing: HeatmapDrawing::default(),
-            tile_draws: DrawList::default(),
-            color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
-            color_ramp_global_state: None,
-            render_target: None,
-            shared_texture_vertices: None,
-        }
-    }
-
-    fn update_color_ramp(&mut self) {
-        let mut color_value = self.values.unevaluated.heatmap_color.get_value().clone();
+    fn update_color_ramp(&mut self, values: &LayerValues<Heatmap>) {
+        let mut color_value = values.unevaluated.heatmap_color.get_value().clone();
         if color_value.is_undefined() {
             color_value = default_heatmap_color();
         }
@@ -219,16 +207,19 @@ impl RenderHeatmapLayer {
 
 impl TypedLayer for RenderHeatmapLayer {
     type Type = Heatmap;
+    type Tile = StandingDraw;
     type Drawing = HeatmapDrawing;
 
     const TERRAIN: OnTerrain = OnTerrain::Stands { hides_behind_ground: false };
 
-    fn parts(&self) -> Parts<'_, Self> {
-        Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
-    }
-
-    fn parts_mut(&mut self) -> PartsMut<'_, Self> {
-        PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
+    fn new(_values: &LayerValues<Heatmap>) -> Self {
+        RenderHeatmapLayer {
+            tile_draws: DrawList::default(),
+            color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
+            color_ramp_global_state: None,
+            render_target: None,
+            shared_texture_vertices: None,
+        }
     }
 
     fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
@@ -241,7 +232,7 @@ impl TypedLayer for RenderHeatmapLayer {
             (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
             _ => true,
         };
-        let ramp_value = self.values.unevaluated.heatmap_color.get_value();
+        let ramp_value = cx.values.unevaluated.heatmap_color.get_value();
         let ramp_affected = parameters.layer_changed
             || (global_state_differs
                 && ramp_value.get_dependencies().intersects(Dependency::GLOBAL_STATE)
@@ -251,17 +242,63 @@ impl TypedLayer for RenderHeatmapLayer {
                 ));
         self.color_ramp_global_state = parameters.global_state.clone();
         if ramp_affected {
-            self.update_color_ramp();
+            self.update_color_ramp(cx.values);
         }
         let evaluated = &*cx.evaluated;
         if *evaluated.paint.heatmap_opacity.uniform() > 0.0 { Evaluation::TRANSLUCENT } else { Evaluation::NONE }
     }
 
-    /// Makes the tiles' draws into the render target, which it builds for a
-    /// tile it keeps none of, and the layer's draw of the frame, which colors
-    /// the render target's heat onto it, and writes the buffers they read.
+    /// The draw of a tile's kernels into the render target.
+    fn tile(
+        &mut self,
+        cx: &mut TileCx<'_, '_, Self>,
+        tile: FrameTile<'_, Heatmap>,
+        _data: TileData<'_, Heatmap>,
+    ) -> Option<StandingDraw> {
+        let render_data = tile.data_for_pass(RENDER_PASS)?;
+        let bucket = render_data.bucket;
+        let binders = bucket.paint_property_binders.get(&cx.base.style.base().id)?;
+        let geometry = render_data.geometry();
+        if bucket.vertices.is_empty() {
+            return None;
+        }
+        let (vertices, indexes) =
+            (bucket_vertices(geometry, &bucket.vertices)?, bucket_indexes(geometry, &bucket.triangles)?);
+        let context = &mut *cx.parameters.context;
+        let paint =
+            paint_vertices(context, geometry, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state());
+        let mut uniforms = Uniforms::default();
+        let mut attrs = VertexAttributeArray::new();
+        binders.bind(&cx.values.evaluated.paint, paint.as_ref(), &mut attrs, &mut uniforms);
+        let shader = context.shader_key(&programs::HEATMAP, uniforms, cx.base.projection_variant);
+        attrs.set_shared(
+            "pos",
+            SharedAttribute::new(
+                vertices,
+                AttributeDataType::Short2,
+                offset_of!(HeatmapLayoutVertex, a1) as u32,
+                size_of::<HeatmapLayoutVertex>() as u32,
+            ),
+        );
+        let geometry = DrawGeometry {
+            vertices: attrs,
+            vertex_count: if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() },
+            mode: DrawMode::Triangles(),
+            indexes: indexes.into(),
+            segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
+            instances: None,
+        };
+        let objects =
+            DrawObjects::new(shader, ColorMode::additive(), CullFaceMode::disabled(), geometry, Textures::default());
+        Some(StandingDraw::new(objects))
+    }
+
+    /// Makes the tiles' draws into the render target and the layer's draw of
+    /// the frame, which colors the render target's heat onto it, and writes
+    /// the buffers they read.
     fn update_draws(
         &mut self,
+        mut cx: LayerCx<'_, Self>,
         gpu: &mut dyn Gpu,
         paint_parameters: &mut PaintParameters<'_>,
         render_tiles: &[FrameTile<'_, Heatmap>],
@@ -274,26 +311,24 @@ impl TypedLayer for RenderHeatmapLayer {
             RenderTarget::new(paint_parameters.context, size, TextureChannelDataType::HalfFloat)
         });
         render_target.set_size(paint_parameters.context, size);
-        if self.draw_tiles(gpu, render_tiles, paint_parameters) {
-            self.draw_texture(gpu, paint_parameters);
-        }
-    }
-}
-
-impl RenderLayer for RenderHeatmapLayer {
-    fn upload_render_targets(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
-        if self.base.is_renderable && self.render_target.is_some() {
-            self.drawing.upload_target(gpu, context);
+        if self.draw_tiles(&mut cx, gpu, render_tiles, paint_parameters) {
+            self.draw_texture(&mut cx, gpu, paint_parameters);
         }
     }
 
-    fn render_targets(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        if self.base.is_renderable
+    fn upload_render_targets(&mut self, cx: LayerCx<'_, Self>, gpu: &mut dyn Gpu, context: &mut Context) {
+        if self.render_target.is_some() {
+            cx.drawing.upload_target(cx.tiles, gpu, context);
+        }
+    }
+
+    fn render_targets(&mut self, cx: LayerCx<'_, Self>, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        if cx.base.is_renderable
             && let Some(render_target) = &mut self.render_target
             && let Some(mut passes) = render_target.begin(gpu, parameters)
         {
             while passes.next(parameters) {
-                self.drawing.render_target(gpu, parameters);
+                cx.drawing.render_target(cx.tiles, gpu, parameters);
             }
             passes.end(gpu, parameters);
         }
@@ -302,15 +337,17 @@ impl RenderLayer for RenderHeatmapLayer {
 
 impl RenderHeatmapLayer {
     /// Makes the tiles' draws into the render target, with their GPU objects
-    /// in the tiles' caches, and writes the buffers they read. Returns false
+    /// in the tiles' values, and writes the buffers they read. Returns false
     /// if the layer draws nothing.
     fn draw_tiles(
         &mut self,
+        cx: &mut LayerCx<'_, Self>,
         gpu: &mut dyn Gpu,
         render_tiles: &[FrameTile<'_, Heatmap>],
         paint_parameters: &mut PaintParameters<'_>,
     ) -> bool {
-        let RenderHeatmapLayer { base, values, drawing, tile_draws, .. } = self;
+        let RenderHeatmapLayer { tile_draws, .. } = self;
+        let LayerCx { base, values, tiles, drawing } = cx;
 
         let evaluated = &values.evaluated.paint;
         // The draws keep the order they're pushed in, the tiles'.
@@ -319,75 +356,28 @@ impl RenderHeatmapLayer {
             let tile_id = tile.id();
 
             let Some(render_data) = tile.data_for_pass(RENDER_PASS) else {
-                drawing.tiles.drop_value(&tile_id);
                 continue;
             };
             let bucket = render_data.bucket;
             let Some(binders) = bucket.paint_property_binders.get(&base.style.base().id) else {
                 continue;
             };
-            let geometry = render_data.geometry();
-            let paint = |context: &mut _| {
-                paint_vertices(
-                    context,
-                    geometry,
-                    &binders.interleaved_vertex_buffer,
-                    binders.depends_on_feature_state(),
-                )
-            };
-
-            let Some(mut entry) = drawing.tiles.entry(&tile_id) else {
+            let Some(mut entry) = tiles.entry(&tile_id) else {
                 continue;
             };
-            // A draw built from another bucket goes.
-            entry.set_bucket(render_data.id);
-
             // The draw's attributes read the bucket's vertices in the
             // context's store, which upload again when they change.
             let changes = entry.take_changes();
-            let context = &mut *paint_parameters.context;
-            if let Some(cached) = entry.value.as_mut() {
-                refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
-                    binders.bind(evaluated, paint(context).as_ref(), attrs, &mut Uniforms::default());
-                });
-            } else if !bucket.vertices.is_empty()
-                && let (Some(vertices), Some(indexes)) =
-                    (bucket_vertices(geometry, &bucket.vertices), bucket_indexes(geometry, &bucket.triangles))
-            {
-                let mut uniforms = Uniforms::default();
-                let mut attrs = VertexAttributeArray::new();
-                binders.bind(evaluated, paint(context).as_ref(), &mut attrs, &mut uniforms);
-                let shader = context.shader_key(&programs::HEATMAP, uniforms, base.projection_variant);
-                attrs.set_shared(
-                    "pos",
-                    SharedAttribute::new(
-                        vertices,
-                        AttributeDataType::Short2,
-                        offset_of!(HeatmapLayoutVertex, a1) as u32,
-                        size_of::<HeatmapLayoutVertex>() as u32,
-                    ),
-                );
-                let geometry = DrawGeometry {
-                    vertices: attrs,
-                    vertex_count: if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() },
-                    mode: DrawMode::Triangles(),
-                    indexes: indexes.into(),
-                    segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
-                    instances: None,
-                };
-                let objects = DrawObjects::new(
-                    shader,
-                    ColorMode::additive(),
-                    CullFaceMode::disabled(),
-                    geometry,
-                    Textures::default(),
-                );
-                *entry.value = Some(StandingDraw::new(objects));
-            }
-
             let Some(draw) = entry.value.as_mut() else {
                 continue;
             };
+            let context = &mut *paint_parameters.context;
+            refresh_paint_attributes(&mut draw.objects, changes, |attrs| {
+                let geometry = render_data.geometry();
+                let buffer = &binders.interleaved_vertex_buffer;
+                let paint = paint_vertices(context, geometry, buffer, binders.depends_on_feature_state());
+                binders.bind(evaluated, paint.as_ref(), attrs, &mut Uniforms::default());
+            });
             // Over terrain, the kernels stand on the frame's ground. They
             // don't hide behind it: their density adds up on the screen, as
             // GL JS's does.
@@ -399,7 +389,7 @@ impl RenderHeatmapLayer {
         }
 
         let target = drawing.target.get_or_insert_default();
-        finish_tiles(tile_draws, target, &mut drawing.tiles, gpu, paint_parameters.context, |writer| {
+        finish_tiles(tile_draws, target, tiles, gpu, paint_parameters.context, |writer| {
             Self::write_tile_uniforms(evaluated, writer);
         });
         true
@@ -459,8 +449,14 @@ impl RenderHeatmapLayer {
     /// Makes the layer's draw of the frame, which colors the heat of the
     /// render target onto it through the layer's color ramp, with GPU
     /// objects it builds once, and writes the buffers it reads.
-    fn draw_texture(&mut self, gpu: &mut dyn Gpu, paint_parameters: &mut PaintParameters<'_>) {
-        let RenderHeatmapLayer { values, drawing, color_ramp, render_target, shared_texture_vertices, .. } = self;
+    fn draw_texture(
+        &mut self,
+        cx: &mut LayerCx<'_, Self>,
+        gpu: &mut dyn Gpu,
+        paint_parameters: &mut PaintParameters<'_>,
+    ) {
+        let RenderHeatmapLayer { color_ramp, render_target, shared_texture_vertices, .. } = self;
+        let LayerCx { values, drawing, .. } = cx;
         let Some(render_target) = render_target.as_ref() else {
             return;
         };
