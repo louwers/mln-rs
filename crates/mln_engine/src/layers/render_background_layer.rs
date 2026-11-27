@@ -16,10 +16,10 @@ use mln_style::types::TranslateAnchorType;
 
 use super::cast_matrix;
 use crate::draw::indexes::DrawIndexes;
-use crate::draw::objects::{DrawGeometry, DrawObjects, Textures, raw_vertices};
+use crate::draw::objects::{DrawGeometry, Mesh, Textures, raw_vertices};
 use crate::draw::segment::SegmentBase;
 use crate::draw::vertex_attribute::Uniforms;
-use crate::layer::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, TileDraws, TileObjects};
+use crate::layer::layer_drawing::{DrawDepth, DrawList, FrameDraw, MeshMut, TileDraws, TileObjects};
 use crate::layer::layer_type::LayerType;
 use crate::layer::render_layer::{
     EvaluateCx, Evaluation, Hosted, LayerCx, LayerValues, OnTerrain, RenderLayer, TypedLayer, UpdateCx,
@@ -53,22 +53,18 @@ impl LayerType for Background {
     }
 }
 
-/// What the layer keeps of a tile: its draw, and the passes it was built
+/// What the layer keeps of a tile: its mesh, and the passes it was built
 /// for and whether with a pattern.
 pub(crate) struct BackgroundTile {
-    draw: KeptDraw,
+    mesh: Mesh,
     built_for: (RenderPass, bool),
 }
 
 impl TileObjects for BackgroundTile {
     type Part = ();
 
-    fn objects(&mut self, (): ()) -> Option<DrawObjectsMut<'_>> {
-        self.draw.objects(())
-    }
-
-    fn drop_bindings(&mut self) {
-        self.draw.drop_bindings();
+    fn objects(&mut self, (): ()) -> Option<MeshMut<'_>> {
+        Some((&mut self.mesh).into())
     }
 }
 
@@ -89,14 +85,14 @@ impl RenderBackgroundLayer {
         (RenderPass(layer.render_passes), has_pattern)
     }
 
-    /// The GPU objects of the draw of the tile `tile_id`, with `shader` and
+    /// The mesh of the draw of the tile `tile_id`, with `shader` and
     /// `color_mode`, in the projection `variant`.
     fn build_tile(
         tile_id: &OverscaledTileID,
         shader: ShaderKey,
         color_mode: ColorMode,
         variant: ProjectionVariant,
-    ) -> DrawObjects {
+    ) -> Mesh {
         let (vertices, vertex_count, indexes, segments) = if variant == ProjectionVariant::Globe {
             // The background is not depth tested, so it needs no tile border.
             let mesh = raw_globe_tile_mesh(&tile_id.canonical, false, SubdivisionGranularitySetting::globe().tile);
@@ -115,7 +111,7 @@ impl RenderBackgroundLayer {
             segments: segments.iter().map(SegmentBase::copy).collect(),
             instances: None,
         };
-        DrawObjects::new(shader, color_mode, CullFaceMode::disabled(), geometry, Textures::default())
+        Mesh::new(shader, color_mode, CullFaceMode::disabled(), geometry, Textures::default())
     }
 
     /// The entries in the layer's storage buffers of the draw of `tile_id`.
@@ -220,25 +216,22 @@ impl TypedLayer for RenderBackgroundLayer {
             if draw_passes == RenderPass::Translucent { ColorMode::alpha_blended() } else { ColorMode::unblended() };
         for (tile_id, entry) in tiles.entries() {
             let cached = entry.value.get_or_insert_with(|| BackgroundTile {
-                draw: KeptDraw::new(Self::build_tile(&tile_id, shader.clone(), color_mode, variant)),
+                mesh: Self::build_tile(&tile_id, shader.clone(), color_mode, variant),
                 built_for,
             });
             if pattern_texture.is_some() {
-                cached
-                    .draw
-                    .objects
-                    .set_texture(const { programs::BACKGROUND_PATTERN.texture_slot("image") }, pattern_texture);
+                cached.mesh.set_texture(const { programs::BACKGROUND_PATTERN.texture_slot("image") }, pattern_texture);
             }
             let draw = FrameDraw {
                 pass: draw_passes,
                 depth: DrawDepth::Layer { sub_layer: 0, mask: DepthMaskType::ReadWrite },
-                ..cached.draw.frame_draw(Some(tile_id))
+                ..FrameDraw::new(Some(tile_id), cached.mesh.id())
             };
             draw_list.push(draw, Self::uniforms(&tile_id, has_pattern, paint_parameters));
         }
 
         let texsize = patterns.pixel_size();
-        drawing.finish(draw_list, tiles, gpu, paint_parameters.context, |writer| {
+        drawing.finish(draw_list, gpu, paint_parameters.context, |writer| {
             let opacity = *evaluated.background_opacity.uniform();
             if let Some((from, to)) = pattern_positions {
                 let crossfade = &layer.crossfade;
