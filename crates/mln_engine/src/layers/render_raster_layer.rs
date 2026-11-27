@@ -1,7 +1,7 @@
 // The layer keeps one texture and the quads of one mask per tile contents'
 // id (`textures`, `mask_quads`), in the context's store, which its draws of a
 // tile in the frame and in drapes share. A tile's draw stays until the
-// tile's mask changes, and is then built again.
+// tile's mask, or an image source's mesh, changes, and is then built again.
 
 use std::mem::offset_of;
 use std::rc::Rc;
@@ -28,19 +28,16 @@ use crate::draw::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::draw::objects::{DrawGeometry, DrawObjects, Textures};
 use crate::draw::segment::SegmentBase;
 use crate::draw::store::SharedTexture;
-use crate::draw::uniform_buffer::UniformBufferArray;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::SharedVertices;
 use crate::layer::bucket_geometry::copied_vertices;
-use crate::layer::layer_drawing::{
-    DrawGroup, DrawList, DrawObjectsMut, DrawOrder, FrameDraw, KeptDraw, LayerDrawing, LayerDraws, TileMap,
-};
+use crate::layer::layer_drawing::{DrawList, DrawObjectsMut, KeptDraw, TileDraws, TileObjects};
 use crate::layer::layer_type::LayerType;
-use crate::layer::layout::NoLayout;
 use crate::layer::render_layer::{
     EvaluateCx, Evaluation, LayerUpdateParameters, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer,
     RenderLayerBase, TypedLayer,
 };
+use crate::layer::tile_input::RasterTile;
 use crate::layers::raster::programs;
 use crate::layers::raster::ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 use crate::render::globe::globe_tile_mesh::GlobeTileMeshCache;
@@ -49,9 +46,9 @@ use crate::render::paint_parameters::PaintParameters;
 use crate::render::static_data::RenderStaticData;
 use crate::render::tile::FrameTile;
 use crate::render::tile_matrix::{projection_data, to_projection_ubo};
-use crate::source::render_image_source::{ImageQuad, ImageSourceRenderData};
-use crate::tile::UnwrappedTileID;
-use crate::tile_store::raster::RasterContents;
+use crate::source::RasterTiles;
+use crate::source::render_image_source::ImageQuad;
+use crate::tile::{OverscaledTileID, UnwrappedTileID};
 
 /// The ids of the buffers that the draws bind.
 const DRAWABLE_ID: usize = programs::RASTER.buffer_id("drawableVector");
@@ -62,95 +59,21 @@ const IMAGE0_SLOT: usize = programs::RASTER.texture_slot("image0");
 const IMAGE1_SLOT: usize = programs::RASTER.texture_slot("image1");
 
 /// What the layer keeps of a tile: its draw, and the generation of the
-/// tile's mask it was built of.
-pub(crate) struct RasterTile {
+/// tile's mask or mesh it was built of.
+pub(crate) struct RasterTileDraw {
     draw: KeptDraw,
     geometry_generation: u64,
 }
 
-/// What a frame's draw of the layer draws.
-#[derive(Clone, Copy)]
-enum RasterPart {
-    /// The draw of its tile.
-    Tile,
-    /// The image source's draw at the index.
-    Image(usize),
-}
+impl TileObjects for RasterTileDraw {
+    type Part = ();
 
-/// What the layer keeps of its draws: those of the tiles, and of an image
-/// source's image, one for each tile it is drawn in, with the image's
-/// bucket and the generation of its geometry they were built of.
-#[derive(Default)]
-struct RasterObjects {
-    tiles: TileMap<RasterTile>,
-    images: Vec<KeptDraw>,
-    image: Option<(SimpleIdentity, u64)>,
-}
-
-/// The layer's drawing: the GPU objects of its draws, and its draws of the
-/// frame.
-#[derive(Default)]
-pub(crate) struct RasterDrawing {
-    objects: RasterObjects,
-    frame: Option<LayerDraws<RasterPart>>,
-}
-
-impl RasterDrawing {
-    /// The GPU objects of `draw`, `part` of the layer's.
-    fn objects<'a>(objects: &'a mut RasterObjects, draw: &FrameDraw, part: RasterPart) -> Option<DrawObjectsMut<'a>> {
-        let draw = match part {
-            RasterPart::Tile => &mut objects.tiles.get_mut(&draw.tile?)?.draw,
-            RasterPart::Image(index) => objects.images.get_mut(index)?,
-        };
-        Some((&mut draw.objects).into())
-    }
-}
-
-impl LayerDrawing for RasterDrawing {
-    type Tile = RasterTile;
-
-    fn tiles(&mut self) -> Option<&mut TileMap<RasterTile>> {
-        Some(&mut self.objects.tiles)
+    fn objects(&mut self, (): ()) -> Option<DrawObjectsMut<'_>> {
+        self.draw.objects(())
     }
 
-    fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
-        if let Some(frame) = &self.frame {
-            visit(DrawGroup::Draws(frame.frame()));
-        }
-    }
-
-    fn clear(&mut self) {
-        self.objects.tiles.clear();
-        self.objects.images.clear();
-        self.objects.image = None;
-        self.clear_frame();
-    }
-
-    fn begin_frame(&mut self) {
-        self.frame.get_or_insert_default().clear();
-    }
-
-    fn clear_frame(&mut self) {
-        if let Some(frame) = &mut self.frame {
-            frame.clear();
-        }
-    }
-
-    fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
-        if let Some(frame) = &self.frame {
-            frame.upload(gpu, &mut self.objects, Self::objects, context);
-        }
-    }
-
-    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
-        if let Some(frame) = &self.frame {
-            frame.render(&mut self.objects, Self::objects, gpu, parameters);
-            order.step(parameters);
-        }
-    }
-
-    fn frame_buffers(&mut self) -> Option<&mut UniformBufferArray> {
-        Some(self.frame.as_mut()?.uniform_buffers_mut())
+    fn drop_bindings(&mut self) {
+        self.draw.drop_bindings();
     }
 }
 
@@ -174,8 +97,7 @@ impl StaticGeometry {
 }
 
 impl LayerType for Raster {
-    type Layout = NoLayout;
-    type TileBucket<'a> = &'a RasterContents;
+    type Input = RasterTiles;
 
     fn render_layer(style: Arc<LayerStyle<Raster>>) -> Box<dyn RenderLayer> {
         Box::new(RenderRasterLayer::new(style))
@@ -185,18 +107,16 @@ impl LayerType for Raster {
 pub(crate) struct RenderRasterLayer {
     base: RenderLayerBase,
     values: LayerValues<Raster>,
-    /// The draws of the tiles, and of an image source's image, one for each
-    /// tile it is drawn in.
-    drawing: RasterDrawing,
+    /// The draws of the tiles.
+    drawing: TileDraws<RasterTileDraw>,
     /// The frame's draws as the update makes them, with their uniform blocks
     /// and projections.
-    draw_list: DrawList<(RasterDrawableUBO, ProjectionUBO), RasterPart>,
+    draw_list: DrawList<(RasterDrawableUBO, ProjectionUBO)>,
 
     static_geometry: Option<StaticGeometry>,
     globe_meshes: GlobeTileMeshCache<RasterLayoutVertex>,
 
-    /// The texture of each tile's or image source's image, by the id of
-    /// the tile's contents or of the source's bucket.
+    /// The texture of each tile's image, by its id.
     textures: HashMap<SimpleIdentity, SharedTexture>,
     /// The quads of each tile's mask, by the id of its contents.
     mask_quads: MaskQuads,
@@ -210,7 +130,7 @@ impl RenderRasterLayer {
         RenderRasterLayer {
             base,
             values,
-            drawing: RasterDrawing::default(),
+            drawing: TileDraws::default(),
             draw_list: DrawList::default(),
             static_geometry: None,
             globe_meshes: GlobeTileMeshCache::new(),
@@ -220,7 +140,7 @@ impl RenderRasterLayer {
         }
     }
 
-    /// The texture of `image`, of the contents or bucket `id`, in
+    /// The texture of `image`, the image `id`, in
     /// `textures`, which this creates if needed, with `sampler`.
     fn texture(
         textures: &mut HashMap<SimpleIdentity, SharedTexture>,
@@ -263,52 +183,6 @@ impl RenderRasterLayer {
 }
 
 impl RenderRasterLayer {
-    /// The draws of an image source's layer with `raster_shader`: one for
-    /// each tile the image is drawn in, which share the image's geometry
-    /// and texture, built again when the image or its geometry changes.
-    fn update_image(
-        &mut self,
-        gpu: &mut dyn Gpu,
-        image_data: ImageSourceRenderData<'_>,
-        paint_parameters: &mut PaintParameters<'_>,
-    ) {
-        let sampler = self.sampler_state();
-        let RenderRasterLayer { base, drawing, draw_list, textures, .. } = self;
-        let raster_shader =
-            paint_parameters.context.shader_key(&programs::RASTER, Uniforms::default(), base.projection_variant);
-        let objects = &mut drawing.objects;
-        // The bucket is missing until the image loads. An image source's
-        // bucket always has geometry of its own once it has an image.
-        let Some((bucket, quads)) = image_data.bucket.and_then(|bucket| Some((bucket, bucket.quads()?))) else {
-            objects.images.clear();
-            objects.image = None;
-            return;
-        };
-        let built_of = (bucket.id(), bucket.generation());
-        if objects.image != Some(built_of) {
-            objects.images.clear();
-            objects.image = Some(built_of);
-            // Only the image's bucket draws: the textures of the images
-            // before it go.
-            textures.retain(|id, _| *id == bucket.id());
-        }
-        let texture = Self::texture(textures, sampler, paint_parameters.context, bucket.id(), &bucket.image);
-        let tile_ids = image_data.tile_ids;
-        objects.images.truncate(tile_ids.len());
-        while objects.images.len() < tile_ids.len() {
-            let draw_geometry =
-                raster_geometry(&quads.vertices, quads.vertices.count(), quads.indexes.clone().into(), &quads.segments);
-            let color_mode = ColorMode::alpha_blended();
-            objects.images.push(KeptDraw::new(new_objects(&raster_shader, color_mode, draw_geometry, &texture)));
-        }
-        for (index, (tile_id, draw)) in tile_ids.iter().zip(&objects.images).enumerate() {
-            let uniforms = Self::uniforms(tile_id, paint_parameters);
-            draw_list.push_part(FrameDraw::new(None, draw.id), RasterPart::Image(index), uniforms);
-        }
-
-        self.finish_frame_draws(gpu, paint_parameters.context, &image_data.quad);
-    }
-
     /// The entries in the layer's storage buffers of a draw of `tile_id`.
     fn uniforms(tile_id: &UnwrappedTileID, parameters: &PaintParameters<'_>) -> (RasterDrawableUBO, ProjectionUBO) {
         let projection = projection_data(
@@ -329,12 +203,9 @@ impl RenderRasterLayer {
     /// `quad`.
     fn finish_frame_draws(&mut self, gpu: &mut dyn Gpu, context: &mut Context, quad: &ImageQuad) {
         let composite = self.composite();
-        let Some(frame) = self.drawing.frame.as_mut() else {
-            return;
-        };
-        frame.set_composite(composite);
+        self.drawing.frame_mut().set_composite(composite);
         let evaluated = &self.values.evaluated.paint;
-        let replaced = self.draw_list.finish(frame, gpu, context, |writer| {
+        self.drawing.finish(&mut self.draw_list, gpu, context, |writer| {
             let props = RasterEvaluatedPropsUBO {
                 spin_weights: spin_weights(*evaluated.raster_hue_rotate.uniform()),
                 tl_parent: [0.0, 0.0],
@@ -356,12 +227,20 @@ impl RenderRasterLayer {
             writer.storage(DRAWABLE_ID, |(draw_ubo, _)| *draw_ubo);
             writer.storage(PROJECTION_ID, |(_, projection)| *projection);
         });
-        if replaced {
-            let objects = &mut self.drawing.objects;
-            for draw in objects.tiles.values_mut().map(|tile| &mut tile.draw).chain(&mut objects.images) {
-                draw.objects.drop_bindings();
-            }
-        }
+    }
+}
+
+/// Adds the frame's draw of the tile `tile_id`, from what the layer keeps of
+/// it, if anything, to `draw_list`.
+fn raster_draw(
+    kept: Option<&RasterTileDraw>,
+    tile_id: OverscaledTileID,
+    parameters: &PaintParameters<'_>,
+    draw_list: &mut DrawList<(RasterDrawableUBO, ProjectionUBO)>,
+) {
+    if let Some(kept) = kept {
+        let draw = kept.draw.frame_draw(Some(tile_id));
+        draw_list.push(draw, RenderRasterLayer::uniforms(&tile_id.to_unwrapped(), parameters));
     }
 }
 
@@ -440,7 +319,7 @@ fn raster_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
 
 impl TypedLayer for RenderRasterLayer {
     type Type = Raster;
-    type Drawing = RasterDrawing;
+    type Drawing = TileDraws<RasterTileDraw>;
     const TERRAIN: OnTerrain = OnTerrain::Drapes;
 
     fn parts(&self) -> Parts<'_, Self> {
@@ -464,8 +343,9 @@ impl TypedLayer for RenderRasterLayer {
     }
 
     /// Makes the frame's draws of the layer, one of each of its tiles, which
-    /// it builds for a tile it keeps none of or whose mask changed since,
-    /// and writes the layer's buffers they read.
+    /// it builds for a tile it keeps none of or whose mask or mesh changed
+    /// since, and writes the layer's buffers they read, which put the
+    /// tiles' vertices on their source's quad.
     fn update_draws(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -488,91 +368,91 @@ impl TypedLayer for RenderRasterLayer {
         }
 
         for tile in render_tiles {
-            let tile_id = tile.draw_id(paint_parameters);
-            let Some(mut entry) = drawing.objects.tiles.entry(&tile_id) else {
+            let tile_id = tile.draw_id();
+            let Some(mut entry) = drawing.tiles_mut().entry(&tile_id) else {
                 continue;
             };
 
-            let Some(raster) = tile.bucket() else {
+            let Some(data) = tile.data() else {
                 *entry.value = None;
                 continue;
             };
 
-            // A draw of other contents, or of the contents before their mask
-            // changed, is built again.
-            entry.set_bucket(raster.id());
-            let geometry_generation = raster.masking.generation();
+            // A draw of another image, or of the image before its mask or
+            // mesh changed, is built again.
+            entry.set_bucket(data.id());
+            let geometry_generation = data.generation();
             if entry.value.as_ref().is_some_and(|cached| cached.geometry_generation != geometry_generation) {
                 *entry.value = None;
             }
 
             if entry.value.is_none() {
                 let context = &mut *paint_parameters.context;
-                let texture = Self::texture(textures, sampler, context, raster.id(), &raster.image);
-
-                // Only a masked tile has quads; any other tile is drawn with
-                // the static quad over the tile's extent. On the globe, the
-                // draw is the pole-capped grid of what the mask keeps.
-                let mask = raster.masking.mask();
-                let draw_geometry = if base.projection_variant == ProjectionVariant::Globe {
-                    let globe_mesh = globe_meshes.get(context, &tile_id.canonical, mask, RasterLayoutVertex::new);
-                    raster_geometry(
-                        &globe_mesh.vertices,
-                        globe_mesh.vertices.count(),
-                        globe_mesh.indexes(),
-                        &globe_mesh.segments,
-                    )
-                } else if let Some(quads) = mask_quads.get(context, raster.id(), &raster.masking) {
-                    raster_geometry(
-                        &quads.vertices,
-                        quads.vertices.count(),
-                        quads.indexes.clone().into(),
-                        &quads.segments,
-                    )
-                } else {
-                    raster_geometry(
-                        &static_geometry.vertices,
-                        4,
-                        static_geometry.indexes.clone().into(),
-                        &static_geometry.segments,
-                    )
+                let draw_geometry = match data {
+                    // An image source's image draws on its mesh, once it has
+                    // one.
+                    RasterTile::Image(image) => {
+                        let Some(quads) = image.quads() else { continue };
+                        raster_geometry(
+                            &quads.vertices,
+                            quads.vertices.count(),
+                            quads.indexes.clone().into(),
+                            &quads.segments,
+                        )
+                    }
+                    // Only a masked tile has quads; any other tile is drawn
+                    // with the static quad over the tile's extent. On the
+                    // globe, the draw is the pole-capped grid of what the
+                    // mask keeps.
+                    RasterTile::Tile(raster) => {
+                        let mask = raster.masking.mask();
+                        if base.projection_variant == ProjectionVariant::Globe {
+                            let globe_mesh =
+                                globe_meshes.get(context, &tile_id.canonical, mask, RasterLayoutVertex::new);
+                            raster_geometry(
+                                &globe_mesh.vertices,
+                                globe_mesh.vertices.count(),
+                                globe_mesh.indexes(),
+                                &globe_mesh.segments,
+                            )
+                        } else if let Some(quads) = mask_quads.get(context, raster.id(), &raster.masking) {
+                            raster_geometry(
+                                &quads.vertices,
+                                quads.vertices.count(),
+                                quads.indexes.clone().into(),
+                                &quads.segments,
+                            )
+                        } else {
+                            raster_geometry(
+                                &static_geometry.vertices,
+                                4,
+                                static_geometry.indexes.clone().into(),
+                                &static_geometry.segments,
+                            )
+                        }
+                    }
                 };
+                let texture = Self::texture(textures, sampler, context, data.id(), data.image());
                 let color_mode = ColorMode::alpha_blended();
                 let objects = new_objects(&raster_shader, color_mode, draw_geometry, &texture);
-                let built = RasterTile { draw: KeptDraw::new(objects), geometry_generation };
+                let built = RasterTileDraw { draw: KeptDraw::new(objects), geometry_generation };
                 *entry.value = Some(built);
             }
 
-            if let Some(cached) = entry.value.as_ref() {
-                let draw = cached.draw.frame_draw(Some(tile_id));
-                let uniforms = Self::uniforms(&tile_id.to_unwrapped(), paint_parameters);
-                draw_list.push_part(draw, RasterPart::Tile, uniforms);
-            }
+            raster_draw(entry.value.as_ref(), tile_id, paint_parameters, draw_list);
         }
 
-        self.finish_frame_draws(gpu, paint_parameters.context, &ImageQuad::TILE);
-    }
-
-    fn update_image_draws(
-        &mut self,
-        gpu: &mut dyn Gpu,
-        paint_parameters: &mut PaintParameters<'_>,
-        image: ImageSourceRenderData<'_>,
-    ) {
-        self.update_image(gpu, image, paint_parameters);
+        let quad = render_tiles.iter().find_map(|tile| tile.data()).map_or(ImageQuad::TILE, RasterTile::quad);
+        self.finish_frame_draws(gpu, paint_parameters.context, &quad);
     }
 
     /// Drops the textures and quads of the tiles the frame doesn't draw,
     /// in every frame, including one the layer draws nothing in. The frame's
-    /// draws and its drapes' share the others. An image source's draws keep
-    /// their image's texture themselves.
-    fn update(&mut self, params: &mut LayerUpdateParameters<'_>, tiles: &[FrameTile<'_, Raster>]) {
-        if params.source.is_some_and(|source| source.image_render_data().is_some()) {
-            return;
-        }
+    /// draws and its drapes' share the others.
+    fn update(&mut self, _params: &mut LayerUpdateParameters<'_>, tiles: &[FrameTile<'_, Raster>]) {
         let live_contents = &mut self.live_contents;
         live_contents.clear();
-        live_contents.extend(tiles.iter().filter_map(|tile| Some(tile.bucket()?.id())));
+        live_contents.extend(tiles.iter().filter_map(|tile| Some(tile.data()?.id())));
         self.textures.retain(|id, _| live_contents.contains(id));
         self.mask_quads.retain(live_contents);
     }
