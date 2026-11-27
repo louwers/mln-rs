@@ -44,7 +44,8 @@ enum Stage {
 }
 
 impl<V: StyleValue> Transitioning<V> {
-    pub(crate) fn new(value: V) -> Self {
+    #[must_use]
+    pub fn new(value: V) -> Self {
         Transitioning { prior: None, start: None, delay: Duration::ZERO, duration: Duration::ZERO, value }
     }
 
@@ -82,7 +83,7 @@ impl<V: StyleValue> Transitioning<V> {
     /// Not inlined: the property sets call these once
     /// per property, so inlining copies them into every call.
     #[inline(never)]
-    pub(crate) fn evaluate(
+    pub fn evaluate(
         &mut self,
         evaluation: Evaluation<V::Type>,
         parameters: &PropertyEvaluationParameters,
@@ -112,7 +113,7 @@ impl<V: StyleValue> Transitioning<V> {
         }
     }
 
-    pub(crate) fn has_transition(&self) -> bool {
+    pub fn has_transition(&self) -> bool {
         self.prior.is_some()
     }
 
@@ -136,7 +137,7 @@ impl<V: StyleValue> Transitioning<V> {
     /// Evaluates the value if it may have changed since `previous`, or
     /// copies `previous`.
     #[inline(never)]
-    pub(crate) fn evaluate_with_previous(
+    pub fn evaluate_with_previous(
         &mut self,
         evaluation: Evaluation<V::Type>,
         parameters: &PropertyEvaluationParameters,
@@ -169,8 +170,16 @@ pub struct Transitionable<V> {
 }
 
 impl<V: StyleValue> Transitionable<V> {
+    /// A value that transitions with the style's default transition.
+    #[must_use]
+    pub fn new(value: V) -> Self {
+        Transitionable { value, options: TransitionOptions::default() }
+    }
+
+    /// The value, in transition from `prior` as `params` and the value's
+    /// own options say.
     #[inline(never)]
-    pub(crate) fn transition(&self, params: &TransitionParameters, mut prior: Transitioning<V>) -> Transitioning<V> {
+    pub fn transition(&self, params: &TransitionParameters, mut prior: Transitioning<V>) -> Transitioning<V> {
         if let Some(change) = &params.global_state_change {
             prior.retain_prior_global_state(change);
             if change.state_only && !self.value.transitions_on_global_state_change(Some(&change.changed_keys)) {
@@ -187,6 +196,8 @@ impl<V: StyleValue> Transitionable<V> {
 }
 
 /// The style value type of a property kind.
+#[doc(hidden)]
+#[macro_export]
 macro_rules! __property_value {
     (color_ramp, $t:ty) => {
         $crate::property::color_ramp::ColorRampPropertyValue
@@ -195,9 +206,10 @@ macro_rules! __property_value {
         $crate::property::value::PropertyValue<$t>
     };
 }
-pub(crate) use __property_value;
 
 /// How a property kind evaluates.
+#[doc(hidden)]
+#[macro_export]
 macro_rules! __property_evaluation {
     (integer_zoom) => {
         $crate::property::evaluated::Evaluated::integer_zoom
@@ -215,9 +227,10 @@ macro_rules! __property_evaluation {
         $crate::property::evaluated::Evaluated::plain
     };
 }
-pub(crate) use __property_evaluation;
 
 /// Whether a property kind may differ by feature.
+#[doc(hidden)]
+#[macro_export]
 macro_rules! __property_data_driven {
     (data_driven) => {
         true
@@ -235,7 +248,6 @@ macro_rules! __property_data_driven {
         false
     };
 }
-pub(crate) use __property_data_driven;
 
 /// Declares a property set as `mod $module`, one named field per property,
 /// followed by the paths its types and defaults need:
@@ -260,6 +272,7 @@ pub(crate) use __property_data_driven;
 /// A paint set's `derived { field: kind T = default => source, }` values
 /// aren't style properties: each takes `source`'s value, and transitions with
 /// the style's default transition.
+#[macro_export]
 macro_rules! properties {
     ($(#[$meta:meta])* $vis:vis mod $module:ident: paint {
         $($field:ident: $kind:ident $t:ty = $default:expr),+ $(,)?
@@ -285,8 +298,8 @@ macro_rules! properties {
                 })+)?
             }
 
-            #[derive(Clone, Debug, Default, PartialEq, ::mln_wire::Wire)]
-            #[wire(default)]
+            #[derive(Clone, Debug, Default, PartialEq, $crate::__private::mln_wire::Wire)]
+            #[wire(crate = $crate::__private::mln_wire, default)]
             pub struct Transitionable {
                 $(pub $field: $crate::property::set::Transitionable<$crate::__property_value!($kind, $t)>,)+
             }
@@ -297,8 +310,8 @@ macro_rules! properties {
                 $($(pub $dfield: $crate::property::set::Transitioning<$crate::__property_value!($dkind, $dt)>,)+)?
             }
 
-            #[derive(Clone, Debug, Default, ::mln_wire::Wire)]
-            #[wire(default)]
+            #[derive(Clone, Debug, Default, $crate::__private::mln_wire::Wire)]
+            #[wire(crate = $crate::__private::mln_wire, default)]
             pub struct PossiblyEvaluated {
                 $(pub $field: $crate::property::evaluated::Evaluated<$t>,)+
                 $($(pub $dfield: $crate::property::evaluated::Evaluated<$dt>,)+)?
@@ -312,11 +325,8 @@ macro_rules! properties {
                 ) -> Unevaluated {
                     Unevaluated {
                         $($field: self.$field.transition(parameters, prior.$field),)+
-                        $($($dfield: $crate::property::set::Transitionable {
-                            value: self.$source.value.clone(),
-                            options: ::core::default::Default::default(),
-                        }
-                        .transition(parameters, prior.$dfield),)+)?
+                        $($($dfield: $crate::property::set::Transitionable::new(self.$source.value.clone())
+                            .transition(parameters, prior.$dfield),)+)?
                     }
                 }
 
@@ -380,7 +390,7 @@ macro_rules! properties {
 
                 fn collect_evaluated_global_state_refs(
                     evaluated: &PossiblyEvaluated,
-                    refs: &mut crate::collections::VecSet<String>,
+                    refs: &mut $crate::collections::VecSet<String>,
                 ) {
                     evaluated.collect_global_state_refs(refs);
                 }
@@ -440,7 +450,7 @@ macro_rules! properties {
                     result
                 }
 
-                pub fn collect_global_state_refs(&self, refs: &mut crate::collections::VecSet<String>) {
+                pub fn collect_global_state_refs(&self, refs: &mut $crate::collections::VecSet<String>) {
                     $(if let Some(property_refs) = self.$field.get_value().get_global_state_refs() {
                         refs.extend(property_refs.iter().cloned());
                     })+
@@ -471,14 +481,14 @@ macro_rules! properties {
                 })+
             }
 
-            #[derive(Clone, Debug, Default, PartialEq, ::mln_wire::Wire)]
-            #[wire(default)]
+            #[derive(Clone, Debug, Default, PartialEq, $crate::__private::mln_wire::Wire)]
+            #[wire(crate = $crate::__private::mln_wire, default)]
             pub struct Unevaluated {
                 $(pub $field: $crate::__property_value!($kind, $t),)+
             }
 
-            #[derive(Clone, Debug, Default, ::mln_wire::Wire)]
-            #[wire(default)]
+            #[derive(Clone, Debug, Default, $crate::__private::mln_wire::Wire)]
+            #[wire(crate = $crate::__private::mln_wire, default)]
             pub struct PossiblyEvaluated {
                 $(pub $field: $crate::property::evaluated::Evaluated<$t>,)+
             }
@@ -524,7 +534,7 @@ macro_rules! properties {
                     result
                 }
 
-                pub fn collect_global_state_refs(&self, refs: &mut crate::collections::VecSet<String>) {
+                pub fn collect_global_state_refs(&self, refs: &mut $crate::collections::VecSet<String>) {
                     $(if let Some(property_refs) = self.$field.get_global_state_refs() {
                         refs.extend(property_refs.iter().cloned());
                     })+
@@ -536,7 +546,7 @@ macro_rules! properties {
                     self.get_dependencies()
                 }
 
-                fn collect_global_state_refs(&self, refs: &mut crate::collections::VecSet<String>) {
+                fn collect_global_state_refs(&self, refs: &mut $crate::collections::VecSet<String>) {
                     Unevaluated::collect_global_state_refs(self, refs);
                 }
             }
@@ -554,9 +564,164 @@ macro_rules! properties {
         }
     };
 }
-pub(crate) use properties;
+
+/// Declares a layer type's property sets, as [`properties!`] does, and its
+/// property table: `PROPERTIES`, with the paint properties and then the
+/// layout properties in the order the sets list them, and `visit`, which
+/// calls a visitor with the field of a slot of the table. A type's
+/// [`StyleLayerType`](crate::layer::StyleLayerType) impl names both:
+///
+/// ```ignore
+/// mln_style::layer_properties!(
+///     /// The paint properties of an `org.example.dot` layer.
+///     pub mod paint: paint {
+///         dot_radius: data_driven f32 = 5.0,
+///         dot_color: data_driven Color = Color::black(),
+///     }
+///     use mln_style::color::Color;
+/// );
+///
+/// impl StyleLayerType for Dot {
+///     const PROPERTIES: &'static PropertyTable = &PROPERTIES;
+///     type PaintProperties = paint::Transitionable;
+///     type LayoutProperties = NoProperties;
+///     fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(slot: usize, visitor: V) -> Option<V::Output> {
+///         visit(slot, visitor)
+///     }
+///     // ...
+/// }
+/// ```
+///
+/// The paint set comes first and the layout set second; a type may have
+/// either alone. A property's style-spec name is its field's, with each `_`
+/// a `-`, and a data-driven kind makes it data-driven in the table. The
+/// sets can't have `derived` values.
+#[macro_export]
+macro_rules! layer_properties {
+    ($(#[$pmeta:meta])* $pvis:vis mod $paint:ident: paint {
+        $($pfield:ident: $pkind:ident $pt:ty = $pdefault:expr),+ $(,)?
+    } $(#[$lmeta:meta])* $lvis:vis mod $layout:ident: layout {
+        $($lfield:ident: $lkind:ident $lt:ty = $ldefault:expr),+ $(,)?
+    } $(use $($import:path),+;)?) => {
+        // Each set imports the paths both sets need.
+        $crate::properties!(
+            $(#[$pmeta])*
+            #[allow(unused_imports, reason = "the imports are those of both sets")]
+            $pvis mod $paint: paint { $($pfield: $pkind $pt = $pdefault,)+ } $(use $($import),+;)?
+        );
+        $crate::properties!(
+            $(#[$lmeta])*
+            #[allow(unused_imports, reason = "the imports are those of both sets")]
+            $lvis mod $layout: layout { $($lfield: $lkind $lt = $ldefault,)+ } $(use $($import),+;)?
+        );
+        $crate::__property_table!(
+            paint $paint { $($pfield $pkind)+ }
+            layout $layout { $($lfield $lkind)+ }
+        );
+    };
+    ($(#[$pmeta:meta])* $pvis:vis mod $paint:ident: paint {
+        $($pfield:ident: $pkind:ident $pt:ty = $pdefault:expr),+ $(,)?
+    } $(use $($import:path),+;)?) => {
+        $crate::properties!(
+            $(#[$pmeta])* $pvis mod $paint: paint { $($pfield: $pkind $pt = $pdefault,)+ } $(use $($import),+;)?
+        );
+        $crate::__property_table!(paint $paint { $($pfield $pkind)+ } layout);
+    };
+    ($(#[$lmeta:meta])* $lvis:vis mod $layout:ident: layout {
+        $($lfield:ident: $lkind:ident $lt:ty = $ldefault:expr),+ $(,)?
+    } $(use $($import:path),+;)?) => {
+        $crate::properties!(
+            $(#[$lmeta])* $lvis mod $layout: layout { $($lfield: $lkind $lt = $ldefault,)+ } $(use $($import),+;)?
+        );
+        $crate::__property_table!(paint layout $layout { $($lfield $lkind)+ });
+    };
+}
+
+/// `layer_properties!`'s `PROPERTIES` and `visit`, for the paint set
+/// `$paint` and the layout set `$layout`, either of which may be missing.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __property_table {
+    (
+        paint $($paint:ident { $($pfield:ident $pkind:ident)+ })?
+        layout $($layout:ident { $($lfield:ident $lkind:ident)+ })?
+    ) => {
+        /// The type's properties, by slot.
+        pub(crate) static PROPERTIES: $crate::property::table::PropertyTable = {
+            const COUNT: usize =
+                <[&str]>::len(&[$($(::core::stringify!($pfield),)+)? $($(::core::stringify!($lfield),)+)?]);
+            static INFO: [$crate::property::table::PropertyInfo; COUNT] = [
+                $($($crate::__property_info!(paint $pfield $pkind),)+)?
+                $($($crate::__property_info!(layout $lfield $lkind),)+)?
+            ];
+            static BY_NAME: [u8; COUNT] = $crate::__private::slots_by_name(&INFO);
+            $crate::property::table::PropertyTable::new(&INFO, &BY_NAME)
+        };
+
+        /// Calls `visitor` with the field of the property in `slot` of
+        /// `PROPERTIES`.
+        pub(crate) fn visit<T, V>(slot: usize, visitor: V) -> ::core::option::Option<V::Output>
+        where
+            T: $crate::layer::StyleLayerType<
+                $(PaintProperties = $paint::Transitionable,)?
+                $(LayoutProperties = $layout::Unevaluated,)?
+            >,
+            V: $crate::property::table::PropertyVisitor<$crate::layer::LayerStyle<T>>,
+        {
+            let mut _next = 0;
+            $($(
+                if slot == _next {
+                    return ::core::option::Option::Some(visitor.paint(|s| &s.paint.$pfield, |s| &mut s.paint.$pfield));
+                }
+                _next += 1;
+            )+)?
+            $($(
+                if slot == _next {
+                    return ::core::option::Option::Some(visitor.layout(|s| &s.layout.$lfield, |s| &mut s.layout.$lfield));
+                }
+                _next += 1;
+            )+)?
+            ::core::option::Option::None
+        }
+    };
+}
+
+/// The table entry of the property in the field `$field` of a `$scope`
+/// set, of the kind `$kind`.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __property_info {
+    ($scope:ident $field:ident $kind:ident) => {{
+        const FIELD: &str = ::core::stringify!($field);
+        const NAME: [u8; FIELD.len()] = $crate::__private::property_name(FIELD);
+        const INFO: $crate::property::table::PropertyInfo =
+            // Replacing ASCII bytes keeps the field's UTF-8 valid.
+            $crate::property::table::PropertyInfo::$scope(match ::core::str::from_utf8(&NAME) {
+                ::core::result::Result::Ok(name) => name,
+                ::core::result::Result::Err(_) => FIELD,
+            });
+        $crate::__property_info!(@flags INFO $kind)
+    }};
+    (@flags $info:ident data_driven) => {
+        $info.data_driven()
+    };
+    (@flags $info:ident integer_zoom) => {
+        $info.data_driven()
+    };
+    (@flags $info:ident cross_faded_data_driven) => {
+        $info.data_driven().cross_faded()
+    };
+    (@flags $info:ident cross_faded_or_data_driven) => {
+        $info.data_driven().cross_faded()
+    };
+    (@flags $info:ident $kind:ident) => {
+        $info
+    };
+}
 
 /// The methods of a set's `PossiblyEvaluated`.
+#[doc(hidden)]
+#[macro_export]
 macro_rules! __possibly_evaluated_methods {
     ($($field:ident: $kind:ident),+) => {
         impl PossiblyEvaluated {
@@ -567,7 +732,7 @@ macro_rules! __possibly_evaluated_methods {
                 result
             }
 
-            pub fn collect_global_state_refs(&self, refs: &mut crate::collections::VecSet<String>) {
+            pub fn collect_global_state_refs(&self, refs: &mut $crate::collections::VecSet<String>) {
                 $(if let Some(property_refs) = self.$field.global_state_refs() {
                     refs.extend(property_refs.iter().cloned());
                 })+
@@ -589,7 +754,6 @@ macro_rules! __possibly_evaluated_methods {
         }
     };
 }
-pub(crate) use __possibly_evaluated_methods;
 
 /// What an overridable property's override reads: whether a formatted
 /// section sets a text color.

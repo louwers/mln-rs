@@ -844,7 +844,8 @@ macro_rules! paint_property_binders {
         }
     ) => {
         $(#[$meta])*
-        #[derive(Clone, Debug, mln_wire::Wire)]
+        #[derive(Clone, Debug, $crate::__private::mln_wire::Wire)]
+        #[wire(crate = $crate::__private::mln_wire)]
         pub(crate) struct $name {
             pub interleaved_vertex_buffer: $crate::layer::binders::InterleavedVertexBuffer,
             $(pub $field: $binder,)+
@@ -869,13 +870,13 @@ macro_rules! paint_property_binders {
 
             fn populate(
                 &mut self,
-                feature: &dyn mln_style::feature::GeometryTileFeature,
+                feature: &dyn $crate::__private::mln_style::feature::GeometryTileFeature,
                 length: usize,
                 index: usize,
                 pattern_positions: &$crate::draw::ImagePositions,
                 pattern_dependencies: Option<&$crate::layer::binders::PatternDependency>,
-                canonical: &mln_style::tile_id::CanonicalTileID,
-                formatted_section: &mln_style::expression::Value,
+                canonical: &$crate::__private::mln_style::tile_id::CanonicalTileID,
+                formatted_section: &$crate::__private::mln_style::expression::Value,
             ) {
                 let buffer = &mut self.interleaved_vertex_buffer;
                 let added = (length - buffer.vertex_count) * buffer.stride;

@@ -44,6 +44,14 @@ pub use render::update_slot::{Update, UpdateReader, UpdateSlot};
 
 /// The `log` targets of this crate's records. Each names the event that
 /// `mln_c` reports the record under (`mln_c::logging`).
+/// What the expansions of the crate's macros name, so that a crate that
+/// invokes them needn't depend on it.
+#[doc(hidden)]
+pub mod __private {
+    pub use mln_style;
+    pub use mln_wire;
+}
+
 mod log_target {
     pub(crate) const GENERAL: &str = "mln_engine::general";
     #[cfg_attr(not(feature = "sqlite"), expect(dead_code, reason = "only the database logs"))]

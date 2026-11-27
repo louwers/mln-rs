@@ -43,6 +43,13 @@ pub mod window;
 
 pub use color_mode::{ColorMode, Rgba};
 /// The `log` targets of this crate's records (see the crate docs).
+/// What the expansions of the crate's macros name, so that a crate that
+/// invokes them needn't depend on it.
+#[doc(hidden)]
+pub mod __private {
+    pub use bytemuck;
+}
+
 mod log_target {
     pub(crate) const RENDER: &str = "mln_gfx::render";
 }

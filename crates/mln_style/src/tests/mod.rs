@@ -16,6 +16,7 @@ mod expression_global_state;
 mod filter;
 mod format_section_override_test;
 mod lat_lng_property;
+mod layer_properties;
 mod layer_round_trip;
 mod layout_difference;
 mod m1_render_test_styles;

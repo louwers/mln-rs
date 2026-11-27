@@ -8,6 +8,7 @@
 //! field that holds it, typed, so that reading, converting and comparing a
 //! value needs no downcast.
 
+use std::cmp::Ordering;
 use std::sync::Arc;
 
 use crate::conversion::to_value::make_transition_style_property;
@@ -40,7 +41,7 @@ pub struct PropertyInfo {
 
 impl PropertyInfo {
     #[must_use]
-    pub(crate) const fn paint(name: &'static str) -> Self {
+    pub const fn paint(name: &'static str) -> Self {
         PropertyInfo {
             name,
             scope: PropertyScope::Paint,
@@ -52,7 +53,7 @@ impl PropertyInfo {
     }
 
     #[must_use]
-    pub(crate) const fn layout(name: &'static str) -> Self {
+    pub const fn layout(name: &'static str) -> Self {
         PropertyInfo {
             name,
             scope: PropertyScope::Layout,
@@ -64,23 +65,87 @@ impl PropertyInfo {
     }
 
     #[must_use]
-    pub(crate) const fn data_driven(self) -> Self {
+    pub const fn data_driven(self) -> Self {
         PropertyInfo { data_driven: true, ..self }
     }
 
     #[must_use]
-    pub(crate) const fn tokens(self) -> Self {
+    pub const fn tokens(self) -> Self {
         PropertyInfo { tokens: true, ..self }
     }
 
     #[must_use]
-    pub(crate) const fn overridable(self) -> Self {
+    pub const fn overridable(self) -> Self {
         PropertyInfo { overridable: true, ..self }
     }
 
     #[must_use]
-    pub(crate) const fn cross_faded(self) -> Self {
+    pub const fn cross_faded(self) -> Self {
         PropertyInfo { cross_faded: true, ..self }
+    }
+}
+
+/// The style-spec name of the property in the field `field`: the field's
+/// name with each `_` a `-`, as `N` bytes, `field`'s length.
+#[doc(hidden)]
+#[must_use]
+pub const fn property_name<const N: usize>(field: &str) -> [u8; N] {
+    let field = field.as_bytes();
+    assert!(field.len() == N, "the length is the field's");
+    let mut name = [0; N];
+    let mut i = 0;
+    while i < N {
+        name[i] = if field[i] == b'_' { b'-' } else { field[i] };
+        i += 1;
+    }
+    name
+}
+
+/// The slots of `properties`, sorted by name, as [`PropertyTable::new`]
+/// takes them. Fails the build for more than 256 properties or two of the
+/// same name.
+#[doc(hidden)]
+#[must_use]
+pub const fn slots_by_name<const N: usize>(properties: &[PropertyInfo; N]) -> [u8; N] {
+    assert!(N <= 256, "a table has at most 256 properties");
+    let mut slots = [0; N];
+    let mut i = 0;
+    while i < N {
+        slots[i] = i as u8;
+        // Insertion: move the new slot down past the names after its own.
+        let mut j = i;
+        while j > 0 {
+            let order = compare(properties[slots[j - 1] as usize].name, properties[slots[j] as usize].name);
+            assert!(!matches!(order, Ordering::Equal), "two properties have the same name");
+            if matches!(order, Ordering::Less) {
+                break;
+            }
+            let previous = slots[j - 1];
+            slots[j - 1] = slots[j];
+            slots[j] = previous;
+            j -= 1;
+        }
+        i += 1;
+    }
+    slots
+}
+
+/// `a.cmp(b)`, in a constant.
+const fn compare(a: &str, b: &str) -> Ordering {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    let mut i = 0;
+    while i < a.len() && i < b.len() {
+        if a[i] != b[i] {
+            return if a[i] < b[i] { Ordering::Less } else { Ordering::Greater };
+        }
+        i += 1;
+    }
+    if a.len() < b.len() {
+        Ordering::Less
+    } else if a.len() > b.len() {
+        Ordering::Greater
+    } else {
+        Ordering::Equal
     }
 }
 

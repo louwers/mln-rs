@@ -100,9 +100,6 @@ pub use layer::{Layer, LayerList, LayerTypeInfo};
 pub use property::evaluation::{CrossfadeParameters, PropertyEvaluationParameters};
 // The property macros, at the root so that the generated code and the
 // macros themselves name them as `crate::name!`.
-pub(crate) use property::set::{
-    __possibly_evaluated_methods, __property_data_driven, __property_evaluation, __property_value, properties,
-};
 pub use property::transition::{GlobalStateChange, TransitionOptions, TransitionParameters};
 pub use property::value::{PropertyValue, StyleValue};
 pub use registry::StyleRegistry;
@@ -113,6 +110,15 @@ pub use style::{Style, StyleCamera, StyleLoadError, diff};
 
 /// The `log` targets of this crate's records. Each names the event that
 /// `mln_c` reports the record under (`mln_c::logging`).
+/// What the expansions of [`properties!`] and [`layer_properties!`] name,
+/// so that a crate that invokes them needn't depend on it.
+#[doc(hidden)]
+pub mod __private {
+    pub use mln_wire;
+
+    pub use crate::property::table::{property_name, slots_by_name};
+}
+
 mod log_target {
     pub(crate) const GENERAL: &str = "mln_style::general";
     pub(crate) const PARSE_STYLE: &str = "mln_style::parse_style";
