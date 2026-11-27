@@ -167,7 +167,6 @@ httpmock.workspace = true
 # The built-in registrations of the integration tests' maps.
 mln_builtins = { package = "mln-rs-builtins", path = "../mln_builtins" }
 mln_headless = { package = "mln-rs-headless", path = "../mln_headless" }
-mln_webgpu = { package = "mln-rs-webgpu", path = "../mln_webgpu" }
 proptest.workspace = true
 tempfile.workspace = true
 

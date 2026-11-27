@@ -1,5 +1,5 @@
 // The parts of test/gl/bucket.test.cpp of the engine's stores and raster
-// masks (on the WebGPU headless backend).
+// masks.
 mod bucket_test;
 // Cameras that move faster than the network answers.
 mod fast_camera_test;
@@ -50,6 +50,9 @@ mod vector_tile_test;
 
 // The tests' own source types.
 pub(crate) mod types;
+
+// The tests' backend, which draws nothing.
+pub(crate) mod fake_gpu;
 
 /// The registrations that the tests' maps, renderers and styles use: the
 /// specification's expression functions and the tests' layer types and
@@ -459,32 +462,14 @@ pub(crate) fn ready(source: mln_style::Source) -> mln_style::Source {
     }
 }
 
-/// A WebGPU device, or `None` where no adapter is available: the test is
-/// skipped there, unless `MLN_RENDER_BACKEND` asks for `webgpu`.
-pub(super) fn webgpu_device() -> Option<mln_webgpu::Device> {
-    let requested = std::env::var("MLN_RENDER_BACKEND").is_ok_and(|backend| backend.eq_ignore_ascii_case("webgpu"));
-    match mln_webgpu::Device::new(None) {
-        Ok(device) => Some(device),
-        Err(error) if error.kind == mln_gfx::ErrorKind::Unsupported && !requested => {
-            eprintln!("skipped: {error}");
-            None
-        }
-        Err(error) => panic!("WebGPU device: {error}"),
-    }
-}
-
-/// Runs `f` with the `Gpu` of a headless WebGPU backend and a context over
-/// it, which it then tears down. Skipped where no WebGPU adapter is
-/// available unless `MLN_RENDER_BACKEND` asks for `webgpu`.
+/// Runs `f` with a [`FakeGpu`](fake_gpu::FakeGpu) and a context over it,
+/// which it then tears down, checking that the teardown destroyed everything
+/// that wasn't destroyed before.
 fn with_context(f: impl FnOnce(&mut dyn mln_gfx::gpu::Gpu, &mut crate::draw::context::Context)) {
-    use mln_gfx::RendererBackend as _;
     use mln_gfx::gpu::Gpu as _;
-    let Some(device) = webgpu_device() else {
-        return;
-    };
-    let mut backend = mln_webgpu::RendererBackend::new(&device);
-    let gpu = backend.gpu();
+    let mut gpu = fake_gpu::FakeGpu::default();
     let mut context = crate::draw::context::Context::new(*gpu.caps(), 1.0);
-    f(gpu, &mut context);
-    context.tear_down(gpu);
+    f(&mut gpu, &mut context);
+    context.tear_down(&mut gpu);
+    assert_eq!(0, gpu.live(), "the context's teardown left resources live");
 }

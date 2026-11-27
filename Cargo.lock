@@ -2730,7 +2730,6 @@ dependencies = [
  "mln-rs-gfx",
  "mln-rs-headless",
  "mln-rs-style",
- "mln-rs-webgpu",
  "mln-rs-wire",
  "mlt-core",
  "objc2 0.6.5",
