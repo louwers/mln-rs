@@ -1,0 +1,35 @@
+# The `org.maplibre.image-process` layer type and the style members that
+# route layers into shared targets, written on the layer contract that the
+# engine opens to other crates. Its render tests (render-tests/) run through
+# tools/render-test's runner (tests/render_tests.rs).
+[package]
+name = "mln-rs-image-process"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "A layer type for mln-rs that blurs, thresholds, colors and combines what other layers draw"
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+include.workspace = true
+
+[lib]
+name = "mln_image_process"
+
+[dependencies]
+bytemuck.workspace = true
+mln_engine.workspace = true
+mln_gfx.workspace = true
+mln_style.workspace = true
+
+[dev-dependencies]
+log.workspace = true
+mln_builtins.workspace = true
+# Unpublished: without a version, `cargo package` drops it.
+mln_headless = { package = "mln-rs-headless", path = "../mln_headless" }
+parking_lot.workspace = true
+render_test.workspace = true
+
+[lints]
+workspace = true

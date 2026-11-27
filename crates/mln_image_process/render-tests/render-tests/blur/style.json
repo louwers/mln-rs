@@ -1,0 +1,119 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 128,
+      "height": 96
+    }
+  },
+  "org.maplibre:targets": [
+    {
+      "id": "t"
+    }
+  ],
+  "center": [20.0, 20.0],
+  "zoom": 3,
+  "sources": {
+    "shapes": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "square"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [17.01171875, 21.47946067],
+                  [20.17578125, 21.47946067],
+                  [20.17578125, 18.50650387],
+                  [17.01171875, 18.50650387],
+                  [17.01171875, 21.47946067]
+                ]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "line"
+            },
+            "geometry": {
+              "type": "LineString",
+              "coordinates": [
+                [15.60546875, 17.50348037],
+                [24.39453125, 22.45755118]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "point"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [22.63671875, 19.17195672]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#ffffff"
+      }
+    },
+    {
+      "id": "fill",
+      "type": "fill",
+      "org.maplibre:destination-target": "t",
+      "source": "shapes",
+      "filter": ["==", ["get", "kind"], "square"],
+      "paint": {
+        "fill-color": "#3070c0"
+      }
+    },
+    {
+      "id": "line",
+      "type": "line",
+      "org.maplibre:destination-target": "t",
+      "source": "shapes",
+      "filter": ["==", ["get", "kind"], "line"],
+      "paint": {
+        "line-color": "#c03020",
+        "line-width": 4
+      }
+    },
+    {
+      "id": "circle",
+      "type": "circle",
+      "org.maplibre:destination-target": "t",
+      "source": "shapes",
+      "filter": ["==", ["get", "kind"], "point"],
+      "paint": {
+        "circle-color": "#20a040",
+        "circle-radius": 10
+      }
+    },
+    {
+      "id": "process",
+      "type": "org.maplibre.image-process",
+      "org.maplibre:source-target": "t",
+      "org.maplibre:operations": [
+        {
+          "type": "blur",
+          "size": 3
+        }
+      ]
+    }
+  ]
+}

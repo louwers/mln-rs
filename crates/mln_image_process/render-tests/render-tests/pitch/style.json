@@ -1,0 +1,309 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 160,
+      "height": 128
+    }
+  },
+  "org.maplibre:targets": [
+    {
+      "id": "t"
+    }
+  ],
+  "center": [20.0, 20.0],
+  "zoom": 3,
+  "pitch": 60,
+  "sources": {
+    "grid": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "square"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [13.49609375, 24.39294393],
+                  [15.95703125, 24.39294393],
+                  [15.95703125, 22.13227087],
+                  [13.49609375, 22.13227087],
+                  [13.49609375, 24.39294393]
+                ]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "square"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [13.49609375, 21.15194857],
+                  [15.95703125, 21.15194857],
+                  [15.95703125, 18.83955993],
+                  [13.49609375, 18.83955993],
+                  [13.49609375, 21.15194857]
+                ]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "square"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [13.49609375, 17.83845397],
+                  [15.95703125, 17.83845397],
+                  [15.95703125, 15.48101236],
+                  [13.49609375, 15.48101236],
+                  [13.49609375, 17.83845397]
+                ]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "square"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [17.01171875, 24.39294393],
+                  [19.47265625, 24.39294393],
+                  [19.47265625, 22.13227087],
+                  [17.01171875, 22.13227087],
+                  [17.01171875, 24.39294393]
+                ]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "square"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [17.01171875, 21.15194857],
+                  [19.47265625, 21.15194857],
+                  [19.47265625, 18.83955993],
+                  [17.01171875, 18.83955993],
+                  [17.01171875, 21.15194857]
+                ]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "square"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [17.01171875, 17.83845397],
+                  [19.47265625, 17.83845397],
+                  [19.47265625, 15.48101236],
+                  [17.01171875, 15.48101236],
+                  [17.01171875, 17.83845397]
+                ]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "square"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [20.52734375, 24.39294393],
+                  [22.98828125, 24.39294393],
+                  [22.98828125, 22.13227087],
+                  [20.52734375, 22.13227087],
+                  [20.52734375, 24.39294393]
+                ]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "square"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [20.52734375, 21.15194857],
+                  [22.98828125, 21.15194857],
+                  [22.98828125, 18.83955993],
+                  [20.52734375, 18.83955993],
+                  [20.52734375, 21.15194857]
+                ]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "square"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [20.52734375, 17.83845397],
+                  [22.98828125, 17.83845397],
+                  [22.98828125, 15.48101236],
+                  [20.52734375, 15.48101236],
+                  [20.52734375, 17.83845397]
+                ]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "square"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [24.04296875, 24.39294393],
+                  [26.50390625, 24.39294393],
+                  [26.50390625, 22.13227087],
+                  [24.04296875, 22.13227087],
+                  [24.04296875, 24.39294393]
+                ]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "square"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [24.04296875, 21.15194857],
+                  [26.50390625, 21.15194857],
+                  [26.50390625, 18.83955993],
+                  [24.04296875, 18.83955993],
+                  [24.04296875, 21.15194857]
+                ]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "square"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [24.04296875, 17.83845397],
+                  [26.50390625, 17.83845397],
+                  [26.50390625, 15.48101236],
+                  [24.04296875, 15.48101236],
+                  [24.04296875, 17.83845397]
+                ]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "line"
+            },
+            "geometry": {
+              "type": "LineString",
+              "coordinates": [
+                [12.08984375, 18.33973174],
+                [27.91015625, 18.33973174]
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#ffffff"
+      }
+    },
+    {
+      "id": "squares",
+      "type": "fill",
+      "org.maplibre:destination-target": "t",
+      "source": "grid",
+      "filter": ["==", ["get", "kind"], "square"],
+      "paint": {
+        "fill-color": "#3070c0"
+      }
+    },
+    {
+      "id": "glow",
+      "type": "org.maplibre.image-process",
+      "org.maplibre:source-target": "t",
+      "org.maplibre:operations": [
+        {
+          "type": "blur",
+          "size": 4
+        },
+        {
+          "type": "color",
+          "value": "#ff8000"
+        }
+      ]
+    },
+    {
+      "id": "squares-on-map",
+      "type": "fill",
+      "source": "grid",
+      "filter": ["==", ["get", "kind"], "square"],
+      "paint": {
+        "fill-color": "#3070c0"
+      }
+    },
+    {
+      "id": "line",
+      "type": "line",
+      "source": "grid",
+      "filter": ["==", ["get", "kind"], "line"],
+      "paint": {
+        "line-color": "#202020",
+        "line-width": 2
+      }
+    }
+  ]
+}

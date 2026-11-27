@@ -2841,6 +2841,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "mln-rs-image-process"
+version = "0.0.18"
+dependencies = [
+ "bytemuck",
+ "log",
+ "mln-rs-builtins",
+ "mln-rs-engine",
+ "mln-rs-gfx",
+ "mln-rs-headless",
+ "mln-rs-render-test",
+ "mln-rs-style",
+ "parking_lot",
+]
+
+[[package]]
 name = "mln-rs-mtl"
 version = "0.0.18"
 dependencies = [

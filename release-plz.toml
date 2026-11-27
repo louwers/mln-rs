@@ -56,6 +56,7 @@ changelog_include = [
   "mln-rs-gfx",
   "mln-rs-gl",
   "mln-rs-glsl",
+  "mln-rs-image-process",
   "mln-rs-mtl",
   "mln-rs-ngon",
   "mln-rs-polylabel",

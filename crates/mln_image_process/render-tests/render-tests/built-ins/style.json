@@ -1,0 +1,142 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 192,
+      "height": 96
+    }
+  },
+  "org.maplibre:targets": [
+    {
+      "id": "t"
+    }
+  ],
+  "center": [20.0, 20.0],
+  "zoom": 3,
+  "sprite": "local://sprites/sprite",
+  "sources": {
+    "mixed": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "area"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [14.55078125, 22.6199063],
+                  [18.41796875, 22.6199063],
+                  [18.41796875, 19.00584135],
+                  [14.55078125, 19.00584135],
+                  [14.55078125, 22.6199063]
+                ]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "road"
+            },
+            "geometry": {
+              "type": "LineString",
+              "coordinates": [
+                [12.96875, 17.50348037],
+                [27.03125, 17.50348037]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "stop"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [20.87890625, 21.64294166]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "kind": "label"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [22.63671875, 19.66929426]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#f0ece0"
+      }
+    },
+    {
+      "id": "fill",
+      "type": "fill",
+      "org.maplibre:destination-target": "t",
+      "source": "mixed",
+      "filter": ["==", ["get", "kind"], "area"],
+      "paint": {
+        "fill-color": "#70a0e0",
+        "fill-antialias": false
+      }
+    },
+    {
+      "id": "line",
+      "type": "line",
+      "org.maplibre:destination-target": "t",
+      "source": "mixed",
+      "filter": ["==", ["get", "kind"], "road"],
+      "paint": {
+        "line-color": "#d04020",
+        "line-width": 5,
+        "line-dasharray": [2, 1]
+      }
+    },
+    {
+      "id": "circle",
+      "type": "circle",
+      "org.maplibre:destination-target": "t",
+      "source": "mixed",
+      "filter": ["==", ["get", "kind"], "stop"],
+      "paint": {
+        "circle-color": "#30a050",
+        "circle-radius": 8,
+        "circle-stroke-width": 2,
+        "circle-stroke-color": "#ffffff"
+      }
+    },
+    {
+      "id": "symbol",
+      "type": "symbol",
+      "org.maplibre:destination-target": "t",
+      "source": "mixed",
+      "filter": ["==", ["get", "kind"], "label"],
+      "layout": {
+        "icon-image": "dot.sdf",
+        "icon-allow-overlap": true
+      },
+      "paint": {
+        "icon-color": "#a020a0"
+      }
+    },
+    {
+      "id": "process",
+      "type": "org.maplibre.image-process",
+      "org.maplibre:source-target": "t"
+    }
+  ]
+}

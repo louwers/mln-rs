@@ -1,0 +1,85 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 128,
+      "height": 96
+    }
+  },
+  "org.maplibre:targets": [
+    {
+      "id": "imagery"
+    },
+    {
+      "id": "mask"
+    }
+  ],
+  "center": [0, 0],
+  "zoom": 0,
+  "sources": {
+    "gradient": {
+      "type": "raster",
+      "tiles": ["local://tiles/gradient-{z}-{x}-{y}.png"],
+      "tileSize": 512
+    },
+    "window": {
+      "type": "geojson",
+      "data": {
+        "type": "Feature",
+        "properties": {},
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [-16.875, 11.1784018737],
+              [16.875, 11.1784018737],
+              [16.875, -11.1784018737],
+              [-16.875, -11.1784018737],
+              [-16.875, 11.1784018737]
+            ]
+          ]
+        }
+      }
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#ffffff"
+      }
+    },
+    {
+      "id": "imagery",
+      "type": "raster",
+      "source": "gradient",
+      "org.maplibre:destination-target": "imagery",
+      "paint": {
+        "raster-fade-duration": 0
+      }
+    },
+    {
+      "id": "window",
+      "type": "fill",
+      "source": "window",
+      "org.maplibre:destination-target": "mask",
+      "paint": {
+        "fill-color": "#000000",
+        "fill-antialias": false
+      }
+    },
+    {
+      "id": "process",
+      "type": "org.maplibre.image-process",
+      "org.maplibre:source-target": "imagery",
+      "org.maplibre:operations": [
+        {
+          "type": "combine",
+          "target": "mask",
+          "mode": "multiply"
+        }
+      ]
+    }
+  ]
+}
