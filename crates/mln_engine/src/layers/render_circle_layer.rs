@@ -15,7 +15,7 @@ use mln_style::layers::Circle;
 use mln_style::types::{AlignmentType, CirclePitchScaleType};
 
 use super::{cast_matrix, refresh_paint_attributes};
-use crate::buckets::circle_bucket::{CircleBinders, CircleBucket, CircleLayoutVertex};
+use crate::buckets::circle_bucket::{CircleBinders, CircleLayoutVertex};
 use crate::camera::{TileCoordinate, TileProjector};
 use crate::draw::objects::{DrawGeometry, DrawObjects, Textures};
 use crate::draw::segment::SegmentBase;
@@ -25,9 +25,9 @@ use crate::layer::layer_drawing::{DrawList, FrameDraw, TileDraws, UniformWriter}
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, LayerBucket, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer, RenderLayerBase,
-    TypedLayer,
+    EvaluateCx, Evaluation, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
+use crate::layer::tile_input::{Features, TileData};
 use crate::layers::circle::programs;
 use crate::layers::circle::ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use crate::layout::circle_layout::CircleLayout;
@@ -115,11 +115,10 @@ fn plane_geometry(
 }
 
 impl LayerType for Circle {
-    type Layout = CircleLayout;
-    type TileBucket<'a> = LayerBucket<'a, Circle>;
+    type Input = Features<CircleLayout>;
 
-    fn query_radius(bucket: &CircleBucket, layer: &EvaluatedLayer<Circle>) -> f32 {
-        bucket.query_radius(layer)
+    fn query_radius(data: TileData<'_, Circle>, layer: &EvaluatedLayer<Circle>) -> f32 {
+        data.bucket.query_radius(layer)
     }
 
     fn render_layer(style: Arc<LayerStyle<Circle>>) -> Box<dyn RenderLayer> {
@@ -271,7 +270,7 @@ impl TypedLayer for RenderCircleLayer {
                 continue;
             };
 
-            let render_data = tile.bucket_for_pass(RENDER_PASS);
+            let render_data = tile.data_for_pass(RENDER_PASS);
             let Some(render_data) = render_data else {
                 *entry.value = None;
                 continue;
