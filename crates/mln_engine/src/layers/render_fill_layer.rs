@@ -18,16 +18,13 @@ use super::{cast_matrix, refresh_paint_attributes};
 use crate::buckets::fill_bucket::{FillBinders, FillLayoutVertex};
 use crate::draw::atlas_binding::AtlasBinding;
 use crate::draw::context::Context;
-use crate::draw::identity::SimpleIdentity;
 use crate::draw::indexes::{DrawIndexes, Indexes, SharedIndexes};
-use crate::draw::objects::{DrawGeometry, DrawObjects, copy_shared_attributes};
+use crate::draw::objects::{DrawGeometry, Mesh, copy_shared_attributes};
 use crate::draw::segment::SegmentBase;
 use crate::draw::texture2d::Texture2D;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::layer::bucket_geometry::{bucket_indexes, bucket_vertices, copied_vertices, paint_vertices};
-use crate::layer::layer_drawing::{
-    DrawDepth, DrawList, DrawObjectsMut, FrameDraw, TileDraws, TileObjects, UniformWriter,
-};
+use crate::layer::layer_drawing::{DrawDepth, DrawList, FrameDraw, MeshMut, TileDraws, TileObjects, UniformWriter};
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
@@ -123,9 +120,7 @@ const RENDER_PASS: RenderPass = RenderPass::Translucent;
 
 /// A draw the layer keeps of a tile.
 struct FillDraw {
-    /// The id of the draw's GPU objects, made with them.
-    id: SimpleIdentity,
-    objects: DrawObjects,
+    mesh: Mesh,
     /// The sub-layer of the layer's depth the draw is at.
     sub_layer: u8,
     depth: DepthMaskType,
@@ -146,8 +141,8 @@ impl FillDraw {
         atlases: Option<&AtlasBinding>,
     ) -> FillDraw {
         let textures = atlases.map(|atlases| atlases.textures(&shader)).unwrap_or_default();
-        let objects = DrawObjects::new(shader, color_mode, CullFaceMode::disabled(), geometry, textures);
-        FillDraw { id: SimpleIdentity::new(), objects, sub_layer, depth, paint_layout: None }
+        let mesh = Mesh::new(shader, color_mode, CullFaceMode::disabled(), geometry, textures);
+        FillDraw { mesh, sub_layer, depth, paint_layout: None }
     }
 }
 
@@ -195,18 +190,12 @@ pub(crate) enum FillPart {
 impl TileObjects for FillTile {
     type Part = FillPart;
 
-    fn objects(&mut self, part: FillPart) -> Option<DrawObjectsMut<'_>> {
+    fn objects(&mut self, part: FillPart) -> Option<MeshMut<'_>> {
         let draw = match part {
             FillPart::Fill => &mut self.fill,
             FillPart::Outline => &mut self.outline,
         };
-        Some(DrawObjectsMut { objects: &mut draw.as_mut()?.objects, atlases: self.atlases.as_ref() })
-    }
-
-    fn drop_bindings(&mut self) {
-        for draw in self.fill.iter_mut().chain(&mut self.outline) {
-            draw.objects.drop_bindings();
-        }
+        Some(MeshMut { mesh: &mut draw.as_mut()?.mesh, atlases: self.atlases.as_ref() })
     }
 }
 
@@ -361,9 +350,9 @@ impl TileBuilder<'_> {
                 );
                 for (id, vertices) in [(OUTLINE_VERTICES_ID, &bucket.vertices), (OUTLINE_ENDS_ID, &bucket.outline_ends)]
                 {
-                    draw.objects.read_as_storage(id, Some(bucket_vertices(geometry, vertices)?));
+                    draw.mesh.read_as_storage(id, Some(bucket_vertices(geometry, vertices)?));
                 }
-                draw.objects.read_as_storage(OUTLINE_PAINT_ID, paint.clone());
+                draw.mesh.read_as_storage(OUTLINE_PAINT_ID, paint.clone());
                 draw.paint_layout = Some(outline_paint_layout(&vertex_attrs));
                 Some(draw)
             } else if let Some(quad) = self.outline_quad {
@@ -541,7 +530,7 @@ impl RenderFillLayer {
 
         let faded = evaluated.fill_pattern.faded();
         let tlbr = |id: &str| tile_bucket.pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
-        let texture = draw.objects.texture(IMAGE_SLOT).and_then(|texture| parameters.context.texture(texture));
+        let texture = draw.mesh.texture(IMAGE_SLOT).and_then(|texture| parameters.context.texture(texture));
         let texture_size = texture.map(Texture2D::size).unwrap_or_default();
         // A pattern has nothing to sample before its tile has an atlas, and
         // the shaders divide by the atlas size.
@@ -701,7 +690,7 @@ impl TypedLayer for RenderFillLayer {
                 paint
             };
             if let Some(fill) = &mut cached.fill {
-                refresh_paint_attributes(&mut fill.objects, changes, |attrs| drop(refresh(attrs)));
+                refresh_paint_attributes(&mut fill.mesh, changes, |attrs| drop(refresh(attrs)));
             }
             if let Some(outline) = &mut cached.outline {
                 match &cached.fill {
@@ -711,16 +700,16 @@ impl TypedLayer for RenderFillLayer {
                         if changes.paint {
                             let mut attrs = VertexAttributeArray::new();
                             let paint = refresh(&mut attrs);
-                            outline.objects.read_as_storage(OUTLINE_PAINT_ID, paint);
+                            outline.mesh.read_as_storage(OUTLINE_PAINT_ID, paint);
                             outline.paint_layout = Some(outline_paint_layout(&attrs));
                         }
                     }
                     // A line outline reads the fill's attributes, and so
                     // binds the buffers the fill uploads.
-                    Some(fill) if changes.paint && !outline.objects.has_instances() => {
-                        outline.objects.share_vertex_attributes(&fill.objects);
+                    Some(fill) if changes.paint && !outline.mesh.has_instances() => {
+                        outline.mesh.share_vertex_attributes(&fill.mesh);
                     }
-                    _ => refresh_paint_attributes(&mut outline.objects, changes, |attrs| drop(refresh(attrs))),
+                    _ => refresh_paint_attributes(&mut outline.mesh, changes, |attrs| drop(refresh(attrs))),
                 }
             }
 
@@ -746,7 +735,7 @@ impl TypedLayer for RenderFillLayer {
                     pass: RENDER_PASS,
                     depth: DrawDepth::Layer { sub_layer: draw.sub_layer, mask: draw.depth },
                     clip: true,
-                    ..FrameDraw::new(Some(tile_id), draw.id)
+                    ..FrameDraw::new(Some(tile_id), draw.mesh.id())
                 };
                 self.draw_list.push_part(tile_draw, part, uniforms);
             }
@@ -758,7 +747,7 @@ impl TypedLayer for RenderFillLayer {
             *layer.paint.fill_layer_blend.uniform(),
         ));
         frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.draw_id().to_unwrapped()));
-        cx.drawing.finish(&mut self.draw_list, cx.tiles, gpu, paint_parameters.context, |writer| {
+        cx.drawing.finish(&mut self.draw_list, gpu, paint_parameters.context, |writer| {
             Self::write_uniforms(layer, writer);
         });
         // The next update's tiles set the depth mask of their fills again.
