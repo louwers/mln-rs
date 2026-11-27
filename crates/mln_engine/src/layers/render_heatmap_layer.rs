@@ -9,7 +9,6 @@ use std::sync::Arc;
 use glam::dcamera::rh::proj::opengl::orthographic;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
@@ -35,8 +34,7 @@ use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeAr
 use crate::draw::vertices::SharedVertices;
 use crate::layer::bucket_geometry::{bucket_indexes, bucket_vertices, copied_vertices, paint_vertices};
 use crate::layer::layer_drawing::{
-    DrawDepth, DrawGroup, DrawList, DrawOrder, FrameDraw, FrameDraws, LayerDrawing, LayerDraws, TileMap, UniformWriter,
-    tile_objects,
+    DrawDepth, DrawGroup, DrawOrder, FrameDraw, LayerDrawing, LayerDraws, TileMap, tile_objects,
 };
 use crate::layer::layer_type::LayerType;
 use crate::layer::paint_property_binder::PaintBinders as _;
@@ -53,13 +51,8 @@ use crate::render::static_data::RenderStaticData;
 use crate::render::target::RenderTarget;
 use crate::render::terrain::StandingDraw;
 use crate::render::tile::FrameTile;
-use crate::render::tile_matrix::{bind_no_projection, globe_extrude_scale, projection_data, to_projection_ubo};
+use crate::render::tile_matrix::{globe_extrude_scale, projection_data, to_projection_ubo};
 use crate::tile::OverscaledTileID;
-
-/// The ids of the buffers that the draws bind.
-const DRAWABLE_ID: usize = programs::HEATMAP.buffer_id("drawableVector");
-const PROPS_ID: usize = programs::HEATMAP.buffer_id("props");
-const TEXTURE_PROPS_ID: usize = programs::HEATMAP_TEXTURE.buffer_id("ubo");
 
 /// The slots of the programs' textures that the draws bind.
 const COLOR_RAMP_SLOT: usize = programs::HEATMAP_TEXTURE.texture_slot("color_ramp");
@@ -68,12 +61,6 @@ const IMAGE_SLOT: usize = programs::HEATMAP_TEXTURE.texture_slot("image");
 /// The pass the layer's draws draw in, onto the frame and into its render
 /// target.
 const RENDER_PASS: RenderPass = RenderPass::Translucent;
-
-/// A tile's draw's entries in the render target's storage buffers.
-struct HeatmapUniforms {
-    draw_ubo: HeatmapDrawableUBO,
-    projection: ProjectionUBO,
-}
 
 /// The layer's drawing: the tiles' draws into the render target, and the
 /// layer's draw of the frame, which colors the render target's heat onto it.
@@ -88,7 +75,7 @@ pub(crate) struct HeatmapDrawing {
     color_ramp: Option<(Rc<PremultipliedImage>, SharedTexture)>,
     /// The layer's draw of the frame, from its first update that draws the
     /// tiles.
-    frame: Option<FrameDraws>,
+    frame: Option<LayerDraws>,
 }
 
 impl HeatmapDrawing {
@@ -118,7 +105,7 @@ impl HeatmapDrawing {
 impl LayerDrawing<StandingDraw> for HeatmapDrawing {
     fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
         if let Some(frame) = &self.frame {
-            visit(DrawGroup::Draws(frame));
+            visit(DrawGroup::Draws(frame.frame()));
         }
     }
 
@@ -148,7 +135,7 @@ impl LayerDrawing<StandingDraw> for HeatmapDrawing {
 
     fn upload(&mut self, _tiles: &mut TileMap<StandingDraw>, gpu: &mut dyn Gpu, context: &mut Context) {
         if let (Some(frame), Some(texture)) = (&self.frame, &mut self.texture) {
-            frame.upload_one(gpu, texture, context);
+            frame.frame().upload_one(gpu, texture, context);
         }
     }
 
@@ -161,7 +148,7 @@ impl LayerDrawing<StandingDraw> for HeatmapDrawing {
     ) {
         if let Some(frame) = &mut self.frame {
             if let Some(texture) = &mut self.texture {
-                frame.render_one(texture, gpu, parameters);
+                frame.frame_mut().render_one(texture, gpu, parameters);
             }
             order.step(parameters);
         }
@@ -177,8 +164,6 @@ impl LayerType for Heatmap {
 }
 
 pub(crate) struct RenderHeatmapLayer {
-    /// The tiles' draws into the render target as the update makes them.
-    tile_draws: DrawList<HeatmapUniforms>,
     color_ramp: Rc<PremultipliedImage>,
     /// The global-state snapshot used to generate the cached color ramp and
     /// detect when it needs to be rebuilt.
@@ -214,7 +199,6 @@ impl TypedLayer for RenderHeatmapLayer {
 
     fn new(_values: &LayerValues<Heatmap>) -> Self {
         RenderHeatmapLayer {
-            tile_draws: DrawList::default(),
             color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
             color_ramp_global_state: None,
             render_target: None,
@@ -293,8 +277,7 @@ impl TypedLayer for RenderHeatmapLayer {
     }
 
     /// Makes the tiles' draws into the render target and the layer's draw of
-    /// the frame, which colors the render target's heat onto it, and writes
-    /// the buffers they read.
+    /// the frame, which colors the render target's heat onto it.
     fn update_draws(
         &mut self,
         mut cx: LayerCx<'_, Self>,
@@ -310,7 +293,7 @@ impl TypedLayer for RenderHeatmapLayer {
             RenderTarget::new(paint_parameters.context, size, TextureChannelDataType::HalfFloat)
         });
         render_target.set_size(paint_parameters.context, size);
-        if self.draw_tiles(&mut cx, gpu, render_tiles, paint_parameters) {
+        if Self::draw_tiles(&mut cx, gpu, render_tiles, paint_parameters) {
             self.draw_texture(&mut cx, gpu, paint_parameters);
         }
     }
@@ -336,16 +319,13 @@ impl TypedLayer for RenderHeatmapLayer {
 
 impl RenderHeatmapLayer {
     /// Makes the tiles' draws into the render target, with their meshes in
-    /// the tiles' values, and writes the buffers they read. Returns false
-    /// if the layer draws nothing.
+    /// the tiles' values. Returns false if the layer draws nothing.
     fn draw_tiles(
-        &mut self,
         cx: &mut LayerCx<'_, Self>,
         gpu: &mut dyn Gpu,
         render_tiles: &[FrameTile<'_, Heatmap>],
         paint_parameters: &mut PaintParameters<'_>,
     ) -> bool {
-        let RenderHeatmapLayer { tile_draws, .. } = self;
         let LayerCx { base, values, tiles, drawing } = cx;
 
         let evaluated = &values.evaluated.paint;
@@ -383,24 +363,23 @@ impl RenderHeatmapLayer {
             let ground = paint_parameters.ground.as_deref();
             let centers = &bucket.centers;
             draw.stand(context, ground, tile_id.to_unwrapped(), "ground_height", centers);
-            let draw = FrameDraw { depth: DrawDepth::Off, ..FrameDraw::new(Some(tile_id), order) };
-            tile_draws.push(draw, Self::tile_uniforms(&tile_id, binders, paint_parameters));
+            let frame_draw = FrameDraw { depth: DrawDepth::Off, ..FrameDraw::new(Some(tile_id), order) };
+            let (drawable, projection) = Self::tile_uniforms(&tile_id, binders, paint_parameters);
+            drawing.target.get_or_insert_default().push_at(frame_draw, (), &draw.mesh, &projection, drawable);
         }
 
         let target = drawing.target.get_or_insert_default();
-        tile_draws.finish(target, gpu, paint_parameters.context, |writer| {
-            Self::write_tile_uniforms(evaluated, writer);
-        });
+        target.block(&Self::tile_props(evaluated)).finish(gpu, paint_parameters);
         true
     }
 
-    /// The entries in the render target's storage buffers of the draw of
-    /// `tile_id`, whose bucket's binders are `binders`.
+    /// The block and the projection of the draw of `tile_id`, whose bucket's
+    /// binders are `binders`.
     fn tile_uniforms(
         tile_id: &OverscaledTileID,
         binders: &HeatmapBinders,
         parameters: &PaintParameters<'_>,
-    ) -> HeatmapUniforms {
+    ) -> (HeatmapDrawableUBO, ProjectionUBO) {
         const NEAR_CLIPPED: bool = false;
         const IN_VIEWPORT_PIXEL_UNITS: bool = false;
         let zoom = parameters.view.zoom() as f32;
@@ -416,38 +395,30 @@ impl RenderHeatmapLayer {
             false,
         );
         let latitude_scale = parameters.view.projection().circle_radius_correction(parameters.view);
-        HeatmapUniforms {
-            draw_ubo: HeatmapDrawableUBO {
-                matrix: cast_matrix(&projection.fallback_matrix),
-                extrude_scale: tile_id.pixels_to_tile_units(1.0, zoom),
-                weight_t: binders.heatmap_weight.interpolation_factor(zoom),
-                radius_t: binders.heatmap_radius.interpolation_factor(zoom),
-                globe_extrude_scale: globe_extrude_scale(&tile_id, zoom, latitude_scale),
-            },
-            projection: to_projection_ubo(&projection),
-        }
+        let drawable = HeatmapDrawableUBO {
+            matrix: cast_matrix(&projection.fallback_matrix),
+            extrude_scale: tile_id.pixels_to_tile_units(1.0, zoom),
+            weight_t: binders.heatmap_weight.interpolation_factor(zoom),
+            radius_t: binders.heatmap_radius.interpolation_factor(zoom),
+            globe_extrude_scale: globe_extrude_scale(&tile_id, zoom, latitude_scale),
+        };
+        (drawable, to_projection_ubo(&projection))
     }
 
-    /// Writes the buffers of the tiles' draws into the render target, of a
+    /// The block that the tiles' draws into the render target share, of a
     /// layer of the paint values `evaluated`.
-    fn write_tile_uniforms(
-        evaluated: &HeatmapPaintProperties::PossiblyEvaluated,
-        writer: &mut UniformWriter<'_, HeatmapUniforms>,
-    ) {
-        let props = HeatmapEvaluatedPropsUBO {
+    fn tile_props(evaluated: &HeatmapPaintProperties::PossiblyEvaluated) -> HeatmapEvaluatedPropsUBO {
+        HeatmapEvaluatedPropsUBO {
             weight: evaluated.heatmap_weight.constant_or(&HeatmapPaintProperties::Defaults::heatmap_weight()),
             radius: evaluated.heatmap_radius.constant_or(&HeatmapPaintProperties::Defaults::heatmap_radius()),
             intensity: *evaluated.heatmap_intensity.uniform(),
             padding: 0.0,
-        };
-        writer.uniform(PROPS_ID, &props);
-        writer.storage(DRAWABLE_ID, |uniforms| uniforms.draw_ubo);
-        writer.storage(PROJECTION_ID, |uniforms| uniforms.projection);
+        }
     }
 
     /// Makes the layer's draw of the frame, which colors the heat of the
     /// render target onto it through the layer's color ramp, with a mesh it
-    /// builds once, and writes the buffers it reads.
+    /// builds once.
     fn draw_texture(
         &mut self,
         cx: &mut LayerCx<'_, Self>,
@@ -521,7 +492,7 @@ impl RenderHeatmapLayer {
             return;
         };
         let frame_draw = FrameDraw::new(None, draw.id());
-        frame.push(frame_draw);
+        frame.push(frame_draw, (), draw, ());
         let size = paint_parameters.renderable_size;
         let m = orthographic(0.0, f64::from(size.width), f64::from(size.height), 0.0, -1.0, 1.0);
         let props = HeatmapTexturePropsUBO {
@@ -531,8 +502,6 @@ impl RenderHeatmapLayer {
             pad2: 0.0,
             pad3: 0.0,
         };
-        let context = &mut *paint_parameters.context;
-        frame.buffers.write_pod(gpu, TEXTURE_PROPS_ID, &props, context.device());
-        bind_no_projection(gpu, &mut frame.buffers, context);
+        frame.block(&props).finish(gpu, paint_parameters);
     }
 }
