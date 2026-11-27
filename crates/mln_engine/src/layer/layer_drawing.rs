@@ -1,10 +1,9 @@
 //! What the engine keeps of a layer's tiles between frames: its value of
 //! each tile it draws, a value of the layer's type, in a [`TileMap`], which
 //! also says what the tile's value was made from and what of that bucket's
-//! vertex data changed since, in the frame and in each drape the layer
-//! draws in ([`DrapeTiles`]).
+//! vertex data changed since. The frame and every drape the layer draws in
+//! draw the same values.
 
-use std::any::Any;
 use std::ops::BitOrAssign;
 
 use mln_style::hash::HashMap;
@@ -394,48 +393,6 @@ impl<T> TileEntry<'_, T> {
     /// which the layer is about to copy again.
     pub(crate) fn take_changes(&mut self) -> BucketChanges {
         std::mem::take(&mut self.state.changes)
-    }
-}
-
-/// What a drape keeps of a layer's tile values there, whatever the
-/// layer's type, for a [`DrapeTiles`].
-trait AnyTiles {
-    fn as_any_mut(&mut self) -> &mut dyn Any;
-    fn mark_changed(&mut self, changed: &ChangedBuckets);
-}
-
-impl<T: 'static> AnyTiles for TileMap<T> {
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
-    fn mark_changed(&mut self, changed: &ChangedBuckets) {
-        TileMap::mark_changed(self, changed);
-    }
-}
-
-/// A layer's values of the tiles it draws in a drape of its stack, which
-/// the engine keeps as it keeps those of the frame, beside the layer's
-/// draws there. Only the layer's draw update in the drape changes them
-/// ([`RenderLayer::update_drape_draws`]).
-///
-/// [`RenderLayer::update_drape_draws`]: crate::layer::render_layer::RenderLayer::update_drape_draws
-pub(crate) struct DrapeTiles(Box<dyn AnyTiles>);
-
-impl DrapeTiles {
-    /// No tile values of the type `T`.
-    pub(crate) fn new<T: 'static>() -> DrapeTiles {
-        DrapeTiles(Box::new(TileMap::<T>::default()))
-    }
-
-    /// The tile values, if they are `T`s.
-    pub(crate) fn downcast_mut<T: 'static>(&mut self) -> Option<&mut TileMap<T>> {
-        self.0.as_any_mut().downcast_mut()
-    }
-
-    /// See [`RenderLayer::mark_changed`](crate::layer::render_layer::RenderLayer::mark_changed).
-    pub(crate) fn mark_changed(&mut self, changed: &ChangedBuckets) {
-        self.0.mark_changed(changed);
     }
 }
 

@@ -10,10 +10,12 @@
 //! drape draws the tiles over its own tile: on Mercator those of its world
 //! copy; on the globe, which has no copies, those of any, in its own, so
 //! that near the antimeridian it holds the tiles that the cover puts in the
-//! next copy. Each draped layer has tile values and draws of its own in
-//! each drape of its stack, which the layer makes as it makes the frame's,
-//! for the drape's frame ([`RenderLayer::update_drape_draws`]), and which
-//! the engine draws with the drape's uniforms, clip masks and stencil.
+//! next copy. Each draped layer has draws of its own in each drape of its
+//! stack, which the layer makes as it makes the frame's, for the drape's
+//! frame ([`RenderLayer::update_drape_draws`]), and which the engine draws
+//! with the drape's uniforms, clip masks and stencil. The drapes draw the
+//! layer's values of its tiles, which it keeps once for the frame and every
+//! drape a tile overlaps.
 //!
 //! A drape draws again only when what its layers would draw it from differs
 //! from what they last drew it from ([`DrapeKey`]), or its side changes;
@@ -59,9 +61,9 @@ use crate::draw::context::Context;
 use crate::draw::draws::{DrawGroups, DrawOrder, Draws};
 use crate::draw::resources::{GpuTexture, attachment_bytes};
 use crate::draw::store::SharedTexture;
-use crate::layer::layer_drawing::{ChangedBuckets, DrapeTiles};
+use crate::layer::layer_drawing::ChangedBuckets;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
-use crate::layer::render_layer::{FrameSourceTiles, RenderLayer};
+use crate::layer::render_layer::{DrapeTile, FrameSourceTiles, RenderLayer};
 use crate::render::clip_masks::ClipMasks;
 use crate::render::layer_composite::LayerComposite;
 use crate::render::paint_parameters::{OpenPass, PaintParameters, TransformParameters};
@@ -130,11 +132,10 @@ fn cap_sizes(sizes: &mut [u32], held: &[usize], cap: u64) {
     }
 }
 
-/// What a drape keeps of a layer: its tile values and its draws there,
-/// with the style they were made for.
+/// What a drape keeps of a layer: its draws there, with the style they
+/// were made for.
 struct DrapeLayer {
     style: Arc<dyn ErasedLayerStyle>,
-    tiles: DrapeTiles,
     draws: Draws,
 }
 
@@ -236,6 +237,8 @@ struct Targets {
 #[derive(Default)]
 pub(crate) struct Drapes {
     drapes: Vec<Drape>,
+    /// The drapes' tiles, in id order.
+    tiles: Vec<OverscaledTileID>,
     /// Whether the frame's view is on the globe, where a drape draws the
     /// tiles over its own whatever their world copy.
     globe: bool,
@@ -289,6 +292,10 @@ impl Drapes {
             }
             self.drapes.push(drape);
         }
+        self.tiles.clear();
+        self.tiles.extend(self.drapes.iter().map(|drape| drape.tile));
+        self.tiles.sort();
+        self.tiles.dedup();
     }
 
     /// How many stacks the drapes of each tile are of.
@@ -380,7 +387,7 @@ impl Drapes {
         source: Option<FrameSourceTiles<'_>>,
         lit: bool,
     ) {
-        let globe = self.globe;
+        let (globe, tiles) = (self.globe, &self.tiles);
         let style = Arc::clone(&layer.base().style);
         // The draws' updates don't read what the layers composite with, which
         // the upload makes.
@@ -392,16 +399,15 @@ impl Drapes {
             // What was made for another style of the layer goes, as the
             // layer's own draws do.
             let kept = previous.iter().position(|kept| Arc::ptr_eq(&kept.style, &style));
-            let kept = kept.map(|index| previous.swap_remove(index)).or_else(|| {
-                let tiles = layer.new_drape_tiles();
-                debug_assert!(tiles.is_some(), "a layer that doesn't drape in a drape");
-                Some(DrapeLayer { style: Arc::clone(&style), tiles: tiles?, draws: Draws::default() })
-            });
-            let Some(mut kept) = kept else { continue };
+            let mut kept = match kept {
+                Some(index) => previous.swap_remove(index),
+                None => DrapeLayer { style: Arc::clone(&style), draws: Draws::default() },
+            };
             let (unwrapped, size) = (tile.to_unwrapped(), Size::new(*size, *size));
             let mut parameters = parameters.drape(transform, clip_masks, layer_composite, size, unwrapped);
             parameters.drape_lit = lit;
-            layer.update_drape_draws(gpu, &mut parameters, source, (*tile, globe), &mut kept.tiles, &mut kept.draws);
+            let drape = DrapeTile { tile: *tile, globe, tiles };
+            layer.update_drape_draws(gpu, &mut parameters, source, drape, &mut kept.draws);
             layers.push(kept);
         }
     }
@@ -471,13 +477,10 @@ impl Drapes {
         drape.stacks.get(stack)?.texture.as_ref().map(|(texture, _)| texture)
     }
 
-    /// Records that the buckets in `changed` changed, for the drapes' draws
-    /// built from them, and makes the drapes that show them draw again.
+    /// Makes the drapes that show the buckets in `changed`, which changed,
+    /// draw again.
     pub(crate) fn mark_changed(&mut self, changed: &ChangedBuckets) {
         for drape in self.drapes.iter_mut().flat_map(|drape| &mut drape.stacks) {
-            for layer in &mut drape.layers {
-                layer.tiles.mark_changed(changed);
-            }
             if drape.drawn.as_ref().is_some_and(|drawn| drawn.holds(changed)) {
                 drape.drawn = None;
             }

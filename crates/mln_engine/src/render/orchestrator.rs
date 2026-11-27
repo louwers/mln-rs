@@ -1199,9 +1199,10 @@ impl RenderOrchestrator {
             let render_layer = &mut self.layers[index as usize];
             let layer_source =
                 layer_source(frame_layer, &self.render_sources, &self.tile_store, &self.found_tiles, &mut contents);
-            // Over terrain, a layer that drapes draws nothing onto the frame.
+            // Over terrain, a layer that drapes draws nothing onto the frame,
+            // and its tile values draw in the drapes.
             if frame.terrain && render_layer.terrain().drapes() {
-                render_layer.remove_all_draws();
+                render_layer.remove_frame_draws();
                 surface = true;
                 continue;
             }

@@ -407,8 +407,8 @@ impl RenderTerrain {
         self.draws.update(gpu, parameters, cover, (self.surface, fog), (&self.drapes, stacks), (depth_first, ground));
     }
 
-    /// Records that the buckets in `changed` changed, for the drapes' draws
-    /// built from them, and makes the drapes that show them draw again.
+    /// Makes the drapes that show the buckets in `changed`, which changed,
+    /// draw again.
     pub(crate) fn mark_changed(&mut self, changed: &ChangedBuckets) {
         self.drapes.mark_changed(changed);
     }
