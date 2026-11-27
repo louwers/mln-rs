@@ -1,12 +1,23 @@
 //! GeoJSON sources: features from GeoJSON data that the style or the API
 //! gives, or that the source's URL points to, cut into tiles or clustered.
+//!
+//! On a map drawn in a registered projection, the data is tiled and
+//! clustered in the projection's world square, which doesn't wrap; it stays
+//! lng/lat to the app. When the style's projection changes, a source tiles
+//! its data again in the new one from the GeoJSON it has: its URL's, the
+//! style's, or what it keeps of the GeoJSON set on it while its style is in
+//! a registered projection.
+
+mod reproject;
 
 use std::sync::{Arc, OnceLock};
 
 use geojson::GeoJson;
+pub use reproject::{features_from_world, features_to_world};
 
 use crate::collections::VecMap;
 use crate::conversion::{Convertible, Error as ConversionError};
+use crate::crs::{CrsMapping, same_mapping};
 use crate::expression::{Expr, Functions};
 use crate::layer::SourceKind;
 use crate::range::Range;
@@ -108,13 +119,30 @@ pub struct GeoJsonSourceOptions {
     pub inline: Option<InlineGeoJson>,
     /// `options.synchronous_update` until the source's override replaces it.
     pub synchronous_update: bool,
+    /// The registered projection that the source's style is drawn in, whose
+    /// world square its data is tiled in; `None` in the built-in projections,
+    /// which tile it in lng/lat. The style sets it when the source joins it
+    /// and when its projection changes.
+    pub crs: Option<Arc<CrsMapping>>,
+    /// The GeoJSON that the data set on the source was built from, which
+    /// the source keeps while its style is in a registered projection, to
+    /// tile it again when the projection changes.
+    pub kept: Option<Arc<GeoJson>>,
 }
 
 impl GeoJsonSourceOptions {
     #[must_use]
     pub fn new(options: Arc<GeoJSONOptions>) -> Self {
         let synchronous_update = options.synchronous_update;
-        GeoJsonSourceOptions { options, url: None, inline: None, synchronous_update }
+        GeoJsonSourceOptions { options, url: None, inline: None, synchronous_update, crs: None, kept: None }
+    }
+
+    /// Whether the source has GeoJSON to tile again when its style's
+    /// projection changes: a URL to request it from, the style's, or what it
+    /// keeps of the GeoJSON set on it.
+    #[must_use]
+    pub fn tiles_again(&self) -> bool {
+        self.url.is_some() || self.inline.is_some() || self.kept.is_some()
     }
 
     #[must_use]
@@ -135,6 +163,29 @@ impl StyleSourceType for GeoJsonSourceType {
     ) -> Option<SourceData<Self>> {
         crate::conversion::source::convert_geojson_source(value, functions, error)
     }
+
+    /// The source with `crs` in its options, whose GeoJSON loads again to
+    /// be tiled in it, if it has some ([`GeoJsonSourceOptions::tiles_again`]).
+    fn in_projection(source: &SourceData<Self>, crs: Option<&Arc<CrsMapping>>) -> Option<SourceData<Self>> {
+        if same_mapping(source.options.crs.as_ref(), crs) {
+            return None;
+        }
+        let mut source = source.clone();
+        source.options.crs = crs.cloned();
+        if source.options.tiles_again() {
+            source.load += 1;
+        }
+        Some(source)
+    }
+
+    /// In a built-in projection, the source lets go of the GeoJSON it kept
+    /// once its data is tiled in lng/lat.
+    fn options_once_described(options: &GeoJsonSourceOptions) -> GeoJsonSourceOptions {
+        if options.crs.is_none() && options.kept.is_some() {
+            return GeoJsonSourceOptions { kept: None, ..options.clone() };
+        }
+        options.clone()
+    }
 }
 
 impl GeoJsonSourceType {
@@ -145,6 +196,7 @@ impl GeoJsonSourceType {
         Edit::update_source::<Self>(id, "a GeoJSON source", |data| {
             data.options.url = Some(url);
             data.options.inline = None;
+            data.options.kept = None;
             data.load += 1;
             true
         })
@@ -167,3 +219,6 @@ impl GeoJsonSourceType {
 pub fn geojson_source(id: &str, options: Arc<GeoJSONOptions>) -> Source {
     Source::new(id, SourceData::<GeoJsonSourceType>::new(GeoJsonSourceOptions::new(options)))
 }
+
+#[cfg(test)]
+mod tests;

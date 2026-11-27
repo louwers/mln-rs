@@ -142,9 +142,13 @@ pub struct FreeCameraOptions {
     /// "mercator meter". Coordinate [0, 0, 0] is the north-west corner and
     /// [1, 1, 0] is the south-east corner. Z coordinate is conformal and must
     /// respect minimum and maximum zoom values. Zoom is automatically
-    /// computed from the altitude (z).
+    /// computed from the altitude (z). A map in a registered projection
+    /// places the camera by the lat/lng and the altitude that the position
+    /// stands for, as GL JS does.
     pub position: Option<DVec3>,
-    /// Orientation of the camera as a unit quaternion.
+    /// Orientation of the camera as a unit quaternion. On a map in a
+    /// registered projection, it turns from the north of the projection's
+    /// grid.
     pub orientation: Option<DQuat>,
 }
 

@@ -18,11 +18,12 @@ use mln_engine::source::{
     WorldCopy,
 };
 use mln_engine::storage::chrono::Timestamp;
-use mln_engine::storage::resource::{Priority, TileFormat};
+use mln_engine::storage::resource::{Priority, TileAddressing, TileFormat};
 use mln_engine::storage::response::{Caching, Reason};
 use mln_engine::storage::{Data, FileSource, LoadingMethod, Request, Resource, Response, StoragePolicy};
 use mln_engine::tile::cut::{Ancestor, Cut, CutData};
 use mln_engine::tile::{OverscaledTileID, TileData};
+use mln_style::crs::TileMatrixSet;
 use mln_style::error::Error;
 use mln_style::hash::{HashMap, hash_bytes};
 use mln_style::layer::SourceKind;
@@ -269,6 +270,9 @@ struct Tilesets {
     params: NetworkParams,
     /// The map's pixel ratio, which raster tiles' resources ask for.
     pixel_ratio: f32,
+    /// The tile matrix set of the map's registered projection, whose units
+    /// the tiles' `{bbox}` is in; none on Mercator and the globe.
+    tile_matrix_set: Option<TileMatrixSet>,
 }
 
 /// How a tile's network requests keep its data fresh, as its source says.
@@ -296,7 +300,14 @@ struct TilesetData {
 
 impl Tilesets {
     fn new(tiles: Tiles) -> Self {
-        Tilesets { tiles, tileset: None, data: None, params: NetworkParams::default(), pixel_ratio: 1.0 }
+        Tilesets {
+            tiles,
+            tileset: None,
+            data: None,
+            params: NetworkParams::default(),
+            pixel_ratio: 1.0,
+            tile_matrix_set: None,
+        }
     }
 
     /// Starts a new tile's loading, whose first request only looks in the
@@ -431,6 +442,16 @@ impl Tilesets {
         // A tileset without tiles makes no tiles, and the source counts as
         // loaded until its tiles are set.
         let tileset = self.tileset.as_ref().filter(|tileset| !tileset.tiles.is_empty())?;
+        // A tile's `{bbox}` is its box in the grid of the map's registered
+        // projection, so the tiles of URLs that hold one load again when the
+        // grid changes.
+        let tile_matrix_set = update.map().tile_matrix_set;
+        if self.tile_matrix_set != tile_matrix_set {
+            if tileset.tiles.iter().any(|url| url.contains("{bbox}")) {
+                update.clear_tiles();
+            }
+            self.tile_matrix_set = tile_matrix_set;
+        }
         let vector = self.tiles == Tiles::Vector;
         let encoding = if vector && tileset.vector_encoding == Some(VectorEncoding::MLT) {
             // The encoding is decided once, from the first tileset (`isMLT`).
@@ -490,7 +511,8 @@ impl Tilesets {
             VectorTileEncoding::Mlt { .. } => TileFormat::Mlt,
         };
         let (x, y, z) = (canonical.x as i32, canonical.y as i32, canonical.z as i8);
-        let mut resource = Resource::tile(url, self.pixel_ratio, x, y, z, scheme, format, LoadingMethod::CacheOnly);
+        let addressing = TileAddressing { scheme, tile_matrix_set: self.tile_matrix_set };
+        let mut resource = Resource::tile(url, self.pixel_ratio, x, y, z, addressing, format, LoadingMethod::CacheOnly);
         resource.order = cx.order();
         let mut tile = TilesetTile::new(resource);
         // A copy made at another pixel ratio is of another resource.

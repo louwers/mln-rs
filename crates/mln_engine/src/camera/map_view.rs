@@ -13,6 +13,8 @@ use crate::camera::mode::{ConstrainMode, ViewportMode};
 use crate::camera::projection_mode::{AxonometricMode, ProjectionMode};
 use crate::camera::transform_state::TransformState;
 use crate::camera::view::{ViewParams, map_offset, zoom_scale};
+use crate::geo::projection::Projection;
+use crate::geo::world::WorldMapping;
 use crate::geo::{EdgeInsets, NorthOrientation};
 
 /// A camera with every member set: the camera that a map has, where
@@ -106,6 +108,11 @@ impl Default for Viewport {
 }
 
 /// One view of a map: its camera, size, and projection.
+///
+/// It doesn't carry how the map's lng/lat maps to its world square, which a
+/// style's registered projection decides: [`to_state`](Self::to_state)
+/// takes that from the map, as
+/// [`View::world`](crate::camera::View::world) gives it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MapView {
     pub camera: Camera,
@@ -116,30 +123,48 @@ pub struct MapView {
     pub viewport: Viewport,
     /// The style's projection at the camera's zoom. A view from a map never
     /// names `globe`, which [`to_state`](Self::to_state) resolves at the
-    /// camera's zoom.
+    /// camera's zoom. A registered projection draws flat, and is Mercator
+    /// here.
     pub projection: ProjectionDefinition,
 }
 
 impl MapView {
     /// A transform state that shows exactly this view, to convert coordinates
-    /// for it.
+    /// for it, where lng/lat maps to the world square as `world` maps it:
+    /// the mapping of the map the view came from
+    /// ([`View::world`](crate::camera::View::world)).
     ///
     /// The state takes the camera as it is: it keeps the center's copy of the
     /// world, and has no bounds and the widest zoom and pitch limits, so no
     /// constraint of the map that the view came from moves the camera.
     ///
     /// `Err` for a view that no transform can show: a camera member that isn't
-    /// finite, a zoom, pitch or field of view outside the limits of every map,
-    /// a padding or frustum offset below zero, an empty size, a scale factor
-    /// that isn't positive, or a skew that isn't finite.
-    pub fn to_state(&self) -> Result<TransformState, Error> {
+    /// finite, a center that `world` has no place for, a zoom, pitch or field
+    /// of view outside the limits of every map, a padding or frustum offset
+    /// below zero, an empty size, a scale factor that isn't positive, or a
+    /// skew that isn't finite.
+    pub fn to_state(&self, world: &WorldMapping) -> Result<TransformState, Error> {
         self.validate()?;
         let camera = &self.camera;
         let viewport = &self.viewport;
         let projection = self.projection.at_zoom(camera.zoom);
         let projection_transition = projection.transition_state();
         let scale = zoom_scale(camera.zoom);
-        let (x, y) = map_offset(&camera.center, scale, projection_transition > 0.0);
+        let (x, y) = match world {
+            WorldMapping::Mercator => map_offset(&camera.center, scale, projection_transition > 0.0),
+            WorldMapping::Crs(_) => {
+                let center = world.world_from_lat_lng(&camera.center);
+                let world_size = Projection::world_size(scale);
+                let offset = ((0.5 - center.x) * world_size, (0.5 - center.y) * world_size);
+                if !offset.0.is_finite() || !offset.1.is_finite() {
+                    return Err(Error::invalid_argument(format!(
+                        "the projection \"{}\" has no place for the view's center",
+                        world.name()
+                    )));
+                }
+                offset
+            }
+        };
         let params = ViewParams {
             size: self.extent.size,
             frustum_offset: viewport.frustum_offset,
@@ -149,6 +174,7 @@ impl MapView {
             center_clamped_to_ground: viewport.center_clamped_to_ground,
             globe_free_bearing: viewport.globe_free_bearing,
             projection_definition: projection,
+            world: world.clone(),
             projection_transition,
             padding: camera.padding,
             x,
@@ -168,11 +194,11 @@ impl MapView {
         Ok(TransformState::from_parts(params, CameraLimits::widest()))
     }
 
-    /// The view that this describes, to draw it or convert coordinates for
-    /// it. `Err`: as [`to_state`](Self::to_state).
+    /// The view that this describes in `world`, to draw it or convert
+    /// coordinates for it. `Err`: as [`to_state`](Self::to_state).
     #[cfg(test)]
-    pub(crate) fn to_view(self) -> Result<crate::camera::view::View, Error> {
-        Ok(self.to_state()?.view().clone())
+    pub(crate) fn to_view(self, world: &WorldMapping) -> Result<crate::camera::view::View, Error> {
+        Ok(self.to_state(world)?.view().clone())
     }
 
     fn validate(&self) -> Result<(), Error> {

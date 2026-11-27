@@ -367,6 +367,15 @@ impl Impl {
         this
     }
 
+    /// The cover at zoom `z` of `geom` in the world square, which spans 0 to
+    /// 1 on both axes.
+    #[cfg(feature = "sqlite")]
+    pub(crate) fn new_in_world_square(z: i32, geom: &Geometry<f64>) -> Impl {
+        let scale = 2f64.powi(z);
+        let Ok(this) = Self::build(z, geom, |p: Point<f64>| Ok::<_, Infallible>(Point::new(p.x * scale, p.y * scale)));
+        this
+    }
+
     /// The cover at zoom `z` of `geom` in longitudes and latitudes, or an
     /// error for a point that isn't a valid `LatLng`.
     pub(crate) fn new_projected(z: i32, geom: &Geometry<f64>) -> Result<Impl, Error> {

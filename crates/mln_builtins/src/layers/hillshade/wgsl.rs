@@ -65,7 +65,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
         exaggeration = (tileProps.zoom - 15.0) * exaggerationFactor;
     }
 
-    let denom = pow(2.0, exaggeration + (28.2562 - tileProps.zoom));
+    // The slopes are divided by 8 times the meters a DEM pixel spans, the
+    // zoom 0 world's width over the pixels across the zoom's tiles.
+    let denom = pow(2.0, exaggeration + (3.0 + tileProps.log2_world_width - tileProps.zoom));
     let deriv = vec2<f32>((c + f + f + i) - (a + d + d + g),
                           (g + h + h + i) - (a + b + b + c)) * tileSize / denom;
 

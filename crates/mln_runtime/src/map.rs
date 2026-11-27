@@ -10,6 +10,7 @@ use mln_engine::camera::{
 use mln_engine::exec::event_queue::Waker;
 use mln_engine::exec::pool::Pool;
 use mln_engine::exec::queue::TimedTask;
+use mln_engine::geo::world::WorldMapping;
 use mln_engine::map::{MapEvent, MapMode, MapSnapshot};
 use mln_engine::text::GlyphCache;
 use mln_engine::text::font_face_engine::FontFaceEngine;
@@ -148,6 +149,9 @@ struct PublishedState {
     snapshot: MapSnapshot,
     /// The ground the map draws (`mln_engine::map::Map::ground`).
     ground: Option<Arc<dyn Elevation>>,
+    /// How the map's lng/lat maps to its world square, which its views
+    /// don't carry ([`MapView::to_state`]).
+    world: WorldMapping,
 }
 
 impl Published {
@@ -468,15 +472,29 @@ impl Map {
 
     /// A projection of `view`, or of the map's view as of
     /// [`snapshot`](Self::snapshot) for `None`, on the ground the map drew
-    /// then (`mln_engine::map::Map::ground`): it converts as the map does, over
-    /// terrain on the ground the renderer drew, else on the flat map. It is
-    /// the caller's, and doesn't follow the map.
+    /// then (`mln_engine::map::Map::ground`), in the projection the map drew
+    /// in then: it converts as the map does, over terrain on the ground the
+    /// renderer drew, else on the flat map, and in a registered projection
+    /// through it. It is the caller's, and doesn't follow the map. A view
+    /// carries no projection of its own: one from before the style switched
+    /// between Mercator and a registered projection converts in the one the
+    /// map draws in now. GL JS doesn't support that switch after the style
+    /// loads either.
     ///
     /// Fails as [`snapshot`](Self::snapshot) does, and for `view` as
     /// [`MapView::to_state`](mln_engine::camera::MapView::to_state).
     pub fn projection(&self, view: Option<&MapView>) -> Result<MapProjection, Error> {
-        let (snapshot_view, ground) = self.published(|state| (state.snapshot.view, state.ground.clone()))?;
-        Ok(MapProjection::from_view(view.unwrap_or(&snapshot_view))?.with_ground(ground))
+        let (snapshot_view, ground, world) =
+            self.published(|state| (state.snapshot.view, state.ground.clone(), state.world.clone()))?;
+        Ok(MapProjection::from_view(view.unwrap_or(&snapshot_view), &world)?.with_ground(ground))
+    }
+
+    /// The map's state as of its last flush, as [`snapshot`](Self::snapshot)
+    /// reads it but for the renderer's updates, with how its lng/lat mapped
+    /// to its world square then, which converts the snapshot's view
+    /// ([`MapView::to_state`]). Fails as `snapshot` does.
+    pub(crate) fn snapshot_with_world(&self) -> Result<(MapSnapshot, WorldMapping), Error> {
+        self.published(|state| (state.snapshot, state.world.clone()))
     }
 
     /// What `read` takes from the map's last flush. Fails with
@@ -1861,7 +1879,8 @@ pub(crate) fn flush(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
     };
     // The renderer's ground changes the map's conversions, though not
     // always its state.
-    *published = Some(PublishedState { snapshot, ground: entry.core.ground() });
+    let world = entry.core.transform_state().view().world().clone();
+    *published = Some(PublishedState { snapshot, ground: entry.core.ground(), world });
     drop(published);
 
     let mut style_outcome = None;
@@ -1932,9 +1951,11 @@ fn remove(core: &mut RuntimeCore, id: MapId, done: Option<Resolver<()>>, outbox:
             core.queue.cancel(task);
         }
         entry.core.set_waker(None);
-        // The handles, which may outlive the map, keep no ground alive.
+        // The handles, which may outlive the map, keep no ground or
+        // registered projection alive.
         if let Some(state) = &mut *entry.published.state.lock() {
             state.ground = None;
+            state.world = WorldMapping::Mercator;
         }
         if let Some(pending) = entry.pending_style.take() {
             outbox.resolve(pending.resolver, Err(Error::cancelled("the map was released")));

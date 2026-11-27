@@ -2,12 +2,12 @@
 //! types ([`layers`]) and source types ([`sources`]), through the engine's
 //! layer and source type contracts (`mln_engine::layer`,
 //! `mln_engine::source`), and [`register_builtins`], which fills a registry
-//! with them, the specification's expression functions and the layer types
-//! that the engine holds.
+//! with them, the specification's expression functions, the layer types
+//! that the engine holds and the built-in projections.
 
 use std::sync::{Arc, LazyLock};
 
-use mln_engine::{Registry, RegistryBuilder};
+use mln_engine::{Registry, RegistryBuilder, register_builtin_projections};
 use mln_style::expression::functions::{RegisterError, register_builtin_functions};
 
 #[cfg(feature = "bench")]
@@ -28,10 +28,12 @@ mod log_target {
 }
 
 /// Adds the style specification's expression functions, layer types and
-/// source types. Fails for a name that an earlier call took, or a role that
-/// an earlier function has.
+/// source types, and the `identity` projection
+/// ([`register_builtin_projections`]). Fails for a name that an earlier call
+/// took, or a role that an earlier function has.
 pub fn register_builtins(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
     register_builtin_functions(builder.functions_mut())?;
+    register_builtin_projections(builder)?;
     layers::register_layer_types(builder)?;
     sources::register_source_types(builder)
 }

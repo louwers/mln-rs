@@ -86,7 +86,7 @@ pub enum MapMode {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum TerrainSkirtLength {
     /// A fifth of a tile's width at the map's zoom, in meters at the
-    /// equator.
+    /// equator, or in a registered projection in its meters per world unit.
     #[default]
     Auto,
     /// No skirts.

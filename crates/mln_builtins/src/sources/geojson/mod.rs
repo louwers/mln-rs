@@ -5,13 +5,21 @@
 //! unless the source updates synchronously. [`tile`] cuts features into
 //! vector tiles, as geojson-vt does, and [`cluster`] groups a clustered
 //! source's points into clusters for each zoom, as supercluster does.
+//!
+//! In a registered projection the data is tiled and clustered in the
+//! projection's world square, which doesn't wrap. Data tiled for another
+//! projection than the style's draws nothing until the source has tiled its
+//! GeoJSON again in the style's, as it does when the projection changes;
+//! a source that has no GeoJSON to tile again warns once that its data must
+//! be set again.
 
 pub mod cluster;
 mod mercator;
 pub mod tile;
 
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
+use geo_types::Coord;
 use geojson::GeoJson;
 use mln_engine::exec::pool::TaskGroup;
 use mln_engine::map::MapMode;
@@ -22,12 +30,15 @@ use mln_engine::source::{
 };
 use mln_engine::storage::Data;
 use mln_engine::tile::TileData;
+use mln_style::crs::{CrsMapping, same_mapping};
 use mln_style::error::Error;
 use mln_style::expression::{Expr, evaluate_accumulated, from_expression_value};
 use mln_style::feature::{Feature, PropertyMap, Value};
 use mln_style::source::SourceData;
 use mln_style::sources::GeoJsonSourceType;
-use mln_style::sources::geojson::{ClusterProperties, GeoJSONOptions, GeoJsonSourceOptions};
+use mln_style::sources::geojson::{
+    ClusterProperties, GeoJSONOptions, GeoJsonSourceOptions, features_from_world, features_to_world,
+};
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::{Edit, Source, constants};
 use parking_lot::Mutex;
@@ -48,24 +59,32 @@ impl SourceType for GeoJsonSource {
 
     const DESCRIBES_IN_BACKGROUND: bool = true;
 
-    /// The GeoJSON at the source's URL, or the GeoJSON the style gives,
-    /// which the source indexes as it describes it.
+    /// The GeoJSON at the source's URL, the GeoJSON the style gives, or the
+    /// GeoJSON the source keeps while its data is tiled for another
+    /// projection than the style's, which the source indexes as it
+    /// describes it.
     fn load(source: &SourceData<GeoJsonSourceType>) -> Load<Arc<dyn GeoJSONData>> {
-        match (&source.options.url, &source.options.inline) {
-            (Some(url), _) => Load::Fetch(Fetch::Source(url.clone())),
-            (None, Some(_)) => Load::Describe,
-            (None, None) => Load::Done,
+        let options = &source.options;
+        let tiled_for_the_style =
+            || source.description::<Arc<dyn GeoJSONData>>().is_some_and(|data| tiled_in(&**data, options.crs.as_ref()));
+        match (&options.url, &options.inline, &options.kept) {
+            (Some(url), _, _) => Load::Fetch(Fetch::Source(url.clone())),
+            (None, Some(_), _) => Load::Describe,
+            (None, None, Some(_)) if !tiled_for_the_style() => Load::Describe,
+            (None, None, _) => Load::Done,
         }
     }
 
-    /// Builds the fetched GeoJSON, or the GeoJSON the style gives. Data that
+    /// Builds the fetched GeoJSON, the GeoJSON the style gives, or the
+    /// GeoJSON the source keeps, in the style's projection. Data that
     /// doesn't build is logged and describes an empty source, so that its
     /// tiles don't wait for data.
     fn describe(options: &GeoJsonSourceOptions, data: Option<Data>, respond: Respond<Described<Arc<dyn GeoJSONData>>>) {
-        respond(match (data, &options.inline) {
-            (Some(data), _) => Ok(build_geojson(&data, options)),
-            (None, Some(inline)) => Ok(build_inline(inline, options)),
-            (None, None) => Err(Error::native("unexpectedly empty GeoJSON")),
+        respond(match (data, &options.inline, &options.kept) {
+            (Some(data), _, _) => Ok(build_geojson(&data, options)),
+            (None, Some(inline), _) => Ok(build_inline(inline, options)),
+            (None, None, Some(kept)) => Ok(build_logged(GeoJson::clone(kept), options)),
+            (None, None, None) => Err(Error::native("unexpectedly empty GeoJSON")),
         });
     }
 
@@ -89,7 +108,7 @@ impl SourceType for GeoJsonSource {
     }
 
     fn supply(_source: &Source) -> Supply<GeometryTiles> {
-        Supply::tiles(GeoJsonOrigin { data: None, synchronous: false })
+        Supply::tiles(GeoJsonOrigin { data: None, synchronous: false, warned: None })
     }
 
     /// The "supercluster" extension: a cluster feature's "children",
@@ -118,6 +137,9 @@ fn tile_features(index: &tile::TileIndex, id: &CanonicalTileID) -> Arc<TileFeatu
 /// A `TileIndex`'s tiles, which it cuts as they are asked for.
 struct IndexData {
     index: tile::TileIndex,
+    /// The registered projection whose world square the data is in; `None`
+    /// for lng/lat.
+    crs: Option<Arc<CrsMapping>>,
 }
 
 impl std::fmt::Debug for IndexData {
@@ -146,10 +168,28 @@ impl GeoJSONData for IndexData {
     fn get_cluster_expansion_zoom(&self, _cluster_id: u32) -> Result<u8, Error> {
         Ok(0)
     }
+
+    fn crs(&self) -> Option<&Arc<CrsMapping>> {
+        self.crs.as_ref()
+    }
 }
 
 struct ClusterData {
     clusters: cluster::Clusters,
+    /// The registered projection whose world square the points were
+    /// clustered in, from which the features that the data gives back go to
+    /// lng/lat; `None` for lng/lat.
+    crs: Option<Arc<CrsMapping>>,
+}
+
+impl ClusterData {
+    /// `features`, from the clusters, in lng/lat.
+    fn lng_lat(&self, features: Features) -> Features {
+        match &self.crs {
+            Some(crs) => features_from_world(features, crs),
+            None => features,
+        }
+    }
 }
 
 impl std::fmt::Debug for ClusterData {
@@ -164,15 +204,24 @@ impl GeoJSONData for ClusterData {
     }
 
     fn get_children(&self, cluster_id: u32) -> Result<Features, Error> {
-        self.clusters.children(cluster_id).map_err(|e| Error::not_found(e.to_string()))
+        let children = self.clusters.children(cluster_id).map_err(|e| Error::not_found(e.to_string()))?;
+        Ok(self.lng_lat(children))
     }
 
     fn get_leaves(&self, cluster_id: u32, limit: u32, offset: u32) -> Result<Features, Error> {
-        self.clusters.leaves(cluster_id, limit as usize, offset as usize).map_err(|e| Error::not_found(e.to_string()))
+        let leaves = self
+            .clusters
+            .leaves(cluster_id, limit as usize, offset as usize)
+            .map_err(|e| Error::not_found(e.to_string()))?;
+        Ok(self.lng_lat(leaves))
     }
 
     fn get_cluster_expansion_zoom(&self, cluster_id: u32) -> Result<u8, Error> {
         self.clusters.expansion_zoom(cluster_id).map_err(|e| Error::not_found(e.to_string()))
+    }
+
+    fn crs(&self) -> Option<&Arc<CrsMapping>> {
+        self.crs.as_ref()
     }
 }
 
@@ -212,23 +261,40 @@ impl cluster::Aggregate for ClusterExpressions<'_> {
     }
 }
 
-/// The data of `features`. Only the features of a feature collection
-/// (`collection`) cluster.
-fn create(features: Features, collection: bool, options: &Arc<GeoJSONOptions>) -> Result<Arc<dyn GeoJSONData>, Error> {
+/// The data of `features`, tiled or clustered in the registered projection
+/// `crs`, or in lng/lat with `None`. Only the features of a feature
+/// collection (`collection`) cluster.
+fn create(
+    features: Features,
+    collection: bool,
+    options: &Arc<GeoJSONOptions>,
+    crs: Option<&Arc<CrsMapping>>,
+) -> Result<Arc<dyn GeoJSONData>, Error> {
     let scale: f64 = f64::from(constants::EXTENT) / constants::TILE_SIZE_D;
+    // A registered projection's world square doesn't wrap.
+    let (coordinates, wrap) = match crs {
+        Some(_) => (Coordinates::UnitSquare, false),
+        None => (Coordinates::LngLat, true),
+    };
     if options.cluster && collection && !features.is_empty() {
+        let features = match crs {
+            Some(crs) => points_to_world(features, crs)?,
+            None => features,
+        };
         let cluster_options = cluster::Options {
             max_zoom: options.cluster_max_zoom,
             extent: constants::EXTENT as u16,
             radius: scale * f64::from(options.cluster_radius),
             min_points: options.cluster_min_points,
+            coordinates,
+            wrap,
         };
         let expressions = ClusterExpressions(&options.cluster_properties);
         let aggregate: Option<&dyn cluster::Aggregate> =
             (!options.cluster_properties.is_empty()).then_some(&expressions);
         let clusters = cluster::Clusters::new(features, cluster_options, aggregate)
             .map_err(|e| Error::invalid_argument(e.to_string()))?;
-        return Ok(Arc::new(ClusterData { clusters }));
+        return Ok(Arc::new(ClusterData { clusters, crs: crs.cloned() }));
     }
 
     let tile_options = tile::Options {
@@ -238,16 +304,76 @@ fn create(features: Features, collection: bool, options: &Arc<GeoJSONOptions>) -
             buffer: (scale * f64::from(options.buffer)).round() as u16,
             tolerance: scale * options.tolerance,
             line_metrics: options.line_metrics,
+            coordinates,
         },
+        wrap,
         ..Default::default()
     };
-    Ok(Arc::new(IndexData { index: tile::TileIndex::new(&features, tile_options) }))
+    let index = match crs {
+        Some(crs) => tile::TileIndex::new(&features_to_world(features, crs), tile_options),
+        None => tile::TileIndex::new(&features, tile_options),
+    };
+    Ok(Arc::new(IndexData { index, crs: crs.cloned() }))
+}
+
+/// `features`, points to cluster, moved to the world square of `crs`. A
+/// point that the projection has no place for is left out, as one outside
+/// the square is; a feature that isn't a point fails as it does in lng/lat.
+fn points_to_world(features: Features, crs: &CrsMapping) -> Result<Features, Error> {
+    let not_a_point =
+        features.iter().position(|feature| !matches!(feature.geometry, Some(geo_types::Geometry::Point(_))));
+    if let Some(index) = not_a_point {
+        return Err(Error::invalid_argument(cluster::Error::NotAPoint(index).to_string()));
+    }
+    let mut features = features_to_world(features, crs);
+    features.retain(|feature| feature.geometry.is_some());
+    Ok(features)
+}
+
+/// Whether `data` is tiled in the registered projection `crs`, or in lng/lat
+/// for `None`.
+fn tiled_in(data: &dyn GeoJSONData, crs: Option<&Arc<CrsMapping>>) -> bool {
+    same_mapping(data.crs(), crs)
 }
 
 /// A tile's features, in tile coordinates. Features that come from one
 /// source feature share its property map.
 pub type TileFeatures = Vec<Feature<i16, Arc<PropertyMap>>>;
 pub type Features = Vec<Feature<f64>>;
+
+/// The space that features' positions are in. Tiles are cut, and points
+/// clustered, in the unit square that tile 0/0/0 covers, with y down.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Coordinates {
+    /// Longitude and latitude, in degrees, which Web Mercator puts in the
+    /// unit square. Latitudes past its limit (about ±85.05°) land on the
+    /// square's top or bottom edge.
+    #[default]
+    LngLat,
+    /// Positions in the unit square already, as data in another projection
+    /// has them, taken as they are.
+    UnitSquare,
+}
+
+impl Coordinates {
+    /// The position in the unit square of `c`, a position in this space.
+    #[must_use]
+    pub(crate) fn project(self, c: Coord) -> Coord {
+        match self {
+            Coordinates::LngLat => mercator::project(c),
+            Coordinates::UnitSquare => c,
+        }
+    }
+
+    /// The position in this space of `p`, a position in the unit square.
+    #[must_use]
+    pub(crate) fn unproject(self, p: Coord) -> Coord {
+        match self {
+            Coordinates::LngLat => mercator::unproject(p),
+            Coordinates::UnitSquare => p,
+        }
+    }
+}
 
 pub trait GeoJSONData: Send + Sync {
     /// The features of tile `id`, made on the calling thread. The data may
@@ -267,17 +393,35 @@ pub trait GeoJSONData: Send + Sync {
     fn get_children(&self, cluster_id: u32) -> Result<Features, Error>;
     fn get_leaves(&self, cluster_id: u32, limit: u32, offset: u32) -> Result<Features, Error>;
     fn get_cluster_expansion_zoom(&self, cluster_id: u32) -> Result<u8, Error>;
+
+    /// The registered projection whose world square the data is tiled in;
+    /// `None` for lng/lat.
+    fn crs(&self) -> Option<&Arc<CrsMapping>> {
+        None
+    }
 }
 
-/// Prepares GeoJSON for tiling. GeoJSON whose geometry `geo_types` can't
-/// hold (a position of fewer than two numbers), or that can't be clustered,
-/// such as a non-point feature, fails with
-/// [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind).
+/// Prepares GeoJSON for tiling in lng/lat, as a map in a built-in projection
+/// draws it. GeoJSON whose geometry `geo_types` can't hold (a position of
+/// fewer than two numbers), or that can't be clustered, such as a non-point
+/// feature, fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind).
 pub fn create_geojson_data(geojson: GeoJson, options: &Arc<GeoJSONOptions>) -> Result<Arc<dyn GeoJSONData>, Error> {
+    create_geojson_data_in(geojson, options, None)
+}
+
+/// [`create_geojson_data`], tiled or clustered in the registered projection
+/// `crs`, or in lng/lat with `None`: in the projection of a source's style,
+/// its options' `crs`, the data draws there. Cluster children and leaves
+/// come back in lng/lat.
+pub fn create_geojson_data_in(
+    geojson: GeoJson,
+    options: &Arc<GeoJSONOptions>,
+    crs: Option<&Arc<CrsMapping>>,
+) -> Result<Arc<dyn GeoJSONData>, Error> {
     let collection = matches!(geojson, GeoJson::FeatureCollection(_));
     let features =
         mln_style::feature::geojson::features(geojson).map_err(|e| Error::invalid_argument(e.to_string()))?;
-    create(features, collection, options)
+    create(features, collection, options, crs)
 }
 
 /// The data of GeoJSON text `data`, built with `options`. Text that isn't
@@ -304,10 +448,10 @@ fn build_inline(inline: &Result<GeoJson, String>, options: &GeoJsonSourceOptions
     }
 }
 
-/// The data of `geojson` built with `options`, or `None`, logged, for
-/// GeoJSON that can't be built.
+/// The data of `geojson` built with `options`, in their projection, or
+/// `None`, logged, for GeoJSON that can't be built.
 fn build_logged(geojson: GeoJson, options: &GeoJsonSourceOptions) -> Option<Arc<dyn GeoJSONData>> {
-    match create_geojson_data(geojson, &options.options) {
+    match create_geojson_data_in(geojson, &options.options, options.crs.as_ref()) {
         Ok(data) => Some(data),
         Err(e) => {
             log::error!(target: PARSE_STYLE, "Failed to parse GeoJSON data: {e}");
@@ -324,9 +468,32 @@ struct GeoJsonOrigin {
     /// workers' other work.
     data: Option<(Arc<dyn GeoJSONData>, TaskGroup)>,
     synchronous: bool,
+    /// The data tiled for another projection that the origin warned about.
+    warned: Option<Weak<dyn GeoJSONData>>,
 }
 
 impl GeoJsonOrigin {
+    /// Whether `data`, the data of the source `id` of `options`, is tiled in
+    /// the style's projection, where it draws. Data tiled for another one
+    /// would draw in the wrong place; when the source has no GeoJSON to tile
+    /// in the style's, the origin warns once that the data must be set
+    /// again.
+    fn draws(&mut self, id: &str, options: &GeoJsonSourceOptions, data: &Arc<dyn GeoJSONData>) -> bool {
+        if tiled_in(&**data, options.crs.as_ref()) {
+            return true;
+        }
+        let warned = self.warned.as_ref().is_some_and(|warned| std::ptr::addr_eq(warned.as_ptr(), Arc::as_ptr(data)));
+        if !options.tiles_again() && !warned {
+            log::warn!(
+                target: GENERAL,
+                "GeoJSON source \"{id}\" has data tiled for another projection and draws nothing; set its data again \
+                 after changing the projection."
+            );
+            self.warned = Some(Arc::downgrade(data));
+        }
+        false
+    }
+
     /// Loads the tile from the source's data: cut on the pool unless the
     /// source updates synchronously. With `relayout`, the tile first drops
     /// its data and style.
@@ -359,7 +526,9 @@ impl DataOrigin for GeoJsonOrigin {
             self.synchronous = synchronous;
             update.clear_tiles();
         }
-        let data = source.description::<Arc<dyn GeoJSONData>>();
+        let id = update.source().id();
+        let described = source.description::<Arc<dyn GeoJSONData>>();
+        let data = described.filter(|data| self.draws(id, &source.options, data));
         let same = match (self.data.as_ref().map(|(data, _)| data), data) {
             (None, None) => true,
             (Some(a), Some(b)) => std::ptr::addr_eq(Arc::as_ptr(a), Arc::as_ptr(b)),
@@ -367,7 +536,10 @@ impl DataOrigin for GeoJsonOrigin {
         };
         if !same {
             self.data = data.map(|data| (Arc::clone(data), TaskGroup::new(update.pool())));
-            if update.map().mode != MapMode::Continuous {
+            // Tiles of data tiled for another projection would draw in the
+            // wrong place, unlike those of data that went.
+            let tiled_elsewhere = data.is_none() && described.is_some();
+            if update.map().mode != MapMode::Continuous || tiled_elsewhere {
                 // Clearing the tiles in order to avoid render tests being
                 // flaky.
                 update.clear_tiles();
@@ -504,13 +676,32 @@ pub fn geojson_data(source: &Source) -> Option<&Arc<dyn GeoJSONData>> {
 }
 
 /// The edit that replaces the data of the GeoJSON source `id`, which no
-/// longer loads it from a URL or the style.
+/// longer loads it from a URL or the style. The data draws in the
+/// projection it was tiled in alone ([`create_geojson_data_in`]).
 pub fn set_data(id: impl Into<String>, geojson: Option<Arc<dyn GeoJSONData>>) -> Edit {
     Edit::update_source::<GeoJsonSourceType>(id, "a GeoJSON source", |data| {
         data.options.url = None;
         data.options.inline = None;
+        data.options.kept = None;
         data.description = geojson.map(|geojson| -> mln_style::source::ErasedDescription { Arc::new(geojson) });
         data.load += 1;
+        true
+    })
+}
+
+/// [`set_data`] with `data`, built from `geojson`, which the source keeps to
+/// tile again while its style is in a registered projection, or until it
+/// has tiled it in its style's projection when `data` was tiled for another
+/// one.
+pub fn set_geojson(id: impl Into<String>, geojson: Arc<GeoJson>, data: Arc<dyn GeoJSONData>) -> Edit {
+    Edit::update_source::<GeoJsonSourceType>(id, "a GeoJSON source", move |source| {
+        let crs = source.options.crs.as_ref();
+        let keep = crs.is_some() || !tiled_in(&*data, crs);
+        source.options.url = None;
+        source.options.inline = None;
+        source.options.kept = keep.then_some(geojson);
+        source.description = Some(Arc::new(data));
+        source.load += 1;
         true
     })
 }
@@ -522,3 +713,6 @@ impl std::fmt::Debug for dyn GeoJSONData {
         f.debug_struct("GeoJSONData").finish_non_exhaustive()
     }
 }
+
+#[cfg(test)]
+mod crs_test;

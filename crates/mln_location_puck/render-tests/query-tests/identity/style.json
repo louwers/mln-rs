@@ -1,0 +1,32 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 256,
+      "height": 256,
+      "queryGeometry": [192, 64]
+    }
+  },
+  "center": [0, 0],
+  "zoom": 0,
+  "projection": {
+    "type": "identity"
+  },
+  "sources": {},
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#eeeeee"
+      }
+    },
+    {
+      "id": "puck",
+      "type": "org.maplibre.location-puck",
+      "paint": {
+        "puck-position": [22.5, 22.5]
+      }
+    }
+  ]
+}

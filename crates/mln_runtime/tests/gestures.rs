@@ -3,6 +3,7 @@
 
 use mln_engine::camera::{CameraOptions, CameraUpdate};
 use mln_engine::geo::ScreenCoordinate;
+use mln_engine::geo::world::WorldMapping;
 use mln_engine::gestures::{GestureCamera, GestureRecognizer, Input, Modes, PointerKind};
 use mln_style::geo::{LatLng, WrapMode};
 
@@ -66,7 +67,7 @@ fn a_box_zoom_over_terrain_centers_on_the_boxed_ground() {
 
     // The box's middle, below the center, meets the ground 1000 m up.
     let middle = at(128.0, 200.0);
-    let state = snapshot.view.to_state().unwrap();
+    let state = snapshot.view.to_state(&WorldMapping::Mercator).unwrap();
     let view = state.view();
     let up = ScreenCoordinate::new(middle.x, f64::from(view.size().height) - middle.y);
     let ground = view.screen_coordinate_to_lat_lng_at(&up, 1000.0, WrapMode::Unwrapped).unwrap();
@@ -92,5 +93,93 @@ fn a_box_zoom_over_terrain_centers_on_the_boxed_ground() {
     assert!((boxed.zoom - (12.0 + 2.56f64.log2())).abs() < 1e-9, "{}", boxed.zoom);
 
     drop(session);
+    wait(map.release());
+}
+
+/// A map of [`map`]'s, in the identity projection, whose square spans lng
+/// -90 to 90 and lat -90 to 90, centered on `[lng, lat]` at `zoom`.
+fn identity_map(runtime: &mln_runtime::Runtime, [lng, lat]: [f64; 2], zoom: f64) -> mln_runtime::Map {
+    let map = map(runtime);
+    wait(map.set_style_json(format!(
+        r#"{{"version":8,"projection":{{"type":"identity"}},"center":[{lng},{lat}],"zoom":{zoom},"sources":{{}},"layers":[]}}"#
+    )));
+    map
+}
+
+#[track_caller]
+fn assert_near(expected: f64, actual: f64, tolerance: f64) {
+    assert!((expected - actual).abs() <= tolerance, "{actual} is not within {tolerance} of {expected}");
+}
+
+/// The recognizer reads a runtime map's points in the projection it draws
+/// in: at zoom 1 the identity's 180 degrees are 1024 pixels, so 64 pixels
+/// right of and above the center are 11.25 degrees east and north of it.
+#[test]
+fn the_recognizer_reads_a_runtime_map_in_its_registered_projection() {
+    let runtime = runtime();
+    let map = identity_map(&runtime, [45.0, 45.0], 1.0);
+
+    let under = GestureCamera::lat_lng_for_pixel(&map, at(192.0, 64.0)).unwrap();
+    assert_near(56.25, under.latitude(), 1e-6);
+    assert_near(56.25, under.longitude(), 1e-6);
+    let projected = map.projection(None).unwrap().pixel_for_lat_lng(&LatLng::new(56.25, 56.25).unwrap());
+    assert_near(192.0, projected.x, 1e-6);
+    assert_near(64.0, projected.y, 1e-6);
+    let (min, max) = GestureCamera::zoom_range(&map);
+    assert!(min <= 1.0 && 1.0 <= max, "{min} {max}");
+
+    wait(map.release());
+}
+
+/// GL JS's "pans by the distance dragged from north of the world square"
+/// (`src/ui/map_tests/map_projection.test.ts`): above the identity's square,
+/// where no location is, a drag moves the map as far as the pointer, rather
+/// than holding the square's edge under it.
+#[test]
+fn a_drag_from_north_of_the_identity_square_pans_by_the_distance_dragged() {
+    let runtime = runtime();
+    let map = identity_map(&runtime, [0.0, 90.0], 0.0);
+    let pole = LatLng::new(90.0, 0.0).unwrap();
+    assert_near(128.0, map.projection(None).unwrap().pixel_for_lat_lng(&pole).y, 1e-6);
+
+    let mut gestures = GestureRecognizer::new(map.clone());
+    let down =
+        Input::PointerDown { id: 1, kind: PointerKind::Mouse, position: at(128.0, 40.0), modes: Modes::default() };
+    gestures.handle(down, 0.0);
+    gestures.handle(Input::PointerMove { id: 1, position: at(128.0, 30.0) }, 16.0);
+    gestures.handle(Input::PointerUp { id: 1, position: at(128.0, 30.0) }, 1000.0);
+
+    // At zoom 0 the identity's 180 degrees are 512 pixels.
+    let moved = wait(map.camera()).camera;
+    assert_near(90.0 - 10.0 * 180.0 / 512.0, moved.center.latitude(), 1e-6);
+    assert_near(118.0, map.projection(None).unwrap().pixel_for_lat_lng(&pole).y, 1e-6);
+
+    wait(map.release());
+}
+
+/// A zoom around a point north of the identity's square, where no location
+/// is, zooms around the center, as GL JS's does there, rather than holding
+/// the square's edge, which slides along under the point as the map zooms.
+#[test]
+fn a_zoom_from_north_of_the_identity_square_zooms_around_the_center() {
+    let runtime = runtime();
+    let map = identity_map(&runtime, [0.0, 90.0], 0.0);
+
+    let mut gestures = GestureRecognizer::new(map.clone());
+    let zoom_in = Input::Delta {
+        position: at(200.0, 40.0),
+        discrete: false,
+        pan: at(0.0, 0.0),
+        zoom: 1.0,
+        bearing: 0.0,
+        pitch: 0.0,
+    };
+    gestures.handle(zoom_in, 0.0);
+
+    let zoomed = wait(map.camera()).camera;
+    assert_near(1.0, zoomed.zoom, 1e-6);
+    assert_near(90.0, zoomed.center.latitude(), 1e-6);
+    assert_near(0.0, zoomed.center.longitude(), 1e-6);
+
     wait(map.release());
 }

@@ -555,7 +555,7 @@ impl Transform {
                 }
             };
             let mut camera = CameraOptions {
-                center: Some(if bounded { unwrapped } else { unwrapped.wrapped() }),
+                center: Some(if bounded { unwrapped } else { self.view().world().wrap(unwrapped) }),
                 ..Default::default()
             };
             let mut zoom = self.state.view().zoom();

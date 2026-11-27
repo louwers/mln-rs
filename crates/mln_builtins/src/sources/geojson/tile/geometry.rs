@@ -1,5 +1,5 @@
-//! The features that tiles are cut from: GeoJSON features projected onto
-//! Web Mercator's unit square, and the pieces that cutting leaves of them.
+//! The features that tiles are cut from: GeoJSON features put in the unit
+//! square, and the pieces that cutting leaves of them.
 
 use std::sync::Arc;
 

@@ -20,6 +20,7 @@ use crate::camera::view::{
 };
 use crate::geo::constants::M2PI;
 use crate::geo::projection::Projection;
+use crate::geo::world::{WorldBox, WorldMapping};
 use crate::geo::{EdgeInsets, ScreenCoordinate};
 
 fn lat_lng_from_mercator(mercator_coordinate: Point<f64>, wrap_mode: WrapMode) -> Result<LatLng, Error> {
@@ -30,6 +31,21 @@ fn lat_lng_from_mercator(mercator_coordinate: Point<f64>, wrap_mode: WrapMode) -
     )
 }
 
+/// The whole world square.
+const WORLD_SQUARE: WorldBox = WorldBox { min: Point::new(0.0, 0.0), max: Point::new(1.0, 1.0) };
+
+/// Where a world that doesn't wrap keeps the center: `bounds` as a box in
+/// its world square, or the whole square without bounds, or for bounds that
+/// the projection has no place for.
+fn center_world_box(world: &WorldMapping, bounds: &LatLngBounds) -> WorldBox {
+    if world.wraps() || *bounds == LatLngBounds::default() {
+        return WORLD_SQUARE;
+    }
+    let world_box = world.lng_lat_box_to_world_box(bounds);
+    let WorldBox { min, max } = world_box;
+    if [min.x, min.y, max.x, max.y].iter().all(|edge| edge.is_finite()) { world_box } else { WORLD_SQUARE }
+}
+
 /// A map's camera with the limits that constrain it: the [`View`] it shows
 /// now, and the bounds, zoom, pitch and field of view it may move within.
 ///
@@ -38,6 +54,9 @@ fn lat_lng_from_mercator(mercator_coordinate: Point<f64>, wrap_mode: WrapMode) -
 pub struct TransformState {
     view: View,
     limits: CameraLimits,
+    /// Where a world that doesn't wrap keeps the center, in its world square:
+    /// the bounds' box, or the whole square.
+    center_world_box: WorldBox,
 }
 
 impl Default for TransformState {
@@ -52,12 +71,14 @@ impl TransformState {
         TransformState {
             view: View::new(ViewParams::new(constrain_mode, viewport_mode)),
             limits: CameraLimits::default(),
+            center_world_box: WORLD_SQUARE,
         }
     }
 
     /// A state that shows `params` within `limits`, as they are.
     pub(crate) fn from_parts(params: ViewParams, limits: CameraLimits) -> Self {
-        let mut state = TransformState { view: View::new(params), limits };
+        let center_world_box = center_world_box(&params.world, &limits.bounds);
+        let mut state = TransformState { view: View::new(params), limits, center_world_box };
         state.update(|_| ());
         state
     }
@@ -71,7 +92,7 @@ impl TransformState {
     /// Changes the view's parameters with `change`, and remakes the view if
     /// they changed.
     fn update(&mut self, change: impl FnOnce(&mut ViewParams)) {
-        let mut params = *self.view.params();
+        let mut params = self.view.params().clone();
         change(&mut params);
         params.center_wrap = if params.projection_transition > 0.0 && self.limits.bounds == LatLngBounds::default() {
             WrapMode::Wrapped
@@ -105,6 +126,20 @@ impl TransformState {
         }
     }
 
+    /// Sets how lng/lat maps to the world square: Mercator, or a registered
+    /// projection's. The center keeps its location, as far as the new
+    /// world's constraints allow.
+    pub fn set_world(&mut self, world: WorldMapping) {
+        if world == *self.view.world() {
+            return;
+        }
+        let center = self.view.center(WrapMode::Unwrapped);
+        let zoom = self.view.zoom();
+        self.update(|p| p.world = world);
+        self.center_world_box = center_world_box(self.view.world(), &self.limits.bounds);
+        self.set_lat_lng_zoom(&center, zoom);
+    }
+
     // MARK: - Free camera
 
     fn update_state_from_camera(&mut self, camera: &CameraPose) {
@@ -129,16 +164,26 @@ impl TransformState {
         }
 
         let mercator_point = Point::new(position.x + dx * travel, position.y + dy * travel);
-        let Ok(center) = lat_lng_from_mercator(mercator_point, WrapMode::Unwrapped) else {
+        let world = self.view.world().clone();
+        let center = match &world {
+            WorldMapping::Mercator => lat_lng_from_mercator(mercator_point, WrapMode::Unwrapped),
+            WorldMapping::Crs(_) => world.lat_lng_from_world(&mercator_point),
+        };
+        let Ok(center) = center else {
             return;
         };
         let zoom = f64::min(zoom, self.limits.max_zoom);
         self.set_lat_lng_zoom(&center, zoom);
 
         let mercator_z = position.z + dz * travel;
-        let alt_m = mercator_z
-            * Projection::meters_per_pixel_at_latitude(self.view.center(WrapMode::Unwrapped).latitude(), 0.0)
-            * TILE_SIZE_D;
+        let alt_m = match &world {
+            WorldMapping::Mercator => {
+                mercator_z
+                    * Projection::meters_per_pixel_at_latitude(self.view.center(WrapMode::Unwrapped).latitude(), 0.0)
+                    * TILE_SIZE_D
+            }
+            WorldMapping::Crs(_) => mercator_z * world.meters_per_world_unit(&mercator_point),
+        };
         self.set_center_altitude(alt_m);
         self.set_angle(new_bearing);
         self.set_pitch(new_pitch);
@@ -313,6 +358,7 @@ impl TransformState {
         let bounds_changed = limits.bounds != self.limits.bounds;
         self.limits = limits;
         if bounds_changed {
+            self.center_world_box = center_world_box(self.view.world(), &self.limits.bounds);
             let lat_lng = self.view.center(WrapMode::Unwrapped);
             let zoom = self.view.zoom();
             self.set_lat_lng_zoom(&lat_lng, zoom);
@@ -426,6 +472,20 @@ impl TransformState {
             return (scale, x, y);
         }
 
+        // A world that doesn't wrap keeps the center inside its square, or
+        // inside the bounds there, and leaves the zoom to the minimum zoom:
+        // the square is the grid that the tile matrix set picked, which can be
+        // much larger than the area of interest or narrower than the view.
+        if !self.view.world().wraps() {
+            let world_size = Projection::world_size(scale);
+            let WorldBox { min, max } = self.center_world_box;
+            let x =
+                mln_style::math::clamp_f64(x, (0.5 - max.x.min(1.0)) * world_size, (0.5 - min.x.max(0.0)) * world_size);
+            let y =
+                mln_style::math::clamp_f64(y, (0.5 - max.y.min(1.0)) * world_size, (0.5 - min.y.max(0.0)) * world_size);
+            return (scale, x, y);
+        }
+
         // The globe has no off-world area: the center goes past the Mercator
         // range toward a pole as far as the zoom allows.
         if self.view.is_globe() {
@@ -499,17 +559,15 @@ impl TransformState {
                 view.screen_coordinate_to_lat_lng(&anchor, WrapMode::Unwrapped),
                 state.view.screen_coordinate_to_lat_lng(&anchor, WrapMode::Unwrapped),
             ) {
-                let lat_lng_coord = Projection::project(&anchor_lat_lng, requested_scale);
-                let anchor_coord = Projection::project(&screen_lat_lng, requested_scale);
+                let lat_lng_coord = view.world().project(&anchor_lat_lng, requested_scale);
+                let anchor_coord = view.world().project(&screen_lat_lng, requested_scale);
                 anchor_offset = Point::new(lat_lng_coord.x - anchor_coord.x, lat_lng_coord.y - anchor_coord.y);
             }
         }
 
-        let current_bounds = self.limits.bounds;
-        let ne_bounds = Projection::project(&current_bounds.northeast(), requested_scale);
-        let sw_bounds = Projection::project(&current_bounds.southwest(), requested_scale);
-        let center = Projection::project(&center_lat_lng, requested_scale);
-        let current_center = Projection::project(&current_center, requested_scale);
+        let (ne_bounds, sw_bounds) = self.bounds_corners(requested_scale);
+        let center = view.world().project(&center_lat_lng, requested_scale);
+        let current_center = view.world().project(&current_center, requested_scale);
 
         let min_y = ne_bounds.y;
         let max_y = sw_bounds.y;
@@ -599,8 +657,25 @@ impl TransformState {
             requested_camera.anchor = None;
             // The clamped point is inside the bounds, so it has a LatLng.
             requested_camera.center =
-                Projection::unproject(&Point::new(result_x, result_y), requested_scale, WrapMode::Unwrapped).ok();
+                view.world().unproject(&Point::new(result_x, result_y), requested_scale, WrapMode::Unwrapped).ok();
         }
+    }
+
+    /// The bounds' north-east and south-west corners in pixels at `scale`. A
+    /// world that doesn't wrap takes the corners of their box in its square,
+    /// within the square: corners alone miss most of a box whose edges curve.
+    fn bounds_corners(&self, scale: f64) -> (Point<f64>, Point<f64>) {
+        let world = self.view.world();
+        if world.wraps() {
+            let bounds = &self.limits.bounds;
+            return (world.project(&bounds.northeast(), scale), world.project(&bounds.southwest(), scale));
+        }
+        let world_size = Projection::world_size(scale);
+        let WorldBox { min, max } = self.center_world_box;
+        (
+            Point::new(max.x.min(1.0) * world_size, min.y.max(0.0) * world_size),
+            Point::new(min.x.max(0.0) * world_size, max.y.min(1.0) * world_size),
+        )
     }
 
     /// The lowest zoom `ConstrainMode::Screen` allows: the one at which the
@@ -614,8 +689,7 @@ impl TransformState {
         }
         // The bounds' extent on screen grows with the scale alone, so they
         // fill the screen at the same zoom wherever the center is.
-        let ne = Projection::project(&self.limits.bounds.northeast(), 1.0);
-        let sw = Projection::project(&self.limits.bounds.southwest(), 1.0);
+        let (ne, sw) = self.bounds_corners(1.0);
         let size = self.view.size();
         let scale_x = f64::from(size.width) / (ne.x - sw.x);
         let scale_y = f64::from(size.height) / (sw.y - ne.y);
@@ -664,7 +738,8 @@ impl TransformState {
         let center = self.center_for_lat_lng_at(lat_lng, anchor, height)?;
         // Wrapped, as easeTo and GL JS's setLocationAtPoint leave it, unless
         // bounds keep it in their range.
-        let target = if self.limits.bounds == LatLngBounds::default() { center.wrapped() } else { center };
+        let target =
+            if self.limits.bounds == LatLngBounds::default() { self.view.world().wrap(center) } else { center };
         let zoom = self.view.zoom();
         self.set_lat_lng_zoom(&target, zoom);
         Ok(())
@@ -692,11 +767,12 @@ impl TransformState {
                 .ok_or_else(|| Error::invalid_argument("no center holds the location at the point"));
         }
         let scale = view.scale();
-        let center_coord = Projection::project(&view.center(WrapMode::Unwrapped), scale);
-        let lat_lng_coord = Projection::project(lat_lng, scale);
+        let world = view.world();
+        let center_coord = world.project(&view.center(WrapMode::Unwrapped), scale);
+        let lat_lng_coord = world.project(lat_lng, scale);
         let anchor_coord =
-            Projection::project(&view.screen_coordinate_to_lat_lng_at(anchor, height, WrapMode::Unwrapped)?, scale);
-        Projection::unproject(
+            world.project(&view.screen_coordinate_to_lat_lng_at(anchor, height, WrapMode::Unwrapped)?, scale);
+        world.unproject(
             &Point::new(
                 center_coord.x + lat_lng_coord.x - anchor_coord.x,
                 center_coord.y + lat_lng_coord.y - anchor_coord.y,
@@ -708,6 +784,24 @@ impl TransformState {
 
     pub fn set_lat_lng_zoom(&mut self, lat_lng: &LatLng, zoom: f64) {
         if !zoom.is_finite() {
+            return;
+        }
+        if let WorldMapping::Crs(_) = self.view.world() {
+            // `constrain` keeps the center in the world square, or in the
+            // bounds there.
+            let scale = mln_style::math::clamp_f64(zoom_scale(zoom), self.constrained_min_scale(), self.max_scale());
+            let world = self.view.world().world_from_lat_lng(lat_lng);
+            let world_size = Projection::world_size(scale);
+            let (x, y) = ((0.5 - world.x) * world_size, (0.5 - world.y) * world_size);
+            if !x.is_finite() || !y.is_finite() {
+                return;
+            }
+            let (scale, x, y) = self.constrain(scale, x, y);
+            self.update(|p| {
+                p.scale = scale;
+                p.x = x;
+                p.y = y;
+            });
             return;
         }
         let globe = self.view.is_globe();
@@ -805,7 +899,7 @@ impl TransformState {
         let pitch = mln_style::math::clamp_f64(across.atan2(up), self.limits.min_pitch, self.limits.max_pitch);
         let zoom = view.zoom() + (distance / raised).log2();
         let center = view.center(WrapMode::Unwrapped);
-        let before = *view.params();
+        let before = view.params().clone();
         self.set_pitch(pitch);
         self.set_lat_lng_zoom(&center, zoom);
         *self.view.params() != before
@@ -864,24 +958,30 @@ impl TransformState {
     }
 
     /// The center, its altitude and the zoom of [`Self::recenter_on`] on a
-    /// Mercator view, before the limits.
+    /// flat view, Mercator or a registered projection, before the limits.
     fn recentered_on_plane(&self, hit: &GroundHit) -> Option<(LatLng, f64, f64)> {
         let view = &self.view;
+        let mapping = view.world();
         let eye = view.eye_position();
         let forward = view.camera_pose().forward();
-        // Meters per Web Mercator unit at zoom 0, across the ground at `hit`.
-        let latitude = hit.location(WrapMode::Unwrapped).latitude();
-        let meters = Projection::meters_per_pixel_at_latitude(latitude, 0.0) * TILE_SIZE_D;
+        // Meters per world unit at zoom 0, across the ground at `hit`.
+        let meters = match mapping {
+            WorldMapping::Mercator => {
+                let latitude = hit.location(mapping, WrapMode::Unwrapped).latitude();
+                Projection::meters_per_pixel_at_latitude(latitude, 0.0) * TILE_SIZE_D
+            }
+            WorldMapping::Crs(_) => mapping.meters_per_world_unit(&Point::new(hit.world.x, hit.world.y)),
+        };
         let to_hit = DVec3::new((hit.world.x - eye.x) * meters, (hit.world.y - eye.y) * meters, hit.height - eye.z);
         let distance = to_hit.dot(forward);
         if !(distance.is_finite() && distance > 0.0) {
             return None;
         }
         let world = Point::new(eye.x + forward.x * distance / meters, eye.y + forward.y * distance / meters);
-        let center = Projection::unproject(&world, 1.0 / TILE_SIZE_D, WrapMode::Unwrapped).ok()?;
+        let center = mapping.unproject(&world, 1.0 / TILE_SIZE_D, WrapMode::Unwrapped).ok()?;
         // Wrapped, as move_lat_lng leaves it, unless bounds keep it in their
         // range.
-        let center = if self.limits.bounds == LatLngBounds::default() { center.wrapped() } else { center };
+        let center = if self.limits.bounds == LatLngBounds::default() { mapping.wrap(center) } else { center };
         let zoom = scale_zoom(view.camera_to_center_distance() * meters / distance / TILE_SIZE_D);
         Some((center, eye.z + forward.z * distance, zoom))
     }
@@ -895,8 +995,8 @@ impl TransformState {
         let center = VerticalPerspectiveProjection::surface_vector(&view.center(WrapMode::Unwrapped))
             * radius(view.center_altitude());
         let forward = (center - eye).normalize();
-        let target =
-            VerticalPerspectiveProjection::surface_vector(&hit.location(WrapMode::Unwrapped)) * radius(hit.height);
+        let target = VerticalPerspectiveProjection::surface_vector(&hit.location(view.world(), WrapMode::Unwrapped))
+            * radius(hit.height);
         let distance = (target - eye).dot(forward);
         if !(distance.is_finite() && distance > 0.0) {
             return None;

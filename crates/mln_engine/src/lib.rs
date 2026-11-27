@@ -34,7 +34,7 @@ pub mod tile;
 pub mod tile_store;
 pub mod worker;
 
-pub use registry::{Registry, RegistryBuilder};
+pub use registry::{Registry, RegistryBuilder, register_builtin_projections};
 pub use render::events::{
     FontStack, GlyphRange, RenderMode, RendererEvent, RendererEvents, RenderingStats, TileOperation,
 };

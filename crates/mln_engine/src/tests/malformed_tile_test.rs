@@ -337,6 +337,7 @@ fn query_of_a_bad_value_is_an_error() {
         &crate::query::SourceQueryOptions::default(),
         None,
         &OverscaledTileID::from_zxy(0, 0, 0),
+        &crate::geo::world::WorldMapping::Mercator,
     )
     .unwrap_err();
     assert_eq!(error.to_string(), "invalid value index 7");

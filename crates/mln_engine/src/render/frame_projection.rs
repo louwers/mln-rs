@@ -74,6 +74,7 @@ mod tests {
     use super::*;
     use crate::camera::{Camera, LogicalExtent, MapView, ProjectionMode, Viewport};
     use crate::geo::EdgeInsets;
+    use crate::geo::world::WorldMapping;
 
     const SIZE: Size = Size { width: 300, height: 200 };
 
@@ -95,7 +96,7 @@ mod tests {
             viewport: Viewport::default(),
             projection: ProjectionDefinition::default(),
         };
-        TransformParameters::new(&view.to_view().unwrap())
+        TransformParameters::new(&view.to_view(&WorldMapping::Mercator).unwrap())
     }
 
     /// `point`, of x and y in Web Mercator's 0 to 1 and z in meters, through
@@ -186,7 +187,7 @@ mod tests {
             viewport: Viewport::default(),
             projection: ProjectionDefinition::default(),
         };
-        let transform = TransformParameters::new(&view.to_view().unwrap());
+        let transform = TransformParameters::new(&view.to_view(&WorldMapping::Mercator).unwrap());
         let projection = compute(&transform, 1.0, ClipDepthRange::ZeroToOne, false);
         assert_eq!(transform.view.far_z(), projection.far_distance);
         // The ground north of the center: what is drawn below the horizon

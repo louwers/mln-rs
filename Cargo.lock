@@ -2679,6 +2679,7 @@ dependencies = [
  "mln-rs-bench-workload",
  "mln-rs-d3d12",
  "mln-rs-engine",
+ "mln-rs-example-projections",
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-mtl",
@@ -2766,6 +2767,14 @@ version = "0.0.18"
 dependencies = [
  "mln-rs",
  "mln-rs-ngon",
+]
+
+[[package]]
+name = "mln-rs-example-projections"
+version = "0.0.18"
+dependencies = [
+ "mln-rs-style",
+ "serde_json",
 ]
 
 [[package]]
@@ -3087,6 +3096,7 @@ dependencies = [
  "log",
  "mln-rs-builtins",
  "mln-rs-engine",
+ "mln-rs-example-projections",
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-runtime",

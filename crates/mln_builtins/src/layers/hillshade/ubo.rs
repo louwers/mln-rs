@@ -31,7 +31,9 @@ uniform_block! {
         pub maxzoom: f32,
         /// What the sum is multiplied by, to meters.
         pub unpack_scale: f32,
-        pub pad0: f32,
+        /// The log2 of the zoom 0 world's width in meters, which with the
+        /// zoom gives the meters a DEM pixel spans.
+        pub log2_world_width: f32,
         pub pad1: f32,
         pub pad2: f32,
     }

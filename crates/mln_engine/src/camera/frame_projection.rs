@@ -9,7 +9,8 @@ pub use mln_gfx::gpu::ClipDepthRange;
 /// Where a frame drew the map, and the depth its 3D layers wrote there.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FrameProjection {
-    /// Takes Web Mercator points, x and y from 0 to 1 and z in meters, to
+    /// Takes points of the map's world square, Web Mercator's or a
+    /// registered projection's, x and y from 0 to 1 and z in meters, to
     /// clip coordinates in `clip_depth_range`'s convention, whose depth
     /// under the API's default depth range is the depth that the frame's 3D
     /// layers wrote at the point.

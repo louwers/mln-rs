@@ -16,8 +16,8 @@ use crate::offline::offline_download::{Downloads, OfflineDownload, Post};
 use crate::storage::chrono::{Timestamp, now};
 use crate::storage::compression::compress;
 use crate::storage::offline::{
-    OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionMetadata, OfflineRegionObserver,
-    OfflineRegionStatus, OfflineTilePyramidRegionDefinition,
+    OfflineGeometryRegionDefinition, OfflineRegion, OfflineRegionDefinition, OfflineRegionDownloadState,
+    OfflineRegionMetadata, OfflineRegionObserver, OfflineRegionStatus, OfflineTilePyramidRegionDefinition,
 };
 use crate::storage::offline_database::{DatabaseError, OfflineDatabase};
 use crate::storage::resource::{Priority, Usage};
@@ -453,6 +453,132 @@ fn geojson_source() {
     download.set_state(OfflineRegionDownloadState::Active);
 
     test.run_loop.run();
+}
+
+/// The URL template of the tiles of [`identity_style`]'s source.
+const IDENTITY_TILES: &str = "http://127.0.0.1:3000/{z}-{x}-{y}.vector.pbf";
+
+/// A style drawn in the identity projection, whose one source has tiles up
+/// to zoom `max_zoom` at the URL template `tiles`.
+fn identity_style(tiles: &str, max_zoom: u8) -> Response {
+    with_data(format!(
+        r#"{{"version": 8, "projection": {{"type": "identity"}},
+            "sources": {{"inline": {{"type": "vector", "minzoom": 0, "maxzoom": {max_zoom}, "tiles": ["{tiles}"]}}}},
+            "layers": [{{"id": "fill", "type": "fill", "source": "inline", "source-layer": "water"}}]}}"#
+    ))
+}
+
+/// The tiles, as z, x and y, that a download of `definition` with the
+/// identity style fetches, which are as many as its status requires.
+fn downloaded_tiles(test: &OfflineTest, definition: OfflineRegionDefinition) -> Vec<(i8, i32, i32)> {
+    downloaded_tile_resources(test, definition, IDENTITY_TILES)
+        .iter()
+        .map(|resource| {
+            let tile = resource.tile_data.as_ref().expect("tile data");
+            (tile.z, tile.x, tile.y)
+        })
+        .collect()
+}
+
+/// The tile resources that a download of `definition` with the identity
+/// style, its tiles at `tiles` up to zoom 15, fetches, which are as many as
+/// its status requires.
+fn downloaded_tile_resources(test: &OfflineTest, definition: OfflineRegionDefinition, tiles: &str) -> Vec<Resource> {
+    let region = test.create_region().expect("region");
+    let download = test.add_download(region.id, definition, Arc::<StubFileSource>::clone(&test.file_source));
+    let style = identity_style(tiles, 15);
+    test.respond(Kind::Style, move |_| style.clone());
+    let tiles = Arc::new(Mutex::new(Vec::new()));
+    let (fetched, size) = (Arc::clone(&tiles), Arc::clone(&test.size));
+    test.respond(Kind::Tile, move |resource| {
+        fetched.lock().push(resource.clone());
+        fixture_response(&size, "0-0-0.vector.pbf")
+    });
+    let stop = test.run_loop.clone();
+    let observer = MockObserver {
+        status_changed_fn: Some(Box::new(move |status: OfflineRegionStatus| {
+            if status.complete() {
+                stop.stop();
+            }
+        })),
+        ..Default::default()
+    };
+    download.set_observer(Some(Rc::new(observer)));
+    download.set_state(OfflineRegionDownloadState::Active);
+    test.run_loop.run();
+
+    download.set_state(OfflineRegionDownloadState::Inactive);
+    let tiles = tiles.lock().clone();
+    assert_eq!(tiles.len() as u64, download.get_status().required_tile_count);
+    tiles
+}
+
+// gtest: OfflineDownload.CoversTheGridOfARegisteredProjection
+#[test]
+fn covers_the_grid_of_a_registered_projection() {
+    let test = OfflineTest::new();
+    // From 60 to 80 N and 0 to 30 E is inside tile 2/2/0 of the identity
+    // grid; in Mercator it reaches into 2/2/1.
+    let bounds = LatLngBounds::hull(LatLng::new(60.0, 0.0).unwrap(), LatLng::new(80.0, 30.0).unwrap());
+    let definition = OfflineTilePyramidRegionDefinition::new(STYLE_URL, bounds, 2.0, 2.0, 1.0, false).unwrap();
+
+    assert_eq!(vec![(2, 2, 0)], downloaded_tiles(&test, definition.into()));
+}
+
+// gtest: OfflineDownload.CoversTheGridOfARegisteredProjectionForAGeometry
+#[test]
+fn covers_the_grid_of_a_registered_projection_for_a_geometry() {
+    let test = OfflineTest::new();
+    // 10 E, 50 N is in tile 2/2/0 of the identity grid and in 2/2/1 of
+    // Mercator's.
+    let point = geo_types::Geometry::Point(geo_types::Point::new(10.0, 50.0));
+    let definition = OfflineGeometryRegionDefinition::new(STYLE_URL, point, 2.0, 2.0, 1.0, false).unwrap();
+
+    assert_eq!(vec![(2, 2, 0)], downloaded_tiles(&test, definition.into()));
+}
+
+#[test]
+fn asks_for_a_tiles_bbox_in_the_registered_projections_tile_matrix_set() {
+    let test = OfflineTest::new();
+    let bounds = LatLngBounds::hull(LatLng::new(60.0, 0.0).unwrap(), LatLng::new(80.0, 30.0).unwrap());
+    let definition = OfflineTilePyramidRegionDefinition::new(STYLE_URL, bounds, 2.0, 2.0, 1.0, false).unwrap();
+
+    // Tile 2/2/0 of the identity spans 0 to 45 E and 45 to 90 N, in degrees
+    // as the identity's units; in EPSG:3857 meters it would be the box of
+    // Mercator's tile 2/2/0.
+    let resources = downloaded_tile_resources(&test, definition.into(), "http://127.0.0.1:3000/tile?bbox={bbox}");
+    let urls: Vec<&str> = resources.iter().map(|resource| resource.url.as_str()).collect();
+    assert_eq!(vec!["http://127.0.0.1:3000/tile?bbox=0,45,45,90"], urls);
+}
+
+// gtest: OfflineDownload.CountsTheWholeGridOfARegisteredProjection
+#[test]
+fn counts_the_whole_grid_of_a_registered_projection() {
+    let test = OfflineTest::new();
+    let region = test.create_region().expect("region");
+    let definition =
+        OfflineTilePyramidRegionDefinition::new(STYLE_URL, LatLngBounds::world(), 0.0, 15.0, 1.0, false).unwrap();
+    let download = test.add_download(region.id, definition.into(), Arc::<StubFileSource>::clone(&test.file_source));
+    test.db().put_region_resource(region.id, &Resource::style(STYLE_URL), &identity_style(IDENTITY_TILES, 15));
+
+    // The identity grid has 4^z tiles at zoom z, and the source stops at 15.
+    let every_tile: u64 = (0..=15).map(|z| 1u64 << (2 * z)).sum();
+    assert_eq!(every_tile, download.get_status().required_tile_count);
+}
+
+#[test]
+fn counts_a_row_of_the_grid_of_a_registered_projection_past_zoom_31() {
+    let test = OfflineTest::new();
+    let region = test.create_region().expect("region");
+    // A line along 10 N across the identity's square, which lies in one row
+    // of tiles at every zoom.
+    let bounds = LatLngBounds::hull(LatLng::new(10.0, -90.0).unwrap(), LatLng::new(10.0, 90.0).unwrap());
+    let definition = OfflineTilePyramidRegionDefinition::new(STYLE_URL, bounds, 0.0, 32.0, 1.0, false).unwrap();
+    let download = test.add_download(region.id, definition.into(), Arc::<StubFileSource>::clone(&test.file_source));
+    test.db().put_region_resource(region.id, &Resource::style(STYLE_URL), &identity_style(IDENTITY_TILES, 32));
+
+    // 2^z tiles at zoom z: 2^32 at zoom 32.
+    assert_eq!((1u64 << 33) - 1, download.get_status().required_tile_count);
 }
 
 /// The completion check of Activate and `ExcludeIdeographs`: deactivate, then

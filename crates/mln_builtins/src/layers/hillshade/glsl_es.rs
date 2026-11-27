@@ -62,9 +62,10 @@ void main() {
     float h = getElevation(v_pos + vec2(0, epsilon.y));
     float i = getElevation(v_pos + vec2(epsilon.x, epsilon.y));
 
-    // Convert the raw pixel-space derivative (slope) into world-space slope.
-    // The conversion factor is: tileSize / (8 * meters_per_pixel).
-    // meters_per_pixel is calculated as pow(2.0, 28.2562 - u_zoom).
+    // Convert the raw pixel-space derivative (slope) into world-space slope:
+    // divide it by 8 times the meters a DEM pixel spans, the zoom 0 world's
+    // width over the pixels across the zoom's tiles, which is
+    // pow(2.0, 3.0 + log2_world_width - zoom) / tileSize.
     // The exaggeration factor is applied to scale the effect at lower zooms.
     // See nickidlugash's awesome breakdown for more info
     // https://github.com/mapbox/mapbox-gl-js/pull/5286#discussion_r148419556
@@ -74,7 +75,7 @@ void main() {
     vec2 deriv = vec2(
         (c + f + f + i) - (a + d + d + g),
         (g + h + h + i) - (a + b + b + c)
-    ) * tileSize / pow(2.0, exaggeration + (28.2562 - u_zoom));
+    ) * tileSize / pow(2.0, exaggeration + (3.0 + u_log2_world_width - u_zoom));
 
     // Encode the derivative into the color channels (r and g)
     // The derivative is scaled from world-space slope to the range [0, 1] for texture storage.

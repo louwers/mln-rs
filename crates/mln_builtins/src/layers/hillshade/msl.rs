@@ -65,9 +65,10 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS)
     float h = getElevation(in.pos + float2(0, epsilon.y), image, image_sampler, tileProps.unpack, tileProps.unpack_scale);
     float i = getElevation(in.pos + float2(epsilon.x, epsilon.y), image, image_sampler, tileProps.unpack, tileProps.unpack_scale);
 
-    // Convert the raw pixel-space derivative (slope) into world-space slope.
-    // The conversion factor is: tileSize / (8 * meters_per_pixel).
-    // meters_per_pixel is calculated as pow(2.0, 28.2562 - u_zoom).
+    // Convert the raw pixel-space derivative (slope) into world-space slope:
+    // divide it by 8 times the meters a DEM pixel spans, the zoom 0 world's
+    // width over the pixels across the zoom's tiles, which is
+    // pow(2.0, 3.0 + log2_world_width - zoom) / tileSize.
     // The exaggeration factor is applied to scale the effect at lower zooms.
     float exaggerationFactor = tileProps.zoom < 2.0 ? 0.4 : tileProps.zoom < 4.5 ? 0.35 : 0.3;
     float exaggeration = tileProps.zoom < 15.0 ? (tileProps.zoom - 15.0) * exaggerationFactor : 0.0;
@@ -75,7 +76,7 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]] MLN_FRAGMENT_BINDINGS)
     float2 deriv = float2(
         (c + f + f + i) - (a + d + d + g),
         (g + h + h + i) - (a + b + b + c)
-    ) * tileSize / pow(2.0, exaggeration + (28.2562 - tileProps.zoom));
+    ) * tileSize / pow(2.0, exaggeration + (3.0 + tileProps.log2_world_width - tileProps.zoom));
 
     // Encode the derivative into the color channels (r and g)
     // The derivative is scaled from world-space slope to the range [0, 1] for texture storage.

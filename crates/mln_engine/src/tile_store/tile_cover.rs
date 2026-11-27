@@ -24,6 +24,7 @@ use crate::camera::{TileCoordinate, View, ViewportMode};
 use crate::geo::ScreenCoordinate;
 use crate::geo::bounding_volumes::{Aabb, Frustum, IntersectionResult};
 use crate::geo::projection::Projection;
+use crate::geo::world::WorldMapping;
 use crate::render::terrain::ElevationRanges;
 use crate::tile::{OverscaledTileID, UnwrappedTileID};
 use crate::tile_store::TileLodMode;
@@ -213,6 +214,15 @@ impl TileCover {
     /// that isn't a valid `LatLng`.
     pub(crate) fn new_from_geometry(geom: &Geometry<f64>, z: u8) -> Result<TileCover, Error> {
         Ok(TileCover { impl_: Box::new(Impl::new_projected(i32::from(z), geom)?) })
+    }
+
+    /// The cover at zoom `z` of `geom` in the world square, which spans 0 to
+    /// 1 on both axes. Its tiles past the square's sides are in other world
+    /// copies.
+    #[cfg(feature = "sqlite")]
+    #[must_use]
+    pub(crate) fn new_from_world_geometry(geom: &Geometry<f64>, z: u8) -> TileCover {
+        TileCover { impl_: Box::new(Impl::new_in_world_square(i32::from(z), geom)) }
     }
 
     #[must_use]
@@ -930,10 +940,13 @@ pub fn tile_cover(
     let mut result: Vec<ResultTile> = Vec::new();
     stack.reserve(128);
 
-    // World copies shall be rendered three times on both sides from closest to farthest
-    for i in 1..=3i16 {
-        stack.push(new_root_tile(-i));
-        stack.push(new_root_tile(i));
+    // World copies shall be rendered three times on both sides from closest to
+    // farthest, in a world that wraps
+    if transform.world().wraps() {
+        for i in 1..=3i16 {
+            stack.push(new_root_tile(-i));
+            stack.push(new_root_tile(i));
+        }
     }
 
     stack.push(new_root_tile(0));
@@ -1084,10 +1097,15 @@ pub(crate) fn mercator_covering_tiles(
     let frustum =
         Frustum::from_inv_proj_matrix_metres(&transform.inverse_projection_matrix(), world_size, 0.0, flipped_y);
 
-    let center_lat_lng = transform.center(WrapMode::Unwrapped);
-    let center = Projection::project(&center_lat_lng, 1.0 / constants::TILE_SIZE_D);
-    let meters_per_world =
-        Projection::meters_per_pixel_at_latitude(center_lat_lng.latitude(), transform.zoom()) * world_size;
+    // A registered projection's center is a place in its world square, which
+    // a place without a location of its own wouldn't keep through lng/lat.
+    let center = match transform.world() {
+        WorldMapping::Mercator => {
+            Projection::project(&transform.center(WrapMode::Unwrapped), 1.0 / constants::TILE_SIZE_D)
+        }
+        WorldMapping::Crs(_) => transform.center_world(),
+    };
+    let meters_per_world = transform.meters_per_pixel() * world_size;
     let center_coord = DVec3::new(center.x, center.y, transform.center_altitude() / meters_per_world);
     // The camera's position, which is above the elevated center.
     let Some(camera_coord) = transform.free_camera_options().position else {
@@ -1113,9 +1131,11 @@ pub(crate) fn mercator_covering_tiles(
     let mut stack: Vec<Node> = Vec::with_capacity(64);
     let mut result: Vec<(OverscaledTileID, f64)> = Vec::with_capacity(64);
     let root = |wrap: i16| Node { zoom: 0, x: 0, y: 0, wrap, fully_visible: false };
-    for i in 1..=3i16 {
-        stack.push(root(-i));
-        stack.push(root(i));
+    if transform.world().wraps() {
+        for i in 1..=3i16 {
+            stack.push(root(-i));
+            stack.push(root(i));
+        }
     }
     stack.push(root(0));
 

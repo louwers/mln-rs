@@ -60,6 +60,7 @@ pub(crate) use cover::{REMEMBERED_RANGES, TerrainTile, terrain_tile_size};
 pub(crate) use drapes::Drapes;
 pub use elevation::{TerrainElevation, TileGround};
 pub(crate) use fog::terrain_fog;
+use geometry::Point;
 pub use ground::{FrameGround, GroundHeights, StandingDraw, height_attribute, point_center};
 use mln_gfx::gpu::Gpu;
 use mln_style::hash::HashMap;
@@ -71,6 +72,7 @@ pub(crate) use stacks::{DrapeStacks, Draped};
 use crate::draw::context::Context;
 use crate::draw::store::SharedTexture;
 use crate::geo::constants;
+use crate::geo::world::WorldMapping;
 use crate::layer::layer_drawing::ChangedBuckets;
 use crate::map::{MapMode, TerrainSkirtLength};
 use crate::render::events::RendererEvent;
@@ -85,12 +87,17 @@ use crate::tile::OverscaledTileID;
 use crate::tile::dem::DemUnpack;
 use crate::tile_store::source_tiles::SourceTiles;
 
-/// How far the skirts of terrain tiles reach down at `zoom`, in meters, or
-/// `None` for no skirts. `Auto` is a fifth of a tile's width at the
-/// equator, as GL JS's `getSkirtLength`.
-fn skirt_length(length: TerrainSkirtLength, zoom: f64) -> Option<f64> {
+/// How far the skirts of terrain tiles reach down at `zoom` in `world`, in
+/// meters, or `None` for no skirts. `Auto` is a fifth of a tile's width, as
+/// GL JS's `getSkirtLength`: at the equator, or in a registered projection
+/// in its meters per world unit.
+fn skirt_length(length: TerrainSkirtLength, zoom: f64, world: &WorldMapping) -> Option<f64> {
+    let world_width = match world {
+        WorldMapping::Mercator => constants::M2PI * constants::EARTH_RADIUS_M,
+        WorldMapping::Crs(_) => world.meters_per_world_unit(&Point::new(0.5, 0.5)),
+    };
     match length {
-        TerrainSkirtLength::Auto => Some(constants::M2PI * constants::EARTH_RADIUS_M / zoom.max(0.0).exp2() / 5.0),
+        TerrainSkirtLength::Auto => Some(world_width / zoom.max(0.0).exp2() / 5.0),
         TerrainSkirtLength::None => None,
     }
 }
@@ -215,7 +222,8 @@ impl RenderTerrain {
         let dem = dem(&terrain.source).filter(|dem| dem.info.kind == SourceKind::RasterDem)?;
         let cover = dem.info.cover?;
 
-        let skirt_length = skirt_length(parameters.terrain.skirt_length, parameters.view.zoom());
+        let skirt_length =
+            skirt_length(parameters.terrain.skirt_length, parameters.view.zoom(), parameters.view.world());
         self.surface = Surface::new(dem.info.dem_encoding, terrain.exaggeration, skirt_length);
         self.drape_memory_limit = parameters.terrain.drape_memory_limit;
 

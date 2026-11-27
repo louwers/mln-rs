@@ -330,6 +330,7 @@ fn gen_tiles(
         max_zoom: 14,
         index_max_zoom: max_zoom,
         index_max_points: max_points,
+        ..Options::default()
     };
 
     let geojson = read(data)?;

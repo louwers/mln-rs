@@ -1351,7 +1351,9 @@ pub struct mln_free_camera_options {
     pub fields: mln_free_camera_option_fields,
     /** The camera's position in Web Mercator units, where the world is 1 wide,
  (0, 0) is its northwest corner, and (1, 1) is its southeast corner. `z` is
- the altitude in the same units.*/
+ the altitude in the same units. A map in a registered projection places
+ the camera by the location and the altitude that the position stands
+ for.*/
     pub position: mln_vec3,
     /** The camera's rotation from looking straight down with north at the top of
  the screen.*/
@@ -1662,7 +1664,9 @@ pub type mln_clip_depth_range = u32;
  y runs from 0 at the north edge of the Mercator world, about 85.05° north, to
  1 at its south edge. z is the altitude in meters above sea level, at the
  scale of the heights of the map's 3D layers, and the map draws its ground at
- 0.
+ 0. On a map in a registered projection, x and y are that projection's
+ instead: they run from 0 to 1 across the square that tile 0/0/0 covers,
+ which has no copies beside it.
 
  `matrix` takes a world point to the clip coordinates where the frame drew
  it, with the camera's padding, roll, field of view, and center altitude, and

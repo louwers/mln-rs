@@ -92,8 +92,18 @@ fn plane_geometry(
         .iter()
         .filter_map(|p| {
             let up = mln_engine::geo::ScreenCoordinate::new(p.x, height - p.y);
-            let location = view.screen_coordinate_to_lat_lng_at(&up, elevation, WrapMode::Unwrapped).ok()?;
-            let world = TileCoordinate::from_lat_lng(0.0, &location).p;
+            let world = if view.world().wraps() {
+                let location = view.screen_coordinate_to_lat_lng_at(&up, elevation, WrapMode::Unwrapped).ok()?;
+                TileCoordinate::from_lat_lng(0.0, &location).p
+            } else {
+                // A registered projection's tiles are cut in its own world
+                // square, where the line of sight meets the plane.
+                let world = view.screen_coordinate_to_world_at(&up, elevation);
+                if !world.x.is_finite() || !world.y.is_finite() {
+                    return None;
+                }
+                world
+            };
             Some(TileCoordinate::to_geometry_coordinate(projector.tile_id(), &world))
         })
         .collect()

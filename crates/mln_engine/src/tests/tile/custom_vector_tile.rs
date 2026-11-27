@@ -40,6 +40,8 @@ fn set_mlt_tile_data() {
         panic!("a layout");
     };
     let mut result = Vec::new();
-    contents.query_source_features(&root, &mut result, &options, None).unwrap();
+    contents
+        .query_source_features(&root, &mut result, &options, None, &crate::geo::world::WorldMapping::Mercator)
+        .unwrap();
     assert_ne!(result, Vec::<crate::tile::feature::Feature>::new());
 }

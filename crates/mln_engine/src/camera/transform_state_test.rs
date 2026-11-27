@@ -8,6 +8,7 @@ use super::TransformState;
 use crate::camera::constants::DEFAULT_FOV;
 use crate::camera::{Camera, CameraLimits, LogicalExtent, MapView, ProjectionMode, Viewport};
 use crate::geo::projection::Projection;
+use crate::geo::world::WorldMapping;
 
 /// A 512 by 512 view at `pitch` degrees, looking north.
 fn pitched(pitch: f64) -> TransformState {
@@ -24,7 +25,7 @@ fn pitched(pitch: f64) -> TransformState {
         viewport: Viewport::default(),
         projection: ProjectionDefinition::default(),
     }
-    .to_state()
+    .to_state(&WorldMapping::Mercator)
     .unwrap()
 }
 
@@ -208,7 +209,7 @@ fn numbers_out_of_range_do_not_panic() {
                 if globe {
                     state.set_projection_definition(&ProjectionDefinition::new(ProjectionType::Globe));
                 }
-                let read = std::panic::catch_unwind(move || {
+                let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
                     set(&mut state, value);
                     let view = state.view();
                     let center = view.center(WrapMode::Unwrapped);
@@ -220,7 +221,7 @@ fn numbers_out_of_range_do_not_panic() {
                     let _ = view.lat_lng_to_screen_coordinate(&center);
                     let _ =
                         view.screen_coordinate_to_lat_lng(&ScreenCoordinate::new(256.0, 256.0), WrapMode::Unwrapped);
-                });
+                }));
                 assert!(read.is_ok(), "globe: {globe}, {name}: {value:e}");
             }
         }
@@ -293,7 +294,7 @@ fn alpine(pitched: bool) -> TransformState {
         viewport: Viewport::default(),
         projection: ProjectionDefinition::default(),
     }
-    .to_state()
+    .to_state(&WorldMapping::Mercator)
     .unwrap()
 }
 
@@ -402,7 +403,7 @@ fn the_center_at_its_altitude_draws_at_the_center() {
             viewport: Viewport::default(),
             projection: ProjectionDefinition::default(),
         }
-        .to_state()
+        .to_state(&WorldMapping::Mercator)
         .unwrap();
         let view = state.view();
         let center = Projection::project(&view.center(mln_style::geo::WrapMode::Unwrapped), view.scale());
@@ -602,7 +603,7 @@ fn terrain_planes_are_gl_js_planes() {
             viewport: Viewport::default(),
             projection: ProjectionDefinition::default(),
         }
-        .to_state()
+        .to_state(&WorldMapping::Mercator)
         .unwrap();
         state.set_terrain_min_elevation(Some(case.min_elevation));
         let view = state.view();
@@ -687,7 +688,7 @@ fn the_terrain_far_plane_reaches_a_rolled_views_sides() {
         viewport: Viewport::default(),
         projection: ProjectionDefinition::default(),
     }
-    .to_state()
+    .to_state(&WorldMapping::Mercator)
     .unwrap();
     state.set_terrain_min_elevation(Some(0.0));
     let view = state.view();
@@ -726,7 +727,7 @@ fn raised(projection: ProjectionDefinition, zoom: f64, center_altitude: f64) -> 
         viewport: Viewport::default(),
         projection,
     }
-    .to_state()
+    .to_state(&WorldMapping::Mercator)
     .unwrap()
 }
 
@@ -1019,7 +1020,7 @@ fn on_globe(pitch: f64, bearing: f64, center_altitude: f64) -> TransformState {
         viewport: Viewport::default(),
         projection: ProjectionDefinition::new(mln_style::types::ProjectionType::VerticalPerspective),
     }
-    .to_state()
+    .to_state(&WorldMapping::Mercator)
     .unwrap();
     state.set_limits(CameraLimits { max_pitch: crate::camera::constants::PITCH_MAX, ..*state.limits() }).unwrap();
     assert!(state.view().is_globe());
@@ -1158,7 +1159,7 @@ fn rolled(width: u32, height: u32, pitch: f64, roll: f64, padding: crate::geo::E
         viewport: Viewport::default(),
         projection: ProjectionDefinition::default(),
     }
-    .to_state()
+    .to_state(&WorldMapping::Mercator)
     .unwrap();
     state.set_terrain_min_elevation(Some(0.0));
     state

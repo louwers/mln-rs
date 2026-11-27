@@ -29,7 +29,9 @@ pub(crate) struct Anchor {
     /// view's zoom and, on the globe, at the center's latitude, as the
     /// globe scales tile units away from it.
     pub(crate) pixels_to_tile_units: f64,
-    /// The tile units that a meter on the ground spans at the position.
+    /// The tile units that a meter on the ground spans at the position: in
+    /// a registered projection, as many as the view's meters per pixel
+    /// there make it ([`View::meters_per_pixel_at`]).
     pub(crate) tile_units_per_meter: f64,
     /// How far the position is from the camera, in pixels, as
     /// [`View::camera_to_center_distance`] is the center's.
@@ -41,29 +43,42 @@ pub(crate) struct Anchor {
 /// world copy the view shows and in the copy past each end, from which
 /// what draws around the position can reach into the view; on the globe,
 /// one, unless the globe hides the position where it draws, at its height
-/// and through the projection as blended. None behind the camera.
+/// and through the projection as blended; in a registered projection, one,
+/// where its world square places the position, unless it has no place
+/// there. None behind the camera.
 pub(crate) fn anchors(view: &View, at: LatLng, height: impl Fn(UnwrappedTileID, [f64; 2]) -> f64) -> Vec<Anchor> {
     let zoom = view.integer_zoom();
     let tiles = f64::from(1u32 << zoom);
-    let at = LatLng::saturating(at.latitude().clamp(-LATITUDE_MAX, LATITUDE_MAX), at.longitude(), WrapMode::Unwrapped);
-    let tile_units_per_meter = tiles * f64::from(EXTENT) / (M2PI * EARTH_RADIUS_M * at.latitude().to_radians().cos());
-    let world = |at: &LatLng| TileCoordinate::from_lat_lng(0.0, at).p;
+    let pixels_to_tile_units = f64::from(EXTENT) / (TILE_SIZE * 2f64.powf(view.zoom() - f64::from(zoom)));
 
     // The world copies' wraps, each with where the position is in it, in
-    // worlds from its top left.
+    // worlds from its top left, and the tile units a meter spans there.
     let mut copies: Vec<(i16, Point<f64>)> = Vec::new();
-    if view.is_globe() {
-        let p = world(&view.lat_lng_near_center(&at));
-        copies.push((p.x.floor() as i16, Point::new(p.x - p.x.floor(), p.y)));
-    } else {
-        let p = world(&at.wrapped());
-        let wraps = world_copies(view);
-        if let (Some(first), Some(last)) = (wraps.iter().min(), wraps.iter().max()) {
-            copies.extend((first - 1..=last + 1).map(|wrap| (wrap, p)));
+    let tile_units_per_meter = if view.world().wraps() {
+        let at =
+            LatLng::saturating(at.latitude().clamp(-LATITUDE_MAX, LATITUDE_MAX), at.longitude(), WrapMode::Unwrapped);
+        let world = |at: &LatLng| TileCoordinate::from_lat_lng(0.0, at).p;
+        if view.is_globe() {
+            let p = world(&view.lat_lng_near_center(&at));
+            copies.push((p.x.floor() as i16, Point::new(p.x - p.x.floor(), p.y)));
+        } else {
+            let p = world(&at.wrapped());
+            let wraps = world_copies(view);
+            if let (Some(first), Some(last)) = (wraps.iter().min(), wraps.iter().max()) {
+                copies.extend((first - 1..=last + 1).map(|wrap| (wrap, p)));
+            }
         }
-    }
+        tiles * f64::from(EXTENT) / (M2PI * EARTH_RADIUS_M * at.latitude().to_radians().cos())
+    } else {
+        // A registered projection's world doesn't repeat, and its scale
+        // varies across it in ways only its converter knows.
+        let p = view.world().world_from_lat_lng(&at);
+        if p.x.is_finite() && p.y.is_finite() {
+            copies.push((0, p));
+        }
+        pixels_to_tile_units / view.meters_per_pixel_at(&at)
+    };
 
-    let pixels_to_tile_units = f64::from(EXTENT) / (TILE_SIZE * 2f64.powf(view.zoom() - f64::from(zoom)));
     let extent = f64::from(EXTENT);
     let last = tiles as u32 - 1;
     copies
@@ -214,7 +229,11 @@ pub(crate) fn ground_visibility(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use mln_engine::camera::TransformState;
+    use mln_engine::geo::world::WorldMapping;
+    use mln_style::crs::{Crs, CrsMapping};
     use mln_style::size::Size;
     use mln_style::types::{ProjectionDefinition, ProjectionType};
 
@@ -226,6 +245,16 @@ mod tests {
         if globe {
             state.set_projection_definition(&ProjectionDefinition::new(ProjectionType::Globe));
         }
+        state.set_lat_lng_zoom(&LatLng::new(latitude, longitude).unwrap(), zoom);
+        state
+    }
+
+    /// A camera on a map in the identity projection, whose world square
+    /// spans longitudes from -90 to 90 and every latitude.
+    fn identity_camera(latitude: f64, longitude: f64, zoom: f64) -> TransformState {
+        let mut state = TransformState::default();
+        state.set_size(Size::new(512, 256));
+        state.set_world(WorldMapping::Crs(Arc::new(CrsMapping::new(Arc::new(Crs::identity())))));
         state.set_lat_lng_zoom(&LatLng::new(latitude, longitude).unwrap(), zoom);
         state
     }
@@ -326,5 +355,38 @@ mod tests {
             let length = (to.x - from.x).hypot(to.y - from.y);
             assert!((length - 10.0).abs() < 0.1, "{latitude}: {length}");
         }
+    }
+
+    #[test]
+    fn in_a_registered_projection_a_position_anchors_once_where_the_projection_places_it() {
+        let state = identity_camera(20.0, 10.0, 2.0);
+        let view = state.view();
+        // 112.5 and 67.5 degrees from the world square's west and north
+        // edges: the middle of tile 2/2/1.
+        let at = LatLng::new(22.5, 22.5).unwrap();
+        let anchors = flat(view, at);
+        assert_eq!(1, anchors.len());
+        assert_eq!(UnwrappedTileID::with_wrap(0, CanonicalTileID::new(2, 2, 1)), anchors[0].tile);
+        assert_eq!([4096.0, 4096.0], anchors[0].point);
+        assert_near(screen(view, at), to_screen(view, anchors[0].tile, anchors[0].point, 0.0).unwrap());
+
+        // Past Mercator's latitude limit, which the projection doesn't have.
+        let north = LatLng::new(88.0, 22.5).unwrap();
+        let anchors = flat(view, north);
+        assert_eq!(1, anchors.len());
+        assert_near(screen(view, north), to_screen(view, anchors[0].tile, anchors[0].point, 0.0).unwrap());
+    }
+
+    /// A meter spans a pixel's tile units over the map's meters per pixel at
+    /// the position: here GL JS's `LngLat.distanceTo` across 100 pixels, over
+    /// 100, where at zoom 2 the identity's 180 degrees are 2048 pixels and a
+    /// pixel spans 16 tile units.
+    #[test]
+    fn in_a_registered_projection_a_meter_spans_what_the_maps_meters_per_pixel_make_it() {
+        let state = identity_camera(20.0, 10.0, 2.0);
+        let anchors = flat(state.view(), LatLng::new(20.0, 10.0).unwrap());
+        assert_eq!(1, anchors.len());
+        let meters_per_pixel = 16.0 / anchors[0].tile_units_per_meter;
+        assert!((meters_per_pixel / 9_182.565_332_549_524 - 1.0).abs() < 1e-9, "{meters_per_pixel}");
     }
 }

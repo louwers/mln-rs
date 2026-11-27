@@ -14,7 +14,7 @@ use geo_index::kdtree::{KDTree, KDTreeBuilder, KDTreeIndex};
 use geo_types::{Coord, Geometry, Point};
 use mln_style::feature::{Feature, Identifier, PropertyMap, Value};
 
-use crate::sources::geojson::{TileFeatures, mercator};
+use crate::sources::geojson::{Coordinates, TileFeatures};
 
 /// How points cluster.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -28,6 +28,21 @@ pub struct Options {
     pub extent: u16,
     /// The fewest points that make a cluster.
     pub min_points: usize,
+    /// The space that the points' positions are in, and that
+    /// [`Clusters::children`] gives clusters' positions in.
+    pub coordinates: Coordinates,
+    /// Whether the world wraps around the antimeridian, so that a tile at
+    /// its left or right edge has the points and clusters within the radius
+    /// past it, from the other side. A world that doesn't ends at the unit
+    /// square's edges: points outside it are left out, and a tile outside
+    /// it is empty.
+    pub wrap: bool,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Options { max_zoom: 16, radius: 40.0, extent: 512, min_points: 2, coordinates: Coordinates::LngLat, wrap: true }
+    }
 }
 
 /// The highest [`Options::max_zoom`]: a cluster ID holds the zoom of its
@@ -85,7 +100,7 @@ impl ClusterId {
 /// A point or a cluster at one zoom.
 #[derive(Clone, Debug)]
 struct Node {
-    /// The position, in Web Mercator's unit square.
+    /// The position, in the unit square.
     pos: Coord,
     kind: Kind,
     /// The cluster that took this node at the zoom below, if one did.
@@ -183,10 +198,13 @@ impl Clusters {
         let points = features
             .iter()
             .enumerate()
-            .map(|(i, f)| {
-                let Some(Geometry::Point(p)) = f.geometry else { return Err(Error::NotAPoint(i)) };
-                let properties = aggregate.map(|a| Arc::new(a.map(&f.properties)));
-                Ok(Node { pos: mercator::project(p.0), kind: Kind::Point(i as u32), parent: None, properties })
+            .filter_map(|(i, f)| {
+                let Some(Geometry::Point(p)) = f.geometry else { return Some(Err(Error::NotAPoint(i))) };
+                let pos = options.coordinates.project(p.0);
+                (options.wrap || in_world(pos)).then(|| {
+                    let properties = aggregate.map(|a| Arc::new(a.map(&f.properties)));
+                    Ok(Node { pos, kind: Kind::Point(i as u32), parent: None, properties })
+                })
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -203,8 +221,9 @@ impl Clusters {
     }
 
     /// The points and clusters of tile `x`, `y` at zoom `z`, with those
-    /// within the radius of its edges. A tile at the antimeridian also has
-    /// those across it.
+    /// within the radius of its edges. In a world that wraps, a tile at the
+    /// antimeridian also has those across it; in one that doesn't, a tile
+    /// outside the unit square is empty.
     #[must_use]
     pub fn tile(&self, z: u8, x: u32, y: u32) -> TileFeatures {
         let level = &self.levels[usize::from(z.min(self.options.max_zoom + 1))];
@@ -212,6 +231,10 @@ impl Clusters {
         let extent = f64::from(self.options.extent);
         let r = self.options.radius / extent;
         let (x, y) = (f64::from(x), f64::from(y));
+        let wrap = self.options.wrap;
+        if !wrap && (x >= z2 || y >= z2) {
+            return TileFeatures::new();
+        }
         let (top, bottom) = ((y - r) / z2, (y + 1.0 + r) / z2);
 
         let mut features = TileFeatures::new();
@@ -228,10 +251,10 @@ impl Clusters {
         };
 
         add(level.range(Coord { x: (x - r) / z2, y: top }, Coord { x: (x + 1.0 + r) / z2, y: bottom }), x);
-        if x == 0.0 {
+        if wrap && x == 0.0 {
             add(level.range(Coord { x: 1.0 - r / z2, y: top }, Coord { x: 1.0, y: bottom }), z2);
         }
-        if x == z2 - 1.0 {
+        if wrap && x == z2 - 1.0 {
             add(level.range(Coord { x: 0.0, y: top }, Coord { x: r / z2, y: bottom }), -1.0);
         }
         features
@@ -341,7 +364,7 @@ impl Clusters {
                 }
             }
             Kind::Cluster { id, num_points } => Feature {
-                geometry: Some(Geometry::Point(Point(mercator::unproject(node.pos)))),
+                geometry: Some(Geometry::Point(Point(self.options.coordinates.unproject(node.pos)))),
                 properties: cluster_properties(id, num_points, node.properties.as_deref()),
                 id: Identifier::Uint(u64::from(id.0)),
             },
@@ -394,6 +417,11 @@ fn cluster(above: &mut Level, zoom: u8, r: f64, min_points: usize, aggregate: Op
         });
     }
     Level::new(nodes)
+}
+
+/// Whether `pos` is in the unit square, its edges included.
+fn in_world(pos: Coord) -> bool {
+    (0.0..=1.0).contains(&pos.x) && (0.0..=1.0).contains(&pos.y)
 }
 
 /// A cluster's properties: `cluster`, `cluster_id`, `point_count` and

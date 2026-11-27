@@ -1240,3 +1240,85 @@ fn the_surface_a_hair_west_of_a_copy_is_its_neighbors() {
     assert_eq!(edge, ground.surface_at(DVec2::new(-1e-17, y)));
     assert_eq!(ground.surface_at(DVec2::new(-1.0, y)), ground.surface_at(DVec2::new(-1.0 - 1e-17, y)));
 }
+
+/// GL JS's terrain on its simple CRS (`src/render/terrain.test.ts`): the
+/// skirts are a fifth of a tile's width in the projection's meters per
+/// world unit, 36 at zoom 0 of the identity's 180-unit world and 18 at zoom
+/// 1.
+#[test]
+fn the_skirts_of_a_registered_projection_are_in_its_meters_per_world_unit() {
+    let tileset = PartialTileset { raster_encoding: Some(RasterEncoding::Terrarium), ..tiles() };
+    let style = style_with(crate::tests::ready(raster_dem_source("dem", None, tileset, 256)));
+    for (zoom, skirt) in [(0.0, 36.0), (1.0, 18.0)] {
+        let mut transform = transform();
+        transform.set_world(crate::tests::crs::identity());
+        transform.jump_to(&CameraOptions { zoom: Some(zoom), ..Default::default() });
+        let mut terrain = RenderTerrain::default();
+        update_terrain(&mut terrain, &update_parameters(style.clone(), &transform, MapMode::Static)).expect("terrain");
+        assert_eq!(skirt, terrain.surface().props.skirt_length, "zoom {zoom}");
+    }
+}
+
+/// A DEM tile: 16 pixels a side, rising a meter a pixel eastward from sea
+/// level, in Terrarium.
+fn terrarium_ramp() -> Response {
+    let mut image = PremultipliedImage::new(Size::new(16, 16));
+    for (i, pixel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        let [hi, lo] = ((i % 16) as u16 + 32768).to_be_bytes();
+        *pixel = [hi, lo, 0, 255];
+    }
+    let mut response = Response::new();
+    response.data = Some(Arc::new(crate::image::encode_png(&image)));
+    response
+}
+
+/// GL JS's terrain on its simple CRS: a location's height is read from the
+/// DEM at its place in the projection's world square, and there is no
+/// ground outside the square, nor in copies of it. The DEM's ramp is low,
+/// below the eye in the identity's world, 180 m wide.
+#[test]
+fn the_ground_of_a_registered_projection_is_read_at_its_place_in_the_projections_world() {
+    let mut load = TerrainLoad::new((0, 14), 1.0);
+    load.transform.set_world(crate::tests::crs::identity());
+    load.transform.jump_to(&CameraOptions {
+        center: Some(LatLng::new(45.0, 45.0).unwrap()),
+        zoom: Some(2.0),
+        ..Default::default()
+    });
+    load.frame();
+    load.answer(|_| Some(terrarium_ramp()));
+    let ground = load.ground_events().pop().flatten().expect("the ground");
+
+    let location = LatLng::new(50.0, 50.0).unwrap();
+    let world = load.transform.view().world().world_from_lat_lng(&location);
+    let cover = load.terrain.cover().unwrap();
+    let (tile, uv) = cover
+        .tiles
+        .iter()
+        .find_map(|tile| {
+            let tiles = f64::from(1u32 << tile.id.canonical.z);
+            let u = world.x * tiles - f64::from(tile.id.canonical.x);
+            let v = world.y * tiles - f64::from(tile.id.canonical.y);
+            ((0.0..1.0).contains(&u) && (0.0..1.0).contains(&v)).then_some((tile, [u as f32, v as f32]))
+        })
+        .expect("a tile at the location");
+    let (dem, coords) = tile.dem.expect("its DEM");
+    let source = load.store.source(load.render_source.tiles().unwrap()).unwrap();
+    let Some(Contents::Dem(contents)) = source.tile(&dem).and_then(Tile::contents) else {
+        panic!("the DEM tile {dem}")
+    };
+    let data = contents.dem();
+    let (dim, stride) = (data.dim as u32, data.stride as usize);
+    let unpack = DemUnpack::of(RasterEncoding::Terrarium);
+    let texel = |x: u32, y: u32| {
+        let start = (y as usize * stride + x as usize) * 4;
+        unpack.decode(data.image().data[start..start + 4].try_into().unwrap())
+    };
+    let height = f64::from(crate::tile::dem::sample(dim, coords, uv, texel));
+    assert_eq!(Some(height), ground.at(location));
+    assert_eq!(Some(height), ground.surface_at(DVec2::new(world.x, world.y)));
+
+    // Past the square's east edge, and in a copy of the square beside it.
+    assert_eq!(None, ground.at(LatLng::new(50.0, 120.0).unwrap()));
+    assert_eq!(None, ground.surface_at(DVec2::new(world.x - 1.0, world.y)));
+}

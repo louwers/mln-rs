@@ -508,9 +508,9 @@ pub(crate) unsafe extern "C" fn mln_map_projection_meters_per_pixel_at_latitude(
         if !(-90.0..=90.0).contains(&latitude) {
             return Err(Error::invalid_argument("latitude must be finite and within [-90, 90]"));
         }
-        let zoom = with_projection(projection, |projection| projection.camera().zoom)?;
+        let meters = with_projection(projection, |projection| projection.meters_per_pixel_at_latitude(latitude))?;
         // SAFETY: non-null, and the caller's contract.
-        unsafe { out_meters_per_pixel.write(Projection::meters_per_pixel_at_latitude(latitude, zoom)) };
+        unsafe { out_meters_per_pixel.write(meters) };
         Ok(())
     })
 }
@@ -1060,5 +1060,45 @@ mod tests {
             let status = mln_lat_lng_for_projected_meters(meters, core::ptr::null_mut(), NULL_DIAGNOSTIC);
             assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT);
         }
+    }
+
+    /// On a map in a registered projection, a pixel spans the ground
+    /// distance across 100 pixels over 100, as MapLibre GL JS's scale control
+    /// measures it: these numbers are its `LngLat.distanceTo`'s, where at
+    /// zoom 2 the identity's 180 degrees are 2048 pixels.
+    #[test]
+    fn meters_per_pixel_follow_a_registered_projection() {
+        use crate::map::mln_map_set_style_json;
+        use crate::map::tests::{create_map, options, release_map, view};
+        use crate::runtime::tests::{Waiter, create as create_runtime, release as release_runtime};
+
+        let runtime = create_runtime();
+        let map = create_map(runtime, &options(1.0));
+        let styled = Waiter::new();
+        let style =
+            r#"{"version":8,"projection":{"type":"identity"},"center":[10,20],"zoom":2,"sources":{},"layers":[]}"#;
+        // SAFETY: local arguments.
+        unsafe { mln_map_set_style_json(map, view(style), &raw const styled.descriptor, NULL_DIAGNOSTIC) };
+        assert_eq!(styled.status(), MLN_STATUS_OK);
+        let mut projection = handles::NULL;
+        // SAFETY: a local output and a null diagnostic.
+        let status = unsafe { mln_map_projection_create(map, core::ptr::null(), &raw mut projection, NULL_DIAGNOSTIC) };
+        assert_eq!(status, MLN_STATUS_OK);
+
+        for (latitude, expected) in
+            [(20.0, 9_182.565_332_549_524), (60.0, 4_882.907_974_674_727_5), (-85.0, 850.944_961_679_508_7)]
+        {
+            let mut meters = -1.0;
+            // SAFETY: a local output and a null diagnostic.
+            let status = unsafe {
+                mln_map_projection_meters_per_pixel_at_latitude(projection, latitude, &raw mut meters, NULL_DIAGNOSTIC)
+            };
+            assert_eq!(status, MLN_STATUS_OK);
+            assert!(((meters - expected) / expected).abs() < 1e-9, "{latitude}: {meters}");
+        }
+
+        mln_map_projection_release(projection);
+        release_map(map);
+        release_runtime(runtime);
     }
 }

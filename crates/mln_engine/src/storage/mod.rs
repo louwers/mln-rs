@@ -65,7 +65,7 @@ pub use file_source::{FileSource, FileSourceExt};
 pub use loader::{Loader, LoaderBuilder};
 pub use online_file_source::OnlineFileSource;
 pub use request::{Callback, Request, Responder};
-pub use resource::{Kind, LoadingMethod, RequestOrder, Resource, StoragePolicy, TileFormat};
+pub use resource::{Kind, LoadingMethod, RequestOrder, Resource, StoragePolicy, TileAddressing, TileFormat};
 pub use resource_options::ResourceOptions;
 pub use response::{Data, ResourceError, Response};
 

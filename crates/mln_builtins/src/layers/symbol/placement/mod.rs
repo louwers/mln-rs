@@ -563,7 +563,7 @@ impl Placement for SymbolPlacement {
         }
         self.placing.clear();
         self.placing.extend_from_slice(layers);
-        let longitude = cx.view.center(mln_style::geo::WrapMode::Unwrapped).longitude() as f32;
+        let longitude = cx.view.world_copy_longitude() as f32;
         let mut added = false;
         let mut removed = false;
         for placing in layers.iter().rev() {

@@ -1,0 +1,50 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 128,
+      "height": 128
+    }
+  },
+  "center": [20, 20],
+  "zoom": 2,
+  "projection": {
+    "type": "identity"
+  },
+  "sources": {
+    "position": {
+      "type": "geojson",
+      "data": {
+        "type": "Point",
+        "coordinates": [22.5, 22.5]
+      }
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#eeeeee"
+      }
+    },
+    {
+      "id": "position",
+      "type": "circle",
+      "source": "position",
+      "paint": {
+        "circle-radius": 13,
+        "circle-color": "#ff0000"
+      }
+    },
+    {
+      "id": "puck",
+      "type": "org.maplibre.location-puck",
+      "paint": {
+        "puck-position": [22.5, 22.5],
+        "puck-accuracy-radius": 150000,
+        "puck-accuracy-border-width": 2
+      }
+    }
+  ]
+}

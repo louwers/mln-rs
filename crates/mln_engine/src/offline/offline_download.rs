@@ -13,16 +13,21 @@ use std::collections::VecDeque;
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
-use mln_style::Parser;
+use geo_types::Geometry;
 use mln_style::collections::VecMap;
+use mln_style::crs::CrsMapping;
+use mln_style::feature::Feature;
 use mln_style::hash::{HashMap, HashSet};
 use mln_style::i18n::glyph_range_is_entirely_locally_generated;
 use mln_style::layer::SourceKind;
 use mln_style::range::Range;
 use mln_style::source::SourceTypeInfo;
+use mln_style::sources::geojson::features_to_world;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::tileset::{Tileset, VectorEncoding};
+use mln_style::{Parser, StyleRegistry};
 
+use crate::geo::world::{WorldBox, WorldMapping};
 use crate::registry::Registry;
 use crate::source::OfflineResources;
 use crate::storage::chrono::now;
@@ -31,13 +36,14 @@ use crate::storage::offline::{
     OfflineRegionDefinition, OfflineRegionDownloadState, OfflineRegionObserver, OfflineRegionStatus,
 };
 use crate::storage::offline_database::{DatabaseError, OfflineDatabase};
-use crate::storage::resource::{Priority, TileFormat, Usage};
+use crate::storage::resource::{Priority, TileAddressing, TileFormat, Usage};
 use crate::storage::response::{Caching, Reason, ResourceError};
 use crate::storage::{FileSource, Kind, LoadingMethod, Request, Resource, Response};
 use crate::text::glyph::{
     GLYPH_RANGES_PER_FONT_STACK, GLYPHS_PER_GLYPH_RANGE, GlyphID, NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK,
     get_glyph_range,
 };
+use crate::tile::tile_range::TileRange;
 use crate::tile_store::tile_cover::{TileCover, covering_zoom_level, tile_count_bounds, tile_count_geometry};
 
 const K_RESOURCES_BATCH_SIZE: usize = 64;
@@ -66,16 +72,104 @@ fn covering_zoom_range(
     Range::new(min_z as u8, max_z as u8)
 }
 
+/// Where a region lies in the world square of a registered projection,
+/// which doesn't wrap.
+enum InWorld {
+    /// A tile pyramid's bounds, as the rectangle around them.
+    Box(WorldBox),
+    /// A geometry's, if any of it has a place there.
+    Geometry(Option<Geometry<f64>>),
+}
+
+impl InWorld {
+    fn new(definition: &OfflineRegionDefinition, crs: &CrsMapping) -> Self {
+        match definition {
+            OfflineRegionDefinition::TilePyramid(reg) => InWorld::Box(crs.lng_lat_box_to_world_box(&reg.bounds)),
+            OfflineRegionDefinition::Geometry(reg) => {
+                let features = features_to_world(vec![Feature::new(reg.geometry.clone())], crs);
+                InWorld::Geometry(features.into_iter().next().and_then(|feature| feature.geometry))
+            }
+        }
+    }
+
+    /// Calls `f` with each tile of the square that the region covers at
+    /// zoom `z`.
+    fn cover(&self, z: u8, f: &mut impl FnMut(CanonicalTileID)) {
+        match self {
+            InWorld::Box(world_box) => {
+                let range = TileRange::from_world_box(world_box, z, z);
+                if range.zoom_range.min > range.zoom_range.max {
+                    return;
+                }
+                for x in range.range.min.x..=range.range.max.x {
+                    for y in range.range.min.y..=range.range.max.y {
+                        f(CanonicalTileID::new(z, x, y));
+                    }
+                }
+            }
+            InWorld::Geometry(Some(geometry)) => {
+                for tile in TileCover::new_from_world_geometry(geometry, z) {
+                    if tile.wrap == 0 {
+                        f(tile.canonical);
+                    }
+                }
+            }
+            InWorld::Geometry(None) => {}
+        }
+    }
+
+    /// How many tiles of the square the region covers at zoom `z`; a box's
+    /// are counted, not walked, and as many as a `u64` holds at most.
+    fn count(&self, z: u8) -> u64 {
+        if let InWorld::Box(world_box) = self {
+            let range = TileRange::from_world_box(world_box, z, z);
+            if range.zoom_range.min > range.zoom_range.max {
+                return 0;
+            }
+            // From zoom 32 a row of the square has 2^32 tiles, one more than
+            // a u32 holds.
+            let tiles = |min: u32, max: u32| u64::from(max) - u64::from(min) + 1;
+            let (min, max) = (range.range.min, range.range.max);
+            return tiles(min.x, max.x).saturating_mul(tiles(min.y, max.y));
+        }
+        let mut count = 0;
+        self.cover(z, &mut |_| count += 1);
+        count
+    }
+}
+
+/// How lng/lat maps to the tiles of the style that `parser` read against
+/// `registry`: the registered projection that the style names, or Mercator,
+/// also for a name that the registry lacks.
+fn style_world(parser: &Parser, registry: &StyleRegistry) -> WorldMapping {
+    parser
+        .projection()
+        .registered_name()
+        .and_then(|name| registry.projection(name))
+        .map_or(WorldMapping::Mercator, |mapping| WorldMapping::Crs(Arc::clone(mapping)))
+}
+
+/// Calls `f` with the tiles that the region covers in the grid that `world`
+/// maps lng/lat to.
 fn tile_cover(
     definition: &OfflineRegionDefinition,
+    world: &WorldMapping,
     round_zoom: bool,
     tile_size: u16,
     zoom_range: Range<u8>,
     mut f: impl FnMut(CanonicalTileID),
 ) {
     let clamped_zoom_range = covering_zoom_range(definition, round_zoom, tile_size, zoom_range);
+    let in_world = match world {
+        WorldMapping::Crs(mapping) => Some(InWorld::new(definition, mapping)),
+        WorldMapping::Mercator => None,
+    };
 
     for z in clamped_zoom_range.min..=clamped_zoom_range.max {
+        if let Some(in_world) = &in_world {
+            in_world.cover(z, &mut f);
+            continue;
+        }
         let cover = match definition {
             OfflineRegionDefinition::TilePyramid(reg) => Some(TileCover::new_from_bounds(&reg.bounds, z)),
             OfflineRegionDefinition::Geometry(reg) => TileCover::new_from_geometry(&reg.geometry, z).ok(),
@@ -90,14 +184,27 @@ fn tile_cover(
     }
 }
 
-fn tile_count(definition: &OfflineRegionDefinition, round_zoom: bool, tile_size: u16, zoom_range: Range<u8>) -> u64 {
+/// How many tiles the region covers in the grid that `world` maps lng/lat
+/// to.
+fn tile_count(
+    definition: &OfflineRegionDefinition,
+    world: &WorldMapping,
+    round_zoom: bool,
+    tile_size: u16,
+    zoom_range: Range<u8>,
+) -> u64 {
     let clamped_zoom_range = covering_zoom_range(definition, round_zoom, tile_size, zoom_range);
+    let in_world = match world {
+        WorldMapping::Crs(mapping) => Some(InWorld::new(definition, mapping)),
+        WorldMapping::Mercator => None,
+    };
 
     let mut result: u64 = 0;
     for z in clamped_zoom_range.min..=clamped_zoom_range.max {
-        result += match definition {
-            OfflineRegionDefinition::TilePyramid(reg) => tile_count_bounds(&reg.bounds, z),
-            OfflineRegionDefinition::Geometry(reg) => tile_count_geometry(&reg.geometry, z).unwrap_or(0),
+        result += match (&in_world, definition) {
+            (Some(in_world), _) => in_world.count(z),
+            (None, OfflineRegionDefinition::TilePyramid(reg)) => tile_count_bounds(&reg.bounds, z),
+            (None, OfflineRegionDefinition::Geometry(reg)) => tile_count_geometry(&reg.geometry, z).unwrap_or(0),
         };
     }
 
@@ -223,6 +330,8 @@ pub struct OfflineDownload {
     network: Arc<dyn FileSource>,
     post: Post,
     registry: Arc<Registry>,
+    /// How lng/lat maps to the tiles of the region's style, once it's read.
+    world: WorldMapping,
     /// The most requests the download has in flight at once.
     maximum_concurrent_requests: u32,
     status: OfflineRegionStatus,
@@ -253,6 +362,7 @@ impl OfflineDownload {
             network,
             post,
             registry,
+            world: WorldMapping::Mercator,
             maximum_concurrent_requests: DEFAULT_MAXIMUM_CONCURRENT_REQUESTS,
             status: OfflineRegionStatus::default(),
             observer: Box::new(NullObserver),
@@ -328,6 +438,7 @@ impl OfflineDownload {
         }
 
         result.required_resource_count_is_precise = true;
+        let world = style_world(&parser, self.registry.style());
 
         for source in &parser.sources {
             let record = source.clone();
@@ -356,7 +467,7 @@ impl OfflineDownload {
                 }
             };
             if let Some(tileset) = tileset.filter(|tileset| !tileset.tiles.is_empty()) {
-                let count = tile_count(&self.definition, round_zoom, tile_size, tileset.zoom_range);
+                let count = tile_count(&self.definition, &world, round_zoom, tile_size, tileset.zoom_range);
                 result.required_tile_count += count;
                 result.required_resource_count += count;
             }
@@ -422,6 +533,7 @@ impl OfflineDownload {
         let mut parser = Parser::new(self.registry.style());
         parser.parse(&String::from_utf8_lossy(style_data)).map_err(|error| error.to_string())?;
         self.status.required_resource_count_is_precise = true;
+        self.world = style_world(&parser, self.registry.style());
 
         for source in &parser.sources {
             let record = source.clone();
@@ -576,7 +688,15 @@ impl OfflineDownload {
         };
         let (status, remaining) = (&mut self.status, &mut self.resources_remaining);
         let pixel_ratio = self.definition.pixel_ratio();
-        tile_cover(&self.definition, round_zoom, tile_size, tileset.zoom_range, |tile: CanonicalTileID| {
+        let world = &self.world;
+        // A tile's `{bbox}` is its box in the tile matrix set of the
+        // registered projection, as a map drawn in it asks for the tile.
+        let tile_matrix_set = match world {
+            WorldMapping::Crs(_) => Some(world.tile_matrix_set()),
+            WorldMapping::Mercator => None,
+        };
+        let addressing = TileAddressing { scheme: tileset.scheme, tile_matrix_set };
+        tile_cover(&self.definition, world, round_zoom, tile_size, tileset.zoom_range, |tile: CanonicalTileID| {
             status.required_resource_count += 1;
             status.required_tile_count += 1;
 
@@ -586,7 +706,7 @@ impl OfflineDownload {
                 tile.x as i32,
                 tile.y as i32,
                 tile.z as i8,
-                tileset.scheme,
+                addressing,
                 format,
                 LoadingMethod::All,
             );

@@ -1248,6 +1248,7 @@ pub(crate) unsafe extern "C" fn mln_map_add_custom_geometry_source(
                 tile_options: Arc::new(tile_options),
                 zoom_range: zooms,
                 tile_functions: Arc::new(tile_functions),
+                crs: None,
             };
             Source::new(&id, SourceData::<CustomGeometrySourceType>::new(options))
         };
@@ -1415,7 +1416,8 @@ pub(crate) unsafe extern "C" fn mln_map_add_custom_vector_source(
             source_id: Arc::new(LentText::new(&id)),
         };
         let source = |tile_functions| {
-            let options = CustomVectorSourceOptions { zoom_range: zooms, tile_functions: Arc::new(tile_functions) };
+            let options =
+                CustomVectorSourceOptions { zoom_range: zooms, tile_functions: Arc::new(tile_functions), crs: None };
             Source::new(&id, SourceData::<CustomVectorSourceType>::new(options))
         };
         add_callback_source(callbacks, source, |source, held| {

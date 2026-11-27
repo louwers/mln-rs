@@ -1,8 +1,10 @@
 // The styles the app offers, from the shared catalog (examples/styles.json)
-// that the web demo reads too, and the terrain it adds to some of them. And
-// the projections it draws them with.
+// that the web demo reads too, the terrain it adds to some of them, and where
+// some of them open. And the projections it draws them with.
 
+use mln_engine::camera::CameraOptions;
 use mln_style::error::Error;
+use mln_style::geo::LatLng;
 
 const STYLES_JSON: &str = include_str!("../../styles.json");
 
@@ -26,6 +28,36 @@ pub(crate) struct Style {
     pub dark: bool,
     /// The terrain the app adds to the style once it loads.
     pub terrain: Option<Terrain>,
+    /// Where the camera goes when the app opens the style or the picker
+    /// picks it; without one, it stays where it is.
+    pub camera: Option<Camera>,
+}
+
+/// A catalog entry's `camera`: a center and a zoom. The bearing and pitch
+/// stay as they are.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Camera {
+    pub center: LatLng,
+    pub zoom: f64,
+}
+
+impl Camera {
+    /// A catalog entry's `camera`, whose `center` is a longitude and a
+    /// latitude, as a style's is; `None` where it lacks a part.
+    fn parse(entry: &serde_json::Value) -> Option<Camera> {
+        let [longitude, latitude] = entry.get("center")?.as_array()?.as_slice() else {
+            return None;
+        };
+        Some(Camera {
+            center: LatLng::new(latitude.as_f64()?, longitude.as_f64()?).ok()?,
+            zoom: entry.get("zoom")?.as_f64()?,
+        })
+    }
+
+    /// The camera options that move the camera here.
+    pub(crate) fn options(self) -> CameraOptions {
+        CameraOptions { center: Some(self.center), zoom: Some(self.zoom), ..CameraOptions::default() }
+    }
 }
 
 /// 3D terrain that the app adds to a style that has none, from a catalog
@@ -101,7 +133,11 @@ fn parse_catalog() -> (String, Vec<Style>) {
                 Some(terrain) => Some(Terrain::parse(terrain)?),
                 None => None,
             };
-            Some(Style { key: Some(key), name, provider, source, dark, terrain })
+            let camera = match entry.get("camera") {
+                Some(camera) => Some(Camera::parse(camera)?),
+                None => None,
+            };
+            Some(Style { key: Some(key), name, provider, source, dark, terrain, camera })
         })
         .collect();
     (default, styles)
@@ -126,6 +162,7 @@ pub(crate) fn default_style() -> Style {
             source: StyleSource::Json("{}".to_owned()),
             dark: false,
             terrain: None,
+            camera: None,
         })
 }
 
@@ -147,7 +184,15 @@ pub(crate) fn style_for(spec: &str) -> Style {
         .filter(|host| !host.is_empty())
         .unwrap_or("local file")
         .to_owned();
-    Style { key: None, name: String::new(), provider, source: StyleSource::Url(url), dark: false, terrain: None }
+    Style {
+        key: None,
+        name: String::new(),
+        provider,
+        source: StyleSource::Url(url),
+        dark: false,
+        terrain: None,
+        camera: None,
+    }
 }
 
 /// The ID of the source that [`add_terrain`] adds.
@@ -285,6 +330,24 @@ mod tests {
         let liberty_3d = style_for("liberty-3d").terrain.expect("Liberty 3D's terrain");
         assert_eq!(liberty_3d.hillshade.expect("Liberty 3D's hillshade").before.as_deref(), Some("building"));
         assert!(liberty_3d.sky.is_some(), "Liberty 3D's sky");
+        // The Arctic opens over Greenland; Liberty keeps the camera.
+        let arctic = Camera { center: LatLng::new(78.0, -40.0).unwrap(), zoom: 1.2 };
+        assert_eq!(style_for("arctic").camera, Some(arctic));
+        assert_eq!(default.camera, None);
+    }
+
+    #[test]
+    fn camera_takes_a_center_and_a_zoom() {
+        let parse = |json: &str| Camera::parse(&serde_json::from_str(json).unwrap());
+        let camera = parse(r#"{"center":[-40,78],"zoom":1.2}"#).unwrap();
+        assert_eq!(camera, Camera { center: LatLng::new(78.0, -40.0).unwrap(), zoom: 1.2 });
+        assert_eq!(camera.options().center, Some(camera.center));
+        assert_eq!(camera.options().zoom, Some(1.2));
+        assert_eq!(camera.options().bearing, None);
+        // A camera without both parts, or with a latitude past a pole, is none.
+        assert_eq!(parse(r#"{"center":[-40,78]}"#), None);
+        assert_eq!(parse(r#"{"center":[-40],"zoom":1}"#), None);
+        assert_eq!(parse(r#"{"center":[0,91],"zoom":1}"#), None);
     }
 
     #[test]

@@ -5,7 +5,7 @@ use crate::suite;
 
 #[test]
 fn render_tests() {
-    assert_eq!(suite::run("render_tests", &[], Some(render_test::map::factory(mln_builtins::registry()))), 0);
+    assert_eq!(suite::run("render_tests", &[], Some(render_test::map::factory(render_test::registry()))), 0);
 }
 
 /// The same tests with the tile workers in two worker instances that the map
@@ -13,6 +13,6 @@ fn render_tests() {
 /// message, bucket and tile crosses as bytes.
 #[test]
 fn render_tests_through_the_codec() {
-    let factory = Some(render_test::map::factory(mln_builtins::registry()));
+    let factory = Some(render_test::map::factory(render_test::registry()));
     assert_eq!(suite::run("render_tests_through_the_codec", &["--tileWorkerCodec", "2"], factory), 0);
 }

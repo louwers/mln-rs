@@ -19,13 +19,13 @@ The tests render on WebGPU, or on the backend that `MLN_RENDER_BACKEND` names:
 ignores of its manifest in `manifests/`.
 
 The tests in `testdata/metrics/integration/gljs` are MapLibre GL JS's tests of
-terrain and image sources, with the tiles and images they load in `gljs/assets`:
-a manifest's `asset_path` names a directory whose files load in place of the
-cache's resources at the same `local://` paths. The tests beside that directory
-(in `gljs`) load the directories it holds (`tiles`, `geojson`, `image`) only
-from it, as GL JS's test server does, so a file missing there is not found; the
-other tests fall back to the cache. `mise run update:gljs-testdata <checkout>`
-copies them again.
+terrain, image sources and the built-in identity projection, with the tiles and
+images they load in `gljs/assets`: a manifest's `asset_path` names a directory
+whose files load in place of the cache's resources at the same `local://` paths.
+The tests beside that directory (in `gljs`) load the directories it holds
+(`tiles`, `geojson`, `image`) only from it, as GL JS's test server does, so a
+file missing there is not found; the other tests fall back to the cache.
+`mise run update:gljs-testdata <checkout>` copies them again.
 
 `expectations/` holds mln-rs's own expected images, at the paths of the tests
 they replace the images of. Every manifest reads it last, so that its image

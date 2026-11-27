@@ -1,11 +1,11 @@
 //! Cuts GeoJSON features into vector tiles, as geojson-vt does.
 //!
-//! [`TileIndex`] projects the features onto Web Mercator's unit square once,
-//! simplifies their lines for its maximum zoom and ranks each point by how
-//! much it matters, so that a tile at any zoom keeps the points that matter
-//! at that zoom. It cuts tiles down to a shallow zoom up front, and deeper
-//! ones on request, from the nearest tile above that it kept the features
-//! of. [`cut_tile`] cuts one tile without an index.
+//! [`TileIndex`] puts the features in the unit square once, simplifies their
+//! lines for its maximum zoom and ranks each point by how much it matters,
+//! so that a tile at any zoom keeps the points that matter at that zoom. It
+//! cuts tiles down to a shallow zoom up front, and deeper ones on request,
+//! from the nearest tile above that it kept the features of. [`cut_tile`]
+//! cuts one tile without an index.
 
 mod clip;
 mod convert;
@@ -20,7 +20,7 @@ use geometry::{Bbox, Feature, X, Y};
 use output::Tile;
 use parking_lot::{Mutex, RwLock};
 
-use crate::sources::geojson::TileFeatures;
+use crate::sources::geojson::{Coordinates, TileFeatures};
 
 /// foldhash's hasher, with a fixed seed in the benchmarks' builds, as
 /// `mln_style::hash`'s.
@@ -44,11 +44,13 @@ pub struct TileOptions {
     /// Whether a line's pieces say where along the line they start and end,
     /// for line gradients.
     pub line_metrics: bool,
+    /// The space that the features' positions are in.
+    pub coordinates: Coordinates,
 }
 
 impl Default for TileOptions {
     fn default() -> Self {
-        TileOptions { tolerance: 3.0, extent: 4096, buffer: 64, line_metrics: false }
+        TileOptions { tolerance: 3.0, extent: 4096, buffer: 64, line_metrics: false, coordinates: Coordinates::LngLat }
     }
 }
 
@@ -64,11 +66,17 @@ pub struct Options {
     /// The most points that a tile cut up front keeps without being cut
     /// further.
     pub index_max_points: u32,
+    /// Whether the world wraps around the antimeridian, so that a tile at
+    /// its left or right edge has what lies past it, from the other side.
+    /// A world that doesn't ends at the unit square's edges: the index cuts
+    /// its features at the tile buffer around the square, and a tile past
+    /// its last column is empty.
+    pub wrap: bool,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { tile: TileOptions::default(), max_zoom: 18, index_max_zoom: 5, index_max_points: 100_000 }
+        Options { tile: TileOptions::default(), max_zoom: 18, index_max_zoom: 5, index_max_points: 100_000, wrap: true }
     }
 }
 
@@ -138,21 +146,35 @@ impl std::fmt::Debug for TileIndex {
 }
 
 impl TileIndex {
-    /// Indexes `features` (in longitude and latitude) for tiles.
+    /// Indexes `features`, whose positions are in `options.tile.coordinates`,
+    /// for tiles. It keeps what lies within the tile buffer above and below
+    /// the unit square.
     #[must_use]
     pub fn new(features: &[mln_style::feature::Feature<f64>], options: Options) -> Self {
         let options = Options { max_zoom: options.max_zoom.min(MAX_ZOOM), ..options };
         let tile = &options.tile;
         let tolerance = tile.tolerance / f64::from(tile.extent) / 2f64.powi(i32::from(options.max_zoom));
-        let features = convert::convert(features, tolerance, tile.line_metrics);
-        let features = clip::wrap(features, f64::from(tile.buffer) / f64::from(tile.extent), tile.line_metrics);
+        let buffer = f64::from(tile.buffer) / f64::from(tile.extent);
+        let features = convert::convert(features, tolerance, tile.line_metrics, tile.coordinates);
+        let features = if options.wrap {
+            clip::wrap(features, buffer, tile.line_metrics)
+        } else {
+            clip::clip_to_world::<X>(features, buffer, tile.line_metrics)
+        };
+        // Web Mercator puts every latitude between the square's top and
+        // bottom edges.
+        let features = match tile.coordinates {
+            Coordinates::LngLat => features,
+            Coordinates::UnitSquare => clip::clip_to_world::<Y>(features, buffer, tile.line_metrics),
+        };
         let index = TileIndex { options, tiles: RwLock::new(HashMap::default()) };
         index.add(&features, TileId::ROOT, None);
         index
     }
 
     /// The features of tile `x`, `y` at zoom `z`, cut now if they aren't
-    /// yet. Columns wrap around the world.
+    /// yet. Columns wrap around a world that wraps; in one that doesn't, a
+    /// tile past the last column is empty.
     pub fn tile(&self, z: u8, x: u32, y: u32) -> Result<Arc<TileFeatures>, Error> {
         if z > self.options.max_zoom {
             return Err(Error::ZoomPastMax(z));
@@ -160,6 +182,9 @@ impl TileIndex {
         let z2 = 1u64 << z;
         if u64::from(y) >= z2 {
             return Err(Error::RowPastEnd { z, y });
+        }
+        if !self.options.wrap && u64::from(x) >= z2 {
+            return Ok(Arc::default());
         }
         // `x % z2` is less than `z2`, at most 2^31.
         let id = TileId { z, x: (u64::from(x) % z2) as u32, y };
@@ -252,9 +277,9 @@ impl TileIndex {
     }
 }
 
-/// Cuts tile `x`, `y` at zoom `z` from `features` (in longitude and
-/// latitude), without an index. `wrap` also gives it what lies past the
-/// antimeridian, and `clip` cuts away what lies past its buffer.
+/// Cuts tile `x`, `y` at zoom `z` from `features`, whose positions are in
+/// `options.coordinates`, without an index. `wrap` also gives it what lies
+/// past the antimeridian, and `clip` cuts away what lies past its buffer.
 #[must_use]
 pub fn cut_tile(
     features: &[mln_style::feature::Feature<f64>],
@@ -268,7 +293,7 @@ pub fn cut_tile(
     let z2 = 2f64.powi(i32::from(z));
     let tolerance = options.tolerance / f64::from(options.extent) / z2;
     let buffer = f64::from(options.buffer) / f64::from(options.extent);
-    let mut features = convert::convert(features, tolerance, options.line_metrics);
+    let mut features = convert::convert(features, tolerance, options.line_metrics, options.coordinates);
     if wrap {
         features = clip::wrap(features, buffer, options.line_metrics);
     }

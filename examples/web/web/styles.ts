@@ -1,8 +1,9 @@
 // The styles the page offers, from the shared catalog (examples/styles.json):
 // vector tiles across several schemas (OpenMapTiles, Protomaps, Shortbread,
 // and Mapeak), raster-dem hillshade, raster tiles (satellite imagery and
-// OpenStreetMap Carto), and Mapterhorn's terrain under the satellite imagery.
-// `dark` turns the page's controls dark.
+// OpenStreetMap Carto), Mapterhorn's terrain under the satellite imagery, and
+// NASA GIBS's imagery of the Arctic in EPSG:3413, a projection that the map
+// registers (src/lib.rs). `dark` turns the page's controls dark.
 
 import type {
   HillshadeLayerSpecification,
@@ -31,7 +32,20 @@ export interface Terrain {
   sky?: SkySpecification;
 }
 
-/** A style the page can show; `key` is null for one from a URL. */
+/**
+ * Where the camera goes when the page opens a style or the picker picks it:
+ * `center`, a longitude and a latitude as in a style, and `zoom`. The
+ * bearing and pitch stay as they are.
+ */
+export interface StyleCamera {
+  center: [number, number];
+  zoom: number;
+}
+
+/**
+ * A style the page can show; `key` is null for one from a URL. Without a
+ * `camera`, the camera stays where it is.
+ */
 export interface Style {
   key: string | null;
   name: string;
@@ -39,6 +53,7 @@ export interface Style {
   source: StyleSource;
   dark?: boolean;
   terrain?: Terrain;
+  camera?: StyleCamera;
 }
 
 interface CatalogEntry {
@@ -49,6 +64,7 @@ interface CatalogEntry {
   json?: object;
   dark?: boolean;
   terrain?: Terrain;
+  camera?: StyleCamera;
 }
 
 export const STYLES: Style[] = (catalog.styles as CatalogEntry[]).map(
@@ -62,6 +78,7 @@ export const STYLES: Style[] = (catalog.styles as CatalogEntry[]).map(
         : { json: JSON.stringify(entry.json) },
     dark: entry.dark,
     terrain: entry.terrain,
+    camera: entry.camera,
   }),
 );
 

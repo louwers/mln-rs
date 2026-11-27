@@ -1,15 +1,17 @@
-//! Clusters testdata/supercluster/places.json, the places of supercluster's tests. The
-//! expectations are GL JS's supercluster's (8.0.1), whose cluster IDs are
-//! these plus the number of points.
+//! Clusters testdata/supercluster/places.json, the places of supercluster's
+//! tests, and points in the unit square. The places' expectations are
+//! GL JS's supercluster's (8.0.1), whose cluster IDs are these plus the
+//! number of points.
 
-use geo_types::Point;
+use geo_types::{Geometry, Point};
 use mln_style::feature::{Feature, Identifier, PropertyMap, Value};
 use serde_json::Value as Json;
 
 use super::{Aggregate, Clusters, Error, MAX_ZOOM, Options, abbreviate};
-use crate::sources::geojson::TileFeatures;
+use crate::sources::geojson::{Coordinates, TileFeatures};
 
-const DEFAULT: Options = Options { max_zoom: 16, radius: 40.0, extent: 512, min_points: 2 };
+const DEFAULT: Options =
+    Options { max_zoom: 16, radius: 40.0, extent: 512, min_points: 2, coordinates: Coordinates::LngLat, wrap: true };
 
 fn places() -> Vec<Feature<f64>> {
     let path = std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
@@ -232,4 +234,43 @@ fn a_cluster_that_takes_nothing_stays_as_it_is() {
     features.truncate(1);
     let clusters = Clusters::new(features, Options { min_points: 1, ..DEFAULT }, None).unwrap();
     assert!(!is_cluster(&clusters.tile(0, 0, 0)[0].properties));
+}
+
+/// Points at `positions`, clustered in the unit square of a world that
+/// doesn't wrap.
+fn in_unit_square(positions: &[(f64, f64)]) -> Clusters {
+    let points = positions.iter().map(|&(x, y)| Feature::new(Point::new(x, y))).collect();
+    let options = Options { coordinates: Coordinates::UnitSquare, wrap: false, ..Options::default() };
+    Clusters::new(points, options, None).unwrap()
+}
+
+#[test]
+fn unit_square_without_wrap_leaves_out_points_outside_the_world() {
+    let clusters = in_unit_square(&[(0.99, 0.5), (1.03, 0.5)]);
+
+    let tile = clusters.tile(0, 0, 0);
+    let [point] = &tile[..] else { panic!("{tile:?}") };
+    assert_eq!(point.geometry, Some(Geometry::Point(Point::new(507, 256))));
+}
+
+#[test]
+fn unit_square_without_wrap_has_no_tile_beside_the_world_and_copies_nothing_across_its_edges() {
+    let clusters = in_unit_square(&[(0.01, 0.5), (0.99, 0.5), (0.5, 0.01), (0.5, 0.99)]);
+
+    assert_eq!(clusters.tile(0, 1, 0), TileFeatures::new());
+    assert_eq!(clusters.tile(0, 0, 1), TileFeatures::new());
+    assert_eq!(clusters.tile(1, 0, 0).len(), 2);
+}
+
+#[test]
+fn unit_square_clusters_come_back_in_the_square() {
+    let clusters = in_unit_square(&[(0.5, 0.5), (0.5001, 0.5), (0.52, 0.5)]);
+
+    let tile = clusters.tile(1, 1, 1);
+    let [cluster] = &tile[..] else { panic!("{tile:?}") };
+    let children = clusters.children(uint(&cluster.properties, "cluster_id") as u32).unwrap();
+    assert_eq!(children.len(), 2);
+    let inner = children.iter().find(|c| is_cluster(&c.properties)).unwrap();
+    let Some(Geometry::Point(position)) = inner.geometry else { panic!("{inner:?}") };
+    assert!((position.x() - 0.50005).abs() < 1e-12 && position.y() == 0.5, "{position:?}");
 }

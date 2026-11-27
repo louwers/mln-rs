@@ -759,6 +759,7 @@ mod tests {
             center: None,
             dem_tiles: Vec::new(),
             ranges: ElevationRanges::default(),
+            world: crate::geo::world::WorldMapping::Mercator,
         };
         let mut drapes = Drapes::default();
         drapes.begin(&view, &cover, 1, (u64::MAX, 4096));

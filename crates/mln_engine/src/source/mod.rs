@@ -122,6 +122,7 @@ use std::sync::Arc;
 
 use mln_style::Source;
 use mln_style::bitmap::PremultipliedImage;
+use mln_style::crs::TileMatrixSet;
 use mln_style::error::Error;
 use mln_style::geo::{LatLng, LatLngBounds};
 use mln_style::range::Range;
@@ -475,6 +476,10 @@ pub struct MapSettings {
     pub mode: MapMode,
     /// The map's pixel ratio, which a raster tile's resource may ask for.
     pub pixel_ratio: f32,
+    /// The tile matrix set of the map's registered projection, in whose
+    /// units a tile's resource asks for the tile's `{bbox}`; `None` on
+    /// Mercator and the globe, whose `{bbox}` is in EPSG:3857 meters.
+    pub tile_matrix_set: Option<TileMatrixSet>,
     /// The map's highest zoom level.
     pub max_zoom: f64,
     /// Where the map's resources load from, if anywhere.
@@ -491,6 +496,7 @@ impl std::fmt::Debug for MapSettings {
         f.debug_struct("MapSettings")
             .field("mode", &self.mode)
             .field("pixel_ratio", &self.pixel_ratio)
+            .field("tile_matrix_set", &self.tile_matrix_set)
             .field("max_zoom", &self.max_zoom)
             .field("file_source", &self.file_source.as_ref().map(|_| format_args!("..")))
             .field("fast_pfor_enabled", &self.fast_pfor_enabled)

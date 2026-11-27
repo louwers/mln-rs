@@ -24,6 +24,7 @@ use mln_style::types::TranslateAnchorType;
 
 use crate::camera::{TileProjector, VerticalPerspectiveProjection, View};
 use crate::geo::ScreenCoordinate;
+use crate::geo::world::WorldMapping;
 use crate::layer::render_layer::RenderLayer;
 use crate::placement::Overlap;
 use crate::query::RenderedQueryOptions;
@@ -43,6 +44,9 @@ pub(crate) struct FeatureSelection<'a> {
     pub(crate) global_state: Option<&'a GlobalStateMap>,
     pub(crate) tile_id: &'a OverscaledTileID,
     pub(crate) feature_state: Option<&'a SourceFeatureState>,
+    /// How the map's lng/lat maps to its world square, which the features'
+    /// tile coordinates are in.
+    pub(crate) world: &'a WorldMapping,
 }
 
 /// The ground a frame drew of the terrain, which a query finds the features
@@ -456,7 +460,7 @@ impl FeatureIndex {
         selection: &FeatureSelection<'_>,
         region: Option<&QueryRegion<'_>>,
     ) -> Result<(), Error> {
-        let FeatureSelection { layers, options, global_state, tile_id, feature_state } = *selection;
+        let FeatureSelection { layers, options, global_state, tile_id, feature_state, world } = *selection;
         let Some(tile_data) = &self.tile_data else {
             return Ok(());
         };
@@ -510,7 +514,7 @@ impl FeatureIndex {
                 }
             }
 
-            let converted = crate::tile::convert_feature(&feature, &geometry, &tile_id.canonical)?;
+            let converted = crate::tile::convert_feature(&feature, &geometry, &tile_id.canonical, world)?;
             let mut converted = Feature::from(converted);
             converted.source = render_layer.base().style.base().source.clone();
             converted.source_layer = source_layer_id.clone();

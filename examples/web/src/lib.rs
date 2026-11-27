@@ -50,10 +50,14 @@ fn start() {
 }
 
 /// The registrations of the map's runtime and of the tile workers, which
-/// must agree.
+/// must agree: the built-ins, and EPSG:3413, which the catalog's Arctic style
+/// draws in.
 fn registry() -> Arc<Registry> {
     let mut builder = RegistryBuilder::new();
     register_builtins(&mut builder).expect("the built-ins register into no registrations");
+    builder
+        .add_projection(mln_example_projections::epsg3413())
+        .expect("EPSG:3413 registers once, under a name with a colon");
     builder.build()
 }
 

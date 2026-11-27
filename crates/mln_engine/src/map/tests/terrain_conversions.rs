@@ -11,6 +11,7 @@ use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
 use super::ground::{STYLE, assert_near, flat, ground_event, pitchable, report, world};
 use crate::camera::{CameraOptions, Elevation, MapProjection, View};
 use crate::exec::queue::Queue;
+use crate::geo::world::WorldMapping;
 use crate::geo::{EdgeInsets, ScreenCoordinate};
 use crate::map::Map;
 
@@ -218,8 +219,8 @@ fn a_projection_converts_on_the_ground_it_is_given() {
 
     let view = map.snapshot().view;
     let from_map = MapProjection::new(&map);
-    let flat = MapProjection::from_view(&view).unwrap();
-    let grounded = MapProjection::from_view(&view).unwrap().with_ground(map.ground());
+    let flat = MapProjection::from_view(&view, &WorldMapping::Mercator).unwrap();
+    let grounded = MapProjection::from_view(&view, &WorldMapping::Mercator).unwrap().with_ground(map.ground());
     let state_view = map.transform_state().view();
     let mut on_the_ridge = 0;
     for pixel in lower_half() {
@@ -245,7 +246,7 @@ fn a_projection_reads_the_height_of_its_ground() {
     let ridge = Ridge::drawn_from(world(&center()).y);
     let map = map_over(STYLE, Some(&ridge), true, pitched(60.0), &run_loop);
     let from_map = MapProjection::new(&map);
-    let flat = MapProjection::from_view(&map.snapshot().view).unwrap();
+    let flat = MapProjection::from_view(&map.snapshot().view, &WorldMapping::Mercator).unwrap();
 
     let at = |pixels_south: f64| {
         let point = world(&center()) + DVec2::new(0.0, pixels_south * PIXEL);
@@ -308,7 +309,8 @@ fn a_projection_sees_as_far_as_its_map() {
     let mut map = map_over(STYLE, Some(&sunken), false, camera, &run_loop);
     assert_eq!(Some(-1000.0), map.transform_state().view().terrain_min_elevation());
 
-    let mut projection = MapProjection::from_view(&map.snapshot().view).unwrap().with_ground(map.ground());
+    let mut projection =
+        MapProjection::from_view(&map.snapshot().view, &WorldMapping::Mercator).unwrap().with_ground(map.ground());
     let rows = || (0..8).map(|row| ScreenCoordinate::new(256.0, 5.0 * f64::from(row)));
     let check = |map: &Map, projection: &MapProjection, on_ground: bool| {
         for pixel in rows() {
@@ -339,7 +341,8 @@ fn a_projection_moves_around_an_anchor_on_its_ground() {
     let ridge = Ridge::drawn_from(0.0);
     let camera = CameraOptions { center_altitude: Some(0.0), ..pitched(60.0) };
     let mut map = map_over(STYLE, Some(&ridge), false, camera, &run_loop);
-    let mut projection = MapProjection::from_view(&map.snapshot().view).unwrap().with_ground(map.ground());
+    let mut projection =
+        MapProjection::from_view(&map.snapshot().view, &WorldMapping::Mercator).unwrap().with_ground(map.ground());
 
     let anchor = lower_half()
         .find(|pixel| {
@@ -409,8 +412,9 @@ fn a_globe_view_converts_on_its_ground() {
     let view = map.snapshot().view;
     assert!(map.snapshot().globe_rendering);
 
-    let flat_globe = MapProjection::from_view(&view).unwrap();
-    let globe = MapProjection::from_view(&view).unwrap().with_ground(Some(flat(Some(1000.0), 1000.0)));
+    let flat_globe = MapProjection::from_view(&view, &WorldMapping::Mercator).unwrap();
+    let globe =
+        MapProjection::from_view(&view, &WorldMapping::Mercator).unwrap().with_ground(Some(flat(Some(1000.0), 1000.0)));
     for pixel in lower_half() {
         let on_ground = globe.lat_lng_for_pixel(&pixel, WrapMode::Unwrapped).unwrap();
         let at_sea_level = flat_globe.lat_lng_for_pixel(&pixel, WrapMode::Unwrapped).unwrap();
@@ -436,8 +440,9 @@ fn a_pixel_on_a_polar_cap_converts_on_sea_level() {
     map.jump_to(&CameraOptions { center_altitude: Some(1000.0), ..Default::default() });
     let view = map.snapshot().view;
     assert!(map.snapshot().globe_rendering);
-    let flat_globe = MapProjection::from_view(&view).unwrap();
-    let globe = MapProjection::from_view(&view).unwrap().with_ground(Some(flat(Some(1000.0), 1000.0)));
+    let flat_globe = MapProjection::from_view(&view, &WorldMapping::Mercator).unwrap();
+    let globe =
+        MapProjection::from_view(&view, &WorldMapping::Mercator).unwrap().with_ground(Some(flat(Some(1000.0), 1000.0)));
 
     let mut on_the_cap = 0;
     for pixel in (0..16).flat_map(|row| {

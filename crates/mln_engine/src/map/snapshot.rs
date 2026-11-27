@@ -79,7 +79,8 @@ impl From<CameraBounds> for BoundOptions {
 pub struct FreeCamera {
     /// The position in Web Mercator units, where the world is 1 wide, (0, 0)
     /// is its northwest corner and (1, 1) its southeast corner. `z` is the
-    /// altitude in the same units.
+    /// altitude in the same units. On a map in a registered projection, it
+    /// stands for the lat/lng and the altitude of the camera there.
     pub position: DVec3,
     /// The rotation from looking straight down with north at the top of the
     /// screen, as a unit quaternion.

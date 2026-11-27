@@ -49,6 +49,14 @@ fn invoke_tile_changed() {
         panic!("a layout");
     };
     let mut result = Vec::new();
-    contents.query_source_features(&root(), &mut result, &SourceQueryOptions::default(), None).unwrap();
+    contents
+        .query_source_features(
+            &root(),
+            &mut result,
+            &SourceQueryOptions::default(),
+            None,
+            &crate::geo::world::WorldMapping::Mercator,
+        )
+        .unwrap();
     assert_eq!(result.len(), 1);
 }
