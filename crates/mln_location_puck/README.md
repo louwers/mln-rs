@@ -62,7 +62,7 @@ Every part lies on the ground, so pitch foreshortens it, and the puck, the arrow
 and the shadow turn with the bearing. It draws in every world copy, on Mercator
 and on the globe. Over terrain, it stands on the ground under the position and
 hides behind the ground in front of it. A rendered-feature query that hits the
-puck or the arrow returns a point at the position.
+puck or the arrow where they show returns a point at the position.
 
 Its code is under the root license ([LICENSE.md](LICENSE.md)).
 

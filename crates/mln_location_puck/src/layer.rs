@@ -14,7 +14,7 @@ use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_style::types::TranslateAnchorType;
 
 use crate::LocationPuck;
-use crate::anchor::{anchors, to_screen};
+use crate::anchor::{anchors, ground_visibility, to_screen};
 use crate::parts::{Ground, parts};
 use crate::program::PUCK;
 
@@ -107,8 +107,9 @@ impl Layer for LocationPuckLayer {
     }
 
     /// A point at the position where the query meets the puck or the arrow
-    /// of any of its anchors, where they show in front of the globe's
-    /// horizon.
+    /// of any of its anchors, where they show: in front of the globe's
+    /// horizon, and where the ground in front of the anchor fades them less
+    /// than halfway.
     fn hit_frame(&self, query: &FrameQuery<'_, Self>, hits: &mut Vec<Feature>) {
         let paint = &query.values().evaluated.paint;
         let view = query.view();
@@ -119,7 +120,8 @@ impl Layer for LocationPuckLayer {
         };
         let hit = anchors(view, position, height).iter().any(|anchor| {
             let ground = Ground::new(paint, view, anchor);
-            parts(paint).filter(|part| part.hit).any(|part| {
+            let shows = || query.ground(anchor.tile).is_none() || ground_visibility(view, anchor, height) >= 0.5;
+            let meets = parts(paint).filter(|part| part.hit).any(|part| {
                 let [center, x, y] = ground.square(&part);
                 let outline: Vec<[f64; 2]> = part
                     .outline()
@@ -131,7 +133,8 @@ impl Layer for LocationPuckLayer {
                     Some(Vec2::new(screen.x as f32, screen.y as f32))
                 };
                 polygons_intersect(&geometry, &visible_outline(&outline, screen))
-            })
+            });
+            meets && shows()
         });
         if hit {
             let point = geo_types::Point::new(position.longitude(), position.latitude());
