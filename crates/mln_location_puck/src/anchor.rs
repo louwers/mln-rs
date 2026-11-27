@@ -37,7 +37,8 @@ pub(crate) struct Anchor {
 /// meters, `height` gives at a point of a tile: on Mercator, one in each
 /// world copy the view shows and in the copy past each end, from which
 /// what draws around the position can reach into the view; on the globe,
-/// one where the globe doesn't hide the position. None behind the camera.
+/// one, unless the globe hides the position where it draws, at its height
+/// and through the projection as blended. None behind the camera.
 pub(crate) fn anchors(view: &View, at: LatLng, height: impl Fn(UnwrappedTileID, [f64; 2]) -> f64) -> Vec<Anchor> {
     let zoom = view.integer_zoom();
     let tiles = f64::from(1u32 << zoom);
@@ -49,10 +50,8 @@ pub(crate) fn anchors(view: &View, at: LatLng, height: impl Fn(UnwrappedTileID, 
     // worlds from its top left.
     let mut copies: Vec<(i16, Point<f64>)> = Vec::new();
     if view.is_globe() {
-        if !view.is_location_occluded(&at) {
-            let p = world(&view.lat_lng_near_center(&at));
-            copies.push((p.x.floor() as i16, Point::new(p.x - p.x.floor(), p.y)));
-        }
+        let p = world(&view.lat_lng_near_center(&at));
+        copies.push((p.x.floor() as i16, Point::new(p.x - p.x.floor(), p.y)));
     } else {
         let p = world(&at.wrapped());
         let wraps = world_copies(view);
@@ -72,10 +71,9 @@ pub(crate) fn anchors(view: &View, at: LatLng, height: impl Fn(UnwrappedTileID, 
             let tile = UnwrappedTileID::with_wrap(wrap, canonical);
             let point = [(x - f64::from(canonical.x)) * extent, (y - f64::from(canonical.y)) * extent];
             let height = height(tile, point);
-            let distance = TileProjector::new(view, &tile)
-                .project(&Point::new(point[0], point[1]), height)
-                .signed_distance_from_camera;
-            (distance > 0.0).then_some(Anchor {
+            let drawn = TileProjector::new(view, &tile).project_as_drawn(&Point::new(point[0], point[1]), height);
+            let distance = drawn.signed_distance_from_camera;
+            (distance > 0.0 && !drawn.occluded).then_some(Anchor {
                 tile,
                 point,
                 height,
@@ -102,11 +100,12 @@ fn world_copies(view: &View) -> Vec<i16> {
     tile_cover(&parameters, 0, Range::new(0, 0), None).iter().map(|tile| tile.wrap).collect()
 }
 
-/// `point`, in the units of `tile`, `height` meters up, on `view`'s screen,
-/// in logical pixels from its top left; `None` where the globe hides it or
-/// it is behind the camera.
+/// `point`, in the units of `tile`, `height` meters up, where it draws on
+/// `view`'s screen, through the projection as blended, in logical pixels
+/// from its top left; `None` where the globe hides it or it is behind the
+/// camera.
 pub(crate) fn to_screen(view: &View, tile: UnwrappedTileID, point: [f64; 2], height: f64) -> Option<ScreenCoordinate> {
-    let at = TileProjector::new(view, &tile).project(&Point::new(point[0], point[1]), height);
+    let at = TileProjector::new(view, &tile).project_as_drawn(&Point::new(point[0], point[1]), height);
     if at.occluded || at.signed_distance_from_camera <= 0.0 {
         return None;
     }
