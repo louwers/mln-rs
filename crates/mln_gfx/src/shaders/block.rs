@@ -56,6 +56,51 @@ pub trait UniformBlock: bytemuck::Pod {
     const BLOCK: &'static Block;
 }
 
+/// The values of a draw's own of each of its program's blocks of each
+/// draw, in the order the program lists them: none (`()`), one
+/// [`UniformBlock`], or a pair. Only these implement it,
+/// so that its bytes are always its blocks'.
+pub trait DrawBlocks: Copy + sealed::Sealed + 'static {
+    /// The layouts of the blocks, in order.
+    const BLOCKS: &'static [&'static Block];
+
+    /// Calls `f` with the bytes of each block, in order.
+    fn each_bytes(&self, f: impl FnMut(&[u8]));
+}
+
+mod sealed {
+    /// Seals [`DrawBlocks`](super::DrawBlocks) to the types this module
+    /// implements it for.
+    pub trait Sealed {}
+
+    impl Sealed for () {}
+    impl<T: super::UniformBlock> Sealed for T {}
+    impl<A: super::UniformBlock, B: super::UniformBlock> Sealed for (A, B) {}
+}
+
+impl DrawBlocks for () {
+    const BLOCKS: &'static [&'static Block] = &[];
+
+    fn each_bytes(&self, _f: impl FnMut(&[u8])) {}
+}
+
+impl<T: UniformBlock> DrawBlocks for T {
+    const BLOCKS: &'static [&'static Block] = &[T::BLOCK];
+
+    fn each_bytes(&self, mut f: impl FnMut(&[u8])) {
+        f(bytemuck::bytes_of(self));
+    }
+}
+
+impl<A: UniformBlock, B: UniformBlock> DrawBlocks for (A, B) {
+    const BLOCKS: &'static [&'static Block] = &[A::BLOCK, B::BLOCK];
+
+    fn each_bytes(&self, mut f: impl FnMut(&[u8])) {
+        f(bytemuck::bytes_of(&self.0));
+        f(bytemuck::bytes_of(&self.1));
+    }
+}
+
 /// The Rust type of a [`Member`] of a block.
 pub trait MemberValue: bytemuck::Pod {
     /// Its type in a block.

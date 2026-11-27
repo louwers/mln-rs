@@ -4,23 +4,30 @@
 //! Each layer type keeps the meshes it draws in types of its own, those of
 //! a tile in its tile value, which the engine keeps in a [`TileMap`] that
 //! also says what the tile's value was made from and what of that bucket's
-//! vertex data changed since. Its draw update makes the frame's draws,
-//! values ([`FrameDraw`]) in a [`DrawList`] with their uniform values and
-//! the part of the layer's meshes each draws, which it writes to the
-//! buffers of their [`LayerDraws`]. The layer type then uploads and draws
-//! them in loops of its own: [`FrameDraws::begin`] begins a pass's draws,
-//! and [`DrawPass::draw`] draws one draw's mesh, bound with the draws'
-//! buffers. A layer type that draws one group of its tiles' draws keeps
-//! them in a [`TileDraws`], whose tiles name the meshes of their draws by a
-//! part of their own type ([`TileObjects`]). A layer that drapes over
-//! terrain has tile values and a drawing of its type in each drape too
+//! vertex data changed since. Its draw update pushes the frame's draws into
+//! their [`LayerDraws`]: values ([`FrameDraw`]), each with the part of the
+//! layer's meshes it draws and the values of its own of the blocks its
+//! program reads of each draw ([`DrawBlocks`]), and the blocks the draws
+//! share ([`LayerDraws::block`]). The engine writes them to the draws'
+//! buffers ([`LayerDraws::finish`]), with a drape's paint parameters where
+//! the draws go into one. The layer type then uploads and draws them in
+//! loops of its own: [`FrameDraws::begin`] begins a pass's draws, and
+//! [`DrawPass::draw`] draws one draw's mesh, bound with the draws' buffers.
+//! A layer type that draws one group of its tiles' draws keeps them in a
+//! [`TileDraws`], whose tiles name the meshes of their draws by a part of
+//! their own type ([`TileObjects`]). A layer that drapes over terrain has
+//! tile values and a drawing of its type in each drape too
 //! ([`DrapeDrawing`]).
 
 use std::any::Any;
-use std::ops::BitOrAssign;
+use std::ops::{BitOrAssign, Range};
 
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gpu::Gpu;
+use mln_gfx::shaders::bindings::{BUFFER_IDS, PAINT_PARAMS_ID, PROJECTION_ID};
+use mln_gfx::shaders::block::{Block, DrawBlocks, UniformBlock};
+use mln_gfx::shaders::layer_ubo::{GlobalPaintParamsUBO, ProjectionUBO};
+use mln_gfx::shaders::program::{BufferKind, Program, Projection};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::DepthMaskType;
 use mln_style::hash::HashMap;
@@ -483,6 +490,7 @@ pub(crate) enum DrawDepth {
 /// One draw of a frame: the state it draws its mesh with. Its uniform
 /// values are the entries at its index in the storage buffers of its
 /// [`FrameDraws`].
+#[derive(Clone, Copy)]
 pub(crate) struct FrameDraw {
     /// The tile whose draw it is, or `None` for a draw of the layer's.
     pub(crate) tile: Option<OverscaledTileID>,
@@ -524,79 +532,206 @@ impl FrameDraw {
     }
 }
 
-/// The draws an update makes for a frame, each with its uniform values of
-/// type `U` and the part of the layer's meshes it draws, of type `P`,
-/// before they become the draws of a [`LayerDraws`]. The list keeps its
-/// memory from frame to frame, so that a frame of no more draws than one
-/// before it allocates nothing.
-pub(crate) struct DrawList<U, P = ()> {
-    /// The draws, each with the index of its values in `uniforms` and of its
-    /// part in `parts`. The draws sort without their parts, so that the
-    /// sort is one function for all the layers' lists.
-    draws: Vec<(FrameDraw, usize)>,
-    uniforms: Vec<U>,
-    parts: Vec<P>,
-    /// The bytes of a storage buffer's entries, as [`UniformWriter`] writes
-    /// them.
+/// Where a program's blocks of each draw are in the bytes a draw was pushed
+/// with, by the ids of their buffers: each block with its offset.
+struct ProgramBlocks {
+    program: &'static Program,
+    at: [Option<(usize, &'static Block)>; BUFFER_IDS],
+    /// Whether one of the draws whose buffers a write writes draws with it.
+    drawn: bool,
+}
+
+impl ProgramBlocks {
+    fn of(program: &'static Program) -> ProgramBlocks {
+        let mut at = [None; BUFFER_IDS];
+        let mut offset = 0;
+        for buffer in program.buffers {
+            if let BufferKind::Storage { block, .. } | BufferKind::DrawUniform(block) = buffer.kind {
+                at[buffer.id] = Some((offset, block));
+                offset += block.size;
+            }
+        }
+        ProgramBlocks { program, at, drawn: false }
+    }
+}
+
+/// A draw as it was pushed: the index of its program's blocks, its
+/// projection, and where its blocks start in the pushes' bytes.
+struct Pushed {
+    program: usize,
+    projection: ProjectionUBO,
+    blocks: usize,
+}
+
+/// A frame's draws as a layer pushed them, by the index it pushed them at,
+/// with the bytes of their blocks and of the blocks they share, which the
+/// engine writes to the buffers of the frame's draws.
+#[derive(Default)]
+struct Pushes {
+    pushed: Vec<Pushed>,
+    /// The bytes of the pushed draws' blocks.
     bytes: Vec<u8>,
+    /// The blocks of each draw of the pushed draws' programs.
+    programs: Vec<ProgramBlocks>,
+    /// The blocks the draws share, each its layout and where its bytes are
+    /// in `shared_bytes`.
+    shared: Vec<(&'static Block, Range<usize>)>,
+    shared_bytes: Vec<u8>,
+    /// Where a write of one of the draws' buffers gathers its bytes.
+    scratch: Vec<u8>,
 }
 
-impl<U, P> Default for DrawList<U, P> {
-    fn default() -> Self {
-        DrawList { draws: Vec::new(), uniforms: Vec::new(), parts: Vec::new(), bytes: Vec::new() }
-    }
+/// Whether `a` and `b` are the layout of one block.
+fn same_block(a: &Block, b: &Block) -> bool {
+    std::ptr::eq(a, b) || a.name == b.name
 }
 
-impl<U> DrawList<U> {
-    pub(crate) fn push(&mut self, draw: FrameDraw, uniforms: U) {
-        self.push_part(draw, (), uniforms);
-    }
-}
-
-impl<U, P: Copy> DrawList<U, P> {
-    /// Drops the list's draws.
-    pub(crate) fn clear(&mut self) {
-        self.draws.clear();
-        self.uniforms.clear();
-        self.parts.clear();
+impl Pushes {
+    fn clear(&mut self) {
+        self.pushed.clear();
+        self.bytes.clear();
+        self.shared.clear();
+        self.shared_bytes.clear();
     }
 
-    /// Adds `draw`, of the layer's mesh `part`.
-    pub(crate) fn push_part(&mut self, draw: FrameDraw, part: P, uniforms: U) {
-        self.draws.push((draw, self.uniforms.len()));
-        self.uniforms.push(uniforms);
-        self.parts.push(part);
-    }
-
-    /// Makes the list's draws `layer`'s, in [`FrameDraw::order`] and in the
-    /// order they were pushed among draws of the same order, and empties the
-    /// list. Where there are any, `write` first writes the buffers they read
-    /// to `layer`'s.
-    pub(crate) fn finish(
+    /// Adds a draw of `program` with `projection`, whose blocks, of the
+    /// layouts `layouts`, are the pushes' bytes from `start`.
+    fn push(
         &mut self,
-        layer: &mut LayerDraws<P>,
+        program: &'static Program,
+        projection: Option<&ProjectionUBO>,
+        start: usize,
+        layouts: &'static [&'static Block],
+    ) {
+        debug_assert!(
+            program
+                .buffers
+                .iter()
+                .filter_map(|buffer| match buffer.kind {
+                    BufferKind::Storage { block, .. } | BufferKind::DrawUniform(block) => Some(block),
+                    _ => None,
+                })
+                .map(|block| block.name)
+                .eq(layouts.iter().map(|block| block.name)),
+            "a draw of {} pushed with blocks other than its program's of each draw",
+            program.name
+        );
+        debug_assert!(program.projection != Projection::Own, "a draw of {} with a projection of its own", program.name);
+        let index = self.programs.iter().position(|of| std::ptr::eq(of.program, program)).unwrap_or_else(|| {
+            self.programs.push(ProgramBlocks::of(program));
+            self.programs.len() - 1
+        });
+        self.pushed.push(Pushed { program: index, projection: projection.copied().unwrap_or_default(), blocks: start });
+    }
+
+    /// Makes `bytes` the value of the shared block of the layout `layout`.
+    fn block(&mut self, layout: &'static Block, bytes: &[u8]) {
+        if let Some((_, range)) = self.shared.iter().find(|(given, _)| same_block(given, layout)) {
+            self.shared_bytes[range.clone()].copy_from_slice(bytes);
+        } else {
+            let start = self.shared_bytes.len();
+            self.shared_bytes.extend_from_slice(bytes);
+            self.shared.push((layout, start..self.shared_bytes.len()));
+        }
+    }
+
+    /// Writes to `buffers` the buffers that `draws`, the pushed draws in
+    /// drawing order, each with the index it was pushed at, read: at the id
+    /// of each of their programs' uniform blocks, the block of its layout
+    /// that they share; at the id of each storage buffer of an element per
+    /// draw, each draw's block, or zeros for a draw whose program reads
+    /// none there; at the id of a uniform block of a draw's own, which one
+    /// draw reads, its block; the draws' projections, or a projection of
+    /// zeros where none reads one, which every program declares; and the
+    /// frame's paint parameters, `paint_params`, where it has its own.
+    fn write(
+        &mut self,
         gpu: &mut dyn Gpu,
         context: &mut Context,
-        write: impl FnOnce(&mut UniformWriter<'_, U>),
+        draws: &[(FrameDraw, usize)],
+        paint_params: Option<&GlobalPaintParamsUBO>,
+        buffers: &mut DrawBuffers,
     ) {
-        sort_draws(&mut self.draws);
-        let mut writer = UniformWriter {
-            draws: &self.draws,
-            uniforms: &self.uniforms,
-            bytes: &mut self.bytes,
-            buffers: &mut layer.frame.buffers,
-            gpu,
-            context,
-        };
-        if !self.draws.is_empty() {
-            write(&mut writer);
+        let Pushes { pushed, bytes, programs, shared, shared_bytes, scratch } = self;
+        for of in programs.iter_mut() {
+            of.drawn = false;
         }
-        layer.parts.clear();
-        layer.parts.extend(self.draws.iter().map(|&(_, index)| self.parts[index]));
-        take_draws(&mut self.draws, &mut layer.frame.draws);
-        layer.frame.buffers.sweep();
-        self.uniforms.clear();
-        self.parts.clear();
+        for &(_, index) in draws {
+            programs[pushed[index].program].drawn = true;
+        }
+        let mut written = [false; BUFFER_IDS];
+        let (mut per_draw_projection, mut reads_paint_params) = (false, false);
+        for of in programs.iter().filter(|of| of.drawn) {
+            per_draw_projection |= of.program.projection == Projection::PerDraw;
+            reads_paint_params |= of.program.paint_params.is_some();
+        }
+        // The shared blocks first, then the draws': a backend joins writes
+        // to buffers next to each other into one copy, and the shared
+        // blocks' buffers, whose size doesn't change, stay where the first
+        // frame made them, before the draws' buffers.
+        let shared_first = programs.iter().filter(|of| of.drawn).flat_map(|of| {
+            let shared = of.program.buffers.iter().filter(|buffer| matches!(buffer.kind, BufferKind::Uniform(_)));
+            shared.map(move |buffer| (of, buffer))
+        });
+        let per_draw = programs.iter().filter(|of| of.drawn).flat_map(|of| {
+            let per_draw = of.program.buffers.iter().filter(|buffer| !matches!(buffer.kind, BufferKind::Uniform(_)));
+            per_draw.map(move |buffer| (of, buffer))
+        });
+        for (of, buffer) in shared_first.chain(per_draw) {
+            // A mesh binds its vertices read as storage buffers.
+            if matches!(buffer.kind, BufferKind::Vertices(_)) || std::mem::replace(&mut written[buffer.id], true) {
+                continue;
+            }
+            match buffer.kind {
+                BufferKind::Uniform(block) => {
+                    let Some((_, range)) = shared.iter().find(|(given, _)| same_block(given, block)) else {
+                        debug_assert!(false, "draws of {} without their uniform block {}", of.program.name, block.name);
+                        continue;
+                    };
+                    buffers.write_uniform(gpu, buffer.id, &shared_bytes[range.clone()], context.device());
+                }
+                BufferKind::Storage { stride, .. } => {
+                    scratch.clear();
+                    for &(_, index) in draws {
+                        let Pushed { program, blocks, .. } = pushed[index];
+                        let end = scratch.len() + stride;
+                        if let Some((offset, block)) = programs[program].at[buffer.id] {
+                            let at = blocks + offset;
+                            scratch.extend_from_slice(&bytes[at..at + block.size]);
+                        }
+                        scratch.resize(end, 0);
+                    }
+                    buffers.write_storage(gpu, buffer.id, scratch, context.device());
+                }
+                BufferKind::DrawUniform(block) => {
+                    let mut own = draws.iter().map(|&(_, index)| &pushed[index]).filter(|draw| {
+                        programs[draw.program].at[buffer.id].is_some_and(|(_, of)| same_block(of, block))
+                    });
+                    let Some(&Pushed { program, blocks, .. }) = own.next() else { continue };
+                    debug_assert!(own.next().is_none(), "two draws of a block of {}'s own", block.name);
+                    if let Some((offset, _)) = programs[program].at[buffer.id] {
+                        let at = blocks + offset;
+                        buffers.write_uniform(gpu, buffer.id, &bytes[at..at + block.size], context.device());
+                    }
+                }
+                BufferKind::Vertices(_) => {}
+            }
+        }
+        if per_draw_projection {
+            scratch.clear();
+            for &(_, index) in draws {
+                scratch.extend_from_slice(bytemuck::bytes_of(&pushed[index].projection));
+            }
+            buffers.write_storage(gpu, PROJECTION_ID, scratch, context.device());
+        } else if buffers.get(PROJECTION_ID).is_none() {
+            // GL's programs declare the block whether they read it or not,
+            // so a draw binds it all the same.
+            let none = ProjectionUBO::default();
+            buffers.write_storage(gpu, PROJECTION_ID, bytemuck::bytes_of(&none), context.device());
+        }
+        if let Some(paint_params) = paint_params.filter(|_| reads_paint_params) {
+            buffers.write_pod(gpu, PAINT_PARAMS_ID, paint_params, context.device());
+        }
     }
 }
 
@@ -612,34 +747,6 @@ fn sort_draws(draws: &mut [(FrameDraw, usize)]) {
 fn take_draws(draws: &mut Vec<(FrameDraw, usize)>, frame: &mut Vec<FrameDraw>) {
     frame.clear();
     frame.extend(draws.drain(..).map(|(draw, _)| draw));
-}
-
-/// Writes the buffers that a frame's draws read, each draw's entries at its
-/// index in drawing order.
-pub(crate) struct UniformWriter<'a, U> {
-    draws: &'a [(FrameDraw, usize)],
-    uniforms: &'a [U],
-    bytes: &'a mut Vec<u8>,
-    buffers: &'a mut DrawBuffers,
-    gpu: &'a mut dyn Gpu,
-    context: &'a mut Context,
-}
-
-impl<U> UniformWriter<'_, U> {
-    /// Writes each draw's `entry` of its uniform values to the storage
-    /// buffer `id`.
-    pub(crate) fn storage<P: bytemuck::Pod>(&mut self, id: usize, entry: impl Fn(&U) -> P) {
-        self.bytes.clear();
-        for &(_, index) in self.draws {
-            self.bytes.extend_from_slice(bytemuck::bytes_of(&entry(&self.uniforms[index])));
-        }
-        self.buffers.write_storage(self.gpu, id, self.bytes, self.context.device());
-    }
-
-    /// Writes `value`, which all the draws read, to the uniform buffer `id`.
-    pub(crate) fn uniform<P: bytemuck::Pod>(&mut self, id: usize, value: &P) {
-        self.buffers.write_pod(self.gpu, id, value, self.context.device());
-    }
 }
 
 /// Draws of a frame, and what they share.
@@ -676,11 +783,6 @@ impl Default for FrameDraws {
 }
 
 impl FrameDraws {
-    /// Adds `draw`, which draws after the others.
-    pub(crate) fn push(&mut self, draw: FrameDraw) {
-        self.draws.push(draw);
-    }
-
     /// Drops the draws, and the bindings of the meshes that dropped.
     pub(crate) fn clear(&mut self) {
         self.draws.clear();
@@ -873,11 +975,25 @@ pub(crate) struct LayerDraws<P = ()> {
     frame: FrameDraws,
     /// Each draw's part, at the draw's index.
     parts: Vec<P>,
+    /// The draws that the layer pushes for the next frame, each with the
+    /// index it was pushed at, with their parts by that index and their
+    /// blocks, until [`finish`](Self::finish) makes them the frame's. The
+    /// draws sort without their parts, so that the sort is one function for
+    /// all the layers' draws.
+    pushed: Vec<(FrameDraw, usize)>,
+    pushed_parts: Vec<P>,
+    pushes: Pushes,
 }
 
 impl<P> Default for LayerDraws<P> {
     fn default() -> Self {
-        LayerDraws { frame: FrameDraws::default(), parts: Vec::new() }
+        LayerDraws {
+            frame: FrameDraws::default(),
+            parts: Vec::new(),
+            pushed: Vec::new(),
+            pushed_parts: Vec::new(),
+            pushes: Pushes::default(),
+        }
     }
 }
 
@@ -896,6 +1012,11 @@ impl<P: Copy> LayerDraws<P> {
         &self.frame
     }
 
+    /// The draws, with what they share, to draw them.
+    pub(crate) fn frame_mut(&mut self) -> &mut FrameDraws {
+        &mut self.frame
+    }
+
     /// See [`FrameDraws::set_composite`].
     pub(crate) fn set_composite(&mut self, composite: Option<Composite>) {
         self.frame.set_composite(composite);
@@ -906,15 +1027,104 @@ impl<P: Copy> LayerDraws<P> {
         self.frame.set_stencil_tiles(tiles);
     }
 
-    /// The buffers the draws bind.
-    pub(crate) fn buffers_mut(&mut self) -> &mut DrawBuffers {
-        &mut self.frame.buffers
-    }
-
-    /// Drops the draws, and the bindings of the meshes that dropped.
+    /// Drops the draws, those pushed too, and the bindings of the meshes
+    /// that dropped.
     pub(crate) fn clear(&mut self) {
         self.frame.clear();
         self.parts.clear();
+        self.clear_pushed();
+    }
+
+    fn clear_pushed(&mut self) {
+        self.pushed.clear();
+        self.pushed_parts.clear();
+        self.pushes.clear();
+    }
+
+    /// Adds `draw` of `mesh`, the layer's mesh `part`, to the next frame's,
+    /// with `blocks`, the values of the draw's own of the blocks of each
+    /// draw that the mesh's program reads, in its order. The draw's
+    /// projection, where its program reads one, is zeros.
+    pub(crate) fn push<B: DrawBlocks>(&mut self, draw: FrameDraw, part: P, mesh: &Mesh, blocks: B) {
+        self.add(draw, part, mesh, None, blocks);
+    }
+
+    /// Adds `draw` with `projection`, as [`push`](Self::push) does: the
+    /// draw reads it where its program reads a projection of each draw.
+    pub(crate) fn push_at<B: DrawBlocks>(
+        &mut self,
+        draw: FrameDraw,
+        part: P,
+        mesh: &Mesh,
+        projection: &ProjectionUBO,
+        blocks: B,
+    ) {
+        self.add(draw, part, mesh, Some(projection), blocks);
+    }
+
+    fn add<B: DrawBlocks>(
+        &mut self,
+        draw: FrameDraw,
+        part: P,
+        mesh: &Mesh,
+        projection: Option<&ProjectionUBO>,
+        blocks: B,
+    ) {
+        let start = self.pushes.bytes.len();
+        blocks.each_bytes(|block| self.pushes.bytes.extend_from_slice(block));
+        self.add_at(draw, part, mesh.program(), projection, start, B::BLOCKS);
+    }
+
+    /// [`add`](Self::add), with the blocks in the pushes' bytes from `start`
+    /// of whatever type they are.
+    fn add_at(
+        &mut self,
+        draw: FrameDraw,
+        part: P,
+        program: &'static Program,
+        projection: Option<&ProjectionUBO>,
+        start: usize,
+        layouts: &'static [&'static Block],
+    ) {
+        self.pushed.push((draw, self.pushed_parts.len()));
+        self.pushed_parts.push(part);
+        self.pushes.push(program, projection, start, layouts);
+    }
+
+    /// Makes `block` the value that the next frame's draws read of their
+    /// programs' uniform block of its layout, the last given. A draw whose
+    /// program has none ignores it.
+    pub(crate) fn block<T: UniformBlock>(&mut self, block: &T) -> &mut Self {
+        self.pushes.block(T::BLOCK, bytemuck::bytes_of(block));
+        self
+    }
+
+    /// Makes the pushed draws the frame's, in [`FrameDraw::order`] and in
+    /// the order they were pushed among draws of the same order. Where there
+    /// are any, it first writes the buffers they read, with the paint
+    /// parameters of `parameters`' frame where it has its own (a drape's).
+    pub(crate) fn finish(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        let paint_params = parameters.own_paint_params();
+        self.finish_with(gpu, parameters.context, paint_params.as_ref());
+    }
+
+    /// [`finish`](Self::finish), for draws that read `paint_params` of
+    /// their own, or the context's global ones for `None`.
+    pub(crate) fn finish_with(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        context: &mut Context,
+        paint_params: Option<&GlobalPaintParamsUBO>,
+    ) {
+        sort_draws(&mut self.pushed);
+        if !self.pushed.is_empty() {
+            self.pushes.write(gpu, context, &self.pushed, paint_params, &mut self.frame.buffers);
+        }
+        self.parts.clear();
+        self.parts.extend(self.pushed.iter().map(|&(_, index)| self.pushed_parts[index]));
+        take_draws(&mut self.pushed, &mut self.frame.draws);
+        self.frame.buffers.sweep();
+        self.clear_pushed();
     }
 
     /// Uploads the meshes of the draws, in drawing order, which `meshes`
@@ -942,7 +1152,7 @@ impl<P: Copy> LayerDraws<P> {
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
     ) {
-        let LayerDraws { frame, parts } = self;
+        let LayerDraws { frame, parts, .. } = self;
         let Some(mut pass) = frame.begin(gpu, parameters) else {
             return;
         };
@@ -958,41 +1168,46 @@ impl<P: Copy> LayerDraws<P> {
     }
 }
 
-/// One mesh and a frame's draws of it, with the buffers they bind.
+/// One mesh and a frame's draw of it, with the buffers it binds.
 pub(crate) struct SingleDraw {
     pub(crate) mesh: Mesh,
-    pub(crate) frame: FrameDraws,
+    /// How the draw draws.
+    draw: FrameDraw,
+    draws: LayerDraws,
 }
 
 impl SingleDraw {
-    /// One draw of `mesh`, as `draw` draws, without buffers.
+    /// A draw of `mesh`, as `draw` draws, which draws once its blocks are
+    /// written ([`write`](Self::write)).
     #[must_use]
     pub(crate) fn new(mesh: Mesh, draw: FrameDraw) -> SingleDraw {
-        let mut frame = FrameDraws::default();
-        frame.push(draw);
-        SingleDraw { mesh, frame }
+        SingleDraw { mesh, draw, draws: LayerDraws::default() }
+    }
+
+    /// Makes `block` the value the draw reads of its program's uniform
+    /// block of its layout, as [`LayerDraws::block`] does, from the next
+    /// [`write`](Self::write).
+    pub(crate) fn block<T: UniformBlock>(&mut self, block: &T) -> &mut Self {
+        self.draws.block(block);
+        self
+    }
+
+    /// Writes the buffers the draw reads, with `blocks`, its values of its
+    /// program's blocks of each draw, as [`LayerDraws::finish`] does.
+    pub(crate) fn write<B: DrawBlocks>(&mut self, gpu: &mut dyn Gpu, context: &mut Context, blocks: B) {
+        let SingleDraw { mesh, draw, draws } = self;
+        draws.push(*draw, (), mesh, blocks);
+        draws.finish_with(gpu, context, None);
     }
 
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
-        self.frame.upload_one(gpu, &mut self.mesh, context);
-    }
-
-    /// Writes `value` to the frame's uniform buffer `id`, as
-    /// [`DrawBuffers::write_pod`] does.
-    pub(crate) fn write_pod<T: bytemuck::Pod>(
-        &mut self,
-        gpu: &mut dyn Gpu,
-        id: usize,
-        value: &T,
-        context: &mut Context,
-    ) {
-        self.frame.buffers.write_pod(gpu, id, value, context.device());
+        self.draws.frame.upload_one(gpu, &mut self.mesh, context);
     }
 
     /// Draws the draw, if it draws in the pass, into the open pass of `gpu`,
     /// the context's. Returns whether it didn't fail.
     pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> bool {
-        self.frame.render_one(&mut self.mesh, gpu, parameters)
+        self.draws.frame.render_one(&mut self.mesh, gpu, parameters)
     }
 }
 
@@ -1135,15 +1350,9 @@ impl<T: TileObjects> TileDraws<T> {
         self.frame.get_or_insert_default()
     }
 
-    /// Makes the draws of `list` the frame's, as [`DrawList::finish`] does.
-    pub(crate) fn finish<U>(
-        &mut self,
-        list: &mut DrawList<U, T::Part>,
-        gpu: &mut dyn Gpu,
-        context: &mut Context,
-        write: impl FnOnce(&mut UniformWriter<'_, U>),
-    ) {
-        list.finish(self.frame.get_or_insert_default(), gpu, context, write);
+    /// Makes the pushed draws the frame's, as [`LayerDraws::finish`] does.
+    pub(crate) fn finish(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        self.frame_mut().finish(gpu, parameters);
     }
 }
 
@@ -1181,10 +1390,6 @@ impl<T: TileObjects> LayerDrawing<T> for TileDraws<T> {
             frame.render(tiles, tile_objects, gpu, parameters);
             order.step(parameters);
         }
-    }
-
-    fn frame_buffers(&mut self) -> Option<&mut DrawBuffers> {
-        Some(self.frame.as_mut()?.buffers_mut())
     }
 }
 
@@ -1230,12 +1435,6 @@ pub(crate) trait LayerDrawing<T> {
         parameters: &mut PaintParameters<'_>,
         order: DrawOrder,
     );
-
-    /// The buffers that the draws of the drawing's one draw group share,
-    /// once it has the group; `None` for a drawing of other groups.
-    fn frame_buffers(&mut self) -> Option<&mut DrawBuffers> {
-        None
-    }
 }
 
 /// What a drape keeps of a layer, whatever the layer's type, for a
@@ -1247,7 +1446,6 @@ trait AnyDrawing {
     fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>));
     fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context);
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder);
-    fn frame_buffers(&mut self) -> Option<&mut DrawBuffers>;
 }
 
 impl<T: 'static, D: LayerDrawing<T> + 'static> AnyDrawing for (TileMap<T>, D) {
@@ -1271,10 +1469,6 @@ impl<T: 'static, D: LayerDrawing<T> + 'static> AnyDrawing for (TileMap<T>, D) {
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
         let (tiles, drawing) = self;
         drawing.render(tiles, gpu, parameters, order);
-    }
-
-    fn frame_buffers(&mut self) -> Option<&mut DrawBuffers> {
-        self.1.frame_buffers()
     }
 }
 
@@ -1316,21 +1510,6 @@ impl DrapeDrawing {
     /// See [`LayerDrawing::render`].
     pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
         self.0.render(gpu, parameters, order);
-    }
-
-    /// Writes `value` to the uniform buffer `id` that the draws of the
-    /// drawing's draw group share, which they bind rather than the
-    /// context's global one, if it has the group.
-    pub(crate) fn write_uniform<T: bytemuck::Pod>(
-        &mut self,
-        gpu: &mut dyn Gpu,
-        id: usize,
-        value: &T,
-        context: &mut Context,
-    ) {
-        if let Some(buffers) = self.0.frame_buffers() {
-            buffers.write_pod(gpu, id, value, context.device());
-        }
     }
 }
 

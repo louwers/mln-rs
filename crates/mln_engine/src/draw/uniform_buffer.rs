@@ -46,6 +46,13 @@ impl UniformBufferArray {
         self.write(gpu, id, bytemuck::bytes_of(data), false, device)
     }
 
+    /// Writes `data`, the bytes of a block, to the uniform buffer `id`, as
+    /// [`write_pod`](Self::write_pod) does.
+    #[must_use]
+    pub(crate) fn write_uniform(&mut self, gpu: &mut dyn Gpu, id: usize, data: &[u8], device: &mut Device) -> bool {
+        self.write(gpu, id, data, false, device)
+    }
+
     /// Writes `data` to the storage buffer `id`, as
     /// [`write_pod`](Self::write_pod) does.
     pub(crate) fn write_storage(&mut self, gpu: &mut dyn Gpu, id: usize, data: &[u8], device: &mut Device) -> bool {

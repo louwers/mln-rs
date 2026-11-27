@@ -46,7 +46,6 @@
 use std::sync::Arc;
 
 use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, LoadOp, TargetFormats, TextureFormat};
-use mln_gfx::shaders::bindings::PAINT_PARAMS_ID;
 use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
@@ -400,8 +399,6 @@ impl Drapes {
             let mut parameters = parameters.drape(transform, clip_masks, layer_composite, size, unwrapped);
             parameters.drape_lit = lit;
             layer.update_drape_draws(gpu, &mut parameters, source, (*tile, globe), &mut kept.drawing);
-            let global = parameters.global_paint_params();
-            kept.drawing.write_uniform(gpu, PAINT_PARAMS_ID, &global, parameters.context);
             layers.push(kept);
         }
     }

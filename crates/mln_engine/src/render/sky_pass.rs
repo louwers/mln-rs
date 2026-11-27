@@ -21,13 +21,8 @@ use crate::layer::layer_drawing::{DrawDepth, FrameDraw, SingleDraw};
 use crate::render::light::EvaluatedLight;
 use crate::render::sky::EvaluatedSky;
 use crate::render::static_data::RenderStaticData;
-use crate::render::tile_matrix::bind_no_projection;
 use crate::shaders::programs;
 use crate::shaders::ubo::{AtmospherePropsUBO, SkyPropsUBO};
-
-/// The ids of the buffers that the draws bind.
-const SKY_PROPS_ID: usize = programs::SKY.buffer_id("sky");
-const ATMOSPHERE_PROPS_ID: usize = programs::ATMOSPHERE.buffer_id("atmosphere");
 
 /// A draw of `shader`, which reads the view's corners as the vertex attribute
 /// `vertex_attribute`, in the translucent pass at `depth`.
@@ -128,8 +123,7 @@ impl SkyPass {
                 sky_horizon_blend: *evaluated.sky_horizon_blend.uniform() * viewport_size.height as f32 * 0.5,
                 sky_blend: projection_transition as f32,
             };
-            sky.write_pod(gpu, SKY_PROPS_ID, &props, context);
-            bind_no_projection(gpu, &mut sky.frame.buffers, context);
+            sky.block(&props).write(gpu, context, ());
         } else {
             self.sky = None;
         }
@@ -151,8 +145,7 @@ impl SkyPass {
             camera_position: camera.as_vec3().extend(0.0).to_array(),
             sun_position: sun_position(light, state, atmosphere_blend),
         };
-        atmosphere.write_pod(gpu, ATMOSPHERE_PROPS_ID, &props, context);
-        bind_no_projection(gpu, &mut atmosphere.frame.buffers, context);
+        atmosphere.block(&props).write(gpu, context, ());
     }
 
     /// The planar sky, which draws before the layers, if the frame draws it.

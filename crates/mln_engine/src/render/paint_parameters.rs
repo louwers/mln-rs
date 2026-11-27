@@ -381,6 +381,14 @@ impl<'a> PaintParameters<'a> {
         }
     }
 
+    /// The paint parameters that the frame's draws read instead of the
+    /// context's global ones, which the renderer writes for the map's: a
+    /// drape's own.
+    #[must_use]
+    pub(crate) fn own_paint_params(&self) -> Option<GlobalPaintParamsUBO> {
+        self.drape_tile.is_some().then(|| self.global_paint_params())
+    }
+
     /// The size and formats of the attachments that draws draw into
     /// now, `None` outside a pass.
     pub(crate) fn pass_target(&self) -> Option<(Size, TargetFormats)> {

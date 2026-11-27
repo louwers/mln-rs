@@ -168,6 +168,14 @@ impl DrawBuffers {
         self.made(epoch);
     }
 
+    /// Writes `data`, the bytes of a block, to the uniform buffer `id`, as
+    /// [`UniformBufferArray::write_uniform`] does.
+    pub(crate) fn write_uniform(&mut self, gpu: &mut dyn Gpu, id: usize, data: &[u8], device: &mut Device) {
+        let epoch = self.buffers.epoch();
+        let _replaced = self.buffers.write_uniform(gpu, id, data, device);
+        self.made(epoch);
+    }
+
     /// Writes `data` to the storage buffer `id`, as
     /// [`UniformBufferArray::write_storage`] does.
     pub(crate) fn write_storage(&mut self, gpu: &mut dyn Gpu, id: usize, data: &[u8], device: &mut Device) {
@@ -465,6 +473,12 @@ impl Mesh {
     #[must_use]
     pub(crate) fn id(&self) -> SimpleIdentity {
         self.id
+    }
+
+    /// The program the mesh draws with.
+    #[must_use]
+    pub(crate) fn program(&self) -> &'static Program {
+        self.shader.program()
     }
 
     /// Draws the segments into `parameters`' open pass on `gpu`, the

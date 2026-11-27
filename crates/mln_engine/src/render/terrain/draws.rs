@@ -13,8 +13,6 @@ use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gpu::{ClipDepthRange, Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::bindings::PROJECTION_ID;
-use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_style::tile_id::CanonicalTileID;
 
@@ -28,7 +26,7 @@ use crate::draw::segment::SegmentBase;
 use crate::draw::store::SharedIndexes;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::SharedVertices;
-use crate::layer::layer_drawing::{DrawDepth, DrawList, FrameDraw, LayerDraws, TileMap, tile_objects};
+use crate::layer::layer_drawing::{DrawDepth, FrameDraw, LayerDraws, TileMap, tile_objects};
 use crate::layers::render_hillshade_layer::lat_range;
 use crate::log_target;
 use crate::render::frame_projection::zero_to_one_clip_z;
@@ -36,12 +34,6 @@ use crate::render::paint_parameters::PaintParameters;
 use crate::render::terrain::programs;
 use crate::render::terrain::ubo::{HillshadeTilePropsUBO, TerrainDrawableUBO, TerrainFog, TerrainSurfaceUBO};
 use crate::render::tile_matrix::to_projection_ubo;
-
-/// The ids of the buffers that the draws bind.
-const DRAWABLE_ID: usize = programs::TERRAIN.buffer_id("drawableVector");
-const LIGHT_TILE_ID: usize = programs::TERRAIN.buffer_id("lightVector");
-const SURFACE_ID: usize = programs::TERRAIN.buffer_id("terrain");
-const LIGHT_ID: usize = programs::TERRAIN.buffer_id("props");
 
 /// The slots of the programs' textures that the draws bind.
 const GROUND_DEM_SLOT: usize = programs::TERRAIN.texture_slot("ground_dem");
@@ -59,15 +51,6 @@ struct SharedMesh {
     index_count: usize,
 }
 
-/// What a tile's draw reads of its own: where it reads its DEM, its
-/// projection, and its drape's light.
-#[derive(Clone, Copy)]
-struct TileUniforms {
-    drawable: TerrainDrawableUBO,
-    projection: ProjectionUBO,
-    light: HillshadeTilePropsUBO,
-}
-
 /// The draws of the terrain's tiles for one stack of draped layers.
 #[derive(Default)]
 struct StackDraws {
@@ -75,8 +58,6 @@ struct StackDraws {
     tiles: TileMap<Mesh>,
     /// The frame's draws of them.
     frame: LayerDraws,
-    /// The frame's draws as the update makes them, with their uniforms.
-    draw_list: DrawList<TileUniforms>,
 }
 
 /// How the draws were made: the projection variant of their shader,
@@ -185,11 +166,8 @@ impl TerrainDraws {
                 zero_to_one_clip_z(&mut projection.main_matrix);
                 zero_to_one_clip_z(&mut projection.fallback_matrix);
             }
-            let uniforms = TileUniforms {
-                drawable: TerrainDrawableUBO { dem_coords },
-                projection: to_projection_ubo(&projection),
-                light: HillshadeTilePropsUBO::default(),
-            };
+            let drawable = TerrainDrawableUBO { dem_coords };
+            let projection = to_projection_ubo(&projection);
             let latrange = lat_range(&tile.id.to_unwrapped());
             // The ground's depth is the surface's without the skirts, which
             // fill the cracks between tiles: a skirt that the camera sees
@@ -241,19 +219,17 @@ impl TerrainDraws {
                     .stack()
                     .and_then(|stack| lights.light(stack))
                     .map(|light| HillshadeTilePropsUBO { latrange, ..light.tile });
-                draws.draw_list.push(frame_draw, TileUniforms { light: light.unwrap_or_default(), ..uniforms });
+                if let Set::Ground = set {
+                    draws.frame.push_at(frame_draw, (), draw, &projection, drawable);
+                } else {
+                    draws.frame.push_at(frame_draw, (), draw, &projection, (drawable, light.unwrap_or_default()));
+                }
             }
         }
         let surface_ubo = TerrainSurfaceUBO::new(&surface.props, &fog);
-        for (set, StackDraws { frame, draw_list, .. }) in sets(&mut self.stacks, &mut self.depth, &mut self.ground) {
+        for (set, StackDraws { frame, .. }) in sets(&mut self.stacks, &mut self.depth, &mut self.ground) {
             let light = set.stack().and_then(|stack| lights.light(stack)).map(|light| light.props).unwrap_or_default();
-            draw_list.finish(frame, gpu, context, |writer| {
-                writer.storage(DRAWABLE_ID, |uniforms| uniforms.drawable);
-                writer.storage(PROJECTION_ID, |uniforms| uniforms.projection);
-                writer.storage(LIGHT_TILE_ID, |uniforms| uniforms.light);
-                writer.uniform(SURFACE_ID, &surface_ubo);
-                writer.uniform(LIGHT_ID, &light);
-            });
+            frame.block(&surface_ubo).block(&light).finish_with(gpu, context, None);
         }
     }
 

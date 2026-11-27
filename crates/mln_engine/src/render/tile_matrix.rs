@@ -3,35 +3,16 @@
 
 use geometry::Point;
 use glam::{DMat4, DVec2, DVec3, Vec2};
-use mln_gfx::gpu::Gpu;
-use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_style::constants::EXTENT;
 use mln_style::types::TranslateAnchorType;
 
 use crate::camera::{ProjectionData, View};
-use crate::draw::context::Context;
-use crate::draw::objects::DrawBuffers;
 use crate::geo::constants::M2PI;
 use crate::layers::cast_matrix;
 use crate::render::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render::tile::RenderTile;
 use crate::tile::UnwrappedTileID;
-
-/// Gives `layer_uniforms`, of a layer whose draws draw without a
-/// projection, a projection block of zeros if they have none. GL's programs
-/// declare the block whether they read it or not, so a draw binds it all the
-/// same.
-pub(crate) fn bind_no_projection(gpu: &mut dyn Gpu, layer_uniforms: &mut DrawBuffers, context: &mut Context) {
-    if layer_uniforms.get(PROJECTION_ID).is_none() {
-        layer_uniforms.write_storage(
-            gpu,
-            PROJECTION_ID,
-            bytemuck::bytes_of(&ProjectionUBO::default()),
-            context.device(),
-        );
-    }
-}
 
 /// The matrix that draws geometry of the tile `tile_id` in the frame of
 /// `parameters`: translated by `translation`, anchored as `anchor` says, in

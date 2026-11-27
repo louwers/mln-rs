@@ -8,8 +8,6 @@ use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::bindings::PROJECTION_ID;
-use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::{AttributeDataType, DepthMaskType, DrawMode};
 use mln_style::range::Range;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
@@ -20,7 +18,7 @@ use crate::draw::indexes::DrawIndexes;
 use crate::draw::objects::{DrawGeometry, Mesh, Textures, raw_vertices};
 use crate::draw::segment::SegmentBase;
 use crate::draw::vertex_attribute::Uniforms;
-use crate::layer::layer_drawing::{DrawDepth, DrawList, FrameDraw, LayerDraws, TileMap, tile_objects};
+use crate::layer::layer_drawing::{DrawDepth, FrameDraw, LayerDraws, TileMap, tile_objects};
 use crate::render::globe::globe_tile_mesh::{RawGlobeTileMesh, raw_globe_tile_mesh};
 use crate::render::paint_parameters::PaintParameters;
 use crate::render::tile_matrix::to_projection_ubo;
@@ -38,8 +36,6 @@ pub(crate) struct GlobeDepthPass {
     /// The frame's draws of them, which draw into depth in the translucent
     /// pass.
     frame: LayerDraws,
-    /// The frame's draws as the update makes them, with their projections.
-    draw_list: DrawList<ProjectionUBO>,
     meshes: BTreeMap<(u8, bool, bool), RawGlobeTileMesh>,
 }
 
@@ -121,12 +117,11 @@ impl GlobeDepthPass {
             };
             let depth = DrawDepth::Volume { mask: DepthMaskType::ReadWrite };
             let projection = to_projection_ubo(&state.projection_data(&tile_id.to_unwrapped()));
-            self.draw_list.push(FrameDraw { depth, ..FrameDraw::new(Some(*tile_id), draw.id()) }, projection);
+            let frame_draw = FrameDraw { depth, ..FrameDraw::new(Some(*tile_id), draw.id()) };
+            self.frame.push_at(frame_draw, (), draw, &projection, ());
         }
         // The draws draw in the order their meshes were made.
-        self.draw_list.finish(&mut self.frame, gpu, context, |writer| {
-            writer.storage(PROJECTION_ID, |projection| *projection);
-        });
+        self.frame.finish_with(gpu, context, None);
     }
 
     /// Uploads the meshes of the frame's draws.
