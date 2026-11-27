@@ -5,6 +5,7 @@ pub(crate) mod bucket;
 pub(crate) mod dashes;
 pub(crate) mod layer;
 pub(crate) mod mesh;
+mod query;
 #[rustfmt::skip]
 mod glsl;
 #[rustfmt::skip]

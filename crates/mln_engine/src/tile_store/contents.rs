@@ -28,9 +28,10 @@ use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::layer::render_layer::ErasedLayerBucket;
 use crate::layer::tile_layout::{Dependencies, Resolved};
 use crate::log_target;
-use crate::query::feature_index::{FeatureIndex, FeatureSelection, QueryLayers, QueryRegion, QueryResults};
-use crate::query::{RenderedQueryOptions, SourceQueryOptions};
+use crate::query::feature_index::{FeatureIndex, FeatureSelection, QueryLayers, QueryPass, QueryResults, Reach};
+use crate::query::{RenderedQueryOptions, ScreenTile, SourceQueryOptions, TileQuery};
 use crate::render::orchestrator::drop_on_workers;
+use crate::render::terrain::TileGround;
 use crate::render::tile::ViewPlace;
 use crate::source::source_state::SourceFeatureState;
 use crate::text::atlas::ImagePositions;
@@ -43,6 +44,16 @@ use crate::tile_store::dem::DemContents;
 use crate::tile_store::raster::{Masking, RasterContents};
 use crate::tile_store::tile_mask::TileMask;
 
+/// A rendered-feature query of a tile: its geometry in the view's logical
+/// pixels from its top left, and in the tile's units where it meets the
+/// map ([`TileQuery::on_ground`]) and around which it looks for features
+/// ([`Reach`]).
+pub(crate) struct TileQueryInput<'a> {
+    pub(crate) screen: &'a [crate::geo::ScreenCoordinate],
+    pub(crate) ground: &'a [glam::Vec2],
+    pub(crate) culling: &'a [mln_style::feature::GeometryCoordinate],
+    pub(crate) whole_tile: bool,
+}
 /// A layout's buckets, each once, and the bucket of each layer it laid out,
 /// with the values it laid the layer out with. The layers of a layout group
 /// share their bucket. A frame finds a layer by its id once
@@ -439,19 +450,18 @@ impl GeometryContents {
         query_padding
     }
 
-    /// Adds the rendered features of tile `id` in `query_geometry` to
-    /// `result`. Over `ground`, where the query's `screen` points meet it,
-    /// the features of layers that stand on it are found where they stand.
+    /// Adds the features of tile `id` that `input`, a query of the layers
+    /// `pass` looks at, hits to `result`.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the results, tile, query geometry, screen points and ground, camera, layers, options, global and feature state and projection of a feature query"
+        reason = "the results, tile, query, pass, camera, layers, options, global and feature state and projection of a feature query"
     )]
     pub(crate) fn query_rendered_features(
         &self,
         id: &OverscaledTileID,
         result: &mut QueryResults,
-        query_geometry: &mln_style::feature::GeometryCoordinates,
-        (screen, ground): (&[crate::geo::ScreenCoordinate], Option<crate::query::feature_index::QueryGround<'_>>),
+        input: &TileQueryInput<'_>,
+        pass: QueryPass<'_>,
         view: &crate::camera::View,
         layers: &QueryLayers<'_>,
         options: &RenderedQueryOptions,
@@ -462,27 +472,17 @@ impl GeometryContents {
         if self.result.feature_index.data().is_none() {
             return Ok(());
         }
-        let query_padding = self.query_padding(layers);
-        let projector = crate::camera::TileProjector::with_data(
-            view,
-            &id.to_unwrapped(),
-            view.projection_data_with(&id.to_unwrapped(), proj_matrix),
-        );
+        let tile = id.to_unwrapped();
+        let projector =
+            crate::camera::TileProjector::with_data(view, &tile, view.projection_data_with(&tile, proj_matrix));
+        let elevation = pass.elevation.filter(|_| pass.on_terrain);
+        let ground = elevation.filter(|_| pass.stands).map(|ground| TileGround::new(ground, tile));
+        let screen_tile = ScreenTile::new(view, &projector, ground, elevation);
+        let query = TileQuery::new(input.screen, &screen_tile, input.ground);
         let selection =
             FeatureSelection { layers, options, global_state, tile_id: id, feature_state: Some(feature_state) };
-        let tile_size = mln_style::constants::TILE_SIZE_D * f64::from(id.overscale_factor());
-        let scale = 2f64.powf(view.zoom() - f64::from(id.overscaled_z));
-        let region = QueryRegion {
-            geometry: query_geometry,
-            screen,
-            ground: ground.map(|ground| crate::render::terrain::TileGround::new(ground.elevation, id.to_unwrapped())),
-            whole_tile: ground.is_some_and(|ground| ground.standing),
-            view,
-            projector: &projector,
-            pixels_to_tile_units: (f64::from(mln_style::constants::EXTENT) / tile_size / scale) as f32,
-            padding: query_padding * view.max_pitch_scale_factor() as f32,
-        };
-        self.result.feature_index.query(result, &selection, &region)
+        let reach = Reach { geometry: input.culling, whole_tile: input.whole_tile };
+        self.result.feature_index.query(result, &selection, &query, &reach)
     }
 
     /// Adds the features of tile `id` that `options` select to `result`:

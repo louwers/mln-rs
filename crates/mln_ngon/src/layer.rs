@@ -2,27 +2,24 @@ use std::f32::consts::PI;
 
 use geometry::Point;
 use glam::Vec2;
-use mln_engine::camera::{TileCoordinate, TileProjector, View};
-use mln_engine::draw::ground::{FrameGround, StandingDraw, TileGround};
+use mln_engine::draw::ground::{FrameGround, StandingDraw};
 use mln_engine::draw::{
-    Draw, DrawGeometry, Draws, LayerFrame, RenderPass, RenderTile, SegmentBase, SharedAttribute, Textures, Uniforms,
+    Draw, DrawGeometry, Draws, LayerFrame, RenderPass, SegmentBase, SharedAttribute, Textures, Uniforms,
     VertexAttributeArray, cast_matrix, globe_extrude_scale, projection_data, refresh_paint_attributes,
     to_projection_ubo,
 };
-use mln_engine::geo::ScreenCoordinate;
 use mln_engine::layer::binders::PaintBinders as _;
 use mln_engine::layer::{
-    EvaluateCx, EvaluatedLayer, Evaluation, Features, FrameTile, Layer, LayerValues, OnTerrain, PrepareCx, QueryRegion,
-    TileCx, TileData, bucket_indexes, bucket_vertices, paint_vertices,
+    EvaluateCx, EvaluatedLayer, Evaluation, Features, FrameTile, Layer, LayerValues, OnTerrain, PrepareCx, TileCx,
+    TileData, TileQuery, bucket_indexes, bucket_vertices, paint_vertices,
 };
-use mln_engine::query::translate_query_geometry;
+use mln_engine::query::shapes::meets_polygon;
 use mln_engine::tile::OverscaledTileID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_style::color::Color;
 use mln_style::expression::EvaluationContext;
-use mln_style::feature::{FeatureState, GeometryCollection, GeometryCoordinate, GeometryTileFeature};
-use mln_style::geo::WrapMode;
+use mln_style::feature::{FeatureState, GeometryCollection, GeometryTileFeature};
 use mln_style::types::{AlignmentType, CirclePitchScaleType};
 
 use crate::Ngon;
@@ -218,23 +215,23 @@ impl Layer for NgonLayer {
     }
 
     /// Whether the query meets the outline of a polygon of `feature`, its
-    /// stroke's outer edge, where it draws.
+    /// stroke's outer edge, where it draws: one aligned with the viewport
+    /// around where its center draws on the screen, and one aligned with
+    /// the map lying flat on it at its center's height, which the query
+    /// meets where its lines of sight do. A polygon whose center the frame
+    /// hides, behind the camera, the globe's horizon or the ground in
+    /// front, doesn't show.
     fn hit(
         &self,
         values: &LayerValues<Ngon>,
-        region: &QueryRegion<'_>,
+        query: &TileQuery<'_>,
         feature: &dyn GeometryTileFeature,
         geometry: &GeometryCollection,
         feature_state: &FeatureState,
     ) -> bool {
-        let QueryRegion { geometry: query, screen, ground, view, projector, pixels_to_tile_units, .. } = *region;
         let paint = &values.evaluated.paint;
-        let translate = *paint.ngon_translate.uniform();
-        let anchor = *paint.ngon_translate_anchor.uniform();
-        let bearing = view.angle() as f32;
-        let translated = translate_query_geometry(query, translate, anchor, bearing, pixels_to_tile_units);
-        let translated = translated.as_ref().unwrap_or(query);
-
+        let query = query.translated(*paint.ngon_translate.uniform(), *paint.ngon_translate_anchor.uniform());
+        let view = query.view();
         let context =
             EvaluationContext::with_zoom_feature_state(view.zoom() as f32, Some(feature), Some(feature_state));
         let shape = Shape {
@@ -243,110 +240,40 @@ impl Layer for NgonLayer {
             stroke_width: paint.ngon_stroke_width.evaluate(&context).max(0.0),
             rotate: paint.ngon_rotate.evaluate(&context).to_radians(),
         };
-
-        // A polygon aligned with the map is compared with the query in the
-        // plane of the tile, whose y goes down, and one aligned with the
-        // viewport in the plane of the viewport, in pixels from its bottom
-        // left. Over terrain, a polygon stands at the height of the ground
-        // under its center: aligned with the map, it lies in the plane at
-        // that height, where the query's lines of sight meet it; aligned
-        // with the viewport, it shows where it draws, which the query's
-        // screen points test.
         let align_with_map = *paint.ngon_pitch_alignment.uniform() == AlignmentType::Map;
-        let viewport_query: Vec<Vec2> = if align_with_map {
-            translated.iter().map(|p| tile_point(*p)).collect()
-        } else if ground.is_some() {
-            let height = f64::from(view.size().height);
-            screen.iter().map(|p| Vec2::new(p.x as f32, (height - p.y) as f32)).collect()
-        } else {
-            translated.iter().map(|p| project(projector, view, tile_point(*p), 0.0)).collect()
-        };
-        let size = shape.outer_radius() * if align_with_map { pixels_to_tile_units } else { 1.0 };
-
-        // The shader hides a polygon whose center the horizon covers where
-        // it draws it: translated, and through the projection as blended.
-        let drawn_translation = RenderTile::tile_unit_translation(projector.tile_id(), translate, anchor, view);
-        let scale = *paint.ngon_pitch_scale.uniform();
+        let scale_with_map = *paint.ngon_pitch_scale.uniform() == CirclePitchScaleType::Map;
+        let camera = view.camera_to_center_distance();
+        let pixels = query.pixels();
+        // The query on the level the polygons lie on, which over terrain
+        // changes with the ground under them.
+        let mut level: Option<(f64, Vec<Vec2>)> = None;
         for &point in geometry.iter().flatten() {
-            let elevation = ground_height(ground, point);
-            let drawn = tile_point(point) + Vec2::from(drawn_translation);
-            if view.is_globe() && projector.project_as_drawn(&f64_point(drawn), elevation).occluded {
-                continue;
-            }
-            let plane: Vec<Vec2>;
-            let query = if align_with_map && ground.is_some() {
-                let at_elevation = plane_geometry(screen, elevation, view, projector);
-                let translated =
-                    translate_query_geometry(&at_elevation, translate, anchor, bearing, pixels_to_tile_units);
-                plane = translated.as_ref().unwrap_or(&at_elevation).iter().map(|p| tile_point(*p)).collect();
-                &plane
+            let p = Point::new(f64::from(point.x), f64::from(point.y));
+            let height = query.ground_height(p);
+            let Some(center) = query.project(p, height) else { continue };
+            let meets = if align_with_map {
+                // A size on the map, which perspective shrinks with
+                // distance unless it is as large there as at the center.
+                let perspective = if scale_with_map { 1.0 } else { center.distance / camera };
+                let size = (f64::from(shape.outer_radius()) * query.pixel(p) * perspective) as f32;
+                let on_level = match &level {
+                    Some((at, on_level)) if *at == height => on_level,
+                    _ => &level.insert((height, query.on_level(height))).1,
+                };
+                meets_polygon(on_level, &[shape.outline(Vec2::new(p.x as f32, p.y as f32), size)])
             } else {
-                &viewport_query
+                // A size on the screen, which shrinks with distance where it
+                // scales with the map.
+                let perspective = if scale_with_map { camera / center.distance } else { 1.0 };
+                let size = (f64::from(shape.outer_radius()) * perspective) as f32;
+                meets_polygon(&pixels, &[shape.outline(center.point, size)])
             };
-            let center = if align_with_map {
-                tile_point(point)
-            } else if ground.is_some() {
-                project(projector, view, drawn, elevation)
-            } else {
-                project(projector, view, tile_point(point), 0.0)
-            };
-            let distance = projector.project(&f64_point(tile_point(point)), elevation).signed_distance_from_camera;
-            let camera_distance = view.camera_to_center_distance();
-            let size = match (scale, align_with_map) {
-                (CirclePitchScaleType::Viewport, true) => size * (distance / camera_distance) as f32,
-                (CirclePitchScaleType::Map, false) => size * (camera_distance / distance) as f32,
-                _ => size,
-            };
-            if polygons_intersect(query, &shape.outline(center, size, !align_with_map)) {
+            if meets && !query.behind_ground(&center) {
                 return true;
             }
         }
         false
     }
-}
-
-/// `p`, in tile units, as a vector.
-fn tile_point(p: GeometryCoordinate) -> Vec2 {
-    Vec2::new(f32::from(p.x), f32::from(p.y))
-}
-
-fn f64_point(p: Vec2) -> Point<f64> {
-    Point::new(f64::from(p.x), f64::from(p.y))
-}
-
-/// Where `p`, in tile units of the tile `projector` projects, `elevation`
-/// meters up, shows in `view`, in pixels from its bottom left.
-fn project(projector: &TileProjector<'_>, view: &View, p: Vec2, elevation: f64) -> Vec2 {
-    let clip = projector.project(&f64_point(p), elevation).point;
-    let size = view.size();
-    Vec2::new((clip.x as f32 + 1.0) * size.width as f32 * 0.5, (clip.y as f32 + 1.0) * size.height as f32 * 0.5)
-}
-
-/// The height of `ground` under `p`, in tile units of its tile, in meters;
-/// 0 without ground.
-fn ground_height(ground: Option<TileGround<'_>>, p: GeometryCoordinate) -> f64 {
-    ground.map_or(0.0, |ground| f64::from(ground.height(tile_point(p))))
-}
-
-/// Where the lines of sight through `screen`, points from the top left of
-/// `view`, meet the plane `elevation` meters up, in tile units of the tile
-/// `projector` projects.
-fn plane_geometry(
-    screen: &[ScreenCoordinate],
-    elevation: f64,
-    view: &View,
-    projector: &TileProjector<'_>,
-) -> Vec<GeometryCoordinate> {
-    let height = f64::from(view.size().height);
-    screen
-        .iter()
-        .filter_map(|p| {
-            let up = ScreenCoordinate::new(p.x, height - p.y);
-            let location = view.screen_coordinate_to_lat_lng_at(&up, elevation, WrapMode::Unwrapped).ok()?;
-            let world = TileCoordinate::from_lat_lng(0.0, &location).p;
-            Some(TileCoordinate::to_geometry_coordinate(projector.tile_id(), &world))
-        })
-        .collect()
 }
 
 /// The corners of a polygon whose `ngon-corners` is `value`.
@@ -372,45 +299,16 @@ impl Shape {
     }
 
     /// The corners of the stroke's outer edge around `center`, `size` from
-    /// it, in a plane whose y goes up for `y_up` and else down. The first
-    /// corner is on top, turned by the rotation clockwise.
-    fn outline(&self, center: Vec2, size: f32, y_up: bool) -> Vec<Vec2> {
-        let up = if y_up { 1.0 } else { -1.0 };
+    /// it, in a plane whose y goes down, the screen's or a tile's. The
+    /// first corner is on top, turned by the rotation clockwise.
+    fn outline(&self, center: Vec2, size: f32) -> Vec<Vec2> {
         (0..self.corners)
             .map(|i| {
                 let angle = self.rotate + 2.0 * PI * i as f32 / self.corners as f32;
-                center + size * Vec2::new(angle.sin(), up * angle.cos())
+                center + size * Vec2::new(angle.sin(), -angle.cos())
             })
             .collect()
     }
-}
-
-/// Whether the polygon or point `a` and the polygon `b` meet: one has a
-/// corner inside the other, or their edges cross.
-fn polygons_intersect(a: &[Vec2], b: &[Vec2]) -> bool {
-    a.iter().any(|&p| contains(b, p))
-        || b.iter().any(|&p| contains(a, p))
-        || edges(a).any(|(a0, a1)| edges(b).any(|(b0, b1)| segments_cross(a0, a1, b0, b1)))
-}
-
-/// The edges of the ring `ring`, closed.
-fn edges(ring: &[Vec2]) -> impl Iterator<Item = (Vec2, Vec2)> + '_ {
-    ring.iter().zip(ring.iter().cycle().skip(1)).map(|(&a, &b)| (a, b))
-}
-
-/// Whether `p` is inside the ring `ring`, by the crossings of a ray from it.
-fn contains(ring: &[Vec2], p: Vec2) -> bool {
-    edges(ring)
-        .filter(|(a, b)| (a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x)
-        .count()
-        % 2
-        == 1
-}
-
-/// Whether the segments `a0`-`a1` and `b0`-`b1` cross.
-fn segments_cross(a0: Vec2, a1: Vec2, b0: Vec2, b1: Vec2) -> bool {
-    let turn = |a: Vec2, b: Vec2, c: Vec2| (b - a).perp_dot(c - a) > 0.0;
-    turn(a0, b0, b1) != turn(a1, b0, b1) && turn(a0, a1, b0) != turn(a0, a1, b1)
 }
 
 #[cfg(test)]
@@ -434,14 +332,11 @@ mod tests {
     fn the_first_corner_is_on_top_and_corners_turn_clockwise() {
         let center = Vec2::new(100.0, 100.0);
         let triangle = Shape { corners: 3, radius: 0.0, stroke_width: 0.0, rotate: 0.0 };
-        let down = triangle.outline(center, 20.0, false);
-        assert!(down[0].abs_diff_eq(Vec2::new(100.0, 80.0), 1e-4));
-        assert!(down[1].x > 100.0 && down[1].y > 100.0);
-        let up = triangle.outline(center, 20.0, true);
-        assert!(up[0].abs_diff_eq(Vec2::new(100.0, 120.0), 1e-4));
-        assert!(up[1].x > 100.0 && up[1].y < 100.0);
+        let outline = triangle.outline(center, 20.0);
+        assert!(outline[0].abs_diff_eq(Vec2::new(100.0, 80.0), 1e-4));
+        assert!(outline[1].x > 100.0 && outline[1].y > 100.0);
         let turned = Shape { rotate: PI / 2.0, ..triangle };
-        assert!(turned.outline(center, 20.0, false)[0].abs_diff_eq(Vec2::new(120.0, 100.0), 1e-4));
+        assert!(turned.outline(center, 20.0)[0].abs_diff_eq(Vec2::new(120.0, 100.0), 1e-4));
     }
 
     #[test]
@@ -449,9 +344,9 @@ mod tests {
         // A point a quarter unit outside a corner misses the polygon, and
         // one a quarter unit inside hits it.
         let square = Shape { corners: 4, radius: 2.0, stroke_width: 0.0, rotate: PI / 4.0 };
-        let outline = square.outline(Vec2::ZERO, 2.0, false);
+        let outline = [square.outline(Vec2::ZERO, 2.0)];
         let corner = 2.0 * (PI / 4.0).sin();
-        assert!(!polygons_intersect(&[Vec2::splat(corner + 0.25)], &outline));
-        assert!(polygons_intersect(&[Vec2::splat(corner - 0.25)], &outline));
+        assert!(!meets_polygon(&[Vec2::splat(corner + 0.25)], &outline));
+        assert!(meets_polygon(&[Vec2::splat(corner - 0.25)], &outline));
     }
 }

@@ -1,11 +1,8 @@
 //! Where a geographic position is in a view: its anchors, one in each world
-//! copy that what draws around it can reach the view from, and where a
-//! point around one shows on the screen.
+//! copy that what draws around it can reach the view from.
 
 use geometry::Point;
-use glam::DVec3;
-use mln_engine::camera::{TileCoordinate, TileProjector, VerticalPerspectiveProjection, View};
-use mln_engine::geo::ScreenCoordinate;
+use mln_engine::camera::{TileCoordinate, TileProjector, View};
 use mln_engine::geo::constants::{EARTH_RADIUS_M, M2PI};
 use mln_engine::tile::UnwrappedTileID;
 use mln_engine::tile_store::TileLodMode;
@@ -105,120 +102,31 @@ fn world_copies(view: &View) -> Vec<i16> {
     tile_cover(&parameters, 0, Range::new(0, 0), None).iter().map(|tile| tile.wrap).collect()
 }
 
-/// `point`, in the units of `tile`, `height` meters up, where it draws on
-/// `view`'s screen, through the projection as blended, in logical pixels
-/// from its top left; `None` where the globe hides it or it is behind the
-/// camera.
-pub(crate) fn to_screen(view: &View, tile: UnwrappedTileID, point: [f64; 2], height: f64) -> Option<ScreenCoordinate> {
-    let at = TileProjector::new(view, &tile).project_as_drawn(&Point::new(point[0], point[1]), height);
-    if at.occluded || at.signed_distance_from_camera <= 0.0 {
-        return None;
-    }
-    let size = view.size();
-    // Clip space's y goes up.
-    Some(ScreenCoordinate::new(
-        (at.point.x + 1.0) * f64::from(size.width) * 0.5,
-        (1.0 - at.point.y) * f64::from(size.height) * 0.5,
-    ))
-}
-
-/// How much of what stands at `anchor` the ground in front of it leaves,
-/// as the shaders' `ground_visibility` fades it: 1 where no ground nearer
-/// the camera shows at the anchor's screen point, or where that point is
-/// outside the view, down to 0 where the nearest ground there is in front
-/// of the anchor by GL JS's ramp of depth. `height` gives the ground's
-/// height, in meters, at a point of the anchor's tile or past its edges.
-/// The line of sight is sampled every 4 pixels across the ground, at most
-/// 512 times.
-pub(crate) fn ground_visibility(
-    view: &View,
-    anchor: &Anchor,
-    height: impl Fn(UnwrappedTileID, [f64; 2]) -> f64,
-) -> f64 {
-    let Some(screen) = to_screen(view, anchor.tile, anchor.point, anchor.height) else {
-        return 1.0;
-    };
-    let size = view.size();
-    let (width, view_height) = (f64::from(size.width), f64::from(size.height));
-    if !(0.0..=width).contains(&screen.x) || !(0.0..=view_height).contains(&screen.y) {
-        return 1.0;
-    }
-
-    // The line of sight, as a line from the anchor to the eye, or to where
-    // the near plane cuts it, through Mercator's tile units and meters, or
-    // through the globe's unit-sphere space; and its point at `t`, from 0 at
-    // the anchor to 1, as a point of the tile and a height.
-    let tile = anchor.tile;
-    let (tiles, extent) = (f64::from(1u32 << tile.canonical.z), f64::from(EXTENT));
-    let to_tile = |x: f64, y: f64| {
-        [
-            ((x - f64::from(tile.wrap)) * tiles - f64::from(tile.canonical.x)) * extent,
-            (y * tiles - f64::from(tile.canonical.y)) * extent,
-        ]
-    };
-    let anchor_x = (f64::from(tile.canonical.x) + anchor.point[0] / extent) / tiles + f64::from(tile.wrap);
-    let globe = view.is_globe();
-    let (start, end) = if globe {
-        let surface = VerticalPerspectiveProjection::tile_coordinates_to_sphere(
-            &Point::new(anchor.point[0], anchor.point[1]),
-            &tile,
-        );
-        (
-            surface * (1.0 + anchor.height / VerticalPerspectiveProjection::GLOBE_RADIUS_METERS),
-            view.globe_camera_position(),
-        )
-    } else {
-        let Some((near, _)) = view.line_of_sight(&ScreenCoordinate::new(screen.x, view_height - screen.y)) else {
-            return 1.0;
-        };
-        let [x, y] = to_tile(near.x, near.y);
-        (DVec3::new(anchor.point[0], anchor.point[1], anchor.height), DVec3::new(x, y, near.z))
-    };
-    let at = |t: f64| {
-        let q = start.lerp(end, t);
-        if !globe {
-            return ([q.x, q.y], q.z);
-        }
-        let (radius, n) = (q.length(), q.normalize());
-        let location = LatLng::saturating(n.y.asin().to_degrees(), n.x.atan2(n.z).to_degrees(), WrapMode::Unwrapped);
-        let p = TileCoordinate::from_lat_lng(0.0, &location).p;
-        // In the world copy of the anchor.
-        let x = p.x + (anchor_x - p.x).round();
-        (to_tile(x, p.y), (radius - 1.0) * VerticalPerspectiveProjection::GLOBE_RADIUS_METERS)
-    };
-    let under = |t: f64| {
-        let (point, ray) = at(t);
-        height(tile, point) > ray
-    };
-
-    let (eye, _) = at(1.0);
-    let across = (eye[0] - anchor.point[0]).hypot(eye[1] - anchor.point[1]) / anchor.pixels_to_tile_units;
-    let steps = (across / 4.0).ceil().clamp(1.0, 512.0) as u32;
-    let Some(step) = (1..=steps).find(|&i| under(1.0 - f64::from(i) / f64::from(steps))) else {
-        return 1.0;
-    };
-    let (mut above, mut below) =
-        (1.0 - f64::from(step - 1) / f64::from(steps), 1.0 - f64::from(step) / f64::from(steps));
-    for _ in 0..24 {
-        let mid = f64::midpoint(above, below);
-        if under(mid) { below = mid } else { above = mid }
-    }
-    let (point, ray) = at(below);
-    let ground = TileProjector::new(view, &tile).project_as_drawn(&Point::new(point[0], point[1]), ray);
-
-    // GL JS's `depthOpacity`, with its ramp's scale.
-    let depth_factor = view_height / 25.0;
-    let d = depth_factor * (1.0 / anchor.distance - 1.0 / ground.signed_distance_from_camera) + 0.0001;
-    1.0 - (-500.0 * d).clamp(0.0, 1.0)
-}
-
 #[cfg(test)]
 mod tests {
     use mln_engine::camera::TransformState;
+    use mln_engine::geo::ScreenCoordinate;
     use mln_style::size::Size;
     use mln_style::types::{ProjectionDefinition, ProjectionType};
 
     use super::*;
+
+    /// `point`, in the units of `tile`, `height` meters up, where it draws on
+    /// `view`'s screen, through the projection as blended, in logical pixels
+    /// from its top left; `None` where the globe hides it or it is behind the
+    /// camera.
+    fn to_screen(view: &View, tile: UnwrappedTileID, point: [f64; 2], height: f64) -> Option<ScreenCoordinate> {
+        let at = TileProjector::new(view, &tile).project_as_drawn(&Point::new(point[0], point[1]), height);
+        if at.occluded || at.signed_distance_from_camera <= 0.0 {
+            return None;
+        }
+        let size = view.size();
+        // Clip space's y goes up.
+        Some(ScreenCoordinate::new(
+            (at.point.x + 1.0) * f64::from(size.width) * 0.5,
+            (1.0 - at.point.y) * f64::from(size.height) * 0.5,
+        ))
+    }
 
     fn camera(latitude: f64, longitude: f64, zoom: f64, globe: bool) -> TransformState {
         let mut state = TransformState::default();

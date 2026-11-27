@@ -74,14 +74,21 @@
 //!
 //! # Queries
 //!
-//! A rendered-feature query finds a tile's features near its geometry in the
-//! tile's feature index, padded by the layer's
+//! A rendered-feature query finds a tile's features near where it meets the
+//! map in the tile's feature index, padded by the layer's
 //! [`query_radius`](Layer::query_radius), and keeps those the layer
-//! [`hit`](Layer::hit)s. A layer that draws other than its tiles'
-//! features, such as one without a source, answers from the last frame
-//! ([`Layer::hit_frame`], [`FrameQuery`]): its hits come with the tiled
-//! layers', in the layers' order, and the query's filter places them, for
-//! `within`, in a tile that holds their geometry.
+//! [`hit`](Layer::hit)s. The query is in the view's logical pixels, and a
+//! hit test compares it with where the feature draws in them: a
+//! [`TileQuery`] projects the feature's points as the frame drew them, with
+//! the projection blended between the globe and Mercator and the points on
+//! the ground they stand on, and decides where the frame shows them, in
+//! front of the camera, the globe's horizon and the ground. What lies on the
+//! map, and sizes in pixels on it, it tests where the query meets the map.
+//! A layer that draws other than its tiles' features, such as one without a
+//! source, answers from the last frame ([`Layer::hit_frame`],
+//! [`FrameQuery`]), through the same projection ([`ScreenTile`]): its hits
+//! come with the tiled layers', in the layers' order, and the query's filter
+//! places them, for `within`, in a tile that holds their geometry.
 //!
 //! # Buckets
 //!
@@ -134,7 +141,8 @@ pub use crate::layer::render_layer::{
     EvaluateCx, Evaluation, FrameQuery, Layer, LayerValues, OnTerrain, PrepareCx, TileCx, UpdateCx,
 };
 pub use crate::layer::tile_input::{Features, LayerBucket, NoTiles, RasterTile, TileData, TileInput};
-pub use crate::query::feature_index::QueryRegion;
+pub use crate::layer::tile_layout::Resolved;
+pub use crate::query::{ScreenPoint, ScreenTile, TileQuery};
 #[doc(hidden)]
 pub use crate::render::shared_targets::{Router, Routes};
 pub use crate::render::terrain::SurfaceLight;

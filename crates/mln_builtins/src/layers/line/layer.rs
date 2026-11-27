@@ -2,6 +2,8 @@ use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use geometry::Point;
+use glam::Vec2;
 use mln_engine::draw::{
     AtlasBinding, Composite, Context, Draw, DrawGeometry, Draws, Group, LayerFrame, Mesh, RenderPass, SegmentBase,
     SharedAttribute, SharedTexture, Texture2D, Textures, Uniforms, VertexAttributeArray, cast_matrix, projection_data,
@@ -9,16 +11,16 @@ use mln_engine::draw::{
 };
 use mln_engine::layer::binders::PaintBinders as _;
 use mln_engine::layer::{
-    EvaluateCx, EvaluatedLayer, Evaluation, Features, FrameTile, Layer, LayerValues, OnTerrain, PrepareCx, QueryRegion,
-    TileCx, TileData, UpdateCx, bucket_indexes, bucket_vertices, paint_vertices,
+    EvaluateCx, EvaluatedLayer, Evaluation, Features, FrameTile, Layer, LayerValues, OnTerrain, PrepareCx, TileCx,
+    TileData, TileQuery, UpdateCx, bucket_indexes, bucket_vertices, paint_vertices,
 };
+use mln_engine::query::shapes::tile_rings;
 use mln_engine::tile::{OverscaledTileID, UnwrappedTileID};
 use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
-use mln_style::StyleValue as _;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::color::Color;
 use mln_style::expression::{Dependency, EvaluationContext, GlobalStateMap, global_state_refs_intersect};
@@ -27,11 +29,13 @@ use mln_style::layers::Line;
 use mln_style::layers::line_layer_properties::LinePaintProperties;
 use mln_style::size::Size;
 use mln_style::types::{AlignmentType, LineCapType, TranslateAnchorType};
+use mln_style::{PropertyEvaluationParameters, StyleValue as _};
 
 use crate::layers::line::bucket::{LineBinders, LineBucket};
 use crate::layers::line::dashes::{LineAtlas, LinePatternCap};
 use crate::layers::line::mesh::LineLayoutVertex;
 use crate::layers::line::programs;
+use crate::layers::line::query::{Stroke, meets_line};
 use crate::layers::line::ubo::{
     LineDrawableUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO, LinePatternDrawableUBO, LinePatternTilePropsUBO,
     LineSDFDrawableUBO, LineSDFTilePropsUBO,
@@ -197,67 +201,27 @@ impl RenderLineLayer {
 
         self.color_ramp_texture = None;
     }
-
-    // query
-    fn line_width(
-        evaluated: &LinePaintProperties::PossiblyEvaluated,
-        feature: &dyn mln_style::feature::GeometryTileFeature,
-        zoom: f32,
-        feature_state: &mln_style::feature::FeatureState,
-    ) -> f32 {
-        let line_width = evaluated.line_width.evaluate(&EvaluationContext::with_zoom_feature_state(
-            zoom,
-            Some(feature),
-            Some(feature_state),
-        ));
-        let gap_width = evaluated.line_gap_width.evaluate(&EvaluationContext::with_zoom_feature_state(
-            zoom,
-            Some(feature),
-            Some(feature_state),
-        ));
-        if gap_width == 0.0 { line_width } else { gap_width + 2.0 * line_width }
-    }
 }
 
-// query
-fn offset_line(
-    rings: &mln_style::feature::GeometryCollection,
-    offset: f64,
-) -> Vec<mln_style::feature::GeometryCoordinates> {
-    use geometry::Point;
-    use mln_engine::geo::math::{perp, unit};
-
-    debug_assert!(offset != 0.0);
-    debug_assert!(!rings.is_empty());
-
-    let to_f64 = |p: Point<i16>| Point::new(f64::from(p.x), f64::from(p.y));
-    let sub = |a: Point<i16>, b: Point<i16>| Point::new(a.x.wrapping_sub(b.x), a.y.wrapping_sub(b.y));
-
-    let zero = Point::new(0.0, 0.0);
-    let mut new_rings = Vec::with_capacity(rings.len());
-    for ring in rings.iter() {
-        let mut new_ring = Vec::with_capacity(ring.len());
-
-        for i in 0..ring.len() {
-            let p = ring[i];
-
-            let a_to_b = if i == 0 { zero } else { perp(unit(to_f64(sub(p, ring[i - 1])))) };
-            // At the last vertex, use the incoming normal so the endpoint receives the full offset.
-            let b_to_c = if i + 1 == ring.len() { a_to_b } else { perp(unit(to_f64(sub(ring[i + 1], p)))) };
-            let mut extrude = unit(Point::new(a_to_b.x + b_to_c.x, a_to_b.y + b_to_c.y));
-
-            let cos_half_angle = extrude.x * b_to_c.x + extrude.y * b_to_c.y;
-            let scale = if cos_half_angle == 0.0 { 0.0 } else { 1.0 / cos_half_angle };
-            extrude = Point::new(extrude.x * scale, extrude.y * scale);
-
-            // The offset rounds toward zero to tile units, which wrap.
-            let shifted = Point::new((extrude.x * offset) as i16, (extrude.y * offset) as i16);
-            new_ring.push(Point::new(shifted.x.wrapping_add(p.x), shifted.y.wrapping_add(p.y)));
-        }
-        new_rings.push(new_ring);
-    }
-
-    new_rings
+/// `line`, a line in a tile's units, offset by `offset` of the tile's
+/// units a pixel at each point gives, `pixel`, as the line's mesh offsets
+/// it: each point along its join's extrusion, which keeps the line's
+/// segments `offset` from where they were.
+fn offset_line(line: &[Vec2], offset: f32, pixel: impl Fn(Vec2) -> f32) -> Vec<Vec2> {
+    let normal = |d: Vec2| Vec2::new(-d.y, d.x).normalize_or_zero();
+    (0..line.len())
+        .map(|i| {
+            let p = line[i];
+            let before = if i == 0 { Vec2::ZERO } else { normal(p - line[i - 1]) };
+            // At the last point, the incoming normal, so that the end takes
+            // the whole offset.
+            let after = if i + 1 == line.len() { before } else { normal(line[i + 1] - p) };
+            let extrude = (before + after).normalize_or_zero();
+            let cos_half_angle = extrude.dot(after);
+            let extrude = if cos_half_angle == 0.0 { Vec2::ZERO } else { extrude / cos_half_angle };
+            p + extrude * offset * pixel(p)
+        })
+        .collect()
 }
 
 impl Layer for RenderLineLayer {
@@ -442,48 +406,49 @@ impl Layer for RenderLineLayer {
         }
     }
 
-    // query
+    /// Whether the query meets a line of the feature where it lies on the
+    /// map, translated and offset: its stroke, as wide on the map as its
+    /// width in pixels there, with the joins and caps of its layout, and
+    /// for a line with a gap, not in the gap.
     fn hit(
         &self,
         values: &LayerValues<Line>,
-        region: &QueryRegion<'_>,
+        query: &TileQuery<'_>,
         feature: &dyn mln_style::feature::GeometryTileFeature,
         geometry: &mln_style::feature::GeometryCollection,
         feature_state: &mln_style::feature::FeatureState,
     ) -> bool {
-        let QueryRegion { geometry: query_geometry, view, pixels_to_tile_units, .. } = *region;
-        let zoom = view.zoom() as f32;
-        let evaluated = &values.evaluated.paint;
-        // Translate query geometry
-        let translated_query_geometry = mln_engine::query::translate_query_geometry(
-            query_geometry,
-            *evaluated.line_translate.uniform(),
-            *evaluated.line_translate_anchor.uniform(),
-            view.angle() as f32,
-            pixels_to_tile_units,
-        );
-        let query = translated_query_geometry.as_ref().unwrap_or(query_geometry);
+        let paint = &values.evaluated.paint;
+        let query = query.translated(*paint.line_translate.uniform(), *paint.line_translate_anchor.uniform());
+        let zoom = query.view().zoom() as f32;
+        let context = EvaluationContext::with_zoom_feature_state(zoom, Some(feature), Some(feature_state));
+        let width = paint.line_width.evaluate(&context);
+        let gap = paint.line_gap_width.evaluate(&context);
+        let offset = paint.line_offset.evaluate(&context);
+        let (outer, inner) = if gap > 0.0 { (gap / 2.0 + width, Some(gap / 2.0)) } else { (width / 2.0, None) };
 
-        // Evaluate function
-        let offset = evaluated.line_offset.evaluate(&EvaluationContext::with_zoom_feature_state(
-            zoom,
-            Some(feature),
-            Some(feature_state),
-        )) * pixels_to_tile_units;
-        // Test intersection
-        let half_width = (f64::from(Self::line_width(evaluated, feature, zoom, feature_state)) / 2.0
-            * f64::from(pixels_to_tile_units)) as f32;
+        // The joins and caps the line's mesh was laid out with, at the
+        // tile's zoom.
+        let tile = query.tile_id();
+        let layout = values.style.layout.evaluate(&PropertyEvaluationParameters::new(f32::from(tile.canonical.z)));
+        let layout_context = EvaluationContext::with_zoom_feature(f32::from(tile.canonical.z), Some(feature))
+            .with_canonical_tile_id(Some(&tile.canonical));
+        let stroke = Stroke {
+            join: layout.line_join.evaluate(&layout_context),
+            cap: layout.line_cap.evaluate(&layout_context),
+            miter_limit: layout.line_miter_limit.evaluate(&layout_context),
+            round_limit: layout.line_round_limit.evaluate(&layout_context),
+        };
 
-        // Apply offset to geometry
-        if offset != 0.0 && !geometry.is_empty() {
-            return mln_engine::geo::intersection_tests::polygon_intersects_buffered_multi_line(
-                query,
-                &offset_line(geometry, f64::from(offset)),
-                half_width,
-            );
-        }
-
-        mln_engine::geo::intersection_tests::polygon_intersects_buffered_multi_line(query, geometry, half_width)
+        let on_ground = query.on_ground();
+        let pixel = |p: Vec2| query.pixel(Point::new(f64::from(p.x), f64::from(p.y))) as f32;
+        tile_rings(geometry).iter().any(|line| {
+            let line = if offset == 0.0 { line.clone() } else { offset_line(line, offset, pixel) };
+            let pixels: Vec<f32> = line.iter().map(|&p| pixel(p)).collect();
+            let outer: Vec<f32> = pixels.iter().map(|pixel| outer * pixel).collect();
+            let inner: Option<Vec<f32>> = inner.map(|inner| pixels.iter().map(|pixel| inner * pixel).collect());
+            meets_line(&on_ground, &line, &outer, inner.as_deref(), stroke)
+        })
     }
 }
 

@@ -18,7 +18,7 @@ use mln_style::types::{LayerBlendType, VisibilityType};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters};
 use smallvec::SmallVec;
 
-use crate::camera::View;
+use crate::camera::{TileProjector, View};
 use crate::draw::context::Context;
 use crate::draw::draws::{DrawOrder, Draws, Group, LayerFrame, LendAt, Lent};
 use crate::draw::resources::Resources;
@@ -29,7 +29,7 @@ use crate::layer::layer_drawing::{ChangedBuckets, TileMap};
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, entry};
 use crate::layer::tile_input::input::Find;
 use crate::layer::tile_input::{TileData, TileInput};
-use crate::query::feature_index::QueryRegion;
+use crate::query::{ScreenTile, TileQuery};
 use crate::render::paint_parameters::PaintParameters;
 use crate::render::pass::RenderPass;
 use crate::render::shared_targets::SharedTargets;
@@ -636,21 +636,27 @@ pub trait Layer: Sized + 'static {
     fn lend(&mut self, _at: LendAt, _lent: Lent<'_>) {}
 
     /// How far outside a feature of `data`, a tile's bucket of the layer, a
-    /// query still hits it, from `layer`'s current values and the bucket's
-    /// statistics of them. The engine asks only a type whose input lays
+    /// query still hits it, in pixels, from `layer`'s current values and the
+    /// bucket's statistics of them: how far around where the query meets
+    /// the map the engine looks for the features it tests
+    /// ([`hit`](Self::hit)). The engine asks only a type whose input lays
     /// out.
     fn query_radius(_data: TileData<'_, Self>, _layer: &EvaluatedLayer<Self::Style>) -> f32 {
         0.0
     }
 
-    /// Whether a query hits the feature `feature` with `geometry`, with
-    /// `feature_state`: whether it intersects `region` of its tile as the
-    /// layer of `values` draws it at the view's zoom; false unless a layer
-    /// type overrides it.
+    /// Whether `query` hits the feature `feature` with `geometry`, with
+    /// `feature_state`, as the layer of `values` draws it: whether the
+    /// query's geometry, in the view's logical pixels, meets where the
+    /// feature shows in them. `query` projects the feature's points to where
+    /// the frame draws them and decides where it shows them; geometry that
+    /// lies on the map, and what is sized in pixels on it, is tested where
+    /// the query meets the map ([`TileQuery::on_ground`],
+    /// [`TileQuery::on_level`]). False unless a layer type overrides it.
     fn hit(
         &self,
         _values: &LayerValues<Self::Style>,
-        _region: &QueryRegion<'_>,
+        _query: &TileQuery<'_>,
         _feature: &dyn mln_style::feature::GeometryTileFeature,
         _geometry: &mln_style::feature::GeometryCollection,
         _feature_state: &mln_style::feature::FeatureState,
@@ -660,12 +666,13 @@ pub trait Layer: Sized + 'static {
 
     /// Adds to `hits` the features that `query`'s geometry hits of what the
     /// layer shows other than its tiles' features, such as a mark it places
-    /// itself, topmost first. As for tiles' features, a query answers for
-    /// the last update: the engine asks a layer that the update would draw,
-    /// with its view and values, which may come before a frame draws them,
-    /// so a layer answers from `query` rather than from what it kept from
-    /// drawing. The engine names the features' layer and source and keeps
-    /// those that the query's filter takes.
+    /// itself, topmost first, through the tiles the query projects its
+    /// points with ([`FrameQuery::tile`]). As for tiles' features, a query
+    /// answers for the last update: the engine asks a layer that the update
+    /// would draw, with its view and values, which may come before a frame
+    /// draws them, so a layer answers from `query` rather than from what it
+    /// kept from drawing. The engine names the features' layer and source
+    /// and keeps those that the query's filter takes.
     fn hit_frame(&self, _query: &FrameQuery<'_, Self>, _hits: &mut Vec<Feature>) {}
 }
 
@@ -698,12 +705,14 @@ impl<'a, L: Layer> FrameQuery<'a, L> {
         self.geometry
     }
 
-    /// Over terrain, the ground the frame drew under the points of `tile`,
-    /// for a layer that meets terrain ([`Layer::TERRAIN`]); `None` without
-    /// terrain or for a layer that draws flat.
+    /// The tile `tile` as the frame draws it, which projects the layer's
+    /// points in its units: over terrain, for a layer that meets it
+    /// ([`Layer::TERRAIN`]), hidden by the ground the frame drew, and, for
+    /// one that stands on it, standing on that ground.
     #[must_use]
-    pub fn ground(&self, tile: UnwrappedTileID) -> Option<TileGround<'a>> {
-        self.ground.map(|ground| TileGround::new(ground, tile))
+    pub fn tile(&self, tile: UnwrappedTileID) -> ScreenTile<'a> {
+        let ground = self.ground.filter(|_| L::TERRAIN.stands()).map(|ground| TileGround::new(ground, tile));
+        ScreenTile::new(self.view, &TileProjector::new(self.view, &tile), ground, self.ground)
     }
 }
 
@@ -1027,7 +1036,7 @@ pub trait RenderLayer {
     /// See [`Layer::hit`].
     fn hit(
         &self,
-        region: &QueryRegion<'_>,
+        query: &TileQuery<'_>,
         feature: &dyn mln_style::feature::GeometryTileFeature,
         geometry: &mln_style::feature::GeometryCollection,
         feature_state: &mln_style::feature::FeatureState,
@@ -1290,12 +1299,12 @@ impl<L: Layer> RenderLayer for Hosted<L> {
 
     fn hit(
         &self,
-        region: &QueryRegion<'_>,
+        query: &TileQuery<'_>,
         feature: &dyn mln_style::feature::GeometryTileFeature,
         geometry: &mln_style::feature::GeometryCollection,
         feature_state: &mln_style::feature::FeatureState,
     ) -> bool {
-        self.layer.hit(&self.values, region, feature, geometry, feature_state)
+        self.layer.hit(&self.values, query, feature, geometry, feature_state)
     }
 
     fn hit_frame(

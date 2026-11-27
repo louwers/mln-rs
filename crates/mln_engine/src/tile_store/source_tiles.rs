@@ -1139,17 +1139,15 @@ impl SourceTiles {
 
     /// The features the source's rendered tiles draw in `geometry`, screen
     /// points from the top left, traced past the globe's limb
-    /// ([`query_screen_geometry`](crate::query::feature_index::query_screen_geometry)).
-    /// With `ground`, the ground a frame drew of the terrain, a point finds
-    /// features where its line of sight first meets the ground; else, and
-    /// where it meets none, on the flat map at sea level. Every rendered
-    /// tile is a candidate for layers that stand on the ground
-    /// ([`QueryGround::standing`](crate::query::feature_index::QueryGround::standing)).
-    #[expect(clippy::too_many_arguments, reason = "the query's geometry, ground, camera, layers and options")]
+    /// ([`query_screen_geometry`](crate::query::feature_index::query_screen_geometry)),
+    /// of layers that `pass` looks at. Where the layers meet terrain, a
+    /// point meets their features where its line of sight first meets the
+    /// ground the frame drew; else on the map at sea level.
+    #[expect(clippy::too_many_arguments, reason = "the query's geometry, pass, camera, layers and options")]
     pub(crate) fn query_rendered_features(
         &self,
         geometry: &[crate::geo::ScreenCoordinate],
-        ground: Option<crate::query::feature_index::QueryGround<'_>>,
+        pass: crate::query::feature_index::QueryPass<'_>,
         view: &crate::camera::View,
         layers: &crate::query::feature_index::QueryLayers<'_>,
         options: &crate::query::RenderedQueryOptions,
@@ -1157,6 +1155,7 @@ impl SourceTiles {
         proj_matrix: &glam::DMat4,
     ) -> Result<crate::query::feature_index::QueryResults, mln_style::error::Error> {
         use crate::camera::tile_coordinate::TileCoordinate;
+        use crate::query::feature_index::PassReach;
 
         let feature_state = &self.info.feature_state;
 
@@ -1168,9 +1167,21 @@ impl SourceTiles {
         let height = f64::from(view.size().height);
         let globe = view.is_globe();
         let up = |p: &crate::geo::ScreenCoordinate| crate::geo::ScreenCoordinate::new(p.x, height - p.y);
+        let elevation = pass.elevation.filter(|_| pass.on_terrain);
         let on_ground =
-            |p: &crate::geo::ScreenCoordinate| ground.and_then(|ground| view.ground_under(&up(p), ground.elevation));
-        let standing = ground.is_some_and(|ground| ground.standing);
+            |p: &crate::geo::ScreenCoordinate| elevation.and_then(|ground| view.ground_under(&up(p), ground));
+        // A line of sight that meets no drawn ground, over terrain, or that
+        // misses the planet or doesn't come down to the map between the near
+        // and far planes meets the map nowhere.
+        let meets = |p: &crate::geo::ScreenCoordinate| match elevation {
+            Some(_) => on_ground(p).is_some(),
+            None if globe => VerticalPerspectiveProjection::screen_coordinate_hits_globe(view, &up(p), 0.0),
+            None => view.line_of_sight(&up(p)).is_some_and(|(near, far)| (near.z > 0.0) != (far.z > 0.0)),
+        };
+        let reach = match pass.reach {
+            PassReach::TowardCamera if globe => PassReach::WholeTile,
+            reach => reach,
+        };
         let to_world = |p: &crate::geo::ScreenCoordinate| match on_ground(p) {
             // On the main world, where the globe's sea-level points are.
             Some(hit) if globe => geometry::Point::new(hit.world.x.rem_euclid(1.0), hit.world.y),
@@ -1181,8 +1192,6 @@ impl SourceTiles {
             VerticalPerspectiveProjection::screen_coordinate_hits_globe(view, &up(p), 0.0) || on_ground(p).is_some()
         };
 
-        let mut query_geometry: Vec<geometry::Point<f64>> = geometry.iter().map(to_world).collect();
-
         // The bounding box of points, of which the geometry has at least one.
         let envelope = |points: &mut dyn Iterator<Item = (f64, f64)>| {
             let (mut min, mut max) = ((f64::INFINITY, f64::INFINITY), (f64::NEG_INFINITY, f64::NEG_INFINITY));
@@ -1192,6 +1201,38 @@ impl SourceTiles {
             }
             (min, max)
         };
+
+        let mut query_geometry: Vec<geometry::Point<f64>> = geometry.iter().map(to_world).collect();
+
+        // How far around the query its layers' features may reach, on the
+        // screen: the largest of the tiles' query radii, by how much nearer
+        // the camera than the center a point of the view can be. The
+        // features the query looks at are around where the screen points
+        // that far around it meet the map: around a point, those eight ways
+        // from it, and around a ring, those of its box grown by as much.
+        let max_pitch_scale_factor = view.max_pitch_scale_factor();
+        let padding = self
+            .rendered
+            .values()
+            .filter_map(|entry| self.tile(&entry.key)?.contents().and_then(Contents::geometry))
+            .map(|contents| f64::from(contents.query_padding(layers)))
+            .fold(0.0, f64::max)
+            * max_pitch_scale_factor;
+        let mut around: Vec<geometry::Point<f64>> = Vec::new();
+        if padding > 0.0 {
+            let (min, max) = envelope(&mut geometry.iter().map(|p| (p.x, p.y)));
+            let (min, max) = ((min.0 - padding, min.1 - padding), (max.0 + padding, max.1 + padding));
+            let mid = (f64::midpoint(min.0, max.0), f64::midpoint(min.1, max.1));
+            let near = query_geometry.first().map_or(0.0, |p| p.x);
+            for (x, y) in [min.0, mid.0, max.0].into_iter().flat_map(|x| [min.1, mid.1, max.1].map(|y| (x, y))) {
+                let mut world = to_world(&crate::geo::ScreenCoordinate::new(x, y));
+                // The globe's copy nearest the query's.
+                if globe {
+                    world.x += (near - world.x).round();
+                }
+                around.push(world);
+            }
+        }
 
         if globe {
             // The globe has no world copies, so a box across the
@@ -1240,7 +1281,7 @@ impl SourceTiles {
                 covered = covered && bounds_min.0 + EDGE < c.x && c.x < bounds_max.0 - EDGE;
             }
             if !covered {
-                for c in &mut query_geometry {
+                for c in query_geometry.iter_mut().chain(&mut around) {
                     if c.x > 0.5 {
                         c.x -= 1.0;
                     }
@@ -1248,8 +1289,28 @@ impl SourceTiles {
             }
         }
 
+        // Where the query meets the map: nowhere for a point whose line of
+        // sight meets none of it. A ring's points that don't stand for the
+        // nearest points that do.
+        let ground_world: &[geometry::Point<f64>] =
+            if geometry.len() == 1 && !meets(&geometry[0]) { &[] } else { &query_geometry };
+        // The features the query looks at are around where it meets the
+        // map, and, for a pass that looks toward the camera, between there
+        // and the camera, where the lines of sight start at the near plane.
+        let mut culling_world = query_geometry.clone();
+        culling_world.extend(around);
+        if reach == PassReach::TowardCamera {
+            culling_world.extend(
+                geometry
+                    .iter()
+                    .filter_map(|p| view.line_of_sight(&up(p)))
+                    .map(|(near, _)| geometry::Point::new(near.x, near.y)),
+            );
+        }
+        let whole_tile = reach == PassReach::WholeTile;
+
         // The bounding box of the query.
-        let (box_min, box_max) = envelope(&mut query_geometry.iter().map(|p| (p.x, p.y)));
+        let (box_min, box_max) = envelope(&mut culling_world.iter().map(|p| (p.x, p.y)));
         let box_min = geometry::Point::new(box_min.0, box_min.1);
         let box_max = geometry::Point::new(box_max.0, box_max.1);
 
@@ -1274,8 +1335,6 @@ impl SourceTiles {
             ))
         });
 
-        let max_pitch_scale_factor = view.max_pitch_scale_factor() as f32;
-
         // The globe returns a feature once per tile, though the tile is
         // tested at three copies and can be rendered at two wraps: these are
         // where this tile's features start in each layer's results.
@@ -1289,13 +1348,6 @@ impl SourceTiles {
             let Some(contents) = tile.contents().and_then(Contents::geometry) else {
                 continue;
             };
-
-            // 2 to the power of the zoom's distance above the tile's.
-            let scale = (view.scale() / f64::from(1u32 << id.canonical.z)) as f32;
-            let query_padding =
-                f64::from(max_pitch_scale_factor * contents.query_padding(layers) * constants::EXTENT as f32)
-                    / constants::TILE_SIZE_D
-                    / f64::from(scale);
 
             if globe && canonical_tile != Some(id.canonical) {
                 canonical_tile = Some(id.canonical);
@@ -1318,30 +1370,45 @@ impl SourceTiles {
             let copies: &[UnwrappedTileID] = if globe { &globe_copies } else { std::slice::from_ref(id) };
             for copy in copies {
                 let tile_space_bounds_min = TileCoordinate::to_geometry_coordinate(copy, &box_min);
-                if !standing
-                    && (f64::from(tile_space_bounds_min.x) - query_padding >= f64::from(constants::EXTENT)
-                        || f64::from(tile_space_bounds_min.y) - query_padding >= f64::from(constants::EXTENT))
+                if !whole_tile
+                    && (i32::from(tile_space_bounds_min.x) >= constants::EXTENT
+                        || i32::from(tile_space_bounds_min.y) >= constants::EXTENT)
                 {
                     continue;
                 }
 
                 let tile_space_bounds_max = TileCoordinate::to_geometry_coordinate(copy, &box_max);
-                if !standing
-                    && (f64::from(tile_space_bounds_max.x) + query_padding < 0.0
-                        || f64::from(tile_space_bounds_max.y) + query_padding < 0.0)
-                {
+                if !whole_tile && (tile_space_bounds_max.x < 0 || tile_space_bounds_max.y < 0) {
                     continue;
                 }
 
-                let tile_space_query_geometry: mln_style::feature::GeometryCoordinates =
-                    query_geometry.iter().map(|c| TileCoordinate::to_geometry_coordinate(copy, c)).collect();
+                let culling: mln_style::feature::GeometryCoordinates =
+                    culling_world.iter().map(|c| TileCoordinate::to_geometry_coordinate(copy, c)).collect();
+                let tiles = f64::from(1u32 << copy.canonical.z);
+                let extent = f64::from(constants::EXTENT);
+                let ground: Vec<glam::Vec2> = ground_world
+                    .iter()
+                    .map(|c| {
+                        glam::DVec2::new(
+                            ((c.x - f64::from(copy.wrap)) * tiles - f64::from(copy.canonical.x)) * extent,
+                            (c.y * tiles - f64::from(copy.canonical.y)) * extent,
+                        )
+                        .as_vec2()
+                    })
+                    .collect();
+                let input = crate::tile_store::contents::TileQueryInput {
+                    screen: geometry,
+                    ground: &ground,
+                    culling: &culling,
+                    whole_tile,
+                };
 
                 if !globe {
                     contents.query_rendered_features(
                         &tile.id,
                         &mut result,
-                        &tile_space_query_geometry,
-                        (geometry, ground),
+                        &input,
+                        pass,
                         view,
                         layers,
                         options,
@@ -1356,8 +1423,8 @@ impl SourceTiles {
                 contents.query_rendered_features(
                     &tile.id,
                     &mut found,
-                    &tile_space_query_geometry,
-                    (geometry, ground),
+                    &input,
+                    pass,
                     view,
                     layers,
                     options,

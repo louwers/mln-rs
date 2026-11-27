@@ -1,7 +1,12 @@
 pub(crate) mod feature_index;
+mod screen;
+pub mod shapes;
+mod tile_query;
 
-pub use feature_index::{FeatureIndex, FeatureSortOrder, IndexedSubfeature, translate_query_geometry};
+pub use feature_index::{FeatureIndex, FeatureSortOrder, IndexedSubfeature};
 use mln_style::filter::Filter;
+pub use screen::{ScreenPoint, ScreenTile};
+pub use tile_query::TileQuery;
 
 /// Options for query rendered features.
 #[derive(Clone, Debug, Default)]

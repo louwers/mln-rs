@@ -1,3 +1,4 @@
+use geometry::Point;
 use glam::Vec2;
 use mln_engine::draw::ground::FrameGround;
 use mln_engine::draw::{
@@ -7,6 +8,7 @@ use mln_engine::draw::{
 use mln_engine::layer::{
     EvaluateCx, Evaluation, FrameQuery, FrameTile, Layer, LayerValues, NoTiles, OnTerrain, PrepareCx,
 };
+use mln_engine::query::shapes::meets_polygon;
 use mln_engine::tile::OverscaledTileID;
 use mln_engine::tile::feature::Feature;
 use mln_gfx::projection_variant::ProjectionVariant;
@@ -14,7 +16,7 @@ use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_style::types::TranslateAnchorType;
 
 use crate::LocationPuck;
-use crate::anchor::{anchors, ground_visibility, to_screen};
+use crate::anchor::anchors;
 use crate::parts::{Ground, parts};
 use crate::program::PUCK;
 
@@ -107,94 +109,35 @@ impl Layer for LocationPuckLayer {
     }
 
     /// A point at the position where the query meets the puck or the arrow
-    /// of any of its anchors, where they show: in front of the globe's
-    /// horizon, and where the ground in front of the anchor fades them less
-    /// than halfway.
+    /// of any of its anchors, where they show: in front of the camera and
+    /// the globe's horizon, and where the ground in front of the anchor
+    /// doesn't hide them.
     fn hit_frame(&self, query: &FrameQuery<'_, Self>, hits: &mut Vec<Feature>) {
         let paint = &query.values().evaluated.paint;
         let view = query.view();
         let position = *paint.puck_position.uniform();
-        let geometry: Vec<Vec2> = query.geometry().iter().map(|p| Vec2::new(p.x as f32, p.y as f32)).collect();
-        let height = |tile, [x, y]: [f64; 2]| {
-            query.ground(tile).map_or(0.0, |ground| f64::from(ground.height(Vec2::new(x as f32, y as f32))))
-        };
+        let pixels: Vec<Vec2> = query.geometry().iter().map(|p| Vec2::new(p.x as f32, p.y as f32)).collect();
+        let height = |tile, [x, y]: [f64; 2]| query.tile(tile).ground_height(Point::new(x, y));
         let hit = anchors(view, position, height).iter().any(|anchor| {
+            let tile = query.tile(anchor.tile);
+            let Some(at) = tile.project(Point::new(anchor.point[0], anchor.point[1]), anchor.height) else {
+                return false;
+            };
             let ground = Ground::new(paint, view, anchor);
-            let shows = || query.ground(anchor.tile).is_none() || ground_visibility(view, anchor, height) >= 0.5;
             let meets = parts(paint).filter(|part| part.hit).any(|part| {
                 let [center, x, y] = ground.square(&part);
-                let outline: Vec<[f64; 2]> = part
+                let outline: Vec<Point<f64>> = part
                     .outline()
                     .into_iter()
-                    .map(|[cx, cy]| [center[0] + cx * x[0] + cy * y[0], center[1] + cx * x[1] + cy * y[1]])
+                    .map(|[cx, cy]| Point::new(center[0] + cx * x[0] + cy * y[0], center[1] + cx * x[1] + cy * y[1]))
                     .collect();
-                let screen = |point: [f64; 2]| {
-                    let screen = to_screen(view, anchor.tile, point, anchor.height)?;
-                    Some(Vec2::new(screen.x as f32, screen.y as f32))
-                };
-                polygons_intersect(&geometry, &visible_outline(&outline, screen))
+                meets_polygon(&pixels, &[tile.project_ring(&outline, anchor.height)])
             });
-            meets && shows()
+            meets && !tile.behind_ground(&at)
         });
         if hit {
             let point = geo_types::Point::new(position.longitude(), position.latitude());
             hits.push(Feature { geometry: Some(point.into()), ..Feature::default() });
         }
     }
-}
-
-/// Where the ring `ring` shows on the screen, which `screen` gives of each
-/// of its points, `None` where a point doesn't show: the ring clipped where
-/// it passes out of sight, at the last point of each edge that shows, which
-/// bisection finds.
-fn visible_outline(ring: &[[f64; 2]], screen: impl Fn([f64; 2]) -> Option<Vec2>) -> Vec<Vec2> {
-    let lerp = |a: [f64; 2], b: [f64; 2], t: f64| [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-    let mut outline = Vec::with_capacity(ring.len());
-    for (&a, &b) in ring.iter().zip(ring.iter().cycle().skip(1)) {
-        let (shown_a, shown_b) = (screen(a), screen(b));
-        outline.extend(shown_a);
-        let ((Some(last), None) | (None, Some(last))) = (shown_a, shown_b) else {
-            continue;
-        };
-        // From the end that shows toward the one that doesn't.
-        let (from, to) = if shown_a.is_some() { (a, b) } else { (b, a) };
-        let (mut last, mut shown, mut hidden) = (last, 0.0, 1.0);
-        for _ in 0..16 {
-            let mid = f64::midpoint(shown, hidden);
-            match screen(lerp(from, to, mid)) {
-                Some(point) => (last, shown) = (point, mid),
-                None => hidden = mid,
-            }
-        }
-        outline.push(last);
-    }
-    outline
-}
-
-/// Whether the polygon or point `a` and the polygon `b` meet: one has a
-/// corner inside the other, or their edges cross.
-fn polygons_intersect(a: &[Vec2], b: &[Vec2]) -> bool {
-    a.iter().any(|&p| contains(b, p))
-        || b.iter().any(|&p| contains(a, p))
-        || edges(a).any(|(a0, a1)| edges(b).any(|(b0, b1)| segments_cross(a0, a1, b0, b1)))
-}
-
-/// The edges of the ring `ring`, closed.
-fn edges(ring: &[Vec2]) -> impl Iterator<Item = (Vec2, Vec2)> + '_ {
-    ring.iter().zip(ring.iter().cycle().skip(1)).map(|(&a, &b)| (a, b))
-}
-
-/// Whether `p` is inside the ring `ring`, by the crossings of a ray from it.
-fn contains(ring: &[Vec2], p: Vec2) -> bool {
-    edges(ring)
-        .filter(|(a, b)| (a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x)
-        .count()
-        % 2
-        == 1
-}
-
-/// Whether the segments `a0`-`a1` and `b0`-`b1` cross.
-fn segments_cross(a0: Vec2, a1: Vec2, b0: Vec2, b1: Vec2) -> bool {
-    let turn = |a: Vec2, b: Vec2, c: Vec2| (b - a).perp_dot(c - a) > 0.0;
-    turn(a0, b0, b1) != turn(a1, b0, b1) && turn(a0, a1, b0) != turn(a0, a1, b1)
 }

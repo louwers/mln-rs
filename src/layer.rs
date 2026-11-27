@@ -26,6 +26,9 @@ pub use mln_engine::layer::{Router, Routes};
 /// The symbol placement that a placing layer type takes part in.
 pub use mln_engine::placement;
 pub use mln_engine::placement::Placement;
+/// Whether a query's geometry meets a feature's shape, which hit tests
+/// ([`Layer::hit`], [`Layer::hit_frame`]) ask.
+pub use mln_engine::query::shapes;
 pub use mln_engine::{Registry, RegistryBuilder, paint_property_binders};
 pub use mln_style::expression::functions::RegisterError;
 pub use mln_style::layer::{LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};

@@ -1428,7 +1428,14 @@ impl RenderOrchestrator {
             return Ok(());
         }
         let index = self.placements.index();
-        let mut rendered_symbols = index.query_rendered(&geometry.to_vec());
+        // A symbol whose anchor the ground in front of it hides, over
+        // terrain, doesn't show.
+        let elevation = self.terrain.ground().map(|ground| &**ground);
+        let shows = |at: &crate::placement::Stand| {
+            let tile = crate::query::ScreenTile::standing(&self.view, at.tile, elevation);
+            tile.project(at.point, at.height).is_some_and(|point| !tile.behind_ground(&point))
+        };
+        let mut rendered_symbols = index.query_rendered(&geometry.to_vec(), shows);
         let mut bucket_query_data = Vec::with_capacity(rendered_symbols.len());
         for bucket_instance_id in rendered_symbols.keys() {
             bucket_query_data.push(index.query_data(*bucket_instance_id).map_err(Error::native)?);
@@ -1522,41 +1529,44 @@ impl RenderOrchestrator {
 
         let proj_matrix = self.view.projection_matrix_with(self.view.near_z(), false);
 
-        // Over terrain, a layer that drapes is found on the ground the frame
-        // drew, where the query's lines of sight meet it, and so is a 3D
-        // layer that stands on it, by its footprint there. One whose points
-        // stand on the ground is found wherever they show, raised, as its
-        // hit test decides. The others draw flat, at sea level, and are
-        // found there.
+        // Over terrain, a layer that meets it is found on the ground the
+        // frame drew, where the query's lines of sight meet it, and one
+        // whose points stand on it wherever they show, raised, as its hit
+        // test decides. A layer that draws 3D geometry shows it between the
+        // query and the camera too.
         let elevation = self.terrain.ground().map(|ground| &**ground);
-        let ground_of = |layer: &dyn RenderLayer| {
-            let terrain = layer.terrain();
-            let elevation = elevation.filter(|_| terrain != OnTerrain::Flat)?;
-            let standing = terrain.stands() && !layer.volume();
-            Some(crate::query::feature_index::QueryGround { elevation, standing })
+        let pass_of = |layer: &dyn RenderLayer| {
+            use crate::query::feature_index::PassReach;
+            let on_terrain = elevation.is_some() && layer.terrain() != OnTerrain::Flat;
+            let stands = on_terrain && layer.terrain().stands();
+            let reach = if stands {
+                PassReach::WholeTile
+            } else if layer.volume() {
+                PassReach::TowardCamera
+            } else {
+                PassReach::Around
+            };
+            (on_terrain, stands, reach)
         };
         // Traced once for every source. Symbols are found where they were
         // placed, on the screen, so they take the geometry as it is.
         let traced = crate::query::feature_index::query_screen_geometry(&self.view, geometry, elevation.is_some());
         let mut results_by_layer = crate::query::feature_index::QueryResults::default();
-        // Flat, draped, then standing.
-        for pass in [None, Some(false), Some(true)] {
+        let mut passes: Vec<_> = filtered_layers.values().map(|layer| pass_of(*layer)).collect();
+        passes.sort_by_key(|&(on_terrain, stands, reach)| (on_terrain, stands, reach as u8));
+        passes.dedup();
+        for (on_terrain, stands, reach) in passes {
             let layers: crate::query::feature_index::QueryLayers<'_> = filtered_layers
                 .iter()
-                .filter(|(_, layer)| ground_of(**layer).map(|ground| ground.standing) == pass)
+                .filter(|(_, layer)| pass_of(**layer) == (on_terrain, stands, reach))
                 .map(|(id, layer)| (id.clone(), *layer))
                 .collect();
-            if layers.is_empty() {
-                continue;
-            }
-            let ground = pass.and_then(|standing| {
-                elevation.map(|elevation| crate::query::feature_index::QueryGround { elevation, standing })
-            });
+            let pass = crate::query::feature_index::QueryPass { elevation, on_terrain, stands, reach };
             for source_id in &source_ids {
                 if let Some(source) = self.source_tiles(source_id) {
                     let source_results = source.query_rendered_features(
                         &traced,
-                        ground,
+                        pass,
                         &self.view,
                         &layers,
                         options,

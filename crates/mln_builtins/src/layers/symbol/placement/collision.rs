@@ -4,7 +4,7 @@
 use geometry::Point;
 use glam::{DMat4, DVec4, Vec2};
 use mln_engine::camera::{ProjectedTilePoint, TileProjector};
-use mln_engine::placement::{Aabb, CollisionGroup, CollisionIndex, Item, Overlap, Shape};
+use mln_engine::placement::{Aabb, CollisionGroup, CollisionIndex, Item, Overlap, Shape, Stand};
 use mln_style::constants::EXTENT;
 use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::types::IconOverlapType;
@@ -88,6 +88,8 @@ pub(crate) struct PartCollision<'a> {
     pub(crate) label_plane: &'a LabelPlaneProjector<'a>,
     /// What the symbols stand on.
     pub(crate) heights: SymbolHeights<'a>,
+    /// Whether the ground in front of the symbols hides them.
+    pub(crate) hides_behind_ground: bool,
     /// `*-translate`, in tile units.
     pub(crate) translation: Vec2,
     /// Tile units to pixels at the tile's own zoom.
@@ -104,6 +106,20 @@ pub(crate) struct PartCollision<'a> {
     pub(crate) avoid_edges: Option<&'a CollisionBoundaries>,
     /// The group whose shapes alone these collide with.
     pub(crate) collision_group: CollisionGroup,
+}
+
+impl PartCollision<'_> {
+    /// Where a symbol anchored at `anchor`, in tile units, `height_offset`
+    /// meters up, stands as its draws hide it behind the ground: at its
+    /// anchor, translated; `None` where the ground doesn't hide it.
+    pub(crate) fn stand(&self, anchor: Vec2, height_offset: f32) -> Option<Stand> {
+        let point = anchor + self.translation;
+        self.hides_behind_ground.then(|| Stand {
+            tile: *self.tile_projector.tile_id(),
+            point: Point::new(f64::from(point.x), f64::from(point.y)),
+            height: f64::from(self.heights.at(anchor, height_offset)),
+        })
+    }
 }
 
 /// The run a feature is placed for: the glyphs a line label lays out along
@@ -373,7 +389,9 @@ fn place_line_feature(
 /// Inserts `feature`'s `projected_boxes`, placed with `overlap`, in
 /// `index`'s grid of the shapes later shapes collide with, or, where
 /// `ignore_placement`, in that of those they don't; queries find them by
-/// the bucket's instance id.
+/// the bucket's instance id where the ground doesn't hide where the symbol
+/// `stands`.
+#[expect(clippy::too_many_arguments, reason = "the index, the feature, its shapes and how they place")]
 pub(crate) fn insert_feature(
     index: &mut CollisionIndex,
     feature: &CollisionFeature,
@@ -382,9 +400,11 @@ pub(crate) fn insert_feature(
     ignore_placement: bool,
     bucket_instance_id: u32,
     group: CollisionGroup,
+    stands: Option<Stand>,
 ) {
     debug_assert!(feature.along_line || projected_boxes.len() <= 1);
-    let item = Item { feature: &feature.indexed_feature, record: bucket_instance_id, overlap, ignore_placement };
+    let item =
+        Item { feature: &feature.indexed_feature, record: bucket_instance_id, overlap, ignore_placement, stands };
     index.insert(projected_boxes, &item, group);
 }
 

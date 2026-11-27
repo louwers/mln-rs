@@ -8,9 +8,10 @@ use mln_engine::draw::{
 };
 use mln_engine::layer::binders::PaintBinders as _;
 use mln_engine::layer::{
-    EvaluateCx, EvaluatedLayer, Evaluation, Features, FrameTile, Layer, LayerValues, OnTerrain, PrepareCx, QueryRegion,
-    TileCx, TileData, bucket_indexes, bucket_vertices, copied_vertices, paint_vertices,
+    EvaluateCx, EvaluatedLayer, Evaluation, Features, FrameTile, Layer, LayerValues, OnTerrain, PrepareCx, TileCx,
+    TileData, TileQuery, bucket_indexes, bucket_vertices, copied_vertices, paint_vertices,
 };
+use mln_engine::query::shapes::{meets_polygon, tile_rings};
 use mln_engine::tile::OverscaledTileID;
 use mln_gfx::gpu::{Caps, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
@@ -717,27 +718,18 @@ impl Layer for RenderFillLayer {
         self.fill_depth = None;
     }
 
-    // query
+    /// Whether the query meets a polygon of the feature where it lies on
+    /// the map, translated.
     fn hit(
         &self,
         values: &LayerValues<Fill>,
-        region: &QueryRegion<'_>,
+        query: &TileQuery<'_>,
         _feature: &dyn mln_style::feature::GeometryTileFeature,
         geometry: &mln_style::feature::GeometryCollection,
         _feature_state: &mln_style::feature::FeatureState,
     ) -> bool {
-        let evaluated = &values.evaluated.paint;
-        let translated_query_geometry = mln_engine::query::translate_query_geometry(
-            region.geometry,
-            *evaluated.fill_translate.uniform(),
-            *evaluated.fill_translate_anchor.uniform(),
-            region.view.angle() as f32,
-            region.pixels_to_tile_units,
-        );
-
-        mln_engine::geo::intersection_tests::polygon_intersects_multi_polygon(
-            translated_query_geometry.as_ref().unwrap_or(region.geometry),
-            geometry,
-        )
+        let paint = &values.evaluated.paint;
+        let query = query.translated(*paint.fill_translate.uniform(), *paint.fill_translate_anchor.uniform());
+        meets_polygon(&query.on_ground(), &tile_rings(geometry))
     }
 }

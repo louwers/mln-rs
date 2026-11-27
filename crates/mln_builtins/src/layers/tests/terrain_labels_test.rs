@@ -169,6 +169,7 @@ fn assert_glyphs_draw_in_circles(dem: fn() -> PremultipliedImage, pitch_with_map
         tile_projector: &projector,
         label_plane: &label_plane,
         heights,
+        hides_behind_ground: true,
         translation: Vec2::ZERO,
         pixel_ratio,
         scale: (f64::from(zoom) - f64::from(tile.overscaled_z)).exp2() as f32,

@@ -6,17 +6,16 @@ use std::sync::Arc;
 
 use geometry::Point;
 use glam::{DVec2, Vec2};
-use mln_style::feature::GeometryCoordinates;
 use mln_style::hash::{HashMap, HashSet};
 use smallvec::SmallVec;
 
 use super::grid::{Aabb, Grid, Shape};
 use crate::camera::View;
 use crate::geo::ScreenLineString;
-use crate::geo::intersection_tests::polygon_intersects_polygon;
 use crate::map::MapMode;
 use crate::query::feature_index::{FeatureIndex, FeatureSortOrder, IndexedSubfeature};
-use crate::tile::OverscaledTileID;
+use crate::query::shapes::meets_polygon;
+use crate::tile::{OverscaledTileID, UnwrappedTileID};
 use crate::worker::job::SourceKey;
 
 /// How far the grid reaches past each edge of the viewport, in pixels.
@@ -94,6 +93,23 @@ impl<'a> CollisionGroups<'a> {
     }
 }
 
+/// Where a placed mark stands: a point of a tile, in its units, and the
+/// height above sea level, in meters, at which the mark's draws hide it
+/// behind the ground in front of it, over terrain.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Stand {
+    pub tile: UnwrappedTileID,
+    pub point: Point<f64>,
+    pub height: f64,
+}
+
+/// A shape in a grid: the feature it stands for, and where the mark it is
+/// of stands, in the index's `stands`.
+struct Placed {
+    feature: IndexedSubfeature,
+    stands: Option<u32>,
+}
+
 /// What a shape inserted in a [`CollisionIndex`] stands for.
 #[derive(Clone, Copy)]
 pub struct Item<'a> {
@@ -108,6 +124,10 @@ pub struct Item<'a> {
     /// Whether the shape stays out of the way of the shapes placed after
     /// it: they don't collide with it, and queries still find it.
     pub ignore_placement: bool,
+    /// Where the mark the shape is of stands, for a mark whose draws hide
+    /// it behind the ground in front of it: queries find it only where the
+    /// ground doesn't hide that point.
+    pub stands: Option<Stand>,
 }
 
 /// What queries of a placement read of a bucket whose shapes it placed.
@@ -134,8 +154,10 @@ pub struct CollisionIndex {
     size: DVec2,
 
     viewport_padding: f32,
-    collision_grid: Grid<IndexedSubfeature>,
-    ignored_grid: Grid<IndexedSubfeature>,
+    collision_grid: Grid<Placed>,
+    ignored_grid: Grid<Placed>,
+    /// Where the marks of the shapes stand ([`Item::stands`]).
+    stands: Vec<Stand>,
 
     screen_right_boundary: f32,
     screen_bottom_boundary: f32,
@@ -165,20 +187,22 @@ impl CollisionIndex {
         let grid_width = width + 2.0 * viewport_padding;
         let grid_height = height + 2.0 * viewport_padding;
         let grid_size = Vec2::new(grid_width, grid_height);
-        let reset = |mut grid: Grid<IndexedSubfeature>| {
+        let reset = |mut grid: Grid<Placed>| {
             grid.reset(grid_size, CELL_SIZE);
             grid
         };
-        let (collision_grid, ignored_grid) = match previous {
-            Some(previous) => (reset(previous.collision_grid), reset(previous.ignored_grid)),
-            None => (Grid::new(grid_size, CELL_SIZE), Grid::new(grid_size, CELL_SIZE)),
+        let (collision_grid, ignored_grid, mut stands) = match previous {
+            Some(previous) => (reset(previous.collision_grid), reset(previous.ignored_grid), previous.stands),
+            None => (Grid::new(grid_size, CELL_SIZE), Grid::new(grid_size, CELL_SIZE), Vec::new()),
         };
+        stands.clear();
         CollisionIndex {
             view: view.clone(),
             size: DVec2::new(f64::from(size.width), f64::from(size.height)),
             viewport_padding,
             collision_grid,
             ignored_grid,
+            stands,
             screen_right_boundary: width + viewport_padding,
             screen_bottom_boundary: height + viewport_padding,
             grid_right_boundary: grid_width,
@@ -240,17 +264,21 @@ impl CollisionIndex {
     #[must_use]
     pub fn collides(&self, shape: &Shape, overlap: Overlap, group: CollisionGroup) -> bool {
         match overlap {
-            Overlap::Never => self.collision_grid.any(shape, |feature| group.has(feature)),
+            Overlap::Never => self.collision_grid.any(shape, |placed| group.has(&placed.feature)),
             Overlap::Always => false,
-            Overlap::Cooperative => {
-                self.collision_grid.any(shape, |feature| feature.overlap_mode == Overlap::Never && group.has(feature))
-            }
+            Overlap::Cooperative => self
+                .collision_grid
+                .any(shape, |placed| placed.feature.overlap_mode == Overlap::Never && group.has(&placed.feature)),
         }
     }
 
     /// Inserts `shapes`, which stand for `item`, in `group`.
     #[inline]
     pub fn insert(&mut self, shapes: &[Option<Shape>], item: &Item<'_>, group: CollisionGroup) {
+        let stands = item.stands.map(|stand| {
+            self.stands.push(stand);
+            (self.stands.len() - 1) as u32
+        });
         let grid = if item.ignore_placement { &mut self.ignored_grid } else { &mut self.collision_grid };
         for shape in shapes.iter().flatten() {
             let feature = IndexedSubfeature {
@@ -259,7 +287,7 @@ impl CollisionIndex {
                 overlap_mode: item.overlap,
                 ..item.feature.clone()
             };
-            grid.insert(feature, *shape);
+            grid.insert(Placed { feature, stands }, *shape);
         }
     }
 
@@ -283,22 +311,26 @@ impl CollisionIndex {
     }
 
     /// The features whose shapes `query_geometry`, in viewport pixels,
-    /// touches, by their record.
-    pub(crate) fn query_rendered(&self, query_geometry: &ScreenLineString) -> HashMap<u32, Vec<IndexedSubfeature>> {
+    /// touches, by their record, of marks that `shows` says show where they
+    /// stand, if they say ([`Item::stands`]).
+    pub(crate) fn query_rendered(
+        &self,
+        query_geometry: &ScreenLineString,
+        shows: impl Fn(&Stand) -> bool,
+    ) -> HashMap<u32, Vec<IndexedSubfeature>> {
         let mut result: HashMap<u32, Vec<IndexedSubfeature>> = HashMap::default();
         if query_geometry.is_empty() || (self.collision_grid.is_empty() && self.ignored_grid.is_empty()) {
             return result;
         }
 
-        let mut grid_query: Vec<Point<f32>> = Vec::with_capacity(query_geometry.len());
-        for point in query_geometry {
-            grid_query.push(Point::new(point.x as f32 + self.viewport_padding, point.y as f32 + self.viewport_padding));
-        }
+        let grid_query: Vec<Vec2> = query_geometry
+            .iter()
+            .map(|point| Vec2::new(point.x as f32, point.y as f32) + self.viewport_padding)
+            .collect();
 
         // The bounding box of the query in the grid.
         let mut envelope = Aabb::new(Vec2::INFINITY, Vec2::NEG_INFINITY);
-        for point in &grid_query {
-            let point = Vec2::new(point.x, point.y);
+        for &point in &grid_query {
             envelope.min = envelope.min.min(point);
             envelope.max = envelope.max.max(point);
         }
@@ -306,14 +338,17 @@ impl CollisionIndex {
 
         let features = self.collision_grid.query(&envelope).chain(self.ignored_grid.query(&envelope));
         let mut seen_buckets: HashMap<u32, HashSet<usize>> = HashMap::default();
-        for (feature, shape) in features {
+        for (Placed { feature, stands }, shape) in features {
             // Skip already seen features.
             let seen_features = seen_buckets.entry(feature.bucket_instance_id).or_default();
             if seen_features.contains(&feature.index) {
                 continue;
             }
 
-            if !polygon_intersects_box(&grid_query, &shape.bounds()) {
+            let Aabb { min, max } = shape.bounds();
+            let bounds = [min, Vec2::new(max.x, min.y), max, Vec2::new(min.x, max.y)];
+            let hidden = || stands.and_then(|at| self.stands.get(at as usize)).is_some_and(|at| !shows(at));
+            if !meets_polygon(&grid_query, &[bounds]) || hidden() {
                 continue;
             }
 
@@ -323,28 +358,6 @@ impl CollisionIndex {
 
         result
     }
-}
-
-fn polygon_intersects_box(polygon: &[Point<f32>], bbox: &Aabb) -> bool {
-    // The integer polygon test, whose conversion limits the query's accuracy
-    // to a pixel.
-    let mut integer_polygon = GeometryCoordinates::new();
-    for point in polygon {
-        integer_polygon.push(Point::new(point.x as i16, point.y as i16));
-    }
-    let min_x1 = bbox.min.x as i16;
-    let max_y1 = bbox.max.y as i16;
-    let min_y1 = bbox.min.y as i16;
-    let max_x1 = bbox.max.x as i16;
-
-    let bbox_points: GeometryCoordinates = vec![
-        Point::new(min_x1, min_y1),
-        Point::new(max_x1, min_y1),
-        Point::new(max_x1, max_y1),
-        Point::new(min_x1, max_y1),
-    ];
-
-    polygon_intersects_polygon(&integer_polygon, &bbox_points)
 }
 
 #[cfg(test)]
@@ -374,7 +387,7 @@ mod tests {
     fn insert(index: &mut CollisionIndex, overlap: Overlap, group: CollisionGroup) {
         let projected = [Some(Shape::Box(Aabb::new(Vec2::splat(100.0), Vec2::splat(200.0))))];
         let feature = feature();
-        let item = Item { feature: &feature, record: 1, overlap, ignore_placement: false };
+        let item = Item { feature: &feature, record: 1, overlap, ignore_placement: false, stands: None };
         index.insert(&projected, &item, group);
     }
 

@@ -57,7 +57,7 @@ mod schedule;
 use std::time::Duration;
 
 pub use self::grid::{Aabb, Shape};
-pub use self::index::{CollisionGroup, CollisionIndex, Item, Overlap, RetainedQueryData};
+pub use self::index::{CollisionGroup, CollisionIndex, Item, Overlap, RetainedQueryData, Stand};
 pub(crate) use self::run::{ErasedPlacement, Placements, participant};
 #[cfg(feature = "bench")]
 pub(crate) use self::run::{place_alone, placing_layers};

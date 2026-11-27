@@ -114,6 +114,7 @@ impl Placer<'_> {
                 *layout.text_ignore_placement.uniform(),
                 bucket_instance_id,
                 group,
+                ctx.text_collision().stand(symbol.anchor.point, symbol.height_offset()),
             );
         }
         if place_icon && let Some(icon) = &symbol.icon {
@@ -125,6 +126,7 @@ impl Placer<'_> {
                 *layout.icon_ignore_placement.uniform(),
                 bucket_instance_id,
                 group,
+                ctx.icon_collision().stand(symbol.anchor.point, symbol.height_offset()),
             );
         }
 

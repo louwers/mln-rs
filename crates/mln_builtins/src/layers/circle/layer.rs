@@ -2,24 +2,23 @@ use std::mem::offset_of;
 
 use geometry::Point;
 use glam::Vec2;
-use mln_engine::camera::{TileCoordinate, TileProjector};
-use mln_engine::draw::ground::{FrameGround, StandingDraw, TileGround};
+use mln_engine::draw::ground::{FrameGround, StandingDraw};
 use mln_engine::draw::{
-    Draw, DrawGeometry, Draws, LayerFrame, RenderPass, RenderTile, SegmentBase, SharedAttribute, Textures, Uniforms,
+    Draw, DrawGeometry, Draws, LayerFrame, RenderPass, SegmentBase, SharedAttribute, Textures, Uniforms,
     VertexAttributeArray, cast_matrix, globe_extrude_scale, projection_data, refresh_paint_attributes,
     to_projection_ubo,
 };
 use mln_engine::layer::binders::PaintBinders as _;
 use mln_engine::layer::{
-    EvaluateCx, EvaluatedLayer, Evaluation, Features, FrameTile, Layer, LayerValues, OnTerrain, PrepareCx, QueryRegion,
-    TileCx, TileData, bucket_indexes, bucket_vertices, paint_vertices,
+    EvaluateCx, EvaluatedLayer, Evaluation, Features, FrameTile, Layer, LayerValues, OnTerrain, PrepareCx, TileCx,
+    TileData, TileQuery, bucket_indexes, bucket_vertices, paint_vertices,
 };
+use mln_engine::query::shapes::meets_circle;
 use mln_engine::tile::OverscaledTileID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_style::color::Color;
 use mln_style::expression::EvaluationContext;
-use mln_style::geo::WrapMode;
 use mln_style::layers::Circle;
 use mln_style::types::{AlignmentType, CirclePitchScaleType};
 
@@ -33,71 +32,6 @@ const GROUND_DEPTH_SLOT: usize = programs::CIRCLE.texture_slot("ground_depth");
 
 /// The pass the layer's draws draw in.
 const RENDER_PASS: RenderPass = RenderPass::Translucent;
-
-// query
-/// Where `p`, in tile units of the tile `projector` projects, `elevation`
-/// meters up, shows in a view of `size`, in pixels from its bottom left.
-fn project_point(
-    p: Point<f64>,
-    elevation: f64,
-    projector: &TileProjector<'_>,
-    size: mln_style::size::Size,
-) -> mln_style::feature::GeometryCoordinate {
-    let pos = projector.project(&p, elevation).point;
-    // `(float(pos.x) + 1) * size.width * 0.5`: float, then double.
-    mln_style::feature::GeometryCoordinate::new(
-        (f64::from((pos.x as f32 + 1.0) * size.width as f32) * 0.5) as i16,
-        (f64::from((pos.y as f32 + 1.0) * size.height as f32) * 0.5) as i16,
-    )
-}
-
-fn project_query_geometry(
-    query_geometry: &mln_style::feature::GeometryCoordinates,
-    projector: &TileProjector<'_>,
-    size: mln_style::size::Size,
-) -> mln_style::feature::GeometryCoordinates {
-    query_geometry
-        .iter()
-        .map(|p| project_point(Point::new(f64::from(p.x), f64::from(p.y)), 0.0, projector, size))
-        .collect()
-}
-
-/// `screen`, points from the top left of a view of `size`, in pixels from
-/// its bottom left.
-fn viewport_geometry(
-    screen: &[mln_engine::geo::ScreenCoordinate],
-    size: mln_style::size::Size,
-) -> mln_style::feature::GeometryCoordinates {
-    let height = f64::from(size.height);
-    screen.iter().map(|p| mln_style::feature::GeometryCoordinate::new(p.x as i16, (height - p.y) as i16)).collect()
-}
-
-/// The height of `ground` under `p`, in tile units of its tile, in meters;
-/// 0 without ground.
-fn ground_height(ground: Option<TileGround<'_>>, p: mln_style::feature::GeometryCoordinate) -> f64 {
-    ground.map_or(0.0, |ground| f64::from(ground.height(Vec2::new(f32::from(p.x), f32::from(p.y)))))
-}
-
-/// Where the lines of sight through `screen`, points from the top left of
-/// `view`, meet the plane `elevation` meters up, in tile units of the tile
-/// `projector` projects.
-fn plane_geometry(
-    screen: &[mln_engine::geo::ScreenCoordinate],
-    elevation: f64,
-    view: &mln_engine::camera::View,
-    projector: &TileProjector<'_>,
-) -> mln_style::feature::GeometryCoordinates {
-    let height = f64::from(view.size().height);
-    screen
-        .iter()
-        .filter_map(|p| {
-            let up = mln_engine::geo::ScreenCoordinate::new(p.x, height - p.y);
-            let location = view.screen_coordinate_to_lat_lng_at(&up, elevation, WrapMode::Unwrapped).ok()?;
-            let world = TileCoordinate::from_lat_lng(0.0, &location).p;
-            Some(TileCoordinate::to_geometry_coordinate(projector.tile_id(), &world))
-        })
-        .collect()
-}
 
 pub(crate) struct RenderCircleLayer;
 
@@ -297,135 +231,57 @@ impl Layer for RenderCircleLayer {
         out.main().block(&Self::props(layer));
     }
 
-    // query
+    /// Whether the query meets a circle of `feature` where it draws: one
+    /// aligned with the viewport is a circle on the screen around where its
+    /// center draws, and one aligned with the map lies flat on it at its
+    /// center's height, which the query meets where its lines of sight do.
+    /// A circle whose center the frame hides, behind the camera, the
+    /// globe's horizon or the ground in front, doesn't show.
     fn hit(
         &self,
         values: &LayerValues<Circle>,
-        region: &QueryRegion<'_>,
+        query: &TileQuery<'_>,
         feature: &dyn mln_style::feature::GeometryTileFeature,
         geometry: &mln_style::feature::GeometryCollection,
         feature_state: &mln_style::feature::FeatureState,
     ) -> bool {
-        let QueryRegion { geometry: query_geometry, screen, ground, view, projector, pixels_to_tile_units, .. } =
-            *region;
-        let zoom = view.zoom() as f32;
-        let evaluated = &values.evaluated.paint;
-        // Translate query geometry
-        let translated = mln_engine::query::translate_query_geometry(
-            query_geometry,
-            *evaluated.circle_translate.uniform(),
-            *evaluated.circle_translate_anchor.uniform(),
-            view.angle() as f32,
-            pixels_to_tile_units,
-        );
-        let translated_query_geometry = translated.as_ref().unwrap_or(query_geometry);
-
-        // Evaluate functions
-        let radius = evaluated.circle_radius.evaluate(&EvaluationContext::with_zoom_feature_state(
-            zoom,
-            Some(feature),
-            Some(feature_state),
-        ));
-        let stroke = evaluated.circle_stroke_width.evaluate(&EvaluationContext::with_zoom_feature_state(
-            zoom,
-            Some(feature),
-            Some(feature_state),
-        ));
-        let size = radius + stroke;
-
-        // For pitch-alignment: map, compare feature geometry to query geometry in
-        // the plane of the tile Otherwise, compare geometry in the plane of the
-        // viewport A circle with fixed scaling relative to the viewport gets larger
-        // in tile space as it moves into the distance A circle with fixed scaling
-        // relative to the map gets smaller in viewport space as it moves into the
-        // distance
-        //
-        // Over terrain, a circle stands at the height of the ground under its
-        // center: aligned with the map, it lies in the plane at that height,
-        // where the query's lines of sight meet it; aligned with the
-        // viewport, it shows where it draws, which the query's screen points
-        // test, wherever their lines of sight meet the ground.
-        let align_with_map = *evaluated.circle_pitch_alignment.uniform() == AlignmentType::Map;
-        let projected;
-        let viewport_query_geometry = if align_with_map {
-            translated_query_geometry
-        } else {
-            projected = if ground.is_some() {
-                viewport_geometry(screen, view.size())
+        let paint = &values.evaluated.paint;
+        let query = query.translated(*paint.circle_translate.uniform(), *paint.circle_translate_anchor.uniform());
+        let view = query.view();
+        let context =
+            EvaluationContext::with_zoom_feature_state(view.zoom() as f32, Some(feature), Some(feature_state));
+        let size = paint.circle_radius.evaluate(&context) + paint.circle_stroke_width.evaluate(&context);
+        let align_with_map = *paint.circle_pitch_alignment.uniform() == AlignmentType::Map;
+        let scale_with_map = *paint.circle_pitch_scale.uniform() == CirclePitchScaleType::Map;
+        let camera = view.camera_to_center_distance();
+        let pixels = query.pixels();
+        // The query on the level the circles lie on, which over terrain
+        // changes with the ground under them.
+        let mut level: Option<(f64, Vec<Vec2>)> = None;
+        for point in geometry.iter().flatten() {
+            let p = Point::new(f64::from(point.x), f64::from(point.y));
+            let height = query.ground_height(p);
+            let Some(center) = query.project(p, height) else { continue };
+            let meets = if align_with_map {
+                // A size on the map, which perspective shrinks with
+                // distance unless it is as large there as at the center.
+                let perspective = if scale_with_map { 1.0 } else { center.distance / camera };
+                let radius = (f64::from(size) * query.pixel(p) * perspective) as f32;
+                let on_level = match &level {
+                    Some((at, on_level)) if *at == height => on_level,
+                    _ => &level.insert((height, query.on_level(height))).1,
+                };
+                meets_circle(on_level, Vec2::new(p.x as f32, p.y as f32), radius)
             } else {
-                project_query_geometry(translated_query_geometry, projector, view.size())
+                // A size on the screen, which shrinks with distance where it
+                // scales with the map.
+                let perspective = if scale_with_map { camera / center.distance } else { 1.0 };
+                meets_circle(&pixels, center.point, (f64::from(size) * perspective) as f32)
             };
-            &projected
-        };
-        let transformed_size = if align_with_map { size * pixels_to_tile_units } else { size };
-
-        // The shader hides a circle whose center the horizon covers where it
-        // draws it: translated, and through the projection as blended. The
-        // query finds none there either.
-        let drawn_translation = RenderTile::tile_unit_translation(
-            projector.tile_id(),
-            *evaluated.circle_translate.uniform(),
-            *evaluated.circle_translate_anchor.uniform(),
-            view,
-        );
-        for ring in geometry.iter() {
-            for point in ring {
-                let elevation = ground_height(ground, *point);
-                let drawn = Point::new(
-                    f64::from(f32::from(point.x) + drawn_translation[0]),
-                    f64::from(f32::from(point.y) + drawn_translation[1]),
-                );
-                if view.is_globe() && projector.project_as_drawn(&drawn, elevation).occluded {
-                    continue;
-                }
-                let plane;
-                let transformed_query_geometry = if align_with_map && ground.is_some() {
-                    let at_elevation = plane_geometry(screen, elevation, view, projector);
-                    plane = mln_engine::query::translate_query_geometry(
-                        &at_elevation,
-                        *evaluated.circle_translate.uniform(),
-                        *evaluated.circle_translate_anchor.uniform(),
-                        view.angle() as f32,
-                        pixels_to_tile_units,
-                    )
-                    .unwrap_or(at_elevation);
-                    &plane
-                } else {
-                    viewport_query_geometry
-                };
-                let transformed_point = if align_with_map {
-                    *point
-                } else if ground.is_some() {
-                    project_point(drawn, elevation, projector, view.size())
-                } else {
-                    project_point(Point::new(f64::from(point.x), f64::from(point.y)), 0.0, projector, view.size())
-                };
-
-                let projected = projector.project(&Point::new(f64::from(point.x), f64::from(point.y)), elevation);
-                let mut adjusted_size = transformed_size;
-                let w = projected.signed_distance_from_camera;
-                let pitch_scale = &evaluated.circle_pitch_scale;
-                let pitch_alignment = &evaluated.circle_pitch_alignment;
-                if *pitch_scale.uniform() == CirclePitchScaleType::Viewport
-                    && *pitch_alignment.uniform() == AlignmentType::Map
-                {
-                    adjusted_size *= (w / view.camera_to_center_distance()) as f32;
-                } else if *pitch_scale.uniform() == CirclePitchScaleType::Map
-                    && *pitch_alignment.uniform() == AlignmentType::Viewport
-                {
-                    adjusted_size *= (view.camera_to_center_distance() / w) as f32;
-                }
-
-                if mln_engine::geo::intersection_tests::polygon_intersects_buffered_point(
-                    transformed_query_geometry,
-                    &transformed_point,
-                    adjusted_size,
-                ) {
-                    return true;
-                }
+            if meets && !query.behind_ground(&center) {
+                return true;
             }
         }
-
         false
     }
 }

@@ -15,18 +15,17 @@ use mln_style::constants;
 use mln_style::error::Error;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
 use mln_style::feature::{
-    FeatureState, GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileFeature,
-    convert_geometry_to_tile,
+    FeatureState, GeometryCollection, GeometryCoordinate, GeometryTileFeature, convert_geometry_to_tile,
 };
 use mln_style::hash::{HashMap, HashSet};
 use mln_style::tile_id::CanonicalTileID;
-use mln_style::types::TranslateAnchorType;
 
-use crate::camera::{TileProjector, VerticalPerspectiveProjection, View};
+use crate::camera::{VerticalPerspectiveProjection, View};
 use crate::geo::ScreenCoordinate;
 use crate::layer::render_layer::RenderLayer;
 use crate::placement::Overlap;
 use crate::query::RenderedQueryOptions;
+use crate::query::tile_query::TileQuery;
 use crate::source::source_state::SourceFeatureState;
 use crate::tile::feature::{Feature, feature_id_to_string};
 use crate::tile::{OverscaledTileID, TileData};
@@ -45,39 +44,42 @@ pub(crate) struct FeatureSelection<'a> {
     pub(crate) feature_state: Option<&'a SourceFeatureState>,
 }
 
-/// The ground a frame drew of the terrain, which a query finds the features
-/// of some layers on.
+/// How a query looks at the features of some layers: where it meets them,
+/// and which of a tile's features it looks at.
 #[derive(Clone, Copy)]
-pub(crate) struct QueryGround<'a> {
-    pub(crate) elevation: &'a crate::render::terrain::TerrainElevation,
-    /// Whether the layers' points stand on the ground, rather than their
-    /// features lying on it. A point that stands shows raised, where the
-    /// query's lines of sight can meet the ground far beyond it, or not at
-    /// all, so every feature of a rendered tile is a candidate, and the
-    /// layer's hit test decides.
-    pub(crate) standing: bool,
+pub(crate) struct QueryPass<'a> {
+    /// The ground the frame drew of the terrain, where the map has some.
+    pub(crate) elevation: Option<&'a crate::render::terrain::TerrainElevation>,
+    /// Whether the layers meet terrain: their features lie on the ground the
+    /// frame drew, which the query meets where its lines of sight do, and
+    /// the ground in front hides what of them stands. Else the query meets
+    /// them at sea level.
+    pub(crate) on_terrain: bool,
+    /// Whether the layers' points stand on the ground the frame drew.
+    pub(crate) stands: bool,
+    /// Which of a tile's features the query looks at.
+    pub(crate) reach: PassReach,
 }
 
-/// Where a query looks in a tile: its geometry in tile units, seen through
-/// the camera.
+/// Which of a tile's features a query looks at.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum PassReach {
+    /// Those around where it meets the map.
+    Around,
+    /// Those around where it meets the map, and between there and the
+    /// camera: what stands tall enough there shows in it.
+    TowardCamera,
+    /// All of them: what stands on the ground shows raised, where the
+    /// query's lines of sight meet the ground far beyond it, or not at all.
+    WholeTile,
+}
+
+/// Which of a tile's features a query looks at: those whose boxes meet the
+/// box of `geometry`, in the tile's units, or every one of them.
 #[derive(Clone, Copy)]
-pub struct QueryRegion<'a> {
-    pub geometry: &'a GeometryCoordinates,
-    /// The screen points of `geometry`, from the view's top left: where the
-    /// query's lines of sight start.
-    pub screen: &'a [ScreenCoordinate],
-    /// Over terrain, the ground the frame drew under the tile, where the
-    /// lines of sight meet it at `geometry`, for the layers that stand on it.
-    pub ground: Option<crate::render::terrain::TileGround<'a>>,
-    /// Whether every feature of the tile is a candidate, rather than those
-    /// around `geometry` ([`QueryGround::standing`]).
+pub(crate) struct Reach<'a> {
+    pub(crate) geometry: &'a [GeometryCoordinate],
     pub(crate) whole_tile: bool,
-    pub view: &'a View,
-    pub projector: &'a TileProjector<'a>,
-    pub pixels_to_tile_units: f32,
-    /// How far around the geometry the layers' features may reach, in
-    /// pixels.
-    pub(crate) padding: f32,
 }
 
 /// The screen points, from the top left of `view`, that a query of
@@ -347,13 +349,14 @@ impl FeatureIndex {
         self.tile_data = tile_data;
     }
 
-    /// Adds the features of `selection` that `region` touches to `result`,
-    /// later features first.
+    /// Adds the features of `selection` within `reach` that `query` hits
+    /// to `result`, later features first.
     pub(crate) fn query(
         &self,
         result: &mut QueryResults,
         selection: &FeatureSelection<'_>,
-        region: &QueryRegion<'_>,
+        query: &TileQuery<'_>,
+        reach: &Reach<'_>,
     ) -> Result<(), Error> {
         if self.tile_data.is_none() {
             return Ok(());
@@ -362,30 +365,20 @@ impl FeatureIndex {
             return Ok(());
         };
 
-        let additional_padding = (region.padding * region.pixels_to_tile_units).min(constants::EXTENT as f32) as i16;
         let whole_tile = || {
             let extent = constants::EXTENT as i16;
             (GeometryCoordinate::new(0, 0), GeometryCoordinate::new(extent, extent))
         };
-        let candidates = if region.whole_tile { Some(whole_tile()) } else { envelope(region.geometry.iter().copied()) };
+        let candidates = if reach.whole_tile { Some(whole_tile()) } else { envelope(reach.geometry.iter().copied()) };
         let Some((min, max)) = candidates else {
             return Ok(());
         };
-        // The padded box's corners are tile coordinates, which wrap in i16.
-        let (min_x, min_y) = (min.x.wrapping_sub(additional_padding), min.y.wrapping_sub(additional_padding));
-        let (max_x, max_y) = (max.x.wrapping_add(additional_padding), max.y.wrapping_add(additional_padding));
-        // Only a box that reaches into the tile finds features, and one that
-        // wrapped around is empty.
+        // Only a box that reaches into the tile finds features.
         let extent = constants::EXTENT;
-        if min_x > max_x
-            || min_y > max_y
-            || max_x < 0
-            || max_y < 0
-            || i32::from(min_x) >= extent
-            || i32::from(min_y) >= extent
-        {
+        if max.x < 0 || max.y < 0 || i32::from(min.x) >= extent || i32::from(min.y) >= extent {
             return Ok(());
         }
+        let (min_x, min_y, max_x, max_y) = (min.x, min.y, max.x, max.y);
         let mut features: Vec<&Entry> = tree
             .search(i32::from(min_x), i32::from(min_y), i32::from(max_x), i32::from(max_y))
             .into_iter()
@@ -396,7 +389,7 @@ impl FeatureIndex {
         features.dedup_by_key(|feature| feature.sort_index);
         for feature in features {
             let entry = (feature.index, &*feature.source_layer_name, &*feature.bucket_leader_id);
-            self.add_feature(result, entry, selection, Some(region))?;
+            self.add_feature(result, entry, selection, Some(query))?;
         }
         Ok(())
     }
@@ -447,14 +440,14 @@ impl FeatureIndex {
 
     /// Adds the feature `index` of the source layer `source_layer_name`,
     /// of the bucket of `bucket_leader_id`, to `result` under each layer of
-    /// `selection` it is in, where it touches `region`. A symbol layer's
-    /// features need no region: the collision index found them.
+    /// `selection` it is in, where `query` hits it. A symbol layer's
+    /// features need no query: the collision index found them.
     fn add_feature(
         &self,
         result: &mut QueryResults,
         (index, source_layer_name, bucket_leader_id): (usize, &str, &str),
         selection: &FeatureSelection<'_>,
-        region: Option<&QueryRegion<'_>>,
+        query: Option<&TileQuery<'_>>,
     ) -> Result<(), Error> {
         let FeatureSelection { layers, options, global_state, tile_id, feature_state } = *selection;
         let Some(tile_data) = &self.tile_data else {
@@ -492,11 +485,8 @@ impl FeatureIndex {
             };
 
             let needs_cross_tile_index = render_layer.base().evaluated_properties.entry().places();
-            // we use the float camera zoom here, not the integer tile ID zoom,
-            // because for the query we take into account the actual rendered
-            // size of the geometry (#2781)
             let intersects = needs_cross_tile_index
-                || region.is_some_and(|region| render_layer.hit(region, &feature, &geometry, &state));
+                || query.is_some_and(|query| render_layer.hit(query, &feature, &geometry, &state));
             if !intersects {
                 continue;
             }
@@ -525,39 +515,6 @@ impl FeatureIndex {
     pub(crate) fn bucket_layer_ids(&self) -> VecMap<String, Vec<String>> {
         self.bucket_layer_ids.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
     }
-}
-
-/// `query_geometry`, a query's geometry in tile units, moved back by a
-/// layer's `translate` (in pixels, at `pixels_to_tile_units`), turned by
-/// `-bearing` for a translation anchored to the viewport: what a layer that
-/// translates its features tests them against. `None` without a
-/// translation.
-#[must_use]
-pub fn translate_query_geometry(
-    query_geometry: &GeometryCoordinates,
-    translate: [f32; 2],
-    anchor_type: TranslateAnchorType,
-    bearing: f32,
-    pixels_to_tile_units: f32,
-) -> Option<GeometryCoordinates> {
-    if translate[0] == 0.0 && translate[1] == 0.0 {
-        return None;
-    }
-
-    let mut translate_vec = GeometryCoordinate::new(
-        (translate[0] * pixels_to_tile_units) as i16,
-        (translate[1] * pixels_to_tile_units) as i16,
-    );
-    if anchor_type == TranslateAnchorType::Viewport {
-        translate_vec = crate::geo::math::rotate_i16(translate_vec, -bearing);
-    }
-
-    Some(
-        query_geometry
-            .iter()
-            .map(|p| GeometryCoordinate::new(p.x.wrapping_sub(translate_vec.x), p.y.wrapping_sub(translate_vec.y)))
-            .collect(),
-    )
 }
 
 /// A `FeatureIndex` as it crosses, for a tile worker in another wasm instance
@@ -658,27 +615,6 @@ mod tests {
     use geometry::Point;
 
     use super::*;
-
-    #[test]
-    fn translate_query_geometry() {
-        let query: GeometryCoordinates = vec![Point::new(10, 10), Point::new(20, 20)];
-        assert_eq!(super::translate_query_geometry(&query, [0.0, 0.0], TranslateAnchorType::Map, 0.0, 8.0), None);
-        assert_eq!(
-            super::translate_query_geometry(&query, [1.0, -2.0], TranslateAnchorType::Map, 1.0, 8.0),
-            Some(vec![Point::new(2, 26), Point::new(12, 36)])
-        );
-        // Viewport anchor: the translation is rotated by -bearing.
-        assert_eq!(
-            super::translate_query_geometry(
-                &query,
-                [1.0, 0.0],
-                TranslateAnchorType::Viewport,
-                std::f32::consts::FRAC_PI_2,
-                8.0
-            ),
-            Some(vec![Point::new(10, 18), Point::new(20, 28)])
-        );
-    }
 
     #[test]
     fn insert_records_leaders_and_skips_rings_outside_the_tile() {

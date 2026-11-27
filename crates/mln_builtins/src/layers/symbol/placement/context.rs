@@ -74,6 +74,9 @@ pub(crate) struct PlacementContext<'a> {
     icon_plane: LabelPlaneProjector<'a>,
     /// What the bucket's symbols stand on.
     heights: SymbolHeights<'a>,
+    /// Whether the ground in front of the bucket's symbols hides them: over
+    /// terrain, unless they draw over the view.
+    hides_behind_ground: bool,
     // Labels collide where `*-translate` puts them, line labels' circles
     // included.
     text_translation: Vec2,
@@ -150,6 +153,7 @@ impl<'a> PlacementContext<'a> {
             text_plane: plane(pitch_text_with_map, rotate_text_with_map, text_translation),
             icon_plane: plane(pitch_icon_with_map, rotate_icon_with_map, icon_translation),
             heights,
+            hides_behind_ground: ground.is_some() && !screen_space,
             tile_projector,
             text_translation,
             icon_translation,
@@ -197,6 +201,7 @@ impl<'a> PlacementContext<'a> {
             tile_projector: &self.tile_projector,
             label_plane,
             heights: self.heights,
+            hides_behind_ground: self.hides_behind_ground,
             translation,
             pixel_ratio: self.pixel_ratio,
             scale: self.scale,

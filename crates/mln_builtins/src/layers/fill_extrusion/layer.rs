@@ -32,6 +32,8 @@
 
 use std::mem::offset_of;
 
+use geometry::Point;
+use glam::Vec2;
 use mln_engine::camera::View;
 use mln_engine::draw::ground::{FrameGround, GroundHeights, height_attribute};
 use mln_engine::draw::{
@@ -42,22 +44,26 @@ use mln_engine::draw::{
 use mln_engine::layer::binders::PaintBinders as _;
 use mln_engine::layer::{
     BucketGeometry, EvaluateCx, EvaluatedLayer, Evaluation, Features, FrameTile, Layer, LayerValues, OnTerrain,
-    PrepareCx, QueryRegion, TileCx, TileData, bucket_indexes, bucket_vertices, copied_vertices, derived_vertices,
-    paint_vertices,
+    PrepareCx, ScreenPoint, TileCx, TileData, TileQuery, bucket_indexes, bucket_vertices, copied_vertices,
+    derived_vertices, paint_vertices,
 };
+use mln_engine::query::shapes::{distance_on_plane, meets_polygon, ring_contains};
+use mln_engine::tile::geometry_tile_data::is_boundary_edge;
 use mln_engine::tile::{OverscaledTileID, UnwrappedTileID};
 use mln_gfx::gpu::{Caps, ClipDepthRange, ShaderKey};
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_style::constants::TILE_SIZE_D;
+use mln_style::expression::EvaluationContext;
+use mln_style::feature::classify_rings;
 use mln_style::layers::FillExtrusion;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionPaintProperties;
 use mln_style::types::{AlignmentType, LayerBlendType};
 
 use crate::layers::fill_extrusion::bucket::{
     FillExtrusionBinders, FillExtrusionBucket, FillExtrusionLayoutSpec, FillExtrusionLayoutVertex,
-    FillExtrusionStaticVertex, FillExtrusionWallVertex, wall_quad_paint,
+    FillExtrusionStaticVertex, FillExtrusionWallVertex, polygon_centroid, wall_quad_paint,
 };
 use crate::layers::fill_extrusion::programs;
 use crate::layers::fill_extrusion::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
@@ -136,7 +142,7 @@ impl ExtrusionTile {
         let heights: Vec<f32> = centroids
             .iter()
             .flat_map(|&([x, y], count)| {
-                let height = tile_ground.height(glam::Vec2::new(f32::from(x), f32::from(y)));
+                let height = tile_ground.height(Vec2::new(f32::from(x), f32::from(y)));
                 std::iter::repeat_n(height, count as usize)
             })
             .collect();
@@ -489,29 +495,102 @@ impl Layer for RenderFillExtrusionLayer {
         out.main().composite(composite).block(&Self::props(layer, light, state, opacity));
     }
 
-    // query
+    /// Whether the query meets an extrusion of the feature where it draws:
+    /// its roof or one of its walls, translated, standing on the ground
+    /// under its polygon's centroid over terrain, where the ground in front
+    /// doesn't hide it.
     fn hit(
         &self,
         values: &LayerValues<FillExtrusion>,
-        region: &QueryRegion<'_>,
-        _feature: &dyn mln_style::feature::GeometryTileFeature,
+        query: &TileQuery<'_>,
+        feature: &dyn mln_style::feature::GeometryTileFeature,
         geometry: &mln_style::feature::GeometryCollection,
-        _feature_state: &mln_style::feature::FeatureState,
+        feature_state: &mln_style::feature::FeatureState,
     ) -> bool {
-        let evaluated = &values.evaluated.paint;
-        let translated_query_geometry = mln_engine::query::translate_query_geometry(
-            region.geometry,
-            *evaluated.fill_extrusion_translate.uniform(),
-            *evaluated.fill_extrusion_translate_anchor.uniform(),
-            region.view.angle() as f32,
-            region.pixels_to_tile_units,
-        );
-
-        mln_engine::geo::intersection_tests::polygon_intersects_multi_polygon(
-            translated_query_geometry.as_ref().unwrap_or(region.geometry),
-            geometry,
-        )
+        let paint = &values.evaluated.paint;
+        let query = query
+            .translated(*paint.fill_extrusion_translate.uniform(), *paint.fill_extrusion_translate_anchor.uniform());
+        let zoom = query.view().zoom() as f32;
+        let context = EvaluationContext::with_zoom_feature_state(zoom, Some(feature), Some(feature_state));
+        let base = f64::from(paint.fill_extrusion_base.evaluate(&context).max(0.0));
+        let height = f64::from(paint.fill_extrusion_height.evaluate(&context).max(0.0));
+        let pixels = query.pixels();
+        for polygon in classify_rings(geometry) {
+            let [x, y] = polygon_centroid(&polygon);
+            let ground = query.ground_height(Point::new(f64::from(x), f64::from(y)));
+            // Over terrain, a base at the ground goes 10 m lower, to meet a
+            // slope.
+            let (bottom, top) = if query.stands() {
+                (base + ground - if base > 0.0 { 0.0 } else { 10.0 }, height + ground)
+            } else {
+                (base, height)
+            };
+            let rings: Vec<Vec<Point<f64>>> = polygon
+                .iter()
+                .map(|ring| ring.iter().map(|p| Point::new(f64::from(p.x), f64::from(p.y))).collect())
+                .collect();
+            let roof: Vec<Vec<Vec2>> = rings.iter().map(|ring| query.project_ring(ring, top)).collect();
+            if meets_polygon(&pixels, &roof) {
+                let corners: Vec<ScreenPoint> =
+                    rings.first().into_iter().flatten().filter_map(|&p| query.project(p, top)).collect();
+                if face_shows(&query, &pixels, &roof[0], &corners) {
+                    return true;
+                }
+            }
+            if top <= bottom {
+                continue;
+            }
+            for (ring, tile_ring) in rings.iter().zip(polygon.iter()) {
+                for (i, (&a, &b)) in ring.iter().zip(ring.iter().skip(1)).enumerate() {
+                    if is_boundary_edge(tile_ring[i], tile_ring[i + 1]) {
+                        continue;
+                    }
+                    let corners = [(a, bottom), (b, bottom), (b, top), (a, top)].map(|(p, z)| query.project(p, z));
+                    let Some(corners) = corners.into_iter().collect::<Option<Vec<ScreenPoint>>>() else {
+                        continue;
+                    };
+                    let wall: Vec<Vec2> = corners.iter().map(|corner| corner.point).collect();
+                    if meets_polygon(&pixels, std::slice::from_ref(&wall))
+                        && face_shows(&query, &pixels, &wall, &corners)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
+}
+
+/// Whether the ground in front leaves some of the planar face `face`, an
+/// outline on the screen with the points `corners` of it where they draw,
+/// that `query` meets: at the query's points inside it, and at its points
+/// inside the query.
+fn face_shows(query: &TileQuery<'_>, pixels: &[Vec2], face: &[Vec2], corners: &[ScreenPoint]) -> bool {
+    let Some(plane) = plane_of(corners) else {
+        return true;
+    };
+    let inside_face = pixels.iter().copied().filter(|&p| ring_contains(face, p));
+    let inside_query = face.iter().copied().filter(|&p| pixels.len() > 2 && ring_contains(pixels, p));
+    inside_face.chain(inside_query).chain(pixels.first().copied().filter(|_| pixels.len() == 1)).any(|point| {
+        distance_on_plane(point, plane).is_none_or(|distance| !query.behind_ground(&ScreenPoint { point, distance }))
+    })
+}
+
+/// Three of `corners`, points of a planar face where they draw, that span
+/// it: the first, and the two that make the largest triangle with it.
+fn plane_of(corners: &[ScreenPoint]) -> Option<[ScreenPoint; 3]> {
+    let (&a, rest) = corners.split_first()?;
+    let mut best: Option<([ScreenPoint; 3], f32)> = None;
+    for (i, &b) in rest.iter().enumerate() {
+        for &c in &rest[i + 1..] {
+            let area = (b.point - a.point).perp_dot(c.point - a.point).abs();
+            if best.is_none_or(|(_, largest)| area > largest) {
+                best = Some(([a, b, c], area));
+            }
+        }
+    }
+    best.map(|(plane, _)| plane)
 }
 
 /// What building the draws of a tile reads of the layer.
