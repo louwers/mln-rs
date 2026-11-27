@@ -1,10 +1,9 @@
 // A tile's draw, with the quads of the tile's mask, is built again when the
-// tile's mask or its DEM's border changes, and the layer keeps each DEM's
-// texture by the id of the tile's contents, which outlives the draws that a
-// new mask builds again. The elevation stops texture is made anew when the
-// ramp changes, since its size changes with the ramp.
+// tile's mask or its DEM's border changes. The tile's value keeps the texture
+// of its DEM, which the tile's next value takes while the DEM and its border
+// are the same. The elevation stops texture is made anew when the ramp
+// changes, since its size changes with the ramp.
 
-use std::collections::hash_map::Entry;
 use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -20,7 +19,6 @@ use mln_style::color::Color;
 use mln_style::expression::{
     Dependency, EvaluationContext, GlobalStateMap, from_expression_value, global_state_refs_intersect,
 };
-use mln_style::hash::{HashMap, HashSet};
 use mln_style::layer::LayerStyle;
 use mln_style::layers::ColorRelief;
 use mln_style::property::color_ramp::ColorRampPropertyValue;
@@ -41,7 +39,7 @@ use crate::draw::vertices::SharedVertices;
 use crate::layer::bucket_geometry::copied_vertices;
 use crate::layer::layer_type::LayerType;
 use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, Hosted, LayerValues, OnTerrain, PrepareCx, RenderLayer, TileCx, TypedLayer, UpdateCx,
+    EvaluateCx, Evaluation, Hosted, LayerValues, OnTerrain, PrepareCx, RenderLayer, TileCx, TypedLayer,
 };
 use crate::layer::tile_input::TileData;
 use crate::layers::color_relief::programs;
@@ -60,10 +58,20 @@ const ELEVATION_STOPS_SLOT: usize = programs::COLOR_RELIEF.texture_slot("elevati
 const IMAGE_SLOT: usize = programs::COLOR_RELIEF.texture_slot("image");
 
 /// What the layer keeps of a tile: the mesh that colors its DEM, with the
-/// DEM's properties it was built with.
+/// DEM's properties it was built with and the DEM's texture.
 pub(crate) struct ReliefTile {
     mesh: Mesh,
     tile_props: ColorReliefTilePropsUBO,
+    dem: DemTexture,
+}
+
+/// The texture of a DEM's current, possibly backfilled, image, with the id
+/// of the tile's contents and the generation of the DEM's border it was
+/// made at.
+struct DemTexture {
+    id: SimpleIdentity,
+    generation: u64,
+    texture: SharedTexture,
 }
 
 impl LayerType for ColorRelief {
@@ -95,13 +103,6 @@ pub(crate) struct RenderColorReliefLayer {
     /// The triangles of the static data's quad.
     static_data_indices: Option<SharedIndexes>,
     globe_meshes: GlobeTileMeshCache<RasterLayoutVertex>,
-
-    /// The texture of each tile's DEM, by the id of its contents, made from
-    /// its current, possibly backfilled, image, with the generation of the
-    /// DEM's border it was made at.
-    dem_textures: HashMap<SimpleIdentity, (SharedTexture, u64)>,
-    /// The contents of the frame's tiles, whose DEM textures stay.
-    live_dems: HashSet<SimpleIdentity>,
 }
 
 impl RenderColorReliefLayer {
@@ -240,24 +241,19 @@ impl RenderColorReliefLayer {
     }
 }
 
-/// The texture of `dem`'s image in `dem_textures`, which this makes where it
-/// has none made at the DEM's border's generation.
-fn dem_texture<'a>(
-    dem_textures: &'a mut HashMap<SimpleIdentity, (SharedTexture, u64)>,
-    context: &mut Context,
-    dem: &DemContents,
-) -> &'a SharedTexture {
-    let generation = dem.generation();
-    let (dem_texture, _) = match dem_textures.entry(dem.id()) {
-        Entry::Occupied(entry) if entry.get().1 == generation => entry.into_mut(),
-        entry => {
+/// The texture of `dem`'s image: `previous`, if that was made of the same
+/// DEM at its border's generation, or a new one.
+fn dem_texture(previous: Option<DemTexture>, context: &mut Context, dem: &DemContents) -> DemTexture {
+    let (id, generation) = (dem.id(), dem.generation());
+    match previous {
+        Some(previous) if previous.id == id && previous.generation == generation => previous,
+        _ => {
             let texture = context.add_texture_with(|texture| {
                 texture.set_image(Some(Rc::new(dem.dem().image().clone())));
             });
-            entry.insert_entry((texture, generation)).into_mut()
+            DemTexture { id, generation, texture }
         }
-    };
-    dem_texture
+    }
 }
 
 /// The vertex attributes of a color-relief draw over `vertices`.
@@ -304,8 +300,6 @@ impl TypedLayer for RenderColorReliefLayer {
             static_data_shared_vertices: None,
             static_data_indices: None,
             globe_meshes: GlobeTileMeshCache::new(),
-            dem_textures: HashMap::default(),
-            live_dems: HashSet::default(),
         };
 
         // Initialize with default color ramp immediately to avoid
@@ -340,13 +334,16 @@ impl TypedLayer for RenderColorReliefLayer {
         if *evaluated.paint.color_relief_opacity.uniform() > 0.0 { Evaluation::TRANSLUCENT } else { Evaluation::NONE }
     }
 
-    /// The draw that colors a tile's DEM with the ramps; none for a tile
-    /// without a DEM to draw, or before the ramps have textures.
+    /// The draw that colors a tile's DEM with the ramps, with the DEM's
+    /// texture of the tile's previous value where that is of the same DEM;
+    /// none for a tile without a DEM to draw, or before the ramps have
+    /// textures.
     fn tile(
         &mut self,
         cx: &mut TileCx<'_, '_, Self>,
         tile: FrameTile<'_, ColorRelief>,
         dem: TileData<'_, ColorRelief>,
+        previous: Option<ReliefTile>,
     ) -> Option<ReliefTile> {
         if !dem.has_data() {
             return None;
@@ -360,7 +357,6 @@ impl TypedLayer for RenderColorReliefLayer {
             static_data_shared_vertices,
             static_data_indices,
             globe_meshes,
-            dem_textures,
             ..
         } = self;
 
@@ -388,7 +384,7 @@ impl TypedLayer for RenderColorReliefLayer {
             color_ramp_size: *color_ramp_size as i32,
             unpack_scale: unpack.scale,
         };
-        let dem_texture = dem_texture(dem_textures, context, dem);
+        let dem_texture = dem_texture(previous.map(|previous| previous.dem), context, dem);
 
         // The tile's geometry: the globe's mesh of its mask, the mask's
         // quads, or the whole tile's quad.
@@ -425,7 +421,7 @@ impl TypedLayer for RenderColorReliefLayer {
             instances: None,
         };
         let mut draw_textures = Textures::default();
-        draw_textures[IMAGE_SLOT] = Some(dem_texture.clone());
+        draw_textures[IMAGE_SLOT] = Some(dem_texture.texture.clone());
         draw_textures[ELEVATION_STOPS_SLOT] = Some(elevation_stops_texture.clone());
         draw_textures[COLOR_STOPS_SLOT] = Some(color_stops_texture.clone());
         let mesh = Mesh::new(
@@ -436,7 +432,7 @@ impl TypedLayer for RenderColorReliefLayer {
             geometry,
             draw_textures,
         );
-        Some(ReliefTile { mesh, tile_props })
+        Some(ReliefTile { mesh, tile_props, dem: dem_texture })
     }
 
     /// Pushes the frame's draws of the layer, one of each of its tiles.
@@ -450,7 +446,7 @@ impl TypedLayer for RenderColorReliefLayer {
             self.globe_meshes.clear();
         }
         self.update_ramp_textures(cx.gpu, cx.context);
-        let RenderColorReliefLayer { elevation_stops_texture, color_stops_texture, dem_textures, .. } = self;
+        let RenderColorReliefLayer { elevation_stops_texture, color_stops_texture, .. } = self;
 
         // Skip rendering if color ramp textures aren't ready
         let (Some(elevation_stops_texture), Some(color_stops_texture)) =
@@ -471,22 +467,18 @@ impl TypedLayer for RenderColorReliefLayer {
 
         for tile in render_tiles {
             let tile_id = tile.draw_id();
-            let Some(dem) = tile.data().filter(|dem| dem.has_data()) else {
+            if !tile.data().is_some_and(DemContents::has_data) {
                 cx.tiles.drop_value(&tile.id());
                 continue;
-            };
-            let Some(entry) = cx.tiles.entry(&tile.id()) else {
+            }
+            let Some(cached) = cx.tiles.get_mut(&tile.id()) else {
                 continue;
             };
             let context = &mut *cx.context;
-            let dem_texture = dem_texture(dem_textures, context, dem);
+            let dem_texture = &cached.dem.texture;
             if let Some(mut texture) = context.texture_mut(dem_texture) {
                 texture.set_sampler(dem_sampler);
             }
-
-            let Some(cached) = entry.value.as_mut() else {
-                continue;
-            };
             // The ramps' textures change with the ramps.
             let textures = [
                 (IMAGE_SLOT, dem_texture),
@@ -506,18 +498,5 @@ impl TypedLayer for RenderColorReliefLayer {
         let opacity = *cx.values.evaluated.paint.color_relief_opacity.uniform();
         let props = ColorReliefEvaluatedPropsUBO { opacity, pad_eval0: 0.0, pad_eval1: 0.0, pad_eval2: 0.0 };
         out.main().block(&props);
-    }
-
-    /// Drops the DEM textures of the tiles the frame doesn't draw, in every
-    /// frame, including one the layer draws nothing in.
-    fn update(&mut self, _cx: UpdateCx<'_, '_, Self>, tiles: &[FrameTile<'_, ColorRelief>]) {
-        let live_dems = &mut self.live_dems;
-        live_dems.clear();
-        live_dems.extend(tiles.iter().filter_map(|tile| Some(tile.data()?.id())));
-        self.dem_textures.retain(|id, _| live_dems.contains(id));
-    }
-
-    fn release(&mut self) {
-        self.dem_textures.clear();
     }
 }
