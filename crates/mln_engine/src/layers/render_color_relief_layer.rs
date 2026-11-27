@@ -40,7 +40,6 @@ use crate::draw::vertices::SharedVertices;
 use crate::layer::bucket_geometry::copied_vertices;
 use crate::layer::layer_drawing::{DrawList, DrawObjectsMut, KeptDraw, TileDraws, TileObjects};
 use crate::layer::layer_type::LayerType;
-use crate::layer::layout::NoLayout;
 use crate::layer::render_layer::{
     EvaluateCx, Evaluation, LayerUpdateParameters, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer,
     RenderLayerBase, TypedLayer,
@@ -53,8 +52,8 @@ use crate::render::paint_parameters::PaintParameters;
 use crate::render::static_data::RenderStaticData;
 use crate::render::tile::FrameTile;
 use crate::render::tile_matrix::to_projection_ubo;
+use crate::source::DemTiles;
 use crate::tile::dem::DemUnpack;
-use crate::tile_store::dem::DemContents;
 
 /// The ids of the buffers that the draws bind.
 const DRAWABLE_ID: usize = programs::COLOR_RELIEF.buffer_id("drawableVector");
@@ -94,8 +93,7 @@ struct ReliefUniforms {
 }
 
 impl LayerType for ColorRelief {
-    type Layout = NoLayout;
-    type TileBucket<'a> = &'a DemContents;
+    type Input = DemTiles;
 
     fn render_layer(style: Arc<LayerStyle<ColorRelief>>) -> Box<dyn RenderLayer> {
         Box::new(RenderColorReliefLayer::new(style))
@@ -430,12 +428,12 @@ impl TypedLayer for RenderColorReliefLayer {
         };
 
         for tile in render_tiles {
-            let tile_id = tile.draw_id(paint_parameters);
+            let tile_id = tile.draw_id();
             let Some(mut entry) = drawing.tiles_mut().entry(&tile_id) else {
                 continue;
             };
 
-            let Some(dem) = tile.bucket().filter(|dem| dem.has_data()) else {
+            let Some(dem) = tile.data().filter(|dem| dem.has_data()) else {
                 *entry.value = None;
                 continue;
             };
@@ -573,7 +571,7 @@ impl TypedLayer for RenderColorReliefLayer {
     fn update(&mut self, _params: &mut LayerUpdateParameters<'_>, tiles: &[FrameTile<'_, ColorRelief>]) {
         let live_dems = &mut self.live_dems;
         live_dems.clear();
-        live_dems.extend(tiles.iter().filter_map(|tile| Some(tile.bucket()?.id())));
+        live_dems.extend(tiles.iter().filter_map(|tile| Some(tile.data()?.id())));
         self.dem_textures.retain(|id, _| live_dems.contains(id));
         self.mask_quads.retain(live_dems);
     }
