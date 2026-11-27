@@ -5,7 +5,7 @@
 //! through a gesture recognizer (`mln_engine::gestures`).
 //!
 //! The runtime and the session run on this Web Worker's one thread, in the
-//! slices of `mln_web_host`'s pump: a command or a frame demand runs in a
+//! slices of `mln_runtime::web`'s pump: a command or a frame demand runs in a
 //! later task, never inside the call that sends it. The page's animation
 //! frames step the gestures and demand a frame when the map has something
 //! new to draw, and the session renders it in a task of its own.
@@ -18,6 +18,7 @@ use mln_engine::camera::{AnimationOptions, BoundOptions, CameraOptions, CameraUp
 use mln_engine::geo::ScreenCoordinate;
 use mln_engine::gestures::{GestureEvent, GestureRecognizer, Input, Modes, PointerKind};
 use mln_engine::map::MapEvent;
+use mln_runtime::web::{pump, shaper};
 use mln_runtime::{
     AttachOptions, DemandMode, Error, ErrorKind, EventMask, EventType, FrameDemand, FrameDisposition, LogicalExtent,
     Map, MapOptions, RenderSession, RenderTarget, Runtime, RuntimeEvent, RuntimeEventKind, RuntimeOptions, Surface,
@@ -25,7 +26,6 @@ use mln_runtime::{
 };
 use mln_style::geo::LatLng;
 use mln_style::size::Size;
-use mln_web_host::{pump, shaper};
 use parking_lot::Mutex;
 use wasm_bindgen::prelude::*;
 

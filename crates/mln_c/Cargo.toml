@@ -59,11 +59,10 @@ objc2.workspace = true
 [target.'cfg(any(windows, all(unix, not(target_vendor = "apple")), target_family = "wasm"))'.dependencies]
 mln_gl = { workspace = true, optional = true }
 
-# The browser build: JavaScript objects, the instance's tile workers and the
-# shaper module.
+# The browser build: JavaScript objects, and the ports of the instance's tile
+# workers.
 [target.'cfg(target_family = "wasm")'.dependencies]
 js-sys.workspace = true
-mln_web_host.workspace = true
 wasm-bindgen.workspace = true
 web-sys = { workspace = true, features = ["MessagePort"] }
 

@@ -3,7 +3,7 @@
 // build of the module. The page gives it the module and a control port to
 // the map's Web Worker, and the instance starts at once. The map's runtime
 // then connects each of its render sessions over the control port, with a
-// port of the session's own, which the instance serves (mln_web_host's
+// port of the session's own, which the instance serves (mln_runtime::web's
 // tile_worker): requests are the session's bytes, and the replies go back in
 // batches, each its bytes and its payloads (pixels, vertices, indices), all
 // transferred. The worker reports each batch's size over the control port,

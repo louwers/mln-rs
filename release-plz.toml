@@ -63,7 +63,6 @@ changelog_include = [
   "mln-rs-shelf-pack",
   "mln-rs-style",
   "mln-rs-vulkan",
-  "mln-rs-web-host",
   "mln-rs-webgpu",
 ]
 

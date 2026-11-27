@@ -264,7 +264,7 @@ fn font_face_engine() -> Arc<dyn FontFaceEngine> {
 
 #[cfg(target_family = "wasm")]
 fn font_face_engine() -> Arc<dyn FontFaceEngine> {
-    Arc::new(mln_web_host::shaper::ShaperModuleEngine)
+    Arc::new(crate::web::shaper::ShaperModuleEngine)
 }
 
 /// The most worker threads of a runtime's pool.
@@ -634,7 +634,7 @@ impl Runtime {
     /// In the browser, the runtime's thread is the one that calls this, which
     /// a wasm instance has only one of, and the runtime never blocks it: its
     /// commands run in tasks of their own on the browser's event loop
-    /// (`mln_web_host::pump`), never inside the call that sends them.
+    /// (`web::pump`), never inside the call that sends them.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) when the
     /// cache database file can't be opened or created, and in the browser
@@ -646,7 +646,7 @@ impl Runtime {
     /// Starts a runtime and its thread, whose maps parse their styles
     /// against `registry`, and whose renderers and tile workers use it. In
     /// the browser, the tile workers' Web Workers must serve with registries
-    /// filled by the same calls (`mln_web_host::tile_worker::serve`).
+    /// filled by the same calls (`web::tile_worker::serve`).
     ///
     /// Fails as [`new`](Self::new) does.
     pub fn with_registry(options: &RuntimeOptions, registry: Arc<Registry>) -> Result<Runtime, Error> {

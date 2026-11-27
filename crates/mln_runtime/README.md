@@ -21,8 +21,8 @@ session's work through its `DriverWork`.
 
 In the browser (wasm32-unknown-unknown, no threads), everything of a runtime
 runs on the thread that made it, in short tasks on the browser's event loop
-(`mln_web_host`'s pump), and nothing waits: a command runs after the call that
-sent it returns. Sessions present to a canvas with the browser's WebGPU or
+(`mln_runtime::web`'s pump), and nothing waits: a command runs after the call
+that sent it returns. Sessions present to a canvas with the browser's WebGPU or
 WebGL2, one backend per build, and put their tiles' workers in Web Workers, as
 examples/web does.
 

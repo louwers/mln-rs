@@ -379,7 +379,7 @@ async function run({
 
   // The map's work (finished fetches, worker replies, queued tasks, its
   // frames) runs as soon as the map asks for it, in a task of its own
-  // (mln_web_host's pump), rather than waiting for the next animation frame:
+  // (mln_runtime::web's pump), rather than waiting for the next animation frame:
   // each step of a load (a tile's response, its parsing, the next request)
   // would otherwise wait a frame.
   //

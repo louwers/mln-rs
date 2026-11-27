@@ -1,20 +1,39 @@
-//! The browser build: everything of a runtime on the one thread of its wasm
-//! instance, as examples/web runs a map.
+//! The browser build: what a wasm instance needs to run mln-rs in a
+//! browser, on the model of examples/web: wasm32-unknown-unknown without
+//! atomics, one instance per Web Worker, each with its own memory and one
+//! thread.
+//!
+//! - [`pump`]: the instance's work on its own event loop. Its queues and
+//!   pools wake it, and it runs them in slices of a few milliseconds, each a
+//!   task of its own, so that input, worker replies and animation frames
+//!   get in between.
+//! - [`tile_workers`]: the map side of tile workers in other Web Workers,
+//!   for `mln_engine`'s `RemoteWorkers`, over a `MessagePort` to each.
+//! - [`tile_worker`]: the side of a Web Worker that runs tile workers, one
+//!   `TileWorkerHost` per port that a map connected. The app's module
+//!   exports its entry point, so that the Web Worker lays out with the
+//!   app's registrations.
+//! - [`shaper`]: the font-face shaper as a second module, which the map's
+//!   instance loads the first time a style declares font faces.
 //!
 //! The instance has no other threads, so a runtime's queue and pool, its
 //! network loading's queue and each render session's queue run on the
-//! thread that made them, in the slices of
-//! the instance's pump (`mln_web_host::pump`), which the queues and the pool
-//! wake. Nothing waits: a command runs in a later slice, never inside the
-//! call that sent it. Each session's renderer runs
-//! its tiles' jobs in Web Workers of the instance's own ([`tile_workers`]),
-//! and shapes font faces with the shaper module
-//! (the runtime's font-face engine) once a style declares them.
+//! thread that made them, in the slices of the instance's pump, which the
+//! queues and the pool wake. Nothing waits: a command runs in a later slice,
+//! never inside the call that sent it. Each session's renderer runs its
+//! tiles' jobs in Web Workers of the instance's own, and shapes font faces
+//! with the shaper module (the runtime's font-face engine) once a style
+//! declares them.
 //!
 //! JavaScript values stay on this thread with what owns them: the fetch
 //! preloads with the network loading's core, which the pump runs, and the
 //! canvases that a session's attach and surface changes hand its worker in
 //! the session's side here, until the worker takes them.
+
+pub mod pump;
+pub mod shaper;
+pub mod tile_worker;
+pub mod tile_workers;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -26,11 +45,23 @@ use mln_engine::storage::OnlineFileSource;
 use mln_engine::storage::network_status::NetworkStatus;
 use mln_engine::worker::worker_codec::RemoteWorkers;
 use mln_style::hash::HashMap;
-use mln_web_host::{pump, tile_workers};
 
 use crate::log_target;
 use crate::render::{SessionId, SessionQueue};
 use crate::runtime::{CoreQueue, RuntimeCore};
+
+/// Logs a panic's message to the console, and leaves it in the global
+/// `mlnPanic`, for the JavaScript that runs the instance: wasm32-unknown-unknown
+/// aborts on a panic, which traps the instance, and nothing may call into it
+/// after that.
+#[wasm_bindgen::prelude::wasm_bindgen(js_name = mlnWebSetPanicHook)]
+pub fn set_panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        let message = wasm_bindgen::JsValue::from_str(&info.to_string());
+        web_sys::console::error_1(&message);
+        let _ = js_sys::Reflect::set(&js_sys::global(), &wasm_bindgen::JsValue::from_str("mlnPanic"), &message);
+    }));
+}
 
 /// Runs a runtime's `queue` with its `core` in the pump's slices until the
 /// queue stops, and with it its `pool`'s tasks.

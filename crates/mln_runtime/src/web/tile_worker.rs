@@ -1,6 +1,6 @@
 //! The side of a Web Worker that runs tile workers: its own wasm instance,
 //! with its own memory, and a `TileWorkerHost` for each map side that
-//! connected a port to it ([`tile_workers`](crate::tile_workers) describes
+//! connected a port to it ([`tile_workers`](super::tile_workers) describes
 //! the messages). A host runs a tile's job as its message arrives, one job
 //! per message, so the browser's event loop runs between jobs; raster and
 //! raster-dem tiles' images decode in the browser's decoder, whose answer
@@ -20,7 +20,7 @@ use mln_wire::payload::Payload;
 use parking_lot::Mutex;
 use wasm_bindgen::prelude::*;
 
-use crate::pump;
+use super::pump;
 
 /// The tile workers of one port.
 struct Connection {
@@ -45,7 +45,7 @@ thread_local! {
 /// Worker's script calls after the module's `init`.
 pub fn serve(port: &web_sys::MessagePort, registry: Arc<Registry>) {
     // The Web Worker's script reports a panic's message from `mlnPanic`.
-    crate::set_panic_hook();
+    super::set_panic_hook();
     let replies = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&replies);
     // A raster tile's reply comes once the browser decoded its image,

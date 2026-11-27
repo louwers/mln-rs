@@ -3,16 +3,16 @@
 #MISE tools={"core:zig"="0.17.1"}
 # The browser build (wasm32-unknown-unknown, no atomics: one wasm instance per
 # Web Worker, each with its own memory) needs the target, which
-# rust-toolchain.toml installs. Clippy, so that examples/web, which only builds
-# there, is linted too. Three runs, since one would unify their features: the
-# libraries as published (mln_engine's `sqlite` feature on, its SQLite built
-# through sqlite-wasm-rs, which needs a C compiler that targets wasm32, and the
-# in-process font-face shaper), the browser build's two modules as `mise run
-# web:build` builds them, which leave both out, with mln_web_host, the glue they
-# share, and the map's module with its `webgl` feature in place of its
-# default `webgpu`. The check fails if anything turns SQLite back on in the
-# browser build, or brings in a C build (`cc`) that would need that clang, or
-# if either of the map's modules gets the other's backend (mln_gl and its GL
+# rust-toolchain.toml installs. Clippy, so that examples/web and mln_runtime's
+# `web` module, which only build there, are linted too. Three runs, since one
+# would unify their features: the libraries as published (mln_engine's `sqlite`
+# feature on, its SQLite built through sqlite-wasm-rs, which needs a C compiler
+# that targets wasm32, and the in-process font-face shaper), the browser build's
+# two modules as `mise run web:build` builds them, which leave both out, and the
+# map's module with its `webgl` feature in place of its default `webgpu`. The
+# check fails if anything turns SQLite back on in the browser build, or brings
+# in a C build (`cc`) that would need that clang, or if either of the map's
+# modules gets the other's backend (mln_gl and its GL
 # bindings, mln_webgpu and wgpu), or if the browser build brings in ICU4X: it
 # takes its locale services from the browser's `Intl`. Then the C library
 # (crates/mln_c, with mln_runtime) as its browser package builds it, once per
@@ -38,8 +38,8 @@ lacks() {
     fi
 }
 
-dev_shell cargo clippy --target wasm32-unknown-unknown -p mln-rs
-cargo clippy --target wasm32-unknown-unknown -p mln-rs-web -p mln-rs-web-shaper -p mln-rs-web-host
+dev_shell cargo clippy --target wasm32-unknown-unknown -p mln-rs -p mln-rs-runtime
+cargo clippy --target wasm32-unknown-unknown -p mln-rs-web -p mln-rs-web-shaper
 cargo clippy --target wasm32-unknown-unknown -p mln-rs-web --no-default-features --features webgl
 lacks '^rusqlite ' -p mln-rs-web --edges normal
 lacks '^cc ' -p mln-rs-web --edges normal,build

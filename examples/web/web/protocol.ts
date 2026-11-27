@@ -227,7 +227,7 @@ export interface StartTileWorker {
 
 /**
  * From the map's runtime to a tile workers' Web Worker, over its control
- * port, for each render session (mln_web_host's tile_workers): a port to
+ * port, for each render session (mln_runtime::web::tile_workers): a port to
  * serve the session's tile workers on.
  */
 export interface TileWorkerConnect {

@@ -71,7 +71,6 @@ mln_style = { package = "mln-rs-style", path = "crates/mln_style", version = "=0
 mln_vulkan = { package = "mln-rs-vulkan", path = "crates/mln_vulkan", version = "=0.0.18" }
 mln_wire = { package = "mln-rs-wire", path = "crates/mln_wire", version = "=0.0.18" }
 mln_wire_derive = { package = "mln-rs-wire-derive", path = "crates/mln_wire_derive", version = "=0.0.18" }
-mln_web_host = { package = "mln-rs-web-host", path = "crates/mln_web_host", version = "=0.0.18" }
 mln_webgpu = { package = "mln-rs-webgpu", path = "crates/mln_webgpu", version = "=0.0.18" }
 pixelmatch = { package = "mln-rs-pixelmatch", path = "vendor/pixelmatch", version = "=0.0.18" }
 # The render and query test runner, for the render tests of the layer
@@ -550,7 +549,6 @@ mln_engine = { workspace = true, features = [
 mln_runtime.workspace = true
 mln_style.workspace = true
 mln_vulkan = { workspace = true, optional = true }
-mln_web_host.workspace = true
 mln_webgpu = { workspace = true, optional = true }
 
 [lints]

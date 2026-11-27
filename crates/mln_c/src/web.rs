@@ -143,7 +143,7 @@ mod tile_worker {
     #[expect(unreachable_pub, reason = "wasm-bindgen exports only `pub` functions")]
     #[wasm_bindgen(js_name = mlnWebServeTileWorker)]
     pub fn serve(port: &web_sys::MessagePort) {
-        mln_web_host::tile_worker::serve(port, crate::registry::registry());
+        mln_runtime::web::tile_worker::serve(port, crate::registry::registry());
     }
 }
 
@@ -210,6 +210,6 @@ pub(crate) fn set_defaults() {
     if SET.replace(true) {
         return;
     }
-    mln_web_host::tile_workers::set_default_script(wasm_bindgen::link_to!(module = "/js/tile_worker.js"));
-    mln_web_host::shaper::set_default_loader(shaper_loader());
+    mln_runtime::web::tile_workers::set_default_script(wasm_bindgen::link_to!(module = "/js/tile_worker.js"));
+    mln_runtime::web::shaper::set_default_loader(shaper_loader());
 }

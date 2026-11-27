@@ -69,17 +69,23 @@ wgpu = { workspace = true, optional = true }
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 mln_engine = { workspace = true, features = ["font-face-shaper", "sqlite"] }
 
-# The browser build's instance: its pump, tile workers in Web Workers and
-# canvases.
+# The browser build's instance: its pump, tile workers in Web Workers, the
+# shaper module and canvases.
 [target.'cfg(target_family = "wasm")'.dependencies]
 js-sys.workspace = true
-mln_web_host.workspace = true
+mln_wire.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 web-sys = { workspace = true, features = [
   "HtmlCanvasElement",
+  "MessageChannel",
+  "MessageEvent",
+  "MessagePort",
   "OffscreenCanvas",
   "WebGl2RenderingContext",
+  "Worker",
+  "WorkerOptions",
+  "WorkerType",
 ] }
 # wgpu's objects are Send and Sync on an instance without threads, as the
 # runtime's handles need.

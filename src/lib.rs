@@ -54,8 +54,6 @@ pub use mln_style;
 /// Empty on Apple platforms and in the browser build.
 #[cfg(feature = "vulkan")]
 pub use mln_vulkan;
-/// Empty except in the browser build.
-pub use mln_web_host;
 #[cfg(feature = "webgpu")]
 pub use mln_webgpu;
 pub mod source;

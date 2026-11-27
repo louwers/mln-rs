@@ -77,7 +77,7 @@ page (main thread, no wasm)
 - Each worker runs its queues and pool tasks in a pump in place of threads, and
   finished fetches, tile replies and tasks are handled as they arrive, and
   retries and revalidations once they're due
-  ([crates/mln_web_host](../../crates/mln_web_host)).
+  ([crates/mln_runtime/src/web](../../crates/mln_runtime/src/web)).
 - The render session sends work to the tile workers as serialized messages over
   MessageChannels, which the runtime connects through a control port that the
   page gives the map worker for each tile worker. Large arrays, such as pixels

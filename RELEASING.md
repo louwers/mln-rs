@@ -36,9 +36,9 @@ they all take the largest bump. The pull request lists the packages whose API
 broke.
 
 cargo-semver-checks builds the libraries for Linux, so it doesn't see what only
-other targets build: all of mln-rs-mtl (Apple platforms) and mln-rs-web-host
-(the browser), and any item behind a `cfg` for another platform. It doesn't
-catch every break either. For a break it misses, set the version by hand
+other targets build: all of mln-rs-mtl (Apple platforms), mln-rs-runtime's `web`
+module (the browser), and any item behind a `cfg` for another platform. It
+doesn't catch every break either. For a break it misses, set the version by hand
 (below).
 
 To release, merge the pull request. The release workflow then publishes the

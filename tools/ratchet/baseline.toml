@@ -26,9 +26,9 @@
 "crates/mln_engine/src/worker/worker_codec/host.rs" = 3
 "crates/mln_runtime/src/render/driver.rs" = 2
 "crates/mln_runtime/src/render/session.rs" = 9
-"crates/mln_runtime/src/web.rs" = 1
+"crates/mln_runtime/src/web/mod.rs" = 1
+"crates/mln_runtime/src/web/pump.rs" = 3
+"crates/mln_runtime/src/web/shaper.rs" = 6
+"crates/mln_runtime/src/web/tile_worker.rs" = 2
+"crates/mln_runtime/src/web/tile_workers.rs" = 1
 "crates/mln_wire/src/host_bytes.rs" = 3
-"crates/mln_web_host/src/pump.rs" = 3
-"crates/mln_web_host/src/shaper.rs" = 6
-"crates/mln_web_host/src/tile_worker.rs" = 2
-"crates/mln_web_host/src/tile_workers.rs" = 1

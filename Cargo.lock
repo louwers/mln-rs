@@ -2484,7 +2484,6 @@ dependencies = [
  "mln-rs-runtime",
  "mln-rs-style",
  "mln-rs-vulkan",
- "mln-rs-web-host",
  "mln-rs-webgpu",
 ]
 
@@ -2585,7 +2584,6 @@ dependencies = [
  "mln-rs-runtime",
  "mln-rs-style",
  "mln-rs-vulkan",
- "mln-rs-web-host",
  "objc2 0.6.5",
  "parking_lot",
  "raw-window-handle",
@@ -2954,8 +2952,8 @@ dependencies = [
  "mln-rs-mtl",
  "mln-rs-style",
  "mln-rs-vulkan",
- "mln-rs-web-host",
  "mln-rs-webgpu",
+ "mln-rs-wire",
  "objc2 0.6.5",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
@@ -3059,26 +3057,10 @@ dependencies = [
  "mln-rs-gl",
  "mln-rs-runtime",
  "mln-rs-style",
- "mln-rs-web-host",
  "mln-rs-webgpu",
  "parking_lot",
  "serde_json",
  "serde_json_borrow",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
-name = "mln-rs-web-host"
-version = "0.0.18"
-dependencies = [
- "js-sys",
- "log",
- "mln-rs-engine",
- "mln-rs-style",
- "mln-rs-wire",
- "parking_lot",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

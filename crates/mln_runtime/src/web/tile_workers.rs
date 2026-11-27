@@ -1,6 +1,6 @@
 //! The map side of tile workers in other Web Workers: `mln_engine`'s
 //! `WorkerInstances` over a `MessagePort` to each, whose other end a Web
-//! Worker serves with [`tile_worker::serve`](crate::tile_worker::serve).
+//! Worker serves with [`tile_worker::serve`](super::tile_worker::serve).
 //!
 //! A request goes as its bytes, transferred. A batch of replies comes back
 //! as an array, each reply an array of `Uint8Array`s: its bytes, then its
@@ -167,7 +167,7 @@ thread_local! {
 /// `{module, port}` for each map side that connects: `module` the
 /// instance's `WebAssembly.Module`, which it instantiates with the first,
 /// and `port` to serve with the module's `mlnWebServeTileWorker` export,
-/// which calls [`tile_worker::serve`](crate::tile_worker::serve).
+/// which calls [`tile_worker::serve`](super::tile_worker::serve).
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = mlnWebConfigureTileWorkers)]
 pub fn configure(count: Option<u32>, spawn: Option<js_sys::Function>) {
     with_pool(|pool| {

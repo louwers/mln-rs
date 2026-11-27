@@ -20,7 +20,7 @@
 //!
 //! In the browser (wasm32-unknown-unknown, without threads), a runtime's
 //! thread and its sessions' are the one that made the runtime: their work
-//! runs in short tasks on that thread's event loop (`mln_web_host`'s pump),
+//! runs in short tasks on that thread's event loop (`web::pump`),
 //! never inside the call that sent it, and nothing blocks. Sessions present
 //! to a canvas (`Surface::web_canvas`) with the browser's WebGPU or WebGL2,
 //! and put their tiles' workers in Web Workers.
@@ -58,7 +58,7 @@ mod resources;
 mod runtime;
 mod style;
 #[cfg(target_family = "wasm")]
-mod web;
+pub mod web;
 
 /// The `log` targets of this crate's records. Each names the event that
 /// `mln_c` reports the record under (`mln_c::logging`).
@@ -67,6 +67,8 @@ mod log_target {
     pub(crate) const CRASH: &str = "mln_runtime::crash";
     pub(crate) const RENDER: &str = "mln_runtime::render";
     pub(crate) const HTTP_REQUEST: &str = "mln_runtime::http_request";
+    #[cfg(target_family = "wasm")]
+    pub(crate) const GLYPH: &str = "mln_runtime::glyph";
 }
 
 pub use camera::{CameraFitArea, CameraFitOptions, CameraFitUpdate, TileOptions, ViewportOptions};
