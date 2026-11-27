@@ -3,10 +3,10 @@
 use geo_types::{Coord, Geometry, LineString};
 use mln_style::feature::Value;
 
-use crate::tile::clip::{clip_line, clip_ring};
-use crate::tile::geometry::{Line, Ring, Vertex, X};
-use crate::tile::simplify::simplify;
-use crate::tile::{Error, Options, TileIndex};
+use crate::sources::geojson::tile::clip::{clip_line, clip_ring};
+use crate::sources::geojson::tile::geometry::{Line, Ring, Vertex, X};
+use crate::sources::geojson::tile::simplify::simplify;
+use crate::sources::geojson::tile::{Error, Options, TileIndex};
 
 fn p(x: f64, y: f64) -> Vertex {
     Vertex::new(x, y, 0.0)
@@ -41,7 +41,7 @@ fn assert_lines_eq(a: &[Line], b: &[Line]) {
 }
 
 fn clip_lines(input: &Line, line_metrics: bool) -> Vec<Line> {
-    let mut pieces = crate::tile::geometry::Parts::new();
+    let mut pieces = crate::sources::geojson::tile::geometry::Parts::new();
     clip_line::<X>(input, 10.0, 40.0, line_metrics, &mut pieces);
     pieces.into_vec()
 }

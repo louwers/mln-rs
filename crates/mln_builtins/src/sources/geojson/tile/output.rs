@@ -7,7 +7,7 @@ use mln_style::feature::{Feature as TileFeature, PropertyMap, Value};
 
 use super::TileId;
 use super::geometry::{Feature, Geometry as VtGeometry, Line, Parts, Ring, Vertex};
-use crate::TileFeatures;
+use crate::sources::geojson::TileFeatures;
 
 /// A tile's features.
 #[derive(Clone, Debug, Default, PartialEq)]

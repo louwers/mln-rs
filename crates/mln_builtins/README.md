@@ -7,12 +7,13 @@
 > this crate as `mln_rs::mln_builtins`.
 
 The style specification's source types, through the engine's source type
-contract: vector, raster and raster-dem tilesets, GeoJSON and image sources, and
-how they load. `register_builtins` fills a registry with them and the built-in
-layer types.
+contract: vector, raster and raster-dem tilesets, GeoJSON sources, which it cuts
+into tiles or clusters, and image sources, and how they load.
+`register_builtins` fills a registry with them and the built-in layer types.
 
 Its code is under the root license ([LICENSE.md](LICENSE.md)); the symbol
-layout's label points follow Mapbox's polylabel, under the ISC License
+layout's label points and GeoJSON sources' tiling and clustering follow Mapbox's
+polylabel, geojson-vt and supercluster, under the ISC License
 ([LICENSE-ISC](LICENSE-ISC)).
 
 Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the

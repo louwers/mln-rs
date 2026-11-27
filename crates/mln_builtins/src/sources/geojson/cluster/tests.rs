@@ -1,4 +1,4 @@
-//! Clusters testdata/places.json, the places of supercluster's tests. The
+//! Clusters testdata/supercluster/places.json, the places of supercluster's tests. The
 //! expectations are GL JS's supercluster's (8.0.1), whose cluster IDs are
 //! these plus the number of points.
 
@@ -7,12 +7,13 @@ use mln_style::feature::{Feature, Identifier, PropertyMap, Value};
 use serde_json::Value as Json;
 
 use super::{Aggregate, Clusters, Error, MAX_ZOOM, Options, abbreviate};
-use crate::TileFeatures;
+use crate::sources::geojson::TileFeatures;
 
 const DEFAULT: Options = Options { max_zoom: 16, radius: 40.0, extent: 512, min_points: 2 };
 
 fn places() -> Vec<Feature<f64>> {
-    let path = std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("testdata/places.json");
+    let path = std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
+        .join("testdata/supercluster/places.json");
     let json: Json = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     json["features"]
         .as_array()

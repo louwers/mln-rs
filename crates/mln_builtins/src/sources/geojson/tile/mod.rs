@@ -20,7 +20,7 @@ use geometry::{Bbox, Feature, X, Y};
 use output::Tile;
 use parking_lot::{Mutex, RwLock};
 
-use crate::TileFeatures;
+use crate::sources::geojson::TileFeatures;
 
 /// foldhash's hasher, with a fixed seed in the benchmarks' builds, as
 /// `mln_style::hash`'s.

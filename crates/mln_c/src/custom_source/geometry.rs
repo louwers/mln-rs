@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use geojson::GeoJson;
-use mln_builtins::sources::geojson::TileFeatures;
+use mln_builtins::sources::geojson::{TileFeatures, tile};
 use mln_style::constants;
 use mln_style::layer::SourceKind;
 use mln_style::range::Range;
@@ -85,11 +85,11 @@ pub(crate) fn tile_features(geojson: GeoJson, tile_id: &CanonicalTileID, options
         }
     };
     let scale = f64::from(constants::EXTENT / i32::from(options.tile_size.max(1)));
-    let tile_options = mln_geojson::tile::TileOptions {
+    let tile_options = tile::TileOptions {
         extent: constants::EXTENT as u16,
         buffer: (scale * f64::from(options.buffer)).round() as u16,
         tolerance: scale * options.tolerance,
         ..Default::default()
     };
-    mln_geojson::tile::cut_tile(&features, tile_id.z, tile_id.x, tile_id.y, &tile_options, options.wrap, options.clip)
+    tile::cut_tile(&features, tile_id.z, tile_id.x, tile_id.y, &tile_options, options.wrap, options.clip)
 }

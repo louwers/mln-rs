@@ -9,7 +9,7 @@ use smallvec::smallvec;
 
 use super::geometry::{Feature, Geometry, Line, Ring, Vertex};
 use super::simplify::simplify;
-use crate::mercator;
+use crate::sources::geojson::mercator;
 
 /// The features of `features`, simplified with `tolerance` (in the unit
 /// square). A feature without geometry or points has none. A geometry

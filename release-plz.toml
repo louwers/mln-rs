@@ -51,7 +51,6 @@ changelog_include = [
   "mln-rs-builtins",
   "mln-rs-d3d12",
   "mln-rs-engine",
-  "mln-rs-geojson",
   "mln-rs-geometry",
   "mln-rs-gfx",
   "mln-rs-gl",

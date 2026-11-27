@@ -56,7 +56,6 @@ mln_bench_workload = { package = "mln-rs-bench-workload", path = "tools/bench/wo
 # offline regions SQLite, so that examples/web leaves both out
 # (crates/mln_engine/Cargo.toml).
 mln_engine = { package = "mln-rs-engine", path = "crates/mln_engine", version = "=0.0.18", default-features = false }
-mln_geojson = { package = "mln-rs-geojson", path = "crates/mln_geojson", version = "=0.0.18" }
 mln_gfx = { package = "mln-rs-gfx", path = "crates/mln_gfx", version = "=0.0.18" }
 mln_gl = { package = "mln-rs-gl", path = "crates/mln_gl", version = "=0.0.18" }
 mln_glsl = { package = "mln-rs-glsl", path = "crates/mln_glsl", version = "=0.0.18" }
@@ -146,7 +145,7 @@ glam = { version = "0.34.3", default-features = false, features = [
 # port of the C++ core's vendored geometry.hpp variant. Tile geometry stays
 # the port's (mln-rs-geometry's `Point`). mlt-core already depends on it.
 geo-types = { version = "0.7.20" }
-# The k-d tree that GeoJSON sources cluster their points with (mln_geojson),
+# The k-d tree that GeoJSON sources cluster their points with (mln_builtins),
 # instead of porting kdbush.
 geo-index = { version = "0.4.0", default-features = false }
 # GeoJSON, in place of a port of the C++ core's vendored geojson.hpp: the
@@ -538,7 +537,6 @@ geometry.workspace = true
 glam.workspace = true
 mln_builtins.workspace = true
 mln_d3d12 = { workspace = true, optional = true }
-mln_geojson.workspace = true
 mln_gfx.workspace = true
 mln_gl = { workspace = true, optional = true }
 mln_mtl = { workspace = true, optional = true }

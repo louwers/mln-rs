@@ -2477,7 +2477,6 @@ dependencies = [
  "mln-rs-builtins",
  "mln-rs-d3d12",
  "mln-rs-engine",
- "mln-rs-geojson",
  "mln-rs-geometry",
  "mln-rs-gfx",
  "mln-rs-gl",
@@ -2546,13 +2545,14 @@ dependencies = [
  "bytemuck",
  "earcut",
  "etagere",
+ "foldhash 0.2.0",
+ "geo-index",
  "geo-types",
  "geojson",
  "glam",
  "js-sys",
  "log",
  "mln-rs-engine",
- "mln-rs-geojson",
  "mln-rs-geometry",
  "mln-rs-gfx",
  "mln-rs-pixelmatch",
@@ -2562,6 +2562,8 @@ dependencies = [
  "mlt-core",
  "parking_lot",
  "serde_json",
+ "smallvec",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2577,7 +2579,6 @@ dependencies = [
  "mln-rs-builtins",
  "mln-rs-d3d12",
  "mln-rs-engine",
- "mln-rs-geojson",
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-mtl",
@@ -2692,7 +2693,6 @@ dependencies = [
  "log",
  "memmap2",
  "mln-rs-builtins",
- "mln-rs-geojson",
  "mln-rs-geometry",
  "mln-rs-gfx",
  "mln-rs-headless",
@@ -2747,21 +2747,6 @@ dependencies = [
  "geojson",
  "mln-rs-style",
  "serde_json",
-]
-
-[[package]]
-name = "mln-rs-geojson"
-version = "0.0.18"
-dependencies = [
- "foldhash 0.2.0",
- "geo-index",
- "geo-types",
- "geojson",
- "mln-rs-style",
- "parking_lot",
- "serde_json",
- "smallvec",
- "thiserror 2.0.21",
 ]
 
 [[package]]

@@ -2,7 +2,13 @@
 //! gives, or that the source's URL points to, cut into tiles or clustered.
 //! A source's description is its data, indexed for tiling or clustered as it
 //! loads; its tiles take their features from it, cut off the tiles' thread
-//! unless the source updates synchronously.
+//! unless the source updates synchronously. [`tile`] cuts features into
+//! vector tiles, as geojson-vt does, and [`cluster`] groups a clustered
+//! source's points into clusters for each zoom, as supercluster does.
+
+pub mod cluster;
+mod mercator;
+pub mod tile;
 
 use std::sync::Arc;
 
@@ -16,7 +22,6 @@ use mln_engine::source::{
 };
 use mln_engine::storage::Data;
 use mln_engine::tile::TileData;
-use mln_geojson::{cluster, tile};
 use mln_style::error::Error;
 use mln_style::expression::{Expr, evaluate_accumulated, from_expression_value};
 use mln_style::feature::{Feature, PropertyMap, Value};
@@ -239,7 +244,9 @@ fn create(features: Features, collection: bool, options: &Arc<GeoJSONOptions>) -
     Ok(Arc::new(IndexData { index: tile::TileIndex::new(&features, tile_options) }))
 }
 
-pub type TileFeatures = mln_geojson::TileFeatures;
+/// A tile's features, in tile coordinates. Features that come from one
+/// source feature share its property map.
+pub type TileFeatures = Vec<Feature<i16, Arc<PropertyMap>>>;
 pub type Features = Vec<Feature<f64>>;
 
 pub trait GeoJSONData: Send + Sync {

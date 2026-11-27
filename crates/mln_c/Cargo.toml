@@ -41,7 +41,6 @@ mln_builtins.workspace = true
 # The custom layer type, and the custom source types' engine halves.
 mln_engine.workspace = true
 # The custom geometry sources' tiles, cut as a GeoJSON source's.
-mln_geojson.workspace = true
 mln_runtime.workspace = true
 mln_style.workspace = true
 parking_lot.workspace = true

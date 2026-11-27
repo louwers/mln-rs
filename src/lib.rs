@@ -41,7 +41,6 @@ pub use mln_builtins;
 #[cfg(feature = "d3d12")]
 pub use mln_d3d12;
 pub use mln_engine;
-pub use mln_geojson;
 pub use mln_gfx;
 #[cfg(feature = "gl")]
 pub use mln_gl;

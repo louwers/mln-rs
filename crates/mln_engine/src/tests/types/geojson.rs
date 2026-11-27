@@ -2,13 +2,18 @@
 //! style's GeoJSON, the GeoJSON at the source's URL or the test's own,
 //! described in the background and cut into tiles as the tiles start, off
 //! the tiles' thread unless the source updates synchronously or the test
-//! gives them. Unlike the
-//! built-in type's, it doesn't cluster.
+//! gives them. Unlike the built-in type's, it doesn't cluster, clip or
+//! simplify: a tile takes whole each feature whose bounds meet the tile and
+//! its buffer.
 
 use std::sync::Arc;
 
+use geo_types::{
+    Coord, Geometry, GeometryCollection, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon,
+};
 use geojson::GeoJson;
 use mln_style::error::Error;
+use mln_style::geo::{LatLng, WrapMode};
 use mln_style::source::SourceData;
 use mln_style::sources::GeoJsonSourceType;
 use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceOptions};
@@ -16,6 +21,7 @@ use mln_style::tile_id::CanonicalTileID;
 use mln_style::{Edit, Source, constants};
 
 use crate::exec::pool::TaskGroup;
+use crate::geo::projection::Projection;
 use crate::map::MapMode;
 use crate::source::{
     Cover, DataOrigin, Described, Fetch, GeometryTiles, Load, LoadContext, OfflineResources, OriginUpdate, Respond,
@@ -39,26 +45,13 @@ pub(crate) struct TestGeoJson {
 }
 
 impl TestGeoJson {
-    /// The features of `geojson`, cut into tiles with `options`.
+    /// The features of `geojson`, cut into tiles with the buffer of
+    /// `options`.
     pub(crate) fn new(geojson: GeoJson, options: &GeoJSONOptions) -> Result<Arc<Self>, Error> {
         let features =
             mln_style::feature::geojson::features(geojson).map_err(|e| Error::invalid_argument(e.to_string()))?;
-        let scale = f64::from(constants::EXTENT) / constants::TILE_SIZE_D;
-        let tile_options = mln_geojson::tile::Options {
-            max_zoom: options.maxzoom,
-            tile: mln_geojson::tile::TileOptions {
-                extent: constants::EXTENT as u16,
-                buffer: (scale * f64::from(options.buffer)).round() as u16,
-                tolerance: scale * options.tolerance,
-                line_metrics: options.line_metrics,
-            },
-            ..Default::default()
-        };
-        let index = mln_geojson::tile::TileIndex::new(&features, tile_options);
-        Ok(Arc::new(TestGeoJson {
-            tiles: Box::new(move |id| index.tile(id.z, id.x, id.y).unwrap_or_default()),
-            cuts: true,
-        }))
+        let buffer = f64::from(constants::EXTENT) / constants::TILE_SIZE_D * f64::from(options.buffer);
+        Ok(Arc::new(TestGeoJson { tiles: Box::new(move |id| Arc::new(cut(&features, id, buffer))), cuts: true }))
     }
 
     /// `features` in every tile.
@@ -76,6 +69,58 @@ impl TestGeoJson {
     fn of_text(text: &[u8], options: &GeoJSONOptions) -> Option<Arc<Self>> {
         Self::new(serde_json::from_slice(text).ok()?, options).ok()
     }
+}
+
+/// The features of `features` whose bounds meet tile `id` and `buffer`
+/// (in tile units) around it, whole, in the tile's coordinates.
+fn cut(features: &[mln_style::feature::Feature<f64>], id: &CanonicalTileID, buffer: f64) -> Vec<GeoJsonFeature> {
+    let extent = f64::from(constants::EXTENT);
+    let (min, max) = (-buffer, extent + buffer);
+    features
+        .iter()
+        .filter_map(|feature| {
+            let (mut low, mut high) =
+                (Coord { x: f64::INFINITY, y: f64::INFINITY }, Coord { x: -f64::INFINITY, y: -f64::INFINITY });
+            let geometry = map_coords(feature.geometry.as_ref()?, &mut |c| {
+                let world =
+                    Projection::project_zoom(&LatLng::saturating(c.y, c.x, WrapMode::Unwrapped), i32::from(id.z));
+                let p = Coord { x: (world.x - f64::from(id.x)) * extent, y: (world.y - f64::from(id.y)) * extent };
+                (low.x, low.y, high.x, high.y) = (low.x.min(p.x), low.y.min(p.y), high.x.max(p.x), high.y.max(p.y));
+                Coord { x: p.x.round() as i16, y: p.y.round() as i16 }
+            });
+            (high.x >= min && low.x <= max && high.y >= min && low.y <= max).then(|| GeoJsonFeature {
+                geometry: Some(geometry),
+                properties: Arc::new(feature.properties.clone()),
+                id: feature.id.clone(),
+            })
+        })
+        .collect()
+}
+
+/// `geometry` with `f` of each of its coordinates.
+fn map_coords(geometry: &Geometry<f64>, f: &mut dyn FnMut(Coord<f64>) -> Coord<i16>) -> Geometry<i16> {
+    let mut line = |line: &LineString<f64>| LineString(line.0.iter().map(|&c| f(c)).collect());
+    match geometry {
+        Geometry::Point(p) => Point(f(p.0)).into(),
+        Geometry::MultiPoint(points) => MultiPoint(points.iter().map(|p| Point(f(p.0))).collect()).into(),
+        Geometry::Line(l) => line(&LineString(vec![l.start, l.end])).into(),
+        Geometry::LineString(l) => line(l).into(),
+        Geometry::MultiLineString(lines) => MultiLineString(lines.iter().map(line).collect()).into(),
+        Geometry::Polygon(polygon) => map_polygon(polygon, &mut line).into(),
+        Geometry::MultiPolygon(polygons) => {
+            MultiPolygon(polygons.iter().map(|polygon| map_polygon(polygon, &mut line)).collect()).into()
+        }
+        Geometry::Rect(rect) => map_polygon(&rect.to_polygon(), &mut line).into(),
+        Geometry::Triangle(triangle) => map_polygon(&triangle.to_polygon(), &mut line).into(),
+        Geometry::GeometryCollection(geometries) => Geometry::GeometryCollection(GeometryCollection(
+            geometries.iter().map(|geometry| map_coords(geometry, f)).collect(),
+        )),
+    }
+}
+
+/// `polygon` with `line` of each of its rings.
+fn map_polygon(polygon: &Polygon<f64>, line: &mut impl FnMut(&LineString<f64>) -> LineString<i16>) -> Polygon<i16> {
+    Polygon::new(line(polygon.exterior()), polygon.interiors().iter().map(line).collect())
 }
 
 impl SourceType for TestGeoJsonSource {

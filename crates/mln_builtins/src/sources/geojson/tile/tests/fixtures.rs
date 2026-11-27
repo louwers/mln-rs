@@ -10,8 +10,8 @@ use geo_types::{Coord, Geometry, LineString, MultiLineString, Point, Polygon};
 use mln_style::feature::{Feature, Identifier, PropertyMap, Value};
 use serde_json::Value as Json;
 
-use crate::TileFeatures;
-use crate::tile::{Options, TileIndex, TileOptions, cut_tile};
+use crate::sources::geojson::TileFeatures;
+use crate::sources::geojson::tile::{Options, TileIndex, TileOptions, cut_tile};
 
 fn load_file(name: &str) -> String {
     let path =
