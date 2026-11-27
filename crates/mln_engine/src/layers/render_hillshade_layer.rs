@@ -44,7 +44,6 @@ use crate::draw::vertices::SharedVertices;
 use crate::layer::bucket_geometry::copied_vertices;
 use crate::layer::layer_drawing::{DrawList, DrawObjectsMut, FrameDraw, KeptDraw, SingleDraw, TileDraws, TileObjects};
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
-use crate::layer::layout::NoLayout;
 use crate::layer::render_layer::{
     EvaluateCx, Evaluation, LayerUpdateParameters, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer,
     RenderLayerBase, TypedLayer,
@@ -59,6 +58,7 @@ use crate::render::terrain::SurfaceLight;
 use crate::render::terrain::ubo::{HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO, MAX_ILLUMINATION_SOURCES};
 use crate::render::tile::FrameTile;
 use crate::render::tile_matrix::{bind_no_projection, projection_data, to_projection_ubo};
+use crate::source::DemTiles;
 use crate::source::render_source::RenderSource;
 use crate::tile::UnwrappedTileID;
 use crate::tile::dem::{DemUnpack, TERRAIN_RGB_MAXZOOM};
@@ -75,8 +75,7 @@ const PREPARE_TILE_PROPS_ID: usize = programs::HILLSHADE_PREPARE.buffer_id("tile
 const IMAGE_SLOT: usize = programs::HILLSHADE.texture_slot("image");
 
 impl LayerType for Hillshade {
-    type Layout = NoLayout;
-    type TileBucket<'a> = &'a DemContents;
+    type Input = DemTiles;
 
     fn render_layer(style: Arc<LayerStyle<Hillshade>>) -> Box<dyn RenderLayer> {
         Box::new(RenderHillshadeLayer::new(style))
@@ -383,12 +382,12 @@ impl TypedLayer for RenderHillshadeLayer {
         // The illumination, which the first draw computes.
         let mut illumination = None;
         for tile in render_tiles {
-            let tile_id = tile.draw_id(paint_parameters);
+            let tile_id = tile.draw_id();
             let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
                 continue;
             };
 
-            let Some(dem) = tile.bucket().filter(|dem| dem.has_data()) else {
+            let Some(dem) = tile.data().filter(|dem| dem.has_data()) else {
                 *entry.value = None;
                 continue;
             };
@@ -518,7 +517,7 @@ impl TypedLayer for RenderHillshadeLayer {
         }
         let live_dems = &mut self.live_dems;
         live_dems.clear();
-        live_dems.extend(tiles.iter().filter_map(|tile| Some(tile.bucket()?.id())));
+        live_dems.extend(tiles.iter().filter_map(|tile| Some(tile.data()?.id())));
         self.dem_targets.retain(|id, _| live_dems.contains(id));
         self.mask_quads.retain(live_dems);
     }
