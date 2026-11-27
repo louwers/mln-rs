@@ -22,7 +22,6 @@ use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, Size};
 use mln_style::color::Color;
 use mln_style::constants::EXTENT;
 use mln_style::geo::LatLng;
-use mln_style::layer::LayerStyle;
 use mln_style::layers::Hillshade;
 use mln_style::layers::hillshade_layer_properties::HillshadePaintProperties;
 use mln_style::math::deg2radf;
@@ -42,10 +41,8 @@ use crate::draw::target::Target;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::SharedVertices;
 use crate::layer::bucket_geometry::copied_vertices;
-use crate::layer::layer_type::{EvaluatedLayer, LayerType};
-use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, Hosted, LayerValues, OnTerrain, PrepareCx, RenderLayer, TileCx, TypedLayer, UpdateCx,
-};
+use crate::layer::layer_type::EvaluatedLayer;
+use crate::layer::render_layer::{EvaluateCx, Evaluation, Layer, LayerValues, OnTerrain, PrepareCx, TileCx, UpdateCx};
 use crate::layer::tile_input::TileData;
 use crate::layers::hillshade::programs;
 use crate::layers::hillshade::ubo::{HillshadeDrawableUBO, HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO};
@@ -63,14 +60,6 @@ use crate::tile_store::dem::DemContents;
 
 /// The slots of the programs' textures that the draws bind.
 const IMAGE_SLOT: usize = programs::HILLSHADE.texture_slot("image");
-
-impl LayerType for Hillshade {
-    type Input = DemTiles;
-
-    fn render_layer(style: Arc<LayerStyle<Hillshade>>) -> Box<dyn RenderLayer> {
-        Hosted::<RenderHillshadeLayer>::boxed(style)
-    }
-}
 
 /// What the layer keeps of a tile: the draw that shades its DEM's slopes,
 /// and the target they are prepared in.
@@ -269,8 +258,9 @@ fn lit_by_bearing(evaluated: &EvaluatedLayer<Hillshade>) -> bool {
     *evaluated.paint.hillshade_illumination_anchor.uniform() == HillshadeIlluminationAnchorType::Viewport
 }
 
-impl TypedLayer for RenderHillshadeLayer {
-    type Type = Hillshade;
+impl Layer for RenderHillshadeLayer {
+    type Style = Hillshade;
+    type Input = DemTiles;
     type Tile = HillshadeTile;
     const TERRAIN: OnTerrain = OnTerrain::Drapes;
     // A tile's draw holds its mask's geometry and samples its DEM's render
@@ -323,8 +313,8 @@ impl TypedLayer for RenderHillshadeLayer {
     fn tile(
         &mut self,
         cx: &mut TileCx<'_, '_, Self>,
-        tile: FrameTile<'_, Hillshade>,
-        dem: TileData<'_, Hillshade>,
+        tile: FrameTile<'_, RenderHillshadeLayer>,
+        dem: TileData<'_, RenderHillshadeLayer>,
         previous: Option<HillshadeTile>,
     ) -> Option<HillshadeTile> {
         if !dem.has_data() {
@@ -388,7 +378,7 @@ impl TypedLayer for RenderHillshadeLayer {
     fn prepare(
         &mut self,
         cx: &mut PrepareCx<'_, '_, Self>,
-        render_tiles: &[FrameTile<'_, Hillshade>],
+        render_tiles: &[FrameTile<'_, RenderHillshadeLayer>],
         out: &mut Draws,
     ) {
         if cx.base.projection_variant == ProjectionVariant::Mercator {
@@ -441,7 +431,7 @@ impl TypedLayer for RenderHillshadeLayer {
     }
 
     /// Keeps the source's maximum zoom, which the DEMs' preparation reads.
-    fn update(&mut self, cx: UpdateCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Hillshade>]) {
+    fn update(&mut self, cx: UpdateCx<'_, '_, Self>, _tiles: &[FrameTile<'_, RenderHillshadeLayer>]) {
         if let Some(max_zoom) = cx.parameters.source.and_then(RenderSource::max_zoom) {
             self.maxzoom = max_zoom;
         }
