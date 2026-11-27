@@ -1,7 +1,7 @@
 // A tile's draw, with the quads of the tile's mask, stays until the tile's
 // mask, or an image source's mesh, changes, and is then built again. The
-// layer keeps one texture per tile contents' id (`textures`), in the
-// context's store, which outlives the draws that a new mask builds again.
+// tile's value keeps the texture of its image, in the context's store, which
+// the tile's next value takes while the image is the same.
 
 use std::mem::offset_of;
 use std::rc::Rc;
@@ -13,8 +13,6 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
-use mln_style::bitmap::PremultipliedImage;
-use mln_style::hash::{HashMap, HashSet};
 use mln_style::layer::LayerStyle;
 use mln_style::layers::Raster;
 use mln_style::types::{RasterResamplingType, ResamplingType, TranslateAnchorType};
@@ -33,7 +31,7 @@ use crate::draw::vertices::SharedVertices;
 use crate::layer::bucket_geometry::copied_vertices;
 use crate::layer::layer_type::LayerType;
 use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, Hosted, LayerValues, OnTerrain, PrepareCx, RenderLayer, TileCx, TypedLayer, UpdateCx,
+    EvaluateCx, Evaluation, Hosted, LayerValues, OnTerrain, PrepareCx, RenderLayer, TileCx, TypedLayer,
 };
 use crate::layer::tile_input::{RasterTile, TileData};
 use crate::layers::raster::programs;
@@ -81,27 +79,29 @@ impl LayerType for Raster {
 pub(crate) struct RenderRasterLayer {
     static_geometry: Option<StaticGeometry>,
     globe_meshes: GlobeTileMeshCache<RasterLayoutVertex>,
+}
 
-    /// The texture of each tile's image, by its id.
-    textures: HashMap<SimpleIdentity, SharedTexture>,
-    /// The contents of the frame's tiles, whose textures stay.
-    live_contents: HashSet<SimpleIdentity>,
+/// What the layer keeps of a tile: the draw of its image, and the image's
+/// texture, with the image's id.
+pub(crate) struct ImageDraw {
+    mesh: Mesh,
+    image: SimpleIdentity,
+    texture: SharedTexture,
 }
 
 impl RenderRasterLayer {
-    /// The texture of `image`, the image `id`, in
-    /// `textures`, which this creates if needed, with `sampler`.
+    /// The texture of `data`'s image, with `sampler`: `previous`'s, if that
+    /// is of the same image, or a new one.
     fn texture(
-        textures: &mut HashMap<SimpleIdentity, SharedTexture>,
+        previous: Option<ImageDraw>,
         sampler: SamplerState,
         context: &mut Context,
-        id: SimpleIdentity,
-        image: &PremultipliedImage,
+        data: RasterTile<'_>,
     ) -> SharedTexture {
-        let texture = textures
-            .entry(id)
-            .or_insert_with(|| context.add_texture_with(|texture| texture.set_image(Some(Rc::new(image.clone())))))
-            .clone();
+        let texture = match previous {
+            Some(previous) if previous.image == data.id() => previous.texture,
+            _ => context.add_texture_with(|texture| texture.set_image(Some(Rc::new(data.image().clone())))),
+        };
         if let Some(mut texture) = context.texture_mut(&texture) {
             texture.set_sampler(sampler);
         }
@@ -261,16 +261,11 @@ fn raster_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
 
 impl TypedLayer for RenderRasterLayer {
     type Type = Raster;
-    type Tile = Mesh;
+    type Tile = ImageDraw;
     const TERRAIN: OnTerrain = OnTerrain::Drapes;
 
     fn new(_values: &LayerValues<Raster>) -> Self {
-        RenderRasterLayer {
-            static_geometry: None,
-            globe_meshes: GlobeTileMeshCache::new(),
-            textures: HashMap::default(),
-            live_contents: HashSet::default(),
-        }
+        RenderRasterLayer { static_geometry: None, globe_meshes: GlobeTileMeshCache::new() }
     }
 
     fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
@@ -278,14 +273,16 @@ impl TypedLayer for RenderRasterLayer {
         if *evaluated.paint.raster_opacity.uniform() > 0.0 { Evaluation::TRANSLUCENT } else { Evaluation::NONE }
     }
 
-    /// The draw of a tile's image; none for an image source's image that
-    /// has no mesh yet.
+    /// The draw of a tile's image, with the texture of the tile's previous
+    /// value where that is of the same image; none for an image source's
+    /// image that has no mesh yet.
     fn tile(
         &mut self,
         cx: &mut TileCx<'_, '_, Self>,
         tile: FrameTile<'_, Raster>,
         data: TileData<'_, Raster>,
-    ) -> Option<Mesh> {
+        previous: Option<ImageDraw>,
+    ) -> Option<ImageDraw> {
         let sampler = Self::sampler_state(cx.values);
         let context = &mut *cx.context;
         let raster_shader = context.shader_key(&programs::RASTER, Uniforms::default(), cx.base.projection_variant);
@@ -327,9 +324,10 @@ impl TypedLayer for RenderRasterLayer {
                 }
             }
         };
-        let texture = Self::texture(&mut self.textures, sampler, context, data.id(), data.image());
+        let texture = Self::texture(previous, sampler, context, data);
         let color_mode = ColorMode::alpha_blended();
-        Some(new_mesh(context, &raster_shader, color_mode, draw_geometry, &texture))
+        let mesh = new_mesh(context, &raster_shader, color_mode, draw_geometry, &texture);
+        Some(ImageDraw { mesh, image: data.id(), texture })
     }
 
     /// Pushes the frame's draws of the layer, one of each of its tiles,
@@ -339,34 +337,17 @@ impl TypedLayer for RenderRasterLayer {
             self.globe_meshes.clear();
         }
         let sampler = Self::sampler_state(cx.values);
-
-        // Kept draws keep their textures, so a changed filter is applied to
-        // the textures themselves.
-        for texture in self.textures.values() {
-            if let Some(mut texture) = cx.context.texture_mut(texture) {
+        for tile in render_tiles {
+            let kept = cx.tiles.get_mut(&tile.id()).map(|kept| &*kept);
+            // Kept draws keep their textures, so a changed filter is applied
+            // to the textures themselves.
+            if let Some(mut texture) = kept.and_then(|kept| cx.context.texture_mut(&kept.texture)) {
                 texture.set_sampler(sampler);
             }
-        }
-
-        for tile in render_tiles {
-            let tile_id = tile.draw_id();
-            raster_draw(cx.tiles.get_mut(&tile.id()).map(|kept| &*kept), tile_id, cx.frame, out.main());
+            raster_draw(kept.map(|kept| &kept.mesh), tile.draw_id(), cx.frame, out.main());
         }
 
         let quad = render_tiles.iter().find_map(|tile| tile.data()).map_or(ImageQuad::TILE, RasterTile::quad);
         Self::share_frame_draws(cx.values, out.main(), &quad);
-    }
-
-    /// Drops the textures of the tiles the frame doesn't draw, in every
-    /// frame, including one the layer draws nothing in.
-    fn update(&mut self, _cx: UpdateCx<'_, '_, Self>, tiles: &[FrameTile<'_, Raster>]) {
-        let live_contents = &mut self.live_contents;
-        live_contents.clear();
-        live_contents.extend(tiles.iter().filter_map(|tile| Some(tile.data()?.id())));
-        self.textures.retain(|id, _| live_contents.contains(id));
-    }
-
-    fn release(&mut self) {
-        self.textures.clear();
     }
 }
