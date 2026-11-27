@@ -28,15 +28,15 @@ use super::{cast_matrix, refresh_paint_attributes};
 use crate::buckets::heatmap_bucket::{HeatmapBinders, HeatmapLayoutVertex};
 use crate::draw::context::Context;
 use crate::draw::indexes::DrawIndexes;
-use crate::draw::objects::{DrawGeometry, DrawObjects, Textures};
+use crate::draw::objects::{DrawGeometry, Mesh, Textures};
 use crate::draw::segment::SegmentBase;
 use crate::draw::store::SharedTexture;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::SharedVertices;
 use crate::layer::bucket_geometry::{bucket_indexes, bucket_vertices, copied_vertices, paint_vertices};
 use crate::layer::layer_drawing::{
-    DrawDepth, DrawGroup, DrawList, DrawOrder, FrameDraw, FrameDraws, KeptDraw, LayerDrawing, LayerDraws, TileMap,
-    UniformWriter, finish_tiles, tile_objects,
+    DrawDepth, DrawGroup, DrawList, DrawOrder, FrameDraw, FrameDraws, LayerDrawing, LayerDraws, TileMap, UniformWriter,
+    tile_objects,
 };
 use crate::layer::layer_type::LayerType;
 use crate::layer::paint_property_binder::PaintBinders as _;
@@ -82,7 +82,7 @@ pub(crate) struct HeatmapDrawing {
     /// The tiles' draws into the render target.
     target: Option<LayerDraws>,
     /// The layer's draw, built on its first frame.
-    texture: Option<KeptDraw>,
+    texture: Option<Mesh>,
     /// The texture of the color ramp image that `texture` samples, made
     /// again for a new image.
     color_ramp: Option<(Rc<PremultipliedImage>, SharedTexture)>,
@@ -92,7 +92,7 @@ pub(crate) struct HeatmapDrawing {
 }
 
 impl HeatmapDrawing {
-    /// Uploads the GPU objects of the tiles' draws into the render target,
+    /// Uploads the meshes of the tiles' draws into the render target,
     /// those of the draws in `tiles`.
     fn upload_target(&mut self, tiles: &mut TileMap<StandingDraw>, gpu: &mut dyn Gpu, context: &mut Context) {
         if let Some(target) = &self.target {
@@ -100,7 +100,7 @@ impl HeatmapDrawing {
         }
     }
 
-    /// Draws the tiles' draws into the render target, with their objects in
+    /// Draws the tiles' draws into the render target, with their meshes in
     /// `tiles`, into the open pass of `gpu`, the context's, which draws into
     /// it.
     fn render_target(
@@ -109,7 +109,7 @@ impl HeatmapDrawing {
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
     ) {
-        if let Some(target) = &self.target {
+        if let Some(target) = &mut self.target {
             target.render(tiles, tile_objects, gpu, parameters);
         }
     }
@@ -148,7 +148,7 @@ impl LayerDrawing<StandingDraw> for HeatmapDrawing {
 
     fn upload(&mut self, _tiles: &mut TileMap<StandingDraw>, gpu: &mut dyn Gpu, context: &mut Context) {
         if let (Some(frame), Some(texture)) = (&self.frame, &mut self.texture) {
-            frame.upload_one(gpu, &mut texture.objects, context);
+            frame.upload_one(gpu, texture, context);
         }
     }
 
@@ -159,9 +159,9 @@ impl LayerDrawing<StandingDraw> for HeatmapDrawing {
         parameters: &mut PaintParameters<'_>,
         order: DrawOrder,
     ) {
-        if let Some(frame) = &self.frame {
+        if let Some(frame) = &mut self.frame {
             if let Some(texture) = &mut self.texture {
-                frame.render_one(&mut texture.objects, gpu, parameters);
+                frame.render_one(texture, gpu, parameters);
             }
             order.step(parameters);
         }
@@ -288,9 +288,8 @@ impl TypedLayer for RenderHeatmapLayer {
             segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
             instances: None,
         };
-        let objects =
-            DrawObjects::new(shader, ColorMode::additive(), CullFaceMode::disabled(), geometry, Textures::default());
-        Some(StandingDraw::new(objects))
+        let mesh = Mesh::new(shader, ColorMode::additive(), CullFaceMode::disabled(), geometry, Textures::default());
+        Some(StandingDraw::new(mesh))
     }
 
     /// Makes the tiles' draws into the render target and the layer's draw of
@@ -336,8 +335,8 @@ impl TypedLayer for RenderHeatmapLayer {
 }
 
 impl RenderHeatmapLayer {
-    /// Makes the tiles' draws into the render target, with their GPU objects
-    /// in the tiles' values, and writes the buffers they read. Returns false
+    /// Makes the tiles' draws into the render target, with their meshes in
+    /// the tiles' values, and writes the buffers they read. Returns false
     /// if the layer draws nothing.
     fn draw_tiles(
         &mut self,
@@ -372,7 +371,7 @@ impl RenderHeatmapLayer {
                 continue;
             };
             let context = &mut *paint_parameters.context;
-            refresh_paint_attributes(&mut draw.objects, changes, |attrs| {
+            refresh_paint_attributes(&mut draw.mesh, changes, |attrs| {
                 let geometry = render_data.geometry();
                 let buffer = &binders.interleaved_vertex_buffer;
                 let paint = paint_vertices(context, geometry, buffer, binders.depends_on_feature_state());
@@ -389,7 +388,7 @@ impl RenderHeatmapLayer {
         }
 
         let target = drawing.target.get_or_insert_default();
-        finish_tiles(tile_draws, target, tiles, gpu, paint_parameters.context, |writer| {
+        tile_draws.finish(target, gpu, paint_parameters.context, |writer| {
             Self::write_tile_uniforms(evaluated, writer);
         });
         true
@@ -447,8 +446,8 @@ impl RenderHeatmapLayer {
     }
 
     /// Makes the layer's draw of the frame, which colors the heat of the
-    /// render target onto it through the layer's color ramp, with GPU
-    /// objects it builds once, and writes the buffers it reads.
+    /// render target onto it through the layer's color ramp, with a mesh it
+    /// builds once, and writes the buffers it reads.
     fn draw_texture(
         &mut self,
         cx: &mut LayerCx<'_, Self>,
@@ -482,8 +481,8 @@ impl RenderHeatmapLayer {
         let render_target_texture = render_target.texture();
         if let Some(draw) = &mut drawing.texture {
             // The render target's texture is made again with its size.
-            draw.objects.set_texture(IMAGE_SLOT, Some(render_target_texture));
-            draw.objects.set_texture(COLOR_RAMP_SLOT, color_ramp);
+            draw.set_texture(IMAGE_SLOT, Some(render_target_texture));
+            draw.set_texture(COLOR_RAMP_SLOT, color_ramp);
         } else {
             let vertices = shared_texture_vertices
                 .get_or_insert_with(|| copied_vertices(context, &RenderStaticData::heatmap_texture_vertices()))
@@ -509,19 +508,19 @@ impl RenderHeatmapLayer {
             let mut textures = Textures::default();
             textures[IMAGE_SLOT] = Some(render_target_texture.clone());
             textures[COLOR_RAMP_SLOT] = color_ramp.cloned();
-            let objects = DrawObjects::new(
+            let mesh = Mesh::new(
                 heatmap_texture_shader,
                 ColorMode::alpha_blended(),
                 CullFaceMode::disabled(),
                 geometry,
                 textures,
             );
-            drawing.texture = Some(KeptDraw::new(objects));
+            drawing.texture = Some(mesh);
         }
         let (Some(draw), Some(frame)) = (&drawing.texture, drawing.frame.as_mut()) else {
             return;
         };
-        let frame_draw = draw.frame_draw(None);
+        let frame_draw = FrameDraw::new(None, draw.id());
         frame.push(frame_draw);
         let size = paint_parameters.renderable_size;
         let m = orthographic(0.0, f64::from(size.width), f64::from(size.height), 0.0, -1.0, 1.0);
@@ -533,11 +532,7 @@ impl RenderHeatmapLayer {
             pad3: 0.0,
         };
         let context = &mut *paint_parameters.context;
-        if frame.uniform_buffers.write_pod(gpu, TEXTURE_PROPS_ID, &props, context.device())
-            && let Some(texture) = &mut drawing.texture
-        {
-            texture.objects.drop_bindings();
-        }
-        bind_no_projection(gpu, &mut frame.uniform_buffers, context);
+        frame.buffers.write_pod(gpu, TEXTURE_PROPS_ID, &props, context.device());
+        bind_no_projection(gpu, &mut frame.buffers, context);
     }
 }
