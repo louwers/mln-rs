@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use geometry::Point;
 use glam::Vec2;
-use mln_gfx::gpu::Gpu;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_style::color::Color;
@@ -16,22 +15,21 @@ use mln_style::types::{AlignmentType, CirclePitchScaleType};
 use super::{cast_matrix, refresh_paint_attributes};
 use crate::buckets::circle_bucket::{CircleBinders, CircleLayoutVertex};
 use crate::camera::{TileCoordinate, TileProjector};
+use crate::draw::draws::{Draw, Draws, LayerFrame};
 use crate::draw::objects::{DrawGeometry, Mesh, Textures};
 use crate::draw::segment::SegmentBase;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::layer::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
-use crate::layer::layer_drawing::{FrameDraw, TileDraws};
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, Hosted, LayerCx, LayerValues, OnTerrain, RenderLayer, TileCx, TypedLayer,
+    EvaluateCx, Evaluation, Hosted, LayerValues, OnTerrain, PrepareCx, RenderLayer, TileCx, TypedLayer,
 };
 use crate::layer::tile_input::{Features, TileData};
 use crate::layers::circle::programs;
 use crate::layers::circle::ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
 use crate::layout::circle_layout::CircleLayout;
 use crate::query::feature_index::QueryRegion;
-use crate::render::paint_parameters::PaintParameters;
 use crate::render::pass::RenderPass;
 use crate::render::terrain::{FrameGround, StandingDraw, TileGround};
 use crate::render::tile::{FrameTile, RenderTile};
@@ -132,16 +130,16 @@ impl RenderCircleLayer {
         layer: &EvaluatedLayer<Circle>,
         tile_id: &OverscaledTileID,
         binders: &CircleBinders,
-        parameters: &PaintParameters<'_>,
+        frame: &LayerFrame<'_>,
     ) -> (CircleDrawableUBO, ProjectionUBO) {
         const IN_VIEWPORT_PIXEL_UNITS: bool = false;
         const NEAR_CLIPPED: bool = false;
         let evaluated = &layer.paint;
-        let zoom = parameters.view.zoom() as f32;
+        let zoom = frame.view.zoom() as f32;
         let tile_id = tile_id.to_unwrapped();
         let projection = projection_data(
             &tile_id,
-            parameters,
+            frame,
             *evaluated.circle_translate.uniform(),
             *evaluated.circle_translate_anchor.uniform(),
             NEAR_CLIPPED,
@@ -152,13 +150,13 @@ impl RenderCircleLayer {
 
         let pitch_with_map = *evaluated.circle_pitch_alignment.uniform() == AlignmentType::Map;
         let pixels_to_tile_units = tile_id.pixels_to_tile_units(1.0, zoom);
-        let latitude_scale = parameters.view.projection().circle_radius_correction(parameters.view);
+        let latitude_scale = frame.view.projection().circle_radius_correction(frame.view);
         let draw_ubo = CircleDrawableUBO {
             matrix: cast_matrix(&projection.fallback_matrix),
             extrude_scale: if pitch_with_map {
                 [pixels_to_tile_units, pixels_to_tile_units]
             } else {
-                parameters.pixels_to_gl_units
+                frame.pixels_to_gl_units
             },
             color_t: binders.circle_color.interpolation_factor(zoom),
             radius_t: binders.circle_radius.interpolation_factor(zoom),
@@ -195,7 +193,6 @@ impl RenderCircleLayer {
 impl TypedLayer for RenderCircleLayer {
     type Type = Circle;
     type Tile = StandingDraw;
-    type Drawing = TileDraws<StandingDraw>;
 
     const TERRAIN: OnTerrain = OnTerrain::Stands { hides_behind_ground: true };
 
@@ -233,7 +230,7 @@ impl TypedLayer for RenderCircleLayer {
         }
         let (vertices, indexes) =
             (bucket_vertices(geometry, &bucket.vertices)?, bucket_indexes(geometry, &bucket.triangles)?);
-        let context = &mut *cx.parameters.context;
+        let context = &mut *cx.context;
         let paint =
             paint_vertices(context, geometry, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state());
         let mut uniforms = Uniforms::default();
@@ -249,8 +246,10 @@ impl TypedLayer for RenderCircleLayer {
             ),
         );
         let vertex_count = if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() };
+        let shader = context.shader_key(&programs::CIRCLE, uniforms, cx.base.projection_variant);
         let mesh = Mesh::new(
-            context.shader_key(&programs::CIRCLE, uniforms, cx.base.projection_variant),
+            context,
+            shader,
             ColorMode::alpha_blended(),
             CullFaceMode::disabled(),
             DrawGeometry {
@@ -266,22 +265,14 @@ impl TypedLayer for RenderCircleLayer {
         Some(StandingDraw::new(mesh))
     }
 
-    /// Makes the frame's draws of the layer, one of each of its tiles.
-    fn update_draws(
-        &mut self,
-        cx: LayerCx<'_, Self>,
-        gpu: &mut dyn Gpu,
-        paint_parameters: &mut PaintParameters<'_>,
-        render_tiles: &[FrameTile<'_, Circle>],
-    ) {
+    /// Pushes the frame's draws of the layer, one of each of its tiles.
+    fn prepare(&mut self, cx: &mut PrepareCx<'_, '_, Self>, render_tiles: &[FrameTile<'_, Circle>], out: &mut Draws) {
         let layer_id = cx.base.style.base().id.as_str();
         let layer = &*cx.values.evaluated;
         let evaluated = &layer.paint;
         // Over terrain, the circles stand on the frame's ground and hide
         // behind it.
-        let ground = paint_parameters.ground.clone();
-        // The draws keep the order they're pushed in, the tiles'.
-        let order = cx.drawing.frame_mut().id();
+        let ground = cx.frame.ground.as_deref();
         for tile in render_tiles {
             let tile_id = tile.id();
             let Some(render_data) = tile.data_for_pass(RENDER_PASS) else {
@@ -300,23 +291,20 @@ impl TypedLayer for RenderCircleLayer {
             let Some(draw) = entry.value.as_mut() else {
                 continue;
             };
-            let context = &mut *paint_parameters.context;
-            refresh_paint_attributes(&mut draw.mesh, changes, |attrs| {
+            let context = &mut *cx.context;
+            refresh_paint_attributes(&draw.mesh, context, changes, |context, attrs| {
                 let geometry = render_data.geometry();
                 let buffer = &binders.interleaved_vertex_buffer;
                 let paint = paint_vertices(context, geometry, buffer, binders.depends_on_feature_state());
                 binders.bind(evaluated, paint.as_ref(), attrs, &mut Uniforms::default());
             });
-            let ground = ground.as_deref();
             draw.stand(context, ground, tile_id.to_unwrapped(), "ground_height", &bucket.centers);
-            draw.mesh.set_texture(GROUND_DEPTH_SLOT, ground.and_then(FrameGround::depth));
-            let (draw_ubo, projection) = Self::uniforms(layer, &tile_id, binders, paint_parameters);
-            let frame_draw = FrameDraw::new(Some(tile_id), order);
-            cx.drawing.frame_mut().push_at(frame_draw, (), &draw.mesh, &projection, draw_ubo);
+            draw.mesh.set_texture(context, GROUND_DEPTH_SLOT, ground.and_then(FrameGround::depth));
+            let (draw_ubo, projection) = Self::uniforms(layer, &tile_id, binders, cx.frame);
+            // The draws keep the order they're pushed in, the tiles'.
+            out.main().push_at(&draw.mesh, tile_id, &projection, Draw::DEFAULT, draw_ubo);
         }
-
-        cx.drawing.frame_mut().block(&Self::props(layer));
-        cx.drawing.finish(gpu, paint_parameters);
+        out.main().block(&Self::props(layer));
     }
 
     // query
