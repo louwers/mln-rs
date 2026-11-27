@@ -9,6 +9,8 @@ mod concave_image_test;
 mod empty_tile_test;
 // A viewport flipped upside down draws the map upside down.
 mod flipped_viewport_test;
+// A layer without a source answers rendered-feature queries from the frame.
+mod frame_query_test;
 // Frames that fail on the GPU: stills that end with the error, and
 // continuous maps that report it once and draw again later.
 mod gpu_failure_test;

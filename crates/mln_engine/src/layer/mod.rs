@@ -64,7 +64,11 @@
 //! A rendered-feature query finds a tile's features near its geometry in the
 //! tile's feature index, padded by the layer's
 //! [`query_radius`](Layer::query_radius), and keeps those the layer
-//! [`hit`](Layer::hit)s.
+//! [`hit`](Layer::hit)s. A layer that draws other than its tiles'
+//! features, such as one without a source, answers from the last frame
+//! ([`Layer::hit_frame`], [`FrameQuery`]): its hits come with the tiled
+//! layers', in the layers' order, and the query's filter places them, for
+//! `within`, in a tile that holds their geometry.
 //!
 //! # Buckets
 //!
@@ -116,7 +120,7 @@ pub use crate::layer::layer_drawing::BucketChanges;
 pub use crate::layer::layer_type::EvaluatedLayer;
 pub use crate::layer::layout::{BuildCx, Layout, LayoutCx, layers_by_id};
 pub use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, Layer, LayerValues, OnTerrain, PrepareCx, TileCx, UpdateCx,
+    EvaluateCx, Evaluation, FrameQuery, Layer, LayerValues, OnTerrain, PrepareCx, TileCx, UpdateCx,
 };
 pub use crate::layer::tile_input::{Features, LayerBucket, NoTiles, RasterTile, TileData, TileInput};
 pub use crate::layer::tile_layout::Resolved;

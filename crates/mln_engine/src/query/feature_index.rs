@@ -16,8 +16,10 @@ use mln_style::error::Error;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
 use mln_style::feature::{
     FeatureState, GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileFeature,
+    convert_geometry_to_tile,
 };
 use mln_style::hash::{HashMap, HashSet};
+use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::TranslateAnchorType;
 
 use crate::camera::{TileProjector, VerticalPerspectiveProjection, View};
@@ -116,6 +118,30 @@ pub(crate) fn query_screen_geometry<'a>(
 
 /// The features a query found, by layer id.
 pub(crate) type QueryResults = HashMap<String, Vec<Feature>>;
+
+/// The deepest tile, down to zoom 13, that holds all of `geometry`: where a
+/// query's filter places a feature that has no tile, as `within` and
+/// `distance` need. The geometry's coordinates in the zoom-0 tile, 2^13
+/// units wide, choose the tile exactly down to there, where a unit of the
+/// tile is under a metre.
+pub(crate) fn tile_holding(geometry: &geo_types::Geometry<f64>) -> CanonicalTileID {
+    const DEEPEST: u8 = 13;
+    let points = convert_geometry_to_tile(geometry, &CanonicalTileID::new(0, 0, 0));
+    let unit = |v: i16| u32::from(v.clamp(0, (constants::EXTENT - 1) as i16).unsigned_abs());
+    let (mut min, mut max) = ((u32::MAX, u32::MAX), (0, 0));
+    for point in points.iter().flatten() {
+        let (x, y) = (unit(point.x), unit(point.y));
+        (min, max) = ((min.0.min(x), min.1.min(y)), (max.0.max(x), max.1.max(y)));
+    }
+    if min.0 > max.0 {
+        return CanonicalTileID::new(0, 0, 0);
+    }
+    let tile = |z: u8| (min.0 >> (DEEPEST - z), min.1 >> (DEEPEST - z));
+    let holds = |z: u8| tile(z) == (max.0 >> (DEEPEST - z), max.1 >> (DEEPEST - z));
+    let z = (0..=DEEPEST).rev().find(|&z| holds(z)).unwrap_or(0);
+    let (x, y) = tile(z);
+    CanonicalTileID::new(z, x, y)
+}
 
 /// A feature of a feature index or a collision index, which a query looks
 /// up in its tile's data.
@@ -677,6 +703,23 @@ mod tests {
         assert_eq!(decoded.boxes, index.boxes);
         assert_eq!(decoded.encode_grid(), encoded);
         assert_eq!(index.boxes[14], [560, 10, 565, 4000]);
+    }
+
+    #[test]
+    fn the_tile_holding_a_geometry_is_the_deepest_down_to_zoom_13() {
+        let point = |lon: f64, lat: f64| geo_types::Geometry::Point(geo_types::Point::new(lon, lat));
+        // A point a little east and north of 0, 0 is in the zoom-13 tile
+        // southeast of the center.
+        assert_eq!(tile_holding(&point(0.01, 0.01)), CanonicalTileID::new(13, 4096, 4095));
+        // A line across the prime meridian holds only in the world's tile,
+        // and one in the northwest quarter in that quarter's.
+        let line =
+            |a: (f64, f64), b: (f64, f64)| geo_types::Geometry::LineString(geo_types::LineString::from(vec![a, b]));
+        assert_eq!(tile_holding(&line((-1.0, 1.0), (1.0, 1.0))), CanonicalTileID::new(0, 0, 0));
+        assert_eq!(tile_holding(&line((-170.0, 80.0), (-100.0, 10.0))), CanonicalTileID::new(1, 0, 0));
+        // An empty geometry is placed in the world's tile.
+        let empty = geo_types::Geometry::MultiPoint(geo_types::MultiPoint::new(Vec::new()));
+        assert_eq!(tile_holding(&empty), CanonicalTileID::new(0, 0, 0));
     }
 
     #[test]

@@ -1351,6 +1351,44 @@ impl RenderOrchestrator {
         Ok(())
     }
 
+    /// Adds what `geometry` hits of the last frame's drawing of `layers`
+    /// other than their tiles' features ([`Layer::hit_frame`]), over
+    /// `ground` where the frame has terrain, that the query's filter takes,
+    /// placed in a tile that holds each feature's geometry.
+    ///
+    /// [`Layer::hit_frame`]: crate::layer::Layer::hit_frame
+    fn query_frame_hits(
+        &self,
+        results_by_layer: &mut crate::query::feature_index::QueryResults,
+        geometry: &[crate::geo::ScreenCoordinate],
+        ground: Option<&crate::render::terrain::TerrainElevation>,
+        layers: &crate::query::feature_index::QueryLayers<'_>,
+        options: &crate::query::RenderedQueryOptions,
+    ) {
+        let context = mln_style::expression::EvaluationContext::with_zoom_feature(self.view.zoom() as f32, None)
+            .with_global_state(self.global_state.as_deref());
+        let mut hits = Vec::new();
+        for (id, layer) in layers {
+            layer.hit_frame(&self.view, geometry, ground, &mut hits);
+            if let Some(filter) = &options.filter {
+                hits.retain(|hit| {
+                    let feature = hit.to_geojson_feature();
+                    let tile = feature.geometry.as_ref().map(crate::query::feature_index::tile_holding);
+                    let context = context.with_canonical_tile_id(tile.as_ref());
+                    mln_style::expression::with_geojson_feature(&feature, context, |cx| filter.evaluate(cx))
+                });
+            }
+            if hits.is_empty() {
+                continue;
+            }
+            let source = &layer.base().style.base().source;
+            for hit in &mut hits {
+                source.clone_into(&mut hit.source);
+            }
+            results_by_layer.entry(id.clone()).or_default().append(&mut hits);
+        }
+    }
+
     fn query_rendered_features_in(
         &self,
         geometry: &[crate::geo::ScreenCoordinate],
@@ -1418,6 +1456,7 @@ impl RenderOrchestrator {
         }
 
         self.query_rendered_symbols(&mut results_by_layer, geometry, &filtered_layers, options)?;
+        self.query_frame_hits(&mut results_by_layer, geometry, elevation, &filtered_layers, options);
 
         let mut result = Vec::new();
 
