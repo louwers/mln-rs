@@ -152,7 +152,7 @@ impl<const N: usize> MemberValue for [[f32; 4]; N] {
 ///
 /// A member's type is one of [`MemberValue`]'s. The build fails unless the
 /// layouts that [`Block`] names all put each member where the Rust struct
-/// has it: the struct has no padding, so its
+/// has it: the struct has no padding, which bytemuck's `Pod` checks, so its
 /// size is a multiple of 16 and each member follows the one before it, and
 /// each member's offset is a multiple of its
 /// [`ALIGN`](MemberValue::ALIGN). A block makes up a gap with members it
@@ -181,17 +181,13 @@ macro_rules! uniform_block {
         }
     ) => {
         $(#[$meta])*
-        #[derive(Clone, Copy, Debug, Default, PartialEq)]
+        #[derive(Clone, Copy, Debug, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
         #[repr(C, align(16))]
         $vis struct $name {
             $($(#[$member_meta])* pub $member: $ty,)*
         }
 
         const _: () = {
-            assert!(
-                0 $(+ ::core::mem::size_of::<$ty>())* == ::core::mem::size_of::<$name>(),
-                ::core::concat!(::core::stringify!($name), " has padding besides its members"),
-            );
             $(assert!(
                 ::core::mem::offset_of!($name, $member) % <$ty as $crate::shaders::block::MemberValue>::ALIGN == 0,
                 ::core::concat!(
@@ -200,17 +196,6 @@ macro_rules! uniform_block {
                 ),
             );)*
         };
-
-        // Written out rather than derived, as bytemuck's derive names the
-        // crate by a path that can't be `$crate`'s.
-        // SAFETY: the struct is `repr(C)`, and its members, which are `Pod`
-        // (`MemberValue` requires it), fill it (asserted above): every bit
-        // pattern is a value, and it has no uninitialized bytes.
-        #[expect(unsafe_code, reason = "a block is `Pod`; see SAFETY")]
-        unsafe impl $crate::__private::bytemuck::Zeroable for $name {}
-        // SAFETY: as for `Zeroable`.
-        #[expect(unsafe_code, reason = "a block is `Pod`; see SAFETY")]
-        unsafe impl $crate::__private::bytemuck::Pod for $name {}
 
         impl $crate::shaders::block::UniformBlock for $name {
             const BLOCK: &'static $crate::shaders::block::Block = &$crate::shaders::block::Block {
