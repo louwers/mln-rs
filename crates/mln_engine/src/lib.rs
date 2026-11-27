@@ -49,7 +49,7 @@ pub(crate) use layer::paint_property_binder::paint_property_binders;
 pub use layers::custom::{
     Custom, CustomHost, CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters,
 };
-pub use registry::{Registry, RegistryBuilder, register_builtins};
+pub use registry::{Registry, RegistryBuilder, register_layer_types};
 pub use render::events::{
     FontStack, GlyphRange, RenderMode, RendererEvent, RendererEvents, RenderingStats, TileOperation,
 };
@@ -74,6 +74,11 @@ mod log_target {
     pub(crate) const GLYPH: &str = "mln_engine::glyph";
     pub(crate) const TIMING: &str = "mln_engine::timing";
 }
+
+// The tests' copy of mln_builtins' source types names this crate as its
+// dependents do.
+#[cfg(test)]
+extern crate self as mln_engine;
 
 #[cfg(test)]
 mod tests;

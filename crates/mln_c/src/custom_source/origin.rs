@@ -1,4 +1,4 @@
-//! The render half of the custom sources, whose host answers each tile the
+//! The engine half of the custom sources, whose host answers each tile the
 //! map needs: their tiles take their data from the provider that the
 //! origin keeps for the source's tile functions. Fetching a tile's data is
 //! assumed to be expensive, so only a required tile subscribes.
@@ -6,6 +6,7 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use mln_builtins::sources::geojson::TileFeatures;
 use mln_engine::exec::pool::Pool;
 use mln_engine::source::{
     Cover, DataOrigin, GeometryTiles, LoadContext, OriginUpdate, Replier, SourceType, Supply, TileNecessity, WorldCopy,
@@ -14,7 +15,6 @@ use mln_engine::tile::{MltTile, MvtTile, OverscaledTileID, TileData};
 use mln_style::error::Error;
 use mln_style::range::Range;
 use mln_style::source::{SourceData, StyleSourceType};
-use mln_style::sources::geojson::TileFeatures;
 use mln_style::{Source, constants};
 
 use super::provider::{
@@ -23,7 +23,10 @@ use super::provider::{
 use super::{CustomGeometrySourceType, CustomVectorSourceType, CustomVectorTileData, TileDataFormat};
 
 impl SourceType for CustomGeometrySourceType {
+    type Style = Self;
     type Data = GeometryTiles;
+    /// None: the host's tile functions give the source's data.
+    type Description = ();
 
     fn supply(_source: &Source) -> Supply<GeometryTiles> {
         Supply::tiles(CustomOrigin::<Self>::new())
@@ -31,7 +34,10 @@ impl SourceType for CustomGeometrySourceType {
 }
 
 impl SourceType for CustomVectorSourceType {
+    type Style = Self;
     type Data = GeometryTiles;
+    /// None: the host's tile functions give the source's data.
+    type Description = ();
 
     fn supply(_source: &Source) -> Supply<GeometryTiles> {
         Supply::tiles(CustomOrigin::<Self>::new())
@@ -174,7 +180,15 @@ impl<T: CustomSource> DataOrigin for CustomOrigin<T> {
             self.provider = Some(T::provider(data, update.pool()));
         }
         let (tile_size, zoom_range) = T::cover(data);
-        Some(Cover { tile_size, zoom_range, bounds: None })
+        Some(Cover {
+            tile_size,
+            zoom_range,
+            bounds: None,
+            round_zoom: false,
+            overscale: true,
+            prefetch: true,
+            synchronous: false,
+        })
     }
 
     fn start(&mut self, _cx: &mut LoadContext<'_, '_, Self>, _copy: Option<WorldCopy<'_, CustomTile>>) -> CustomTile {

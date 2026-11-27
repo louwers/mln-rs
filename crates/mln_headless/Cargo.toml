@@ -22,6 +22,8 @@ doctest = false
 
 [dependencies]
 log.workspace = true
+# The built-in registrations that the frontend's renderer draws.
+mln_builtins.workspace = true
 mln_gfx.workspace = true
 mln_engine.workspace = true
 # The devices and offscreen targets the frontend renders on, of every

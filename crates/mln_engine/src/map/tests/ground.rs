@@ -169,7 +169,8 @@ pub(super) fn ground_event(elevation: &Arc<dyn Elevation>) -> RendererEvent {
 fn map(mode: MapMode, run_loop: &Queue<()>) -> Map {
     let file_source = StubFileSource::on_queue(run_loop, ResponseType::Asynchronous);
     let options = MapOptions { map_mode: mode, ..Default::default() };
-    let mut map = Map::with_file_source(file_source, options, &crate::map::tests::pool()).expect("map");
+    let mut map =
+        Map::with_file_source(file_source, options, crate::tests::registry(), &crate::map::tests::pool()).expect("map");
     map.load_style_json(STYLE);
     map.process_events();
     map
@@ -179,7 +180,8 @@ fn map(mode: MapMode, run_loop: &Queue<()>) -> Map {
 pub(super) fn pitchable(style: &str, run_loop: &Queue<()>) -> Map {
     let file_source = StubFileSource::on_queue(run_loop, ResponseType::Asynchronous);
     let options = MapOptions { size: mln_style::size::Size::new(512, 512), ..Default::default() };
-    let mut map = Map::with_file_source(file_source, options, &crate::map::tests::pool()).expect("map");
+    let mut map =
+        Map::with_file_source(file_source, options, crate::tests::registry(), &crate::map::tests::pool()).expect("map");
     map.load_style_json(style);
     map.process_events();
     map.set_bounds(&BoundOptions { max_pitch: Some(180.0), ..Default::default() }).unwrap();

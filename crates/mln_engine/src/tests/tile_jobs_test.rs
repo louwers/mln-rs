@@ -23,7 +23,6 @@ use mln_style::tile_id::CanonicalTileID;
 use parking_lot::Mutex;
 use serde_json::json;
 
-use crate::Registry;
 use crate::draw::dynamic_texture::DynamicTextureBinId;
 use crate::exec::pool::TaskGroup;
 use crate::exec::queue::Queue;
@@ -122,7 +121,7 @@ pub(super) fn image(id: &str) -> Arc<ImageImpl> {
 pub(super) fn layer(mut json: serde_json::Value) -> Arc<dyn ErasedEvaluatedLayer> {
     json["source"] = json!("s");
     let mut error = ConversionError::default();
-    let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(&json), &mut error)
+    let layer = convert_layer(crate::tests::registry().style(), &Convertible::from(&json), &mut error)
         .unwrap_or_else(|| panic!("{}", error.message));
     let mut render_layer = crate::tests::render_layer(layer.style());
     render_layer.evaluate(&PropertyEvaluationParameters::new(0.0));
@@ -634,13 +633,13 @@ impl Instances {
 
     fn host(instance: usize, replies: &Arc<Mutex<Vec<(usize, Encoded)>>>) -> TileWorkerHost {
         let replies = Arc::clone(replies);
-        TileWorkerHost::new(Registry::with_builtins(), move |reply| replies.lock().push((instance, reply)))
+        TileWorkerHost::new(crate::tests::registry(), move |reply| replies.lock().push((instance, reply)))
     }
 
     /// `RemoteWorkers` over these instances.
     fn workers(&self) -> Box<dyn TileWorkers> {
         let instances = self.clone();
-        Box::new(RemoteWorkers::new(Registry::with_builtins(), move |sink| {
+        Box::new(RemoteWorkers::new(crate::tests::registry(), move |sink| {
             instances.0.borrow_mut().sink = Some(sink);
             Box::new(instances)
         }))

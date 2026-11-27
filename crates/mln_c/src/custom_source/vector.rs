@@ -44,18 +44,10 @@ impl std::fmt::Debug for CustomVectorSourceOptions {
 }
 
 impl StyleSourceType for CustomVectorSourceType {
-    const INFO: SourceTypeInfo = SourceTypeInfo {
-        name: "custom-vector",
-        layer_kind: SourceKind::Geometry,
-        from_json: false,
-        round_zoom: false,
-        overscale: true,
-        prefetch: true,
-    };
+    const INFO: SourceTypeInfo =
+        SourceTypeInfo { name: "custom-vector", layer_kind: SourceKind::Geometry, from_json: false };
 
     type Options = CustomVectorSourceOptions;
-    /// None: the host's tile functions give the source's data.
-    type Description = ();
 }
 
 impl CustomVectorSourceOptions {

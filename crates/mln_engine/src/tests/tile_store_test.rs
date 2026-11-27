@@ -188,7 +188,7 @@ fn vector_source(tileset: Tileset) -> Source {
         tileset: PartialTileset::default(),
         tile_size: mln_style::constants::TILE_SIZE_I,
     };
-    Source::new("source", SourceData::<VectorSourceType>::with_description(options, tileset))
+    Source::new("source", SourceData::<VectorSourceType>::with_description(options, Arc::new(tileset)))
 }
 
 /// Whether `tile`'s tileset load waits for a network-only request, or (with
@@ -333,7 +333,8 @@ fn fresh_data_is_kept_when_required_again() {
         // Expired, so the next round requests it again.
         tile.with(|tile| {
             let state = tile.parts().1.load.state.as_mut().expect("the tile's state");
-            let tileset = state.downcast_mut::<crate::source::tileset::TilesetTile>().expect("a tileset tile");
+            let tileset =
+                state.downcast_mut::<crate::tests::builtin_sources::tileset::TilesetTile>().expect("a tileset tile");
             tileset.caching_mut().expires = Some(Timestamp::from_secs(0));
         });
     }
@@ -1075,7 +1076,8 @@ fn requested_format<K: mln_style::sources::tileset::TilesetKind>(
     let test = Test::new();
     let tileset = Tileset { tiles: vec!["tiles".to_owned()], vector_encoding: encoding, ..Default::default() };
     let options = TilesetSourceOptions { url: None, tileset: PartialTileset::default(), tile_size: 512 };
-    let source = Source::new("source", SourceData::<TilesetSourceType<K>>::with_description(options, tileset));
+    let source =
+        Source::new("source", SourceData::<TilesetSourceType<K>>::with_description(options, Arc::new(tileset)));
     let store = tile_store(&test.pool, Box::new(InlineWorkers));
     let id = OverscaledTileID::from_zxy(0, 0, 0);
     let tiles = OneTile::with_origin(store, &source, None, &[id], MapMode::Static);

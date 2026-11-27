@@ -63,9 +63,9 @@ pub(crate) fn geojson_source_with_data(
 ) -> mln_style::Source {
     use mln_style::source::SourceData;
     use mln_style::sources::geojson::{GeoJsonSourceOptions, GeoJsonSourceType};
+    let data = mln_builtins::sources::geojson::create_geojson_data(geojson, &options).expect("GeoJSON data");
     let options = GeoJsonSourceOptions::new(options);
-    let data = options.data_builder().build(geojson).expect("GeoJSON data");
-    mln_style::Source::new(id, SourceData::<GeoJsonSourceType>::with_description(options, data))
+    mln_style::Source::new(id, SourceData::<GeoJsonSourceType>::with_description(options, Arc::new(data)))
 }
 
 /// Replaces the data of `map`'s GeoJSON source `id` with `geojson`.
@@ -73,9 +73,9 @@ pub(crate) fn set_geojson(map: &mut Map, id: &str, geojson: geojson::GeoJson) {
     use mln_style::source::SourceData;
     use mln_style::sources::geojson::GeoJsonSourceType;
     let source = map.source(id).expect("the source");
-    let builder = SourceData::<GeoJsonSourceType>::recover(source).expect("a GeoJSON source").options.data_builder();
-    let data = builder.build(geojson).expect("GeoJSON data");
-    let edit = GeoJsonSourceType::set_data(id, Some(data));
+    let options = &SourceData::<GeoJsonSourceType>::recover(source).expect("a GeoJSON source").options.options;
+    let data = mln_builtins::sources::geojson::create_geojson_data(geojson, options).expect("GeoJSON data");
+    let edit = mln_builtins::sources::geojson::set_data(id, Some(data));
     map.edit_style(|style| style.apply(edit)).expect("a GeoJSON source");
 }
 
@@ -700,7 +700,8 @@ impl<FS: FileSource + 'static> MapTest<FS> {
         let mut frontend =
             HeadlessFrontend::with_pixel_ratio(pixel_ratio, run_loop.queue(), &pool).expect("a headless frontend");
         let options = MapOptions { map_mode: mode, size: frontend.size(), pixel_ratio, ..Default::default() };
-        let mut map = Map::with_file_source(Arc::<FS>::clone(&file_source), options, &pool).unwrap();
+        let mut map =
+            Map::with_file_source(Arc::<FS>::clone(&file_source), options, mln_builtins::registry(), &pool).unwrap();
         frontend.attach(&mut map);
         let map = Rc::new(RefCell::new(map));
         let frontend = Rc::new(RefCell::new(frontend));

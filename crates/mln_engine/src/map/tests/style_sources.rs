@@ -7,10 +7,10 @@ use mln_style::error::ErrorKind;
 use mln_style::geo::LatLng;
 use mln_style::size::Size;
 use mln_style::source::SourceData;
-use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, geojson_data, geojson_source};
+use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, geojson_source};
 use mln_style::sources::{ImageSourceType, VectorSourceType, image_source, vector_source as tileset_vector_source};
 use mln_style::tile_id::CanonicalTileID;
-use mln_style::tileset::PartialTileset;
+use mln_style::tileset::{PartialTileset, Tileset};
 use mln_style::{Edit, Layer};
 
 use crate::exec::pool::Pool;
@@ -19,12 +19,15 @@ use crate::map::{Map, MapEvent, MapOptions};
 use crate::storage::response::{Reason, ResourceError};
 use crate::storage::stub_file_source::{ResponseType, StubFileSource};
 use crate::storage::{Kind, Response};
+use crate::tests::builtin_sources::geojson::{create_geojson_data, geojson_data, set_data};
+use crate::tests::builtin_sources::image::set_image;
 
 const EMPTY_GEOJSON_SOURCE: &str = r#"{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}"#;
 
 fn loaded_map(run_loop: &Queue<()>) -> Map {
     let file_source = StubFileSource::on_queue(run_loop, ResponseType::Asynchronous);
-    let mut map = Map::with_file_source(file_source, MapOptions::default(), &Pool::local()).expect("map");
+    let mut map = Map::with_file_source(file_source, MapOptions::default(), crate::tests::registry(), &Pool::local())
+        .expect("map");
     map.load_style_json(r#"{"version":8,"sources":{},"layers":[]}"#);
     map
 }
@@ -107,7 +110,8 @@ fn malformed_sources_are_invalid_arguments() {
 fn a_source_json_needs_a_loaded_style() {
     let run_loop = Queue::<()>::new();
     let file_source = StubFileSource::on_queue(&run_loop, ResponseType::Asynchronous);
-    let mut map = Map::with_file_source(file_source, MapOptions::default(), &Pool::local()).expect("map");
+    let mut map = Map::with_file_source(file_source, MapOptions::default(), crate::tests::registry(), &Pool::local())
+        .expect("map");
     let error = map.add_source_json("points", EMPTY_GEOJSON_SOURCE).unwrap_err();
     assert_eq!(ErrorKind::InvalidState, error.kind);
     assert_eq!("style is not loaded", error.message);
@@ -119,7 +123,8 @@ fn a_source_json_needs_a_loaded_style() {
 /// background work runs when the test runs its pool.
 fn map_over(file_source: &Arc<StubFileSource>) -> Map {
     let file_source: Arc<dyn crate::storage::FileSource> = Arc::<StubFileSource>::clone(file_source);
-    let mut map = Map::with_file_source(file_source, MapOptions::default(), &Pool::local()).expect("map");
+    let mut map = Map::with_file_source(file_source, MapOptions::default(), crate::tests::registry(), &Pool::local())
+        .expect("map");
     map.load_style_json(r#"{"version":8,"sources":{},"layers":[]}"#);
     map
 }
@@ -204,7 +209,7 @@ fn a_tilejson_describes_its_source() {
     map.add_source(tileset_vector_source("source", Some("url".to_owned()), PartialTileset::default())).unwrap();
     assert!(!map.style_loaded());
     run_until(&mut map, &run_loop, Map::style_loaded);
-    assert_eq!(Some("a".to_owned()), map.source("source").unwrap().data().attribution());
+    assert_eq!(Some("a".to_owned()), map.registry().source_attribution(map.source("source").unwrap()));
     assert_eq!(["source"], *source_changes(&map.drain_events()));
 }
 
@@ -218,7 +223,7 @@ fn an_inline_tileset_describes_its_source_at_once() {
     let tileset = PartialTileset { tiles: Some(vec!["tiles".to_owned()]), ..PartialTileset::default() };
     map.add_source(tileset_vector_source("source", None, tileset)).unwrap();
     let data = SourceData::<VectorSourceType>::recover(map.source("source").unwrap()).unwrap();
-    assert_eq!(vec!["tiles".to_owned()], data.description.as_ref().expect("a tileset").tiles);
+    assert_eq!(vec!["tiles".to_owned()], data.description::<Tileset>().expect("a tileset").tiles);
     assert!(map.style_loaded());
 }
 
@@ -256,9 +261,9 @@ fn geojson_source_data_replaces_building_url_data() {
     map.process_events();
 
     let source = map.source("source").unwrap();
-    let builder = SourceData::<GeoJsonSourceType>::recover(source).unwrap().options.data_builder();
-    let data = builder.build(serde_json::from_slice(&geojson_points(2)).unwrap()).unwrap();
-    let edit = GeoJsonSourceType::set_data("source", Some(data));
+    let options = &SourceData::<GeoJsonSourceType>::recover(source).unwrap().options.options;
+    let data = create_geojson_data(serde_json::from_slice(&geojson_points(2)).unwrap(), options).unwrap();
+    let edit = set_data("source", Some(data));
     map.edit_style(|style| style.apply(edit)).unwrap();
     assert!(map.style_loaded());
 
@@ -314,7 +319,8 @@ fn a_geojson_build_keeps_the_synchronous_update_override() {
 
     run_until(&mut map, &run_loop, Map::style_loaded);
     assert_eq!(1, feature_count(&map, "source"));
-    assert!(!map.source("source").unwrap().data().is_update_synchronous());
+    let source = SourceData::<GeoJsonSourceType>::recover(map.source("source").unwrap()).unwrap();
+    assert!(!source.options.synchronous_update);
 }
 
 // gtest: Source.ImageSourceImageUpdate
@@ -333,16 +339,53 @@ fn image_source_image_update() {
     let edit = ImageSourceType::set_url("source", "http://url");
     map.edit_style(|style| style.apply(edit)).unwrap();
     run_until(&mut map, &run_loop, Map::style_loaded);
-    let image =
-        |map: &Map| SourceData::<ImageSourceType>::recover(map.source("source").unwrap()).unwrap().description.clone();
+    let image = |map: &Map| {
+        let data = SourceData::<ImageSourceType>::recover(map.source("source").unwrap()).unwrap();
+        data.description::<PremultipliedImage>().cloned()
+    };
     assert!(image(&map).is_some());
     map.drain_events();
 
     let mut rgba = PremultipliedImage::new(Size::new(2, 1));
     rgba.data.copy_from_slice(&[255, 254, 253, 0, 255, 254, 253, 0]);
-    let edit = ImageSourceType::set_image("source", rgba);
+    let edit = set_image("source", rgba);
     map.edit_style(|style| style.apply(edit)).unwrap();
     assert_eq!(["source"], *source_changes(&map.drain_events()));
     assert_eq!(Size::new(2, 1), image(&map).unwrap().size);
     assert!(map.style_loaded());
+}
+
+// The GeoJSON that a style gives is indexed as its source loads, in the
+// background, and the style loads once it is.
+#[test]
+fn inline_geojson_loads_in_the_background() {
+    let run_loop = Queue::<()>::new();
+    let mut map = map_over(&StubFileSource::on_queue(&run_loop, ResponseType::Asynchronous));
+    let points = String::from_utf8(geojson_points(3)).unwrap();
+    map.load_style_json(&format!(
+        r#"{{"version":8,"sources":{{"source":{{"type":"geojson","data":{points}}}}},"layers":[]}}"#
+    ));
+    assert!(map.source("source").is_some(), "the style parsed");
+    run_until(&mut map, &run_loop, Map::style_loaded);
+    assert_eq!(3, feature_count(&map, "source"));
+}
+
+// GeoJSON that the style gives but that isn't GeoJSON, or that can't be
+// clustered, fails its source as it loads, not the style: the style loads,
+// and the source has no data.
+#[test]
+fn invalid_inline_geojson_fails_the_source_not_the_style() {
+    for data in [
+        r#"{"type":"Nothing"}"#,
+        r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{},"geometry":{"type":"LineString","coordinates":[[0,0],[1,1]]}}]}"#,
+    ] {
+        let run_loop = Queue::<()>::new();
+        let mut map = map_over(&StubFileSource::on_queue(&run_loop, ResponseType::Asynchronous));
+        map.load_style_json(&format!(
+            r#"{{"version":8,"sources":{{"source":{{"type":"geojson","cluster":true,"data":{data}}}}},"layers":[]}}"#
+        ));
+        assert!(map.source("source").is_some(), "the style parsed with {data}");
+        run_until(&mut map, &run_loop, Map::style_loaded);
+        assert!(map.source("source").and_then(geojson_data).is_none(), "{data}");
+    }
 }

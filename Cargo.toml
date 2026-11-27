@@ -49,6 +49,7 @@ categories = ["graphics", "science::geo"]
 # In-repo libraries. The exact version keeps a release's packages together.
 feature = { package = "mln-rs-feature", path = "vendor/feature", version = "=0.0.18" }
 geometry = { package = "mln-rs-geometry", path = "vendor/geometry", version = "=0.0.18" }
+mln_builtins = { package = "mln-rs-builtins", path = "crates/mln_builtins", version = "=0.0.18" }
 mln_d3d12 = { package = "mln-rs-d3d12", path = "crates/mln_d3d12", version = "=0.0.18" }
 mln_bench_workload = { package = "mln-rs-bench-workload", path = "tools/bench/workload" }
 # Without its default features, the in-process font-face shaper and SQLite:
@@ -532,6 +533,7 @@ geo-types.workspace = true
 geojson.workspace = true
 geometry.workspace = true
 glam.workspace = true
+mln_builtins.workspace = true
 mln_d3d12 = { workspace = true, optional = true }
 mln_geojson.workspace = true
 mln_gfx.workspace = true

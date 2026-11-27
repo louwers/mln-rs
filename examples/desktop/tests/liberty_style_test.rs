@@ -105,7 +105,9 @@ fn satellite_3d_adds_mapterhorn_terrain_to_satellite() {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         let attribution = map
-            .with_core(|map| map.source(styles::TERRAIN_SOURCE).and_then(|source| source.data().attribution()))
+            .with_core(|map| {
+                map.source(styles::TERRAIN_SOURCE).and_then(|source| map.registry().source_attribution(source))
+            })
             .and_then(Completion::wait)
             .unwrap();
         if let Some(attribution) = attribution {

@@ -37,7 +37,9 @@ geojson.workspace = true
 glam.workspace = true
 log = { workspace = true, features = ["kv"] }
 mln_gfx.workspace = true
-# The custom layer type, and the custom source types' render halves.
+# The built-in registrations.
+mln_builtins.workspace = true
+# The custom layer type, and the custom source types' engine halves.
 mln_engine.workspace = true
 # The custom geometry sources' tiles, cut as a GeoJSON source's.
 mln_geojson.workspace = true

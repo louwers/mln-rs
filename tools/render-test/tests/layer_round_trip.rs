@@ -9,7 +9,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use mln_engine::Registry;
 use mln_style::StyleRegistry;
 use mln_style::conversion::{Convertible, Error};
 use mln_style::layer::{ErasedLayerStyle, Layer, convert_layer};
@@ -61,7 +60,7 @@ fn every_layer(registry: &StyleRegistry) -> Vec<(PathBuf, Layer)> {
 
 #[test]
 fn every_layer_crosses() {
-    let registry = Arc::clone(Registry::with_builtins().style());
+    let registry = Arc::clone(mln_builtins::registry().style());
     let layers = every_layer(&registry);
     let mut failures = Vec::new();
     for (path, layer) in &layers {
@@ -89,7 +88,7 @@ const NOT_REPARSED: [&str; 2] = [
 
 #[test]
 fn every_layer_reparses() {
-    let registry = Arc::clone(Registry::with_builtins().style());
+    let registry = Arc::clone(mln_builtins::registry().style());
     let layers = every_layer(&registry);
     let mut failures = Vec::new();
     for (path, layer) in &layers {

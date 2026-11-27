@@ -1,5 +1,6 @@
-//! The render half of tileset sources: their tiles load through the map's
-//! file source. A tile's first request only looks in the cache; a required
+//! Vector, raster and raster-dem sources: a source loads the TileJSON at its
+//! URL, or else takes the tileset the style lists, the style's members
+//! winning, and its tiles load through the map's file source. A tile's first request only looks in the cache; a required
 //! tile then asks the network, unless it has data from there that never
 //! expires. The network request stays open while the tile is required: the
 //! file source answers it again as it retries an error or revalidates data
@@ -10,52 +11,166 @@ use std::marker::PhantomData;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
+use mln_engine::map::MapMode;
+use mln_engine::source::{
+    Cover, DataOrigin, DemTiles, Described, GeometryTiles, Load, LoadContext, OfflineResources, OriginUpdate,
+    RasterTiles, Respond, SourceSummary, SourceType, Supply, TileKind, TileNecessity, TileOperation, TileTimes,
+    WorldCopy,
+};
+use mln_engine::storage::chrono::Timestamp;
+use mln_engine::storage::resource::{Priority, TileFormat};
+use mln_engine::storage::response::{Caching, Reason};
+use mln_engine::storage::{Data, FileSource, LoadingMethod, Request, Resource, Response, StoragePolicy};
+use mln_engine::tile::cut::{Ancestor, Cut, CutData};
+use mln_engine::tile::{OverscaledTileID, TileData};
 use mln_style::error::Error;
 use mln_style::hash::{HashMap, hash_bytes};
+use mln_style::layer::SourceKind;
 use mln_style::source::{SourceCommon, SourceData};
-use mln_style::sources::tileset::{
-    RasterDemKind, RasterKind, TilesetKind, TilesetSourceOptions, TilesetSourceType, VectorKind,
-};
+pub use mln_style::sources::tileset::{RasterDemKind, RasterKind, TilesetKind, VectorKind};
+use mln_style::sources::tileset::{TilesetSourceOptions, TilesetSourceType};
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::tileset::{RasterEncoding, Scheme, Tileset, VectorEncoding};
 use mln_style::{Source, constants};
 
-use crate::map::MapMode;
-use crate::source::{
-    Cover, DataOrigin, DemTiles, GeometryTiles, LoadContext, OriginUpdate, RasterTiles, SourceType, Supply, TileKind,
-    TileNecessity, TileOperation, TileTimes, WorldCopy,
-};
-use crate::storage::chrono::Timestamp;
-use crate::storage::resource::{Priority, TileFormat};
-use crate::storage::response::{Caching, Reason};
-use crate::storage::{Data, FileSource, LoadingMethod, Request, Resource, Response, StoragePolicy};
-use crate::tile::cut::{Ancestor, Cut, CutData};
-use crate::tile::{OverscaledTileID, TileData};
+/// The engine half of the vector, raster and raster-dem source types, whose
+/// style half is `mln_style`'s [`TilesetSourceType<K>`].
+pub struct TilesetSource<K>(PhantomData<fn() -> K>);
 
-/// A tileset kind's kind of tiles.
-trait TilesetTilesKind: TilesetKind {
+pub type VectorSource = TilesetSource<VectorKind>;
+pub type RasterSource = TilesetSource<RasterKind>;
+pub type RasterDemSource = TilesetSource<RasterDemKind>;
+
+/// A tileset kind's kind of tiles, and how a view covers them.
+trait TilesetTilesKind: TilesetKind + Sized {
     type Data: TileKind;
+    const TILES: Tiles;
+    /// [`Cover::round_zoom`].
+    const ROUND_ZOOM: bool;
+    /// [`Cover::overscale`].
+    const OVERSCALE: bool;
+
+    /// Sets how the tiles' pixels encode elevations, for a raster-dem
+    /// tileset.
+    fn set_encoding(_update: &mut OriginUpdate<'_, TilesetOrigin<Self>>, _encoding: RasterEncoding) {}
+}
+
+impl TilesetTilesKind for VectorKind {
+    type Data = GeometryTiles;
+    const TILES: Tiles = Tiles::Vector;
+    const ROUND_ZOOM: bool = false;
+    const OVERSCALE: bool = true;
+}
+
+impl TilesetTilesKind for RasterKind {
+    type Data = RasterTiles;
+    const TILES: Tiles = Tiles::Raster;
+    const ROUND_ZOOM: bool = true;
+    const OVERSCALE: bool = false;
+}
+
+impl TilesetTilesKind for RasterDemKind {
+    type Data = DemTiles;
+    const TILES: Tiles = Tiles::Dem;
+    const ROUND_ZOOM: bool = true;
+    // As a raster source's: a DEM tile is the same at every zoom past the
+    // maxzoom, so the map draws it larger rather than load it again.
+    const OVERSCALE: bool = false;
+
+    fn set_encoding(update: &mut OriginUpdate<'_, TilesetOrigin<Self>>, encoding: RasterEncoding) {
+        update.set_encoding(encoding);
+    }
 }
 
 macro_rules! tileset_source_type {
-    ($kind:ty, $data:ty, $tiles:expr) => {
-        impl TilesetTilesKind for $kind {
+    ($kind:ty, $data:ty) => {
+        impl SourceType for TilesetSource<$kind> {
+            type Style = TilesetSourceType<$kind>;
             type Data = $data;
-        }
+            type Description = Tileset;
 
-        impl SourceType for TilesetSourceType<$kind> {
-            type Data = $data;
+            fn load(source: &SourceData<Self::Style>) -> Load<Tileset> {
+                load(source)
+            }
 
-            fn supply(_source: &Source) -> Supply<$data> {
-                Supply::tiles(TilesetOrigin::<$kind>(Tilesets::new($tiles), PhantomData))
+            fn describe(options: &TilesetSourceOptions, data: Option<Data>, respond: Respond<Described<Tileset>>) {
+                describe::<$kind>(options, data, respond);
+            }
+
+            fn metadata_changed(old: Option<&Tileset>, new: Option<&Tileset>) -> bool {
+                old != new
+            }
+
+            fn attribution(source: &SourceData<Self::Style>) -> Option<String> {
+                source.description::<Tileset>().map(|tileset| tileset.attribution.clone())
+            }
+
+            fn summary(source: &SourceData<Self::Style>) -> SourceSummary {
+                summary(source)
+            }
+
+            fn offline(source: &SourceData<Self::Style>) -> OfflineResources {
+                offline::<$kind>(source)
+            }
+
+            fn offline_tileset(source: &SourceData<Self::Style>, tilejson: &[u8]) -> Result<Tileset, String> {
+                source.options.tileset_with_tilejson(tilejson, <$kind as TilesetKind>::INFO.layer_kind)
+            }
+
+            fn supply(_source: &Source) -> Supply<Self::Data> {
+                Supply::tiles(TilesetOrigin::<$kind>(Tilesets::new(<$kind>::TILES), PhantomData))
             }
         }
     };
 }
 
-tileset_source_type!(VectorKind, GeometryTiles, Tiles::Vector);
-tileset_source_type!(RasterKind, RasterTiles, Tiles::Raster);
-tileset_source_type!(RasterDemKind, DemTiles, Tiles::Dem);
+tileset_source_type!(VectorKind, GeometryTiles);
+tileset_source_type!(RasterKind, RasterTiles);
+tileset_source_type!(RasterDemKind, DemTiles);
+
+/// The TileJSON at the source's URL, or else the tileset the style lists.
+fn load<K: TilesetKind>(source: &SourceData<TilesetSourceType<K>>) -> Load<Tileset> {
+    match &source.options.url {
+        Some(url) => Load::Fetch(mln_engine::source::Fetch::Source(url.clone())),
+        None => Load::Ready(source.options.tileset.clone().into()),
+    }
+}
+
+/// The tileset of the TileJSON `data`, with the style's members over its.
+fn describe<K: TilesetKind>(options: &TilesetSourceOptions, data: Option<Data>, respond: Respond<Described<Tileset>>) {
+    let tileset = match data {
+        None => Err("unexpectedly empty TileJSON".to_owned()),
+        Some(data) => options.tileset_with_tilejson(&data, K::INFO.layer_kind),
+    };
+    respond(tileset.map(Some).map_err(Error::native));
+}
+
+fn summary<K: TilesetKind>(source: &SourceData<TilesetSourceType<K>>) -> SourceSummary {
+    let options = &source.options;
+    let vector_encoding = (K::INFO.layer_kind == SourceKind::Geometry).then(|| {
+        let loaded = source.description::<Tileset>().and_then(|tileset| tileset.vector_encoding);
+        loaded.or(options.tileset.vector_encoding).unwrap_or(VectorEncoding::Mapbox)
+    });
+    SourceSummary {
+        url: options.url.clone(),
+        tile_size: Some(options.tile_size),
+        inline_tileset: options.inline_tileset(),
+        vector_encoding,
+        geojson: None,
+    }
+}
+
+fn offline<K: TilesetTilesKind>(source: &SourceData<TilesetSourceType<K>>) -> OfflineResources {
+    let options = &source.options;
+    let (tile_size, round_zoom) = (options.tile_size, K::ROUND_ZOOM);
+    match &options.url {
+        Some(url) => OfflineResources::TileJson { url: url.clone(), tile_size, round_zoom },
+        None => match options.inline_tileset() {
+            Some(tileset) => OfflineResources::Tiles { tileset, tile_size, round_zoom },
+            None => OfflineResources::None,
+        },
+    }
+}
 
 /// The kinds of tiles a tileset's are, which decide what a tile's data
 /// delivers.
@@ -90,7 +205,11 @@ impl<K: TilesetTilesKind> DataOrigin for TilesetOrigin<K> {
 
     fn update(&mut self, update: &mut OriginUpdate<'_, Self>) -> Option<Cover> {
         let data = SourceData::<TilesetSourceType<K>>::recover(update.source())?;
-        self.0.update(&mut update.cast(), &data.options, data.description.as_ref())
+        let (cover, encoding) = self.0.update(&mut update.cast(), &data.options, data.description::<Tileset>())?;
+        if let Some(encoding) = encoding {
+            K::set_encoding(update, encoding);
+        }
+        Some(Cover { round_zoom: K::ROUND_ZOOM, overscale: K::OVERSCALE, ..cover })
     }
 
     fn start(&mut self, cx: &mut LoadContext<'_, '_, Self>, copy: Option<WorldCopy<'_, TilesetTile>>) -> TilesetTile {
@@ -131,9 +250,9 @@ enum VectorTileEncoding {
 impl VectorTileEncoding {
     fn decode(self, data: Data) -> TileData {
         match self {
-            VectorTileEncoding::Mvt => TileData::Mvt(crate::tile::MvtTile::new(data)),
+            VectorTileEncoding::Mvt => TileData::Mvt(mln_engine::tile::MvtTile::new(data)),
             VectorTileEncoding::Mlt { fast_pfor_enabled } => {
-                TileData::Mlt(crate::tile::MltTile::new(data, fast_pfor_enabled))
+                TileData::Mlt(mln_engine::tile::MltTile::new(data, fast_pfor_enabled))
             }
         }
     }
@@ -196,7 +315,7 @@ impl Tilesets {
     /// memory that expires still asks the network, which the file source
     /// holds until the data expires.
     fn request(&mut self, tile: &mut TilesetTile, mut method: Method, cx: &mut LoadContext<'_, '_, Self>) {
-        if !tile.is_fresh(crate::storage::chrono::now()) && self.take_in_memory(tile, cx) {
+        if !tile.is_fresh(mln_engine::storage::chrono::now()) && self.take_in_memory(tile, cx) {
             if cx.necessity() != TileNecessity::Required || tile.has_lasting_data() {
                 return;
             }
@@ -236,7 +355,8 @@ impl Tilesets {
         let Some(data) = self.data.as_mut().filter(|_| self.tiles == Tiles::Vector) else {
             return false;
         };
-        let Some(((item, held), fetched)) = data.in_memory(cx.id(), &tile.resource.url, crate::storage::chrono::now())
+        let Some(((item, held), fetched)) =
+            data.in_memory(cx.id(), &tile.resource.url, mln_engine::storage::chrono::now())
         else {
             return false;
         };
@@ -286,13 +406,14 @@ impl Tilesets {
     }
 
     /// Takes in a version of the source, with `options` and the tileset
-    /// `loaded` for it, if it has loaded.
+    /// `loaded` for it, if it has loaded. Returns the cover, and for a
+    /// raster-dem tileset its elevations' encoding.
     fn update(
         &mut self,
         update: &mut OriginUpdate<'_, Self>,
         options: &TilesetSourceOptions,
         loaded: Option<&Tileset>,
-    ) -> Option<Cover> {
+    ) -> Option<(Cover, Option<RasterEncoding>)> {
         self.params = NetworkParams::of(update.source().common());
         self.pixel_ratio = update.map().pixel_ratio;
         // In Continuous mode, keep the existing tiles if the new tileset is
@@ -317,9 +438,8 @@ impl Tilesets {
         } else {
             VectorTileEncoding::Mvt
         };
-        if self.tiles == Tiles::Dem {
-            update.parts.tiles.info.dem_encoding = tileset.raster_encoding.unwrap_or(RasterEncoding::Mapbox);
-        }
+        let dem_encoding =
+            (self.tiles == Tiles::Dem).then(|| tileset.raster_encoding.unwrap_or(RasterEncoding::Mapbox));
         let file_source = update.map().file_source.clone();
         let current = self.data.as_ref().is_some_and(|current| {
             current.tileset == *tileset
@@ -338,7 +458,16 @@ impl Tilesets {
             let max_zoom = update.map().max_zoom.floor() as i32 - i32::from(OVERSCALED_ZOOMS);
             zoom_range.max = zoom_range.max.max(max_zoom.clamp(0, i32::from(u8::MAX)) as u8);
         }
-        Some(Cover { tile_size, zoom_range, bounds: tileset.bounds })
+        let cover = Cover {
+            tile_size,
+            zoom_range,
+            bounds: tileset.bounds,
+            round_zoom: false,
+            overscale: false,
+            prefetch: true,
+            synchronous: false,
+        };
+        Some((cover, dem_encoding))
     }
 
     /// A tile that starts from its copy in another world copy takes the
@@ -412,7 +541,7 @@ impl Tilesets {
         // then the tile holds it back for the network request to revalidate.
         // An empty copy has nothing to hold back: the network loads anew.
         if res.error.is_none() {
-            if res.caching.is_usable(crate::storage::chrono::now()) {
+            if res.caching.is_usable(mln_engine::storage::chrono::now()) {
                 tile.resource.set_prior(&res);
                 self.take_response(tile, method, &res, cx);
             } else if !res.no_content {
@@ -444,7 +573,7 @@ impl Tilesets {
             if tile.is_idle() && !tile.has_lasting_data() {
                 self.request(tile, Method::Network, cx);
             }
-        } else if matches!(tile.fetch, Fetch::Network { .. }) {
+        } else if tile.is_requesting_network() {
             // Only a network-only request is aborted.
             tile.stop();
         }
@@ -769,7 +898,6 @@ impl TilesetTile {
     }
 
     /// Whether a network request is open.
-    #[cfg(test)]
     pub(crate) fn is_requesting_network(&self) -> bool {
         matches!(self.fetch, Fetch::Network { .. })
     }
@@ -784,5 +912,21 @@ impl TilesetTile {
     /// finds the load idle, and `receive` ignores it.
     fn stop(&mut self) {
         self.fetch = Fetch::Idle;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn data_from_the_network_is_fresh_until_it_expires() {
+        let mut tile = TilesetTile::new(Resource::source("tiles"));
+        tile.from_network = true;
+        assert!(tile.is_fresh(Timestamp::from_secs(10)), "data that never expires");
+        tile.caching_mut().expires = Some(Timestamp::from_secs(5));
+        assert!(tile.is_fresh(Timestamp::from_secs(4)));
+        assert!(!tile.is_fresh(Timestamp::from_secs(5)));
+        assert!(!tile.is_requesting_network() && tile.is_idle(), "a new tile asks nothing");
     }
 }

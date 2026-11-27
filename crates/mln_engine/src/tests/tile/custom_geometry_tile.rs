@@ -10,7 +10,6 @@ use mln_style::layer::{Layer, LayerStyle, SourceKind};
 use mln_style::layers::Circle;
 
 use super::{RasterTileTest, local_tiles};
-use crate::Registry;
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::query::SourceQueryOptions;
 use crate::tile::OverscaledTileID;
@@ -27,7 +26,7 @@ fn invoke_tile_changed() {
     let test = RasterTileTest::new();
     let mut tiles = local_tiles(&test, SourceKind::Geometry, root());
 
-    let layer = Layer::new(Registry::with_builtins().style(), "circle", "circle", "source").unwrap();
+    let layer = Layer::new(crate::tests::registry().style(), "circle", "circle", "source").unwrap();
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
         Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(layer.style()).unwrap()));
 

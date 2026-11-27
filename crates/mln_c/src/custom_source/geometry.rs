@@ -4,11 +4,11 @@
 use std::sync::Arc;
 
 use geojson::GeoJson;
+use mln_builtins::sources::geojson::TileFeatures;
 use mln_style::constants;
 use mln_style::layer::SourceKind;
 use mln_style::range::Range;
 use mln_style::source::{SourceTypeInfo, StyleSourceType};
-use mln_style::sources::geojson::TileFeatures;
 use mln_style::tile_id::CanonicalTileID;
 
 use super::TileFunctions;
@@ -55,18 +55,10 @@ impl std::fmt::Debug for CustomGeometrySourceOptions {
 }
 
 impl StyleSourceType for CustomGeometrySourceType {
-    const INFO: SourceTypeInfo = SourceTypeInfo {
-        name: "custom-geometry",
-        layer_kind: SourceKind::Geometry,
-        from_json: false,
-        round_zoom: false,
-        overscale: true,
-        prefetch: true,
-    };
+    const INFO: SourceTypeInfo =
+        SourceTypeInfo { name: "custom-geometry", layer_kind: SourceKind::Geometry, from_json: false };
 
     type Options = CustomGeometrySourceOptions;
-    /// None: the host's tile functions give the source's data.
-    type Description = ();
 }
 
 impl CustomGeometrySourceOptions {

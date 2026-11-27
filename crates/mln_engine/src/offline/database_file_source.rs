@@ -5,8 +5,6 @@
 
 use std::sync::Arc;
 
-use mln_style::StyleRegistry;
-
 use crate::offline::offline_download::{Downloads, Post};
 use crate::storage::database_file_source::DatabaseQueue;
 use crate::storage::offline::{
@@ -25,7 +23,7 @@ pub type RegionDatabase = DatabaseFileSource<Downloads>;
 pub fn region_database(
     cache_path: &str,
     network: Option<Arc<dyn FileSource>>,
-    registry: Arc<StyleRegistry>,
+    registry: Arc<crate::Registry>,
 ) -> RegionDatabase {
     DatabaseFileSource::with_extension(cache_path, network, false, |worker, network| {
         Downloads::new(network, post_to(worker), registry)

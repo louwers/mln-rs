@@ -96,6 +96,7 @@ impl ContinuousMap {
         let mut map = Map::with_file_source(
             file_source,
             MapOptions { map_mode: MapMode::Continuous, size: Size::new(256, 256), ..Default::default() },
+            mln_builtins::registry(),
             &pool,
         )
         .unwrap();

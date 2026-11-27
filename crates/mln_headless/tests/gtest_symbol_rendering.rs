@@ -7,12 +7,12 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use mln_engine::RenderMode;
 use mln_engine::camera::CameraOptions;
 use mln_engine::exec::pool::Pool;
 use mln_engine::map::{Map, MapMode, MapOptions};
 use mln_engine::storage::Kind;
 use mln_engine::storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_engine::{Registry, RenderMode};
 use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_style::Edit;
 use mln_style::bitmap::PremultipliedImage;
@@ -120,6 +120,7 @@ impl SymbolRenderingTest {
         let mut map = Map::with_file_source(
             file_source,
             MapOptions { map_mode: mode, size: Size::new(256, 256), ..Default::default() },
+            mln_builtins::registry(),
             &pool,
         )
         .unwrap();
@@ -356,7 +357,7 @@ fn fully_hidden_layer_can_reappear() {
     let test = SymbolRenderingTest::new(256, 0.0, SymbolKind::Icon, MapMode::Static);
     let initial = test.render();
 
-    let mut blocker = Layer::new(Registry::with_builtins().style(), "symbol", "blocker", "points").unwrap();
+    let mut blocker = Layer::new(mln_builtins::registry().style(), "symbol", "blocker", "points").unwrap();
     let error = blocker.set_property("icon-image", &Convertible::from(&serde_json::json!("marker")), None);
     assert!(error.is_none(), "{error:?}");
     test.map.borrow_mut().edit_style(|style| style.apply(Edit::AddLayer { layer: blocker, before: None })).unwrap();

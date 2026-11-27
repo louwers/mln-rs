@@ -341,7 +341,7 @@ impl WebMap {
             let attributions = style
                 .get_sources()
                 .iter()
-                .filter_map(|source| source.data().attribution().filter(|a| !a.is_empty()))
+                .filter_map(|source| map.registry().source_attribution(source).filter(|a| !a.is_empty()))
                 .collect::<Vec<_>>();
             (attributions, style.get_name().to_owned())
         });

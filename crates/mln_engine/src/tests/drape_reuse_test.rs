@@ -16,13 +16,12 @@ use mln_style::bitmap::PremultipliedImage;
 use mln_style::feature::FeatureState;
 use mln_style::geo::LatLng;
 use mln_style::size::Size;
-use mln_style::sources::{GeoJSONOptions, GeoJsonSourceType};
+use mln_style::sources::GeoJSONOptions;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::{Edit, Style};
 use parking_lot::Mutex;
 
-use crate::Registry;
 use crate::camera::transform::Transform;
 use crate::camera::{CameraOptions, ConstrainMode, Elevation, ViewportMode};
 use crate::map::{MapMode, TerrainOptions};
@@ -118,7 +117,7 @@ impl Tiles {
 
 /// The style of `json`, with what its sources' types know without a fetch.
 fn style_of(json: &str) -> Style {
-    let registry = Registry::with_builtins();
+    let registry = crate::tests::registry();
     let parsed = Style::from_json(registry.style(), json).expect("the style");
     let mut style = Style::new(Arc::clone(registry.style()));
     for source in parsed.get_sources().iter() {
@@ -193,8 +192,14 @@ impl DrapedMap {
         let device = super::webgpu_device()?;
         let mut backend = mln_webgpu::RendererBackend::new(&device);
         let pool = crate::tests::pool();
-        let mut renderer =
-            Renderer::new(backend.gpu(), 1.0, crate::text::local_fonts::LocalGlyphs::default(), Arc::new(|| {}), &pool);
+        let mut renderer = Renderer::new(
+            backend.gpu(),
+            1.0,
+            crate::text::local_fonts::LocalGlyphs::default(),
+            crate::tests::registry(),
+            Arc::new(|| {}),
+            &pool,
+        );
         let events = RendererEvents::new();
         renderer.set_event_queue(Some(events.clone()));
         let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
@@ -319,7 +324,7 @@ impl DrapedMap {
     /// Adds the first layer of `json`, a style's, with its sources, before
     /// the layer `before` or on top.
     fn add_layer(&mut self, json: &str, before: Option<&str>) {
-        let parsed = Style::from_json(Registry::with_builtins().style(), json).expect("the style");
+        let parsed = Style::from_json(crate::tests::registry().style(), json).expect("the style");
         for source in parsed.get_sources().iter() {
             self.edit(Edit::AddSource(crate::tests::ready(source.clone())));
         }
@@ -435,8 +440,9 @@ fn new_data_draws_the_drapes_whose_tiles_changed_again() {
     }"#
     .parse()
     .unwrap();
-    let data = mln_style::sources::geojson::create_geojson_data(geojson, &GeoJSONOptions::default_options()).unwrap();
-    map.edit(GeoJsonSourceType::set_data("shapes", Some(data)));
+    let data = crate::tests::builtin_sources::geojson::create_geojson_data(geojson, &GeoJSONOptions::default_options())
+        .unwrap();
+    map.edit(crate::tests::builtin_sources::geojson::set_data("shapes", Some(data)));
     // The source indexes its new data on the workers before its tiles lay
     // out again.
     let mut drawn = BTreeSet::new();

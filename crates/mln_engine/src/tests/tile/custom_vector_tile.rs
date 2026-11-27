@@ -8,7 +8,6 @@ use mln_style::layer::{Layer, LayerStyle, SourceKind};
 use mln_style::layers::Fill;
 
 use super::{RasterTileTest, local_tiles};
-use crate::Registry;
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::query::SourceQueryOptions;
 use crate::tile::{MltTile, OverscaledTileID, TileData};
@@ -21,7 +20,7 @@ fn set_mlt_tile_data() {
     let root = OverscaledTileID::from_zxy(0, 0, 0);
     let mut tiles = local_tiles(&test, SourceKind::Geometry, root);
 
-    let mut layer = Layer::new(Registry::with_builtins().style(), "fill", "water", "source").unwrap();
+    let mut layer = Layer::new(crate::tests::registry().style(), "fill", "water", "source").unwrap();
     layer.set_source_layer("water");
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
         Arc::new(EvaluatedLayer::<Fill>::new(LayerStyle::recover(layer.style()).unwrap()));

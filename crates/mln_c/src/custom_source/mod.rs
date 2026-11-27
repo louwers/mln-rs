@@ -7,7 +7,8 @@
 
 use std::sync::{Arc, LazyLock};
 
-use mln_engine::{Registry, RegistryBuilder, register_builtins};
+use mln_builtins::register_builtins;
+use mln_engine::{Registry, RegistryBuilder};
 use mln_style::error::Error;
 use mln_style::geo::LatLngBounds;
 use mln_style::tile_id::CanonicalTileID;

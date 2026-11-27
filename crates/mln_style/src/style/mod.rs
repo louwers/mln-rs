@@ -461,16 +461,13 @@ impl Style {
                 }
                 Arc::make_mut(&mut self.sources).remove(&id);
             }
-            Edit::SetSourceDescription { id, instance, load, result } => {
+            Edit::SetSourceDescription { id, instance, load, description } => {
                 let Some(source) = self.sources.get(&id) else { return Ok(()) };
                 if source.instance() != instance || source.data().load() != load {
                     return Ok(());
                 }
-                if let Ok(description) = result
-                    && let Some(source) = source.with_description(description)
-                {
-                    Arc::make_mut(&mut self.sources).set(source);
-                }
+                let source = source.with_description(description);
+                Arc::make_mut(&mut self.sources).set(source);
             }
             Edit::SetSourceCommon { id, common } => {
                 let source = self.sources.get(&id).ok_or_else(|| source_not_found(&id))?;

@@ -17,7 +17,6 @@ use mln_style::types::ProjectionDefinition;
 use mln_style::{Edit, Source, Style};
 use parking_lot::Mutex;
 
-use crate::Registry;
 use crate::camera::transform::Transform;
 use crate::camera::{CameraOptions, ConstrainMode, Elevation, ViewportMode};
 use crate::exec::pool::TaskGroup;
@@ -43,7 +42,7 @@ fn tiles() -> PartialTileset {
 
 /// A style with `source` and a terrain on the source "dem".
 fn style_with(source: Source) -> Style {
-    let mut style = Style::new(Arc::clone(Registry::with_builtins().style()));
+    let mut style = Style::new(Arc::clone(crate::tests::registry().style()));
     style.apply(Edit::AddSource(source)).unwrap();
     style.apply(Edit::SetTerrain(Some(Terrain::new("dem")))).unwrap();
     style
@@ -383,7 +382,6 @@ impl TerrainLoad {
             tile_lod_mode: TileLodMode::Default,
             subdivision_granularity: SubdivisionGranularitySetting::none(),
             global_state: None,
-            is_update_synchronous: false,
             font_faces: None,
             glyph_pbfs: false,
             placement_commits: 0,
@@ -715,7 +713,7 @@ fn the_ranges_forget_the_dem_tiles_let_go_past_their_bound() {
     let tile = load.frame().tiles[0].id.canonical;
     let source = load.store.source(load.render_source.tiles().unwrap()).unwrap();
     let data = SourceData::<RasterDemSourceType>::recover(&load.source).unwrap();
-    let dem_zooms = data.description.as_ref().unwrap().zoom_range;
+    let dem_zooms = data.description::<mln_style::tileset::Tileset>().unwrap().zoom_range;
 
     let mut ranges = ElevationRanges::default();
     ranges.update(source, dem_zooms, 1.0);
@@ -1139,7 +1137,7 @@ fn the_terrain_lets_go_of_the_map_data() {
         crate::text::local_fonts::LocalGlyphs::default(),
         Arc::default(),
         crate::text::font_face_engine::default_engine(),
-        Registry::with_builtins(),
+        crate::tests::registry(),
         Arc::new(|| {}),
         &pool,
     );
@@ -1173,7 +1171,7 @@ fn a_renderer_without_terrain_tells_a_grounded_map_there_is_no_ground() {
         crate::text::local_fonts::LocalGlyphs::default(),
         Arc::default(),
         crate::text::font_face_engine::default_engine(),
-        Registry::with_builtins(),
+        crate::tests::registry(),
         Arc::new(|| {}),
         &pool,
     );

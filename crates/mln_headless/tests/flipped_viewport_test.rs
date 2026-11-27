@@ -33,7 +33,7 @@ fn render(style: &str, viewport_mode: ViewportMode) -> Option<PremultipliedImage
         HeadlessFrontend::with_device(device, size, 1.0, Arc::default(), &run_loop, &pool).expect("a frontend");
     let file_source = Arc::new(StubFileSource::new(ResponseType::Synchronous));
     let options = MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, viewport_mode, ..Default::default() };
-    let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
+    let mut map = Map::with_file_source(file_source, options, mln_builtins::registry(), &pool).unwrap();
     frontend.attach(&mut map);
     map.set_bounds(&BoundOptions { max_pitch: Some(85.0), ..Default::default() }).unwrap();
     map.load_style_json(style);

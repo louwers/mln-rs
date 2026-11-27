@@ -134,8 +134,6 @@ pub(crate) fn remove_source(map: &mut Map, source_name: &str) -> bool {
 mod tests {
     use std::sync::Arc;
 
-    use mln_engine::Registry;
-
     use super::*;
 
     fn style_json(id: &str) -> String {
@@ -152,7 +150,7 @@ mod tests {
 
     #[test]
     fn transition_test_style() {
-        let mut style = Style::new(Arc::clone(Registry::with_builtins().style()));
+        let mut style = Style::new(Arc::clone(mln_builtins::registry().style()));
         load_json(&mut style, &style_json("background-color/transition"));
         assert!(style.get_layer("background").is_some());
         assert_eq!(
@@ -167,14 +165,14 @@ mod tests {
 
     #[test]
     fn default_camera_of_a_test_style() {
-        let mut style = Style::new(Arc::clone(Registry::with_builtins().style()));
+        let mut style = Style::new(Arc::clone(mln_builtins::registry().style()));
         load_json(&mut style, &style_json("background-color/colorSpace-hcl"));
         assert_eq!(default_camera(&style).zoom, Some(5.0));
     }
 
     #[test]
     fn layers() {
-        let mut style = Style::new(Arc::clone(Registry::with_builtins().style()));
+        let mut style = Style::new(Arc::clone(mln_builtins::registry().style()));
         load_json(&mut style, &style_json("background-visibility/none"));
         assert_eq!(set_layer_zoom_range(&mut style, "background", 1.0, 2.0), Ok(()));
         assert_eq!(set_layer_zoom_range(&mut style, "nope", 1.0, 2.0), Err(MapError::LayerNotFound));

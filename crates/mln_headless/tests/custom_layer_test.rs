@@ -97,9 +97,12 @@ fn session(
     };
     let mut frontend =
         HeadlessFrontend::with_device(device, size, 1.0, Arc::default(), run_loop, &pool).expect("a frontend");
-    let mut map =
-        Map::new(MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() }, &pool)
-            .unwrap();
+    let mut map = Map::new(
+        MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() },
+        mln_builtins::registry(),
+        &pool,
+    )
+    .unwrap();
     frontend.attach(&mut map);
     map.load_style_json(STYLE);
     map.edit_style(|style| style.add_layer(Custom::layer(style.registry(), "quad", host), before))

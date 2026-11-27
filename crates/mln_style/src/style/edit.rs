@@ -14,7 +14,7 @@ use crate::light::Light;
 use crate::projection::Projection;
 use crate::property::transition::TransitionOptions;
 use crate::sky::Sky;
-use crate::source::{Described, ErasedDescription, Source, SourceCommon, SourceData, SourceInstance, StyleSourceType};
+use crate::source::{ErasedDescription, Source, SourceCommon, SourceData, SourceInstance, StyleSourceType};
 use crate::terrain::Terrain;
 use crate::types::VisibilityType;
 
@@ -92,15 +92,15 @@ pub enum Edit {
     /// a source of its kind.
     AddSource(Source),
     RemoveSource(String),
-    /// Gives the source `id` what a load of its description found. The load
-    /// is the source's `instance` with its data's `load`; once the source
-    /// moved on from that load, this changes nothing, and neither does an
-    /// `Err`, which the map reports.
+    /// Gives the source `id` the description a load of it found: `None`
+    /// for one that found nothing. The load is the source's `instance` with
+    /// its data's `load`; once the source moved on from that load, this
+    /// changes nothing.
     SetSourceDescription {
         id: String,
         instance: SourceInstance,
         load: u64,
-        result: Described<ErasedDescription>,
+        description: Option<ErasedDescription>,
     },
     /// Sets the members every source has.
     SetSourceCommon {

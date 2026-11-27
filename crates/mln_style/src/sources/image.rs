@@ -4,14 +4,11 @@
 use std::sync::Arc;
 
 use crate::Edit;
-use crate::bitmap::PremultipliedImage;
 use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
 use crate::geo::LatLng;
 use crate::layer::SourceKind;
-use crate::source::{
-    Described, Fetch, Load, OfflineResources, Source, SourceData, SourceSummary, SourceTypeInfo, StyleSourceType,
-};
+use crate::source::{Source, SourceData, SourceTypeInfo, StyleSourceType};
 
 /// The image source type.
 pub struct ImageSourceType;
@@ -26,44 +23,12 @@ pub struct ImageSourceOptions {
 }
 
 impl StyleSourceType for ImageSourceType {
-    // An image source has no tiles, so the tile members say nothing.
-    const INFO: SourceTypeInfo = SourceTypeInfo {
-        name: "image",
-        layer_kind: SourceKind::Raster,
-        from_json: true,
-        round_zoom: false,
-        overscale: false,
-        prefetch: false,
-    };
+    const INFO: SourceTypeInfo = SourceTypeInfo { name: "image", layer_kind: SourceKind::Raster, from_json: true };
 
     type Options = ImageSourceOptions;
-    type Description = Arc<PremultipliedImage>;
 
     fn from_json(value: &Convertible<'_>, _functions: &Arc<Functions>, error: &mut Error) -> Option<SourceData<Self>> {
         crate::conversion::source::convert_image_source(value, error)
-    }
-
-    /// The image at the source's URL, if it has one.
-    fn load(source: &SourceData<Self>) -> Load<Arc<PremultipliedImage>> {
-        match &source.options.url {
-            Some(url) => Load::Fetch(Fetch::Image(url.clone())),
-            None => Load::Done,
-        }
-    }
-
-    fn describe_image(_options: &ImageSourceOptions, image: PremultipliedImage) -> Described<Arc<PremultipliedImage>> {
-        Ok(Some(Arc::new(image)))
-    }
-
-    fn summary(source: &SourceData<Self>) -> SourceSummary {
-        SourceSummary { url: source.options.url.clone(), ..SourceSummary::default() }
-    }
-
-    fn offline(source: &SourceData<Self>) -> OfflineResources {
-        match &source.options.url {
-            Some(url) => OfflineResources::Image { url: url.clone() },
-            None => OfflineResources::None,
-        }
     }
 }
 
@@ -74,17 +39,6 @@ impl ImageSourceType {
         let url = url.into();
         Edit::update_source::<Self>(id, "an image source", |data| {
             data.options.url = Some(url);
-            data.load += 1;
-            true
-        })
-    }
-
-    /// The edit that replaces the image of the image source `id`, which no
-    /// longer loads it from a URL.
-    pub fn set_image(id: impl Into<String>, image: PremultipliedImage) -> Edit {
-        Edit::update_source::<Self>(id, "an image source", |data| {
-            data.options.url = None;
-            data.description = Some(Arc::new(image));
             data.load += 1;
             true
         })

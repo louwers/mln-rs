@@ -34,7 +34,7 @@ use crate::render::update_parameters::UpdateParameters;
 use crate::storage::{FileSource, Resource, Responder, Response};
 use crate::tile::{OverscaledTileID, UnwrappedTileID};
 use crate::tile_store::TileLodMode;
-use crate::{Registry, RenderMode, Renderer, RendererEvent, RendererEvents};
+use crate::{RenderMode, Renderer, RendererEvent, RendererEvents};
 
 /// A camera pitched by `pitch` and turned to `bearing`, in degrees, over a
 /// 512 px view at a fractional zoom.
@@ -291,7 +291,7 @@ const TWO_STACKS: &str = r#"{
 /// terrain's ground is complete. Returns the tile and stack of each drape
 /// that has a texture then.
 fn textured_drapes(style: &str) -> Option<BTreeSet<(OverscaledTileID, usize)>> {
-    let registry = Registry::with_builtins();
+    let registry = crate::tests::registry();
     let parsed = Style::from_json(registry.style(), style).expect("the style");
     let mut style = Style::new(Arc::clone(registry.style()));
     for source in parsed.get_sources().iter() {
@@ -308,8 +308,14 @@ fn textured_drapes(style: &str) -> Option<BTreeSet<(OverscaledTileID, usize)>> {
     let mut backend = mln_webgpu::RendererBackend::new(&device);
     let mut target = OffscreenTarget::<mln_webgpu::WebGpu>::new(mln_gfx::Size::new(size.width, size.height));
     let pool = crate::tests::pool();
-    let mut renderer =
-        Renderer::new(backend.gpu(), 1.0, crate::text::local_fonts::LocalGlyphs::default(), Arc::new(|| {}), &pool);
+    let mut renderer = Renderer::new(
+        backend.gpu(),
+        1.0,
+        crate::text::local_fonts::LocalGlyphs::default(),
+        crate::tests::registry(),
+        Arc::new(|| {}),
+        &pool,
+    );
     let events = RendererEvents::new();
     renderer.set_event_queue(Some(events.clone()));
     let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);

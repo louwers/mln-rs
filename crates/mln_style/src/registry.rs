@@ -38,9 +38,9 @@ impl StyleRegistry {
         StyleRegistry { functions, layer_types: layers_by_name, source_types: sources_by_name }
     }
 
-    /// The built-in expression functions, layer types and source types, for
-    /// this crate's tests, which can't reach the renderer's
-    /// `Registry::with_builtins`.
+    /// The built-in expression functions and the style halves of the
+    /// built-in layer and source types, for this crate's tests, which can't
+    /// reach `mln_builtins::registry`.
     #[cfg(test)]
     pub(crate) fn with_builtins() -> Arc<Self> {
         use crate::layer::style_entry;

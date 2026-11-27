@@ -27,7 +27,6 @@ pub(crate) struct TileParameters<'a> {
     pub(crate) tile_lod_mode: TileLodMode,
     pub(crate) subdivision_granularity: SubdivisionGranularitySetting,
     pub(crate) global_state: Option<Arc<GlobalStateMap>>,
-    pub(crate) is_update_synchronous: bool,
     /// The style's font faces, which the tiles' layouts shape text with.
     pub(crate) font_faces: Option<Arc<FontFaces>>,
     /// Whether the style has a `glyphs` URL.

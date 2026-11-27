@@ -19,7 +19,6 @@ use mln_style::types::VisibilityType;
 use mln_vec_map::VecSet;
 use parking_lot::Mutex;
 
-use crate::Registry;
 use crate::camera::View;
 use crate::draw::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::image::image_store::{ImageMap, ImageType};
@@ -51,7 +50,20 @@ use crate::worker::job::{
 };
 use crate::worker::tile_workers::InlineWorkers;
 use crate::worker::worker_codec::{Encoded, MapCodec, WorkerCodec, read_job_id, read_reply_header};
+use crate::{Registry, RegistryBuilder};
 
+/// The specification's expression functions and the layer types, which are
+/// all that the measured layouts and codecs read.
+fn layer_registry() -> Arc<Registry> {
+    static LAYERS: std::sync::LazyLock<Arc<Registry>> = std::sync::LazyLock::new(|| {
+        let mut builder = RegistryBuilder::new();
+        let functions = mln_style::expression::functions::register_builtin_functions(builder.functions_mut());
+        let layers = crate::register_layer_types(&mut builder);
+        debug_assert!(functions.is_ok() && layers.is_ok(), "the built-ins register into an empty builder");
+        builder.build()
+    });
+    Arc::clone(&LAYERS)
+}
 /// A vector tile's layout job, as a tile worker runs it once the tile has
 /// every glyph and image it needs: the selection of each layer's features,
 /// and the buckets and feature index built from them.
@@ -104,7 +116,7 @@ impl TileLayout {
         if overscaled_z < z {
             return Err(Error::invalid_argument(format!("tile {z}/{x}/{y} shown at zoom {overscaled_z}")));
         }
-        let registry = Registry::with_builtins();
+        let registry = layer_registry();
         let parameters = PropertyEvaluationParameters::new(f32::from(overscaled_z));
         let mut layers: Vec<Arc<dyn ErasedEvaluatedLayer>> = Vec::new();
         for layer in style.get_layers() {
@@ -350,11 +362,7 @@ impl Codec {
     /// The two sides of a new worker instance.
     #[must_use]
     pub fn new() -> Codec {
-        Codec {
-            map: MapCodec::new(Registry::with_builtins()),
-            worker: WorkerCodec::new(Registry::with_builtins()),
-            generation: 0,
-        }
+        Codec { map: MapCodec::new(layer_registry()), worker: WorkerCodec::new(layer_registry()), generation: 0 }
     }
 
     /// Sends `layout`'s job for `data` to the worker: the map side encodes
@@ -639,7 +647,7 @@ mod tests {
     /// symbol layer, over source `s`.
     fn style() -> Style {
         Style::from_json(
-            Registry::with_builtins().style(),
+            crate::tests::registry().style(),
             r#"{
                 "version": 8,
                 "glyphs": "local://glyphs/{fontstack}/{range}.pbf",

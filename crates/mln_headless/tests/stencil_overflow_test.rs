@@ -79,7 +79,7 @@ fn render(style: &str) -> Option<(PremultipliedImage, i32)> {
     file_source
         .set_response(Kind::Tile, |_: &Resource| Some(file_response("test/fixtures/map/offline/0-0-0.vector.pbf")));
     let options = MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() };
-    let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
+    let mut map = Map::with_file_source(file_source, options, mln_builtins::registry(), &pool).unwrap();
     frontend.attach(&mut map);
     map.load_style_json(style);
     let camera = mln_engine::map::style_camera(map.style());

@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use geojson::{Feature, GeoJson, Geometry};
-use mln_engine::Registry;
 use mln_engine::camera::CameraOptions;
 use mln_engine::exec::pool::Pool;
 use mln_engine::map::{Map, MapMode, MapOptions};
@@ -49,6 +48,7 @@ fn grid() {
             asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
             ..ResourceOptions::default()
         },
+        mln_builtins::registry(),
         &pool,
     )
     .unwrap();
@@ -78,12 +78,12 @@ fn grid() {
     let data = serde_json::to_value(GeoJson::from(features)).unwrap();
     map.add_source_json("custom", &json!({ "type": "geojson", "data": data }).to_string()).unwrap();
 
-    let mut fill_layer = Layer::new(Registry::with_builtins().style(), "fill", "landcover", "mapbox").unwrap();
+    let mut fill_layer = Layer::new(mln_builtins::registry().style(), "fill", "landcover", "mapbox").unwrap();
     fill_layer.set_source_layer("landcover");
     set(&mut fill_layer, "fill-color", &json!("rgba(255,255,0,1)"));
     map.edit_style(|style| style.apply(Edit::AddLayer { layer: fill_layer, before: None })).unwrap();
 
-    let mut layer = Layer::new(Registry::with_builtins().style(), "line", "grid", "custom").unwrap();
+    let mut layer = Layer::new(mln_builtins::registry().style(), "line", "grid", "custom").unwrap();
     set(&mut layer, "line-color", &json!("rgba(255,255,255,1)"));
     map.edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
 
@@ -105,6 +105,7 @@ fn recycle_map_update_images() {
     let mut map = Map::with_file_source(
         StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous),
         MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
+        mln_builtins::registry(),
         &pool,
     )
     .unwrap();
@@ -117,7 +118,7 @@ fn recycle_map_update_images() {
             GeoJson::from(Geometry::new_point([0.0, 0.0])),
         );
 
-        let mut layer = Layer::new(Registry::with_builtins().style(), "symbol", "geometry", "geometry").unwrap();
+        let mut layer = Layer::new(mln_builtins::registry().style(), "symbol", "geometry", "geometry").unwrap();
         set(&mut layer, "icon-image", &json!(marker_name));
 
         map.load_style_json(&read_file("test/fixtures/api/empty.json"));

@@ -790,7 +790,7 @@ impl RenderOrchestrator {
         clock: &FrameClock,
         frame: &mut Frame,
     ) -> Vec<bool> {
-        let mut tile_parameters = TileParameters {
+        let tile_parameters = TileParameters {
             pixel_ratio: update_parameters.pixel_ratio,
             view: &update_parameters.view,
             min_zoom: update_parameters.min_zoom,
@@ -805,7 +805,6 @@ impl RenderOrchestrator {
             tile_lod_mode: update_parameters.tile_lod_mode,
             subdivision_granularity: update_parameters.subdivision_granularity,
             global_state: self.global_state.clone(),
-            is_update_synchronous: false,
             font_faces: update_parameters.font_faces.clone(),
             glyph_pbfs: !update_parameters.style.get_glyph_url().is_empty(),
             placement_commits: self.placements.commits(),
@@ -915,7 +914,6 @@ impl RenderOrchestrator {
                 }
             }
             if let Some(style_source) = &style_source {
-                tile_parameters.is_update_synchronous = style_source.data().is_update_synchronous();
                 let filtered_layers = std::mem::take(&mut self.filtered_layers_for_source);
                 if let Some(source) = self.render_sources.get_mut(style_source.id()) {
                     source.update(

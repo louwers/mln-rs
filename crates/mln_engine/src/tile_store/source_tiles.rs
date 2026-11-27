@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use mln_style::geo::{LatLngBounds, WrapMode};
+use mln_style::geo::WrapMode;
 use mln_style::hash::HashSet;
 use mln_style::layer::SourceKind;
 use mln_style::property::value::PropertyValue;
@@ -67,9 +67,8 @@ pub(crate) struct CoverUpdate<'a, 'p> {
     pub(crate) terrain_reads: &'a [OverscaledTileID],
     pub(crate) parameters: &'a TileParameters<'p>,
     pub(crate) style_source: &'a Source,
-    pub(crate) tile_size: u16,
-    pub(crate) zoom_range: Range<u8>,
-    pub(crate) bounds: Option<LatLngBounds>,
+    /// What the source's origin said its tiles cover.
+    pub(crate) cover: Cover,
 }
 
 pub(crate) struct Slot {
@@ -602,7 +601,7 @@ impl SourceTiles {
         let subdivision_granularity = parameters.subdivision_granularity;
         let relayout = update.needs_relayout || subdivision_granularity != self.last_subdivision_granularity;
         self.last_subdivision_granularity = subdivision_granularity;
-        self.info.synchronous = parameters.is_update_synchronous;
+        self.info.synchronous = update.cover.synchronous;
 
         if relayout {
             self.cache_clear(ctx);
@@ -649,9 +648,9 @@ impl SourceTiles {
         );
 
         let style_source = update.style_source;
-        let zoom_range = update.zoom_range;
-        let tile_size = update.tile_size;
-        let info = style_source.info();
+        let zoom_range = update.cover.zoom_range;
+        let tile_size = update.cover.tile_size;
+        let info = update.cover;
         let overscaled_zoom: i32 = covering_zoom_level(zoom, info.round_zoom, tile_size);
         let mut tile_zoom: i32 = overscaled_zoom.max(0);
         let mut pan_zoom: i32 = i32::from(zoom_range.max);
@@ -751,7 +750,7 @@ impl SourceTiles {
         // zoom by its distance from the camera, as the globe's does, asks for
         // tiles finer than the nominal zoom, up to the source's maximum.
         let mut tile_range: Option<TileRange> = None;
-        if let Some(bounds) = &update.bounds {
+        if let Some(bounds) = &update.cover.bounds {
             let variable_zoom = parameters.tile_lod_mode == TileLodMode::Distance
                 || parameters.view.is_globe()
                 || parameters.terrain.is_some();

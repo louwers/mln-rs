@@ -16,7 +16,9 @@ fn render_on(device: &mln_runtime::Device, color: &str) -> Vec<u8> {
     let pool = Pool::new(4);
     let mut frontend = HeadlessFrontend::with_device(device.clone(), size, 1.0, Arc::default(), &run_loop, &pool)
         .expect("a headless frontend");
-    let mut map = Map::new(MapOptions { map_mode: MapMode::Static, size, ..Default::default() }, &pool).unwrap();
+    let mut map =
+        Map::new(MapOptions { map_mode: MapMode::Static, size, ..Default::default() }, mln_builtins::registry(), &pool)
+            .unwrap();
     frontend.attach(&mut map);
     map.load_style_json(&format!(
         r#"{{"version": 8, "sources": {{}},

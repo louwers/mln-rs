@@ -1646,9 +1646,9 @@ pub(crate) fn create(
     resolver: Resolver<Applied>,
     outbox: &mut Outbox,
 ) {
-    let registry = Arc::clone(core.registry.style());
+    let registry = Arc::clone(&core.registry);
     let mut map =
-        match mln_engine::map::Map::with_registry(Arc::clone(core.loader()), options.map, registry, &core.pool) {
+        match mln_engine::map::Map::with_file_source(Arc::clone(core.loader()), options.map, registry, &core.pool) {
             Ok(map) => map,
             Err(error) => return outbox.resolve(resolver, Err(error)),
         };

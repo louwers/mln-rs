@@ -77,7 +77,7 @@ pub(crate) fn local_tiles(test: &RasterTileTest, kind: SourceKind, id: Overscale
 #[must_use]
 pub(crate) fn remote_workers(count: usize) -> crate::worker::worker_codec::RemoteWorkers {
     use crate::worker::worker_codec::{RemoteWorkers, ThreadWorkerInstances};
-    let registry = crate::Registry::with_builtins();
+    let registry = crate::tests::registry();
     RemoteWorkers::new(Arc::clone(&registry), move |replies| {
         Box::new(ThreadWorkerInstances::new(count, registry, &replies))
     })

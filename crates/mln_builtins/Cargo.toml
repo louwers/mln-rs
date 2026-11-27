@@ -1,0 +1,29 @@
+[package]
+name = "mln-rs-builtins"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+include.workspace = true
+
+[lib]
+name = "mln_builtins"
+# The doc comments have no examples to run.
+doctest = false
+
+[dependencies]
+feature.workspace = true
+geojson.workspace = true
+log.workspace = true
+mln_engine.workspace = true
+mln_geojson.workspace = true
+mln_style.workspace = true
+parking_lot.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

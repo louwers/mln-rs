@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use mln_engine::Registry;
 use mln_engine::camera::{BoundOptions, ProjectionMode};
 use mln_engine::exec::pool::Pool;
 use mln_engine::exec::queue::Queue;
@@ -60,7 +59,7 @@ impl Impl {
             cache_path: resource_options.cache_path.clone(),
             ..mln_engine::storage::ResourceOptions::default()
         };
-        let registry = Registry::with_builtins();
+        let registry = mln_builtins::registry();
         let mut frontend =
             HeadlessFrontend::new(metadata.size, metadata.pixel_ratio, queue, pool).map_err(|e| e.to_string())?;
         if impl_options.tile_worker_codec > 0 {
@@ -72,7 +71,7 @@ impl Impl {
             frontend.renderer().set_tile_workers(workers);
         }
         let file_source = proxy_loader(&resource_options, assets, pool);
-        let mut map = Map::with_registry(
+        let mut map = Map::with_file_source(
             Arc::clone(&file_source),
             MapOptions {
                 map_mode: map_mode(metadata.map_mode),
@@ -85,7 +84,7 @@ impl Impl {
                 },
                 ..Default::default()
             },
-            Arc::clone(registry.style()),
+            Arc::clone(&registry),
             pool,
         )
         .map_err(|e| e.to_string())?;

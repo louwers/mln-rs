@@ -17,7 +17,7 @@ use mln_style::source::convert_source;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::time::Instant;
 use mln_style::types::{ProjectionDefinition, ProjectionType};
-use mln_style::{Edit, Source, Style, StyleRegistry};
+use mln_style::{Edit, Source, Style};
 
 use crate::camera::transform::{CameraCommandId, CommandEnd, FrameClock, TerrainGround, Transform, TransformEvent};
 use crate::camera::{
@@ -150,60 +150,54 @@ pub struct Map {
 
     /// Declared after `style`, so the style and its requests go first.
     file_source: Option<Arc<dyn FileSource>>,
+    /// What the style parses against and its sources load through.
+    registry: Arc<Registry>,
     /// Where the map's background work runs.
     pool: Pool,
 }
 
 impl Map {
     /// A map with a [`Loader`] of its own for the default
-    /// `ResourceOptions`, whose background work runs on `pool`.
+    /// `ResourceOptions`, whose style parses against and whose sources load
+    /// through `registry`, and whose background work runs on `pool`.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for an empty `map_options.size`.
     #[cfg(not(target_family = "wasm"))]
-    pub fn new(map_options: MapOptions, pool: &Pool) -> Result<Map, Error> {
-        Self::with_resource_options(map_options, &ResourceOptions::default(), pool)
+    pub fn new(map_options: MapOptions, registry: Arc<Registry>, pool: &Pool) -> Result<Map, Error> {
+        Self::with_resource_options(map_options, &ResourceOptions::default(), registry, pool)
     }
 
-    /// A map with a [`Loader`] of its own for `resource_options`, on
-    /// `pool`.
+    /// A map with a [`Loader`] of its own for `resource_options`, as
+    /// [`Map::new`].
     #[cfg(not(target_family = "wasm"))]
     pub fn with_resource_options(
         map_options: MapOptions,
         resource_options: &ResourceOptions,
+        registry: Arc<Registry>,
         pool: &Pool,
     ) -> Result<Map, Error> {
         let loader: Arc<dyn FileSource> = Arc::new(Loader::new(resource_options, pool));
-        Self::with_registry(loader, map_options, Arc::clone(Registry::with_builtins().style()), pool)
+        Self::with_file_source(loader, map_options, registry, pool)
     }
 
     // gtests-core: the C++ tests' `MapAdapter` (test/include/mln/test/
     // map_adapter.hpp): a map over a given file source.
-    /// A map whose resources come from `file_source`, on `pool`.
+    /// A map whose resources come from `file_source`, whose style parses
+    /// against and whose sources load through `registry`, on `pool`.
+    ///
+    /// The renderer that draws the map must be given a registry filled by
+    /// the same calls as `registry`: it finds a layer's type by name, and
+    /// draws no layer whose type it lacks.
     pub fn with_file_source(
         file_source: Arc<dyn FileSource>,
         map_options: MapOptions,
-        pool: &Pool,
-    ) -> Result<Map, Error> {
-        Self::with_registry(file_source, map_options, Arc::clone(Registry::with_builtins().style()), pool)
-    }
-
-    /// A map whose resources come from `file_source` and whose style parses
-    /// against `registry`, on `pool`. The other constructors
-    /// use the built-in registrations.
-    ///
-    /// The renderer that draws the map must be given a registry filled by
-    /// the same calls as `registry` ([`crate::Registry::style`]): it
-    /// finds a layer's type by name, and draws no layer whose type it lacks.
-    pub fn with_registry(
-        file_source: Arc<dyn FileSource>,
-        map_options: MapOptions,
-        registry: Arc<StyleRegistry>,
+        registry: Arc<Registry>,
         pool: &Pool,
     ) -> Result<Map, Error> {
         let events = EventQueue::new();
         let renderer_events = RendererEvents::new();
         let pixel_ratio = map_options.pixel_ratio;
-        let style = Arc::new(Style::new(registry));
+        let style = Arc::new(Style::new(Arc::clone(registry.style())));
         let loader = StyleLoader::new(Some(Arc::clone(&file_source)), pool, pixel_ratio);
         let mut transform = Transform::new(map_options.constrain_mode, map_options.viewport_mode);
         transform.set_north_orientation(map_options.north_orientation);
@@ -245,6 +239,7 @@ impl Map {
             events,
             command_ends: Vec::new(),
             file_source: Some(file_source),
+            registry,
             pool: pool.clone(),
         };
         map.share_projection_with_transform();
@@ -256,6 +251,12 @@ impl Map {
     #[must_use]
     pub fn pool(&self) -> &Pool {
         &self.pool
+    }
+
+    /// What the map's style parses against and its sources load through.
+    #[must_use]
+    pub fn registry(&self) -> &Arc<Registry> {
+        &self.registry
     }
 
     // MARK: - Renderer
@@ -351,7 +352,7 @@ impl Map {
                 break;
             }
             for reply in replies {
-                let events = self.loader.on_reply(&self.style, reply);
+                let events = self.loader.on_reply(&self.registry, &self.style, reply);
                 self.handle_load_events(events);
             }
             for event in renderer_events {
@@ -449,14 +450,17 @@ impl Map {
                         id: load.id.to_string(),
                         instance: load.instance,
                         load: load.load,
-                        result: Ok(description),
+                        description,
                     };
                     if !self.apply_loaded_changes(edit) {
                         // The source is loaded now, which the update says.
                         self.on_update();
                     }
                     if let (Some(previous), Some(source)) = (previous, self.style.get_source(&load.id))
-                        && source.metadata_changed_from(&previous)
+                        && self
+                            .registry
+                            .source_type(source.info().name)
+                            .is_some_and(|source_type| source_type.metadata_changed(&previous, source))
                     {
                         self.emit(MapEvent::SourceChanged { source_id: load.id.to_string() });
                         self.on_update();
@@ -470,7 +474,7 @@ impl Map {
     /// seen, and gives the style the ones their types know without a fetch,
     /// before the version is published.
     fn watch_sources(&mut self) {
-        let edits = self.loader.watch_sources(&self.style);
+        let edits = self.loader.watch_sources(&self.registry, &self.style);
         if edits.is_empty() {
             return;
         }

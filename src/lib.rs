@@ -6,7 +6,7 @@
 //!
 //! The library crates of <https://github.com/maplibre/mln-rs> are re-exported
 //! here under their crate names: `mln_rs::mln_engine`, `mln_rs::mln_style`,
-//! `mln_rs::mln_geojson`, and so on. They are published as the `mln-rs-*`
+//! `mln_rs::mln_builtins`, and so on. They are published as the `mln-rs-*`
 //! packages, which only exist for this crate. The tile worker codec's
 //! encoding (`mln_wire`) is internal to the port and not re-exported.
 //!
@@ -31,6 +31,7 @@ pub use geo_types;
 pub use geojson;
 pub use geometry;
 pub use glam;
+pub use mln_builtins;
 /// Empty except on Windows.
 #[cfg(feature = "d3d12")]
 pub use mln_d3d12;

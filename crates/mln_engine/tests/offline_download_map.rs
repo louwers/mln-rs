@@ -8,6 +8,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use mln_engine::RenderMode;
 use mln_engine::camera::CameraOptions;
 use mln_engine::exec::pool::Pool;
 use mln_engine::exec::queue::Queue;
@@ -22,7 +23,6 @@ use mln_engine::storage::offline_database::OfflineDatabase;
 use mln_engine::storage::resource::{Priority, Usage};
 use mln_engine::storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_engine::storage::{FileSource, Kind, Resource, Response};
-use mln_engine::{Registry, RenderMode};
 use mln_headless::HeadlessFrontend;
 use mln_style::geo::{LatLng, LatLngBounds};
 
@@ -78,7 +78,7 @@ fn resource_offline_usage_unset() {
     let network: Arc<dyn FileSource> = Arc::<StubFileSource>::clone(&file_source);
     *host.borrow_mut() = Some((
         OfflineDatabase::new(filename.as_str()),
-        Downloads::new(Some(network), Arc::clone(&post), Arc::clone(Registry::with_builtins().style())),
+        Downloads::new(Some(network), Arc::clone(&post), mln_builtins::registry()),
     ));
     let with = |f: &mut dyn FnMut(&mut OfflineDatabase, &mut Downloads)| {
         let mut host = host.borrow_mut();
@@ -121,7 +121,7 @@ fn resource_offline_usage_unset() {
         .into(),
         Arc::<StubFileSource>::clone(&file_source),
         Arc::clone(&post),
-        Arc::clone(Registry::with_builtins().style()),
+        mln_builtins::registry(),
     );
 
     let s = Arc::clone(&size);
@@ -173,6 +173,7 @@ fn resource_offline_usage_unset() {
     let mut map = Map::with_file_source(
         stubfile_source,
         MapOptions { map_mode: MapMode::Continuous, size: frontend.size(), ..Default::default() },
+        mln_builtins::registry(),
         &pool,
     )
     .unwrap();

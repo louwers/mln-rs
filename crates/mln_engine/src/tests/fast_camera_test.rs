@@ -23,7 +23,6 @@ use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tileset::PartialTileset;
 use parking_lot::Mutex;
 
-use crate::Registry;
 use crate::camera::transform::Transform;
 use crate::camera::{CameraOptions, ConstrainMode, ViewportMode};
 use crate::exec::pool::TaskGroup;
@@ -231,11 +230,11 @@ impl Scene {
         let vector = crate::tests::ready(vector_source("vector", None, tileset("vector/{z}/{x}/{y}", 14)));
         let raster = crate::tests::ready(raster_source("raster", None, tileset("raster/{z}/{x}/{y}", 6), 256));
 
-        let mut fill = Layer::new(Registry::with_builtins().style(), "fill", "water", "vector").unwrap();
+        let mut fill = Layer::new(crate::tests::registry().style(), "fill", "water", "vector").unwrap();
         fill.set_source_layer("water");
         let fill_layers: Vec<Arc<dyn ErasedEvaluatedLayer>> =
             vec![Arc::new(EvaluatedLayer::<Fill>::new(LayerStyle::recover(fill.style()).unwrap()))];
-        let raster_layer = Layer::new(Registry::with_builtins().style(), "raster", "raster", "raster").unwrap();
+        let raster_layer = Layer::new(crate::tests::registry().style(), "raster", "raster", "raster").unwrap();
         let raster_layers: Vec<Arc<dyn ErasedEvaluatedLayer>> =
             vec![Arc::new(EvaluatedLayer::<Raster>::new(LayerStyle::recover(raster_layer.style()).unwrap()))];
 
@@ -296,7 +295,6 @@ impl Scene {
             tile_lod_mode: TileLodMode::Default,
             subdivision_granularity: SubdivisionGranularitySetting::none(),
             global_state: None,
-            is_update_synchronous: false,
             font_faces: None,
             glyph_pbfs: true,
             placement_commits: 0,

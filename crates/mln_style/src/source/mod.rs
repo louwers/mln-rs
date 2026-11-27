@@ -8,9 +8,10 @@
 //! erased value gets back to its type only through [`SourceData::recover`].
 //!
 //! A source's description is what loading its options finds, such as the
-//! tileset of a TileJSON. The type says how it loads ([`StyleSourceType::load`]
-//! and [`StyleSourceType::describe`]); the map's loader runs the loads and
-//! applies what they find as an [`Edit::SetSourceDescription`](crate::Edit).
+//! tileset of a TileJSON. This crate holds it without knowing its type, as an
+//! [`ErasedDescription`]: the engine's half of the source type says how it
+//! loads, and the map's loader applies what a load finds as an
+//! [`Edit::SetSourceDescription`](crate::Edit).
 
 use std::any::Any;
 use std::marker::PhantomData;
@@ -19,12 +20,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use crate::bitmap::PremultipliedImage;
 use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
 use crate::layer::SourceKind;
-use crate::sources::geojson::GeoJSONOptions;
-use crate::tileset::{Tileset, VectorEncoding};
 use crate::{constants, log_target};
 
 mod convert;
@@ -32,10 +30,6 @@ mod list;
 
 pub use convert::convert_source;
 pub use list::SourceList;
-
-/// Where a job hands its result: called at most once, from any thread,
-/// while the job runs or later. Dropping it uncalled drops the result.
-pub type Respond<R> = Box<dyn FnOnce(R) + Send>;
 
 /// What the engine needs to know about a source type besides its data. The
 /// name identifies the type: two registries that agree on a name agree on
@@ -49,104 +43,20 @@ pub struct SourceTypeInfo {
     pub layer_kind: SourceKind,
     /// Whether style JSON can create a source of the type.
     pub from_json: bool,
-    /// Whether the tiles that cover a view are of the zoom level nearest the
-    /// view's, as for raster tiles, rather than the level below it. A
-    /// render in tile mode then draws every tile of the cover, not only
-    /// the first.
-    pub round_zoom: bool,
-    /// Whether a view past the highest zoom level that has tiles asks for
-    /// overscaled tiles of its own zoom, rather than drawing that level's
-    /// tiles larger.
-    pub overscale: bool,
-    /// Whether, in continuous mode, the map first loads tiles a few zoom
-    /// levels below the view's, and keeps the globe's lowest level loaded,
-    /// so that something shows while the view's tiles load.
-    pub prefetch: bool,
 }
 
-/// What a source reports about itself, whichever its type. A member that
-/// the type doesn't have is `None`.
-#[derive(Clone, Debug, Default)]
-pub struct SourceSummary {
-    /// The URL that the source loads its description from.
-    pub url: Option<String>,
-    /// The size of the source's tiles, in pixels.
-    pub tile_size: Option<u16>,
-    /// The tileset that the style lists, for a tileset source without a URL.
-    pub inline_tileset: Option<Tileset>,
-    /// How a vector source's tiles are encoded: as its loaded tileset says,
-    /// else as the style does.
-    pub vector_encoding: Option<VectorEncoding>,
-    /// A GeoJSON source's options.
-    pub geojson: Option<Arc<GeoJSONOptions>>,
-}
+/// A source's description, of the type its source type's loading half
+/// names, which this crate holds without reading it.
+pub type ErasedDescription = Arc<dyn Any + Send + Sync>;
 
-/// What an offline download of a source fetches.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub enum OfflineResources {
-    /// Nothing: the host gives the source's data.
-    #[default]
-    None,
-    /// The tiles of a tileset that's known without a fetch, of tiles
-    /// `tile_size` pixels wide.
-    Tiles { tileset: Tileset, tile_size: u16 },
-    /// The TileJSON at `url`, then the tiles, `tile_size` pixels wide, of
-    /// the tileset that [`ErasedSource::offline_tileset`] makes of it.
-    TileJson { url: String, tile_size: u16 },
-    /// The source's data at `url`: GeoJSON.
-    Source { url: String },
-    /// The source's image at `url`, which is nothing to fetch if empty.
-    Image { url: String },
-}
-
-/// How a source's description loads, as its type says from its data.
-pub enum Load<D> {
-    /// Nothing loads: the source is loaded with the description it has.
-    Done,
-    /// The description, known without a fetch, such as a tileset that the
-    /// style lists.
-    Ready(D),
-    /// The resource that [`StyleSourceType::describe`] or, for an image,
-    /// [`StyleSourceType::describe_image`] turns into the description.
-    Fetch(Fetch),
-}
-
-/// A resource that a source loads its description from, by its URL.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Fetch {
-    /// A document that describes the source, such as TileJSON or GeoJSON.
-    Source(String),
-    /// An image, which the map's loader decodes.
-    Image(String),
-}
-
-/// The bytes that a source loads from: a fetched resource's, or those of
-/// a tile that the host gives.
-pub type Data = Arc<Vec<u8>>;
-
-/// What describing a source's fetched data found: its description, `None`
-/// for data that describes nothing, or why the source failed to load.
-pub type Described<D> = Result<Option<D>, crate::error::Error>;
-
-/// A description of a source of some type, which
-/// [`Source::with_description`] gives back to its type.
-pub type ErasedDescription = Box<dyn Any + Send>;
-
-/// A source type: what its sources hold, how style JSON describes them, how
-/// their descriptions load and what they report.
+/// A source type's style half: its name, what its sources hold and how style
+/// JSON describes them.
 pub trait StyleSourceType: Sized + Send + Sync + 'static {
     const INFO: SourceTypeInfo;
-
-    /// Whether [`describe`](Self::describe) runs on the thread pool rather
-    /// than on the map's thread, for work such as parsing GeoJSON.
-    const DESCRIBES_IN_BACKGROUND: bool = false;
 
     /// What the style or the API gives: a URL, an inline tileset, GeoJSON
     /// options, coordinates.
     type Options: Clone + Send + Sync + 'static;
-
-    /// What loading finds: a tileset, GeoJSON data, an image.
-    type Description: Clone + Send + Sync + 'static;
 
     /// The data of a source from its style JSON `value`, whose expressions
     /// parse against `functions`. Only a type whose [`INFO`](Self::INFO)
@@ -154,61 +64,6 @@ pub trait StyleSourceType: Sized + Send + Sync + 'static {
     fn from_json(_value: &Convertible<'_>, _functions: &Arc<Functions>, error: &mut Error) -> Option<SourceData<Self>> {
         error.message = "invalid source type".to_owned();
         None
-    }
-
-    /// How `source`'s description loads for its current options. The map
-    /// asks again whenever [`SourceData::load`] grows.
-    fn load(_source: &SourceData<Self>) -> Load<Self::Description> {
-        Load::Done
-    }
-
-    /// Turns `data`, the fetched resource of a [`Fetch::Source`], into the
-    /// description of a source of `options`, and answers through `respond`,
-    /// at once or later. `None` is a response without content.
-    fn describe(_options: &Self::Options, _data: Option<Data>, respond: Respond<Described<Self::Description>>) {
-        respond(Err(crate::error::Error::native(format!("a {} source fetches nothing", Self::INFO.name))));
-    }
-
-    /// Turns `image`, the decoded image of a [`Fetch::Image`], into the
-    /// description of a source of `options`.
-    fn describe_image(_options: &Self::Options, _image: PremultipliedImage) -> Described<Self::Description> {
-        Err(crate::error::Error::native(format!("a {} source fetches no image", Self::INFO.name)))
-    }
-
-    /// Whether `new`, a loaded description that replaces `old`, changes what
-    /// the source says about itself, such as a tileset's tiles and
-    /// attribution, which the map reports as a change of the source.
-    #[must_use]
-    fn metadata_changed(_old: Option<&Self::Description>, _new: Option<&Self::Description>) -> bool {
-        false
-    }
-
-    fn attribution(_source: &SourceData<Self>) -> Option<String> {
-        None
-    }
-
-    fn summary(_source: &SourceData<Self>) -> SourceSummary {
-        SourceSummary::default()
-    }
-
-    /// Whether the source's tiles lay out in the call that asks for them.
-    fn is_update_synchronous(_source: &SourceData<Self>) -> bool {
-        false
-    }
-
-    /// What an offline download fetches for the source.
-    fn offline(_source: &SourceData<Self>) -> OfflineResources {
-        OfflineResources::None
-    }
-
-    /// The tileset that an offline download takes the source's tiles from,
-    /// once the TileJSON that [`OfflineResources::TileJson`] named arrived.
-    ///
-    /// # Errors
-    ///
-    /// When `tilejson` doesn't give the source a tileset.
-    fn offline_tileset(_source: &SourceData<Self>, _tilejson: &[u8]) -> Result<Tileset, String> {
-        Err(format!("a {} source has no TileJSON", Self::INFO.name))
     }
 }
 
@@ -245,7 +100,7 @@ pub struct SourceCommon {
 pub struct SourceData<T: StyleSourceType> {
     pub options: T::Options,
     /// `None` until the source's description loads.
-    pub description: Option<T::Description>,
+    pub description: Option<ErasedDescription>,
     /// Grows with each change to the options or the data that starts a new
     /// load, and tags that load.
     pub load: u64,
@@ -266,7 +121,7 @@ impl<T: StyleSourceType> SourceData<T> {
 
     /// A source of `options` with `description`.
     #[must_use]
-    pub fn with_description(options: T::Options, description: T::Description) -> Self {
+    pub fn with_description(options: T::Options, description: ErasedDescription) -> Self {
         SourceData { options, description: Some(description), load: 0 }
     }
 
@@ -275,6 +130,13 @@ impl<T: StyleSourceType> SourceData<T> {
     pub fn recover(source: &Source) -> Option<&Self> {
         let any: &dyn Any = &*source.data;
         any.downcast_ref()
+    }
+
+    /// The source's description as a `D`, or `None` until it loads or if
+    /// it's another type.
+    #[must_use]
+    pub fn description<D: Any>(&self) -> Option<&D> {
+        self.description.as_deref()?.downcast_ref()
     }
 }
 
@@ -285,53 +147,11 @@ pub trait ErasedSource: Any + Send + Sync {
     /// [`SourceData::load`].
     fn load(&self) -> u64;
 
-    /// [`StyleSourceType::load`], with the description erased.
-    fn plan_load(&self) -> Load<ErasedDescription>;
+    /// [`SourceData::description`].
+    fn description(&self) -> Option<&ErasedDescription>;
 
-    /// [`StyleSourceType::DESCRIBES_IN_BACKGROUND`].
-    fn describes_in_background(&self) -> bool;
-
-    /// [`StyleSourceType::describe`] of `data` for the source's options, as
-    /// a job that owns what it needs and may run on another thread.
-    fn describe_job(&self, data: Option<Data>) -> DescribeJob;
-
-    /// [`StyleSourceType::describe_image`] for the source's options, as a
-    /// job that owns what it needs and may run on another thread.
-    fn describe_image_job(&self) -> DescribeImageJob;
-
-    /// This data with `description` in place of its description, or `None`
-    /// if `description` isn't one of the type's.
-    fn with_description(&self, description: Option<ErasedDescription>) -> Option<Arc<dyn ErasedSource>>;
-
-    /// [`StyleSourceType::metadata_changed`] from `previous`'s description
-    /// to this one's; false when `previous` is another type's.
-    fn metadata_changed_from(&self, previous: &dyn ErasedSource) -> bool;
-
-    fn attribution(&self) -> Option<String>;
-
-    fn summary(&self) -> SourceSummary;
-
-    fn is_update_synchronous(&self) -> bool;
-
-    fn offline(&self) -> OfflineResources;
-
-    /// [`StyleSourceType::offline_tileset`].
-    ///
-    /// # Errors
-    ///
-    /// When `tilejson` doesn't give the source a tileset.
-    fn offline_tileset(&self, tilejson: &[u8]) -> Result<Tileset, String>;
-}
-
-/// A job that describes a source's fetched data, answering through the
-/// [`Respond`] it takes.
-pub type DescribeJob = Box<dyn FnOnce(Respond<Described<ErasedDescription>>) + Send>;
-
-/// A job that describes a source's decoded image.
-pub type DescribeImageJob = Box<dyn FnOnce(PremultipliedImage) -> Described<ErasedDescription> + Send>;
-
-fn erase<D: Send + 'static>(description: D) -> ErasedDescription {
-    Box::new(description)
+    /// This data with `description` in place of its description.
+    fn with_description(&self, description: Option<ErasedDescription>) -> Arc<dyn ErasedSource>;
 }
 
 impl<T: StyleSourceType> ErasedSource for SourceData<T> {
@@ -343,62 +163,12 @@ impl<T: StyleSourceType> ErasedSource for SourceData<T> {
         self.load
     }
 
-    fn plan_load(&self) -> Load<ErasedDescription> {
-        match T::load(self) {
-            Load::Done => Load::Done,
-            Load::Ready(description) => Load::Ready(erase(description)),
-            Load::Fetch(fetch) => Load::Fetch(fetch),
-        }
+    fn description(&self) -> Option<&ErasedDescription> {
+        self.description.as_ref()
     }
 
-    fn describes_in_background(&self) -> bool {
-        T::DESCRIBES_IN_BACKGROUND
-    }
-
-    fn describe_job(&self, data: Option<Data>) -> DescribeJob {
-        let options = self.options.clone();
-        Box::new(move |respond| {
-            T::describe(&options, data, Box::new(move |described| respond(described.map(|d| d.map(erase)))));
-        })
-    }
-
-    fn describe_image_job(&self) -> DescribeImageJob {
-        let options = self.options.clone();
-        Box::new(move |image| T::describe_image(&options, image).map(|d| d.map(erase)))
-    }
-
-    fn with_description(&self, description: Option<ErasedDescription>) -> Option<Arc<dyn ErasedSource>> {
-        let description = match description {
-            Some(description) => Some(*description.downcast::<T::Description>().ok()?),
-            None => None,
-        };
-        Some(Arc::new(SourceData::<T> { options: self.options.clone(), description, load: self.load }))
-    }
-
-    fn metadata_changed_from(&self, previous: &dyn ErasedSource) -> bool {
-        let any: &dyn Any = previous;
-        any.downcast_ref::<Self>()
-            .is_some_and(|previous| T::metadata_changed(previous.description.as_ref(), self.description.as_ref()))
-    }
-
-    fn attribution(&self) -> Option<String> {
-        T::attribution(self)
-    }
-
-    fn summary(&self) -> SourceSummary {
-        T::summary(self)
-    }
-
-    fn is_update_synchronous(&self) -> bool {
-        T::is_update_synchronous(self)
-    }
-
-    fn offline(&self) -> OfflineResources {
-        T::offline(self)
-    }
-
-    fn offline_tileset(&self, tilejson: &[u8]) -> Result<Tileset, String> {
-        T::offline_tileset(self, tilejson)
+    fn with_description(&self, description: Option<ErasedDescription>) -> Arc<dyn ErasedSource> {
+        Arc::new(SourceData::<T> { options: self.options.clone(), description, load: self.load })
     }
 }
 
@@ -449,11 +219,10 @@ impl Source {
         Source { id: Arc::clone(&self.id), instance: self.instance, common: self.common, data }
     }
 
-    /// This source with `description` as its description, or `None` if
-    /// `description` isn't one of its type's.
+    /// This source with `description` as its description.
     #[must_use]
-    pub fn with_description(&self, description: Option<ErasedDescription>) -> Option<Self> {
-        Some(self.with_erased_data(self.data.with_description(description)?))
+    pub fn with_description(&self, description: Option<ErasedDescription>) -> Self {
+        self.with_erased_data(self.data.with_description(description))
     }
 
     /// This source with `common` in place of its common members. Logs a
@@ -500,14 +269,6 @@ impl Source {
     #[must_use]
     pub fn ptr_eq(a: &Source, b: &Source) -> bool {
         Arc::ptr_eq(&a.data, &b.data) && a.common == b.common && a.instance == b.instance && a.id == b.id
-    }
-
-    /// Whether `self`, a later version of `previous`, says something new
-    /// about itself through its description (see
-    /// [`StyleSourceType::metadata_changed`]).
-    #[must_use]
-    pub fn metadata_changed_from(&self, previous: &Source) -> bool {
-        self.data.metadata_changed_from(&*previous.data)
     }
 }
 

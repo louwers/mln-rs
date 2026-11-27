@@ -2474,6 +2474,7 @@ dependencies = [
  "geo-types",
  "geojson",
  "glam",
+ "mln-rs-builtins",
  "mln-rs-d3d12",
  "mln-rs-engine",
  "mln-rs-feature",
@@ -2497,6 +2498,7 @@ version = "0.0.18"
 dependencies = [
  "libc",
  "mln-rs-bench-workload",
+ "mln-rs-builtins",
  "mln-rs-d3d12",
  "mln-rs-engine",
  "mln-rs-feature",
@@ -2542,6 +2544,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "mln-rs-builtins"
+version = "0.0.18"
+dependencies = [
+ "geojson",
+ "log",
+ "mln-rs-engine",
+ "mln-rs-feature",
+ "mln-rs-geojson",
+ "mln-rs-style",
+ "parking_lot",
+ "serde_json",
+]
+
+[[package]]
 name = "mln-rs-c"
 version = "0.0.18"
 dependencies = [
@@ -2551,6 +2567,7 @@ dependencies = [
  "js-sys",
  "libc",
  "log",
+ "mln-rs-builtins",
  "mln-rs-d3d12",
  "mln-rs-engine",
  "mln-rs-feature",
@@ -2668,7 +2685,9 @@ dependencies = [
  "libloading",
  "log",
  "memmap2",
+ "mln-rs-builtins",
  "mln-rs-feature",
+ "mln-rs-geojson",
  "mln-rs-geometry",
  "mln-rs-gfx",
  "mln-rs-headless",
@@ -2807,6 +2826,7 @@ dependencies = [
  "glow",
  "khronos-egl",
  "log",
+ "mln-rs-builtins",
  "mln-rs-d3d12",
  "mln-rs-engine",
  "mln-rs-feature",
@@ -2873,6 +2893,7 @@ dependencies = [
  "fastrand",
  "geojson",
  "log",
+ "mln-rs-builtins",
  "mln-rs-engine",
  "mln-rs-feature",
  "mln-rs-geometry",
@@ -2901,6 +2922,7 @@ dependencies = [
  "khronos-egl",
  "libc",
  "log",
+ "mln-rs-builtins",
  "mln-rs-d3d12",
  "mln-rs-engine",
  "mln-rs-feature",
@@ -2946,7 +2968,6 @@ dependencies = [
  "libc",
  "log",
  "mln-rs-feature",
- "mln-rs-geojson",
  "mln-rs-geometry",
  "mln-rs-vec-map",
  "mln-rs-wire",

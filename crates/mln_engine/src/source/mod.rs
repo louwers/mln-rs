@@ -1,6 +1,6 @@
 //! The source type contract: what a crate implements to add a source type
-//! whose sources the renderer draws, and the render half of the built-in
-//! types, which go through the same contract.
+//! whose sources the renderer draws. `mln_builtins` implements it for the
+//! style specification's source types.
 //!
 //! A source type has two halves, which
 //! [`RegistryBuilder::add_source_type::<T>()`](crate::RegistryBuilder::add_source_type)
@@ -9,27 +9,36 @@
 //!
 //! - **The style half**, a marker type that implements `mln_style`'s
 //!   [`StyleSourceType`]: the type's name and its kind of data
-//!   ([`SourceTypeInfo`](mln_style::source::SourceTypeInfo)), the options it
-//!   reads from style JSON, and how the map loads what the style doesn't hold
+//!   ([`SourceTypeInfo`](mln_style::source::SourceTypeInfo)), and the options
+//!   it reads from style JSON. It may be another crate's, as the
+//!   specification's types are `mln_style`'s, so that a tool that only
+//!   parses styles needs no engine.
+//! - **The engine half**, [`SourceType`], whose [`Style`](SourceType::Style)
+//!   names the style half: how the map loads what the style doesn't hold
 //!   itself, such as a TileJSON or GeoJSON data, into the source's
-//!   description.
-//! - **The render half**, [`SourceType`] on the same marker type: what a
-//!   source of the type supplies the renderer.
+//!   description, what a source reports about itself and offline downloads
+//!   fetch, and what it supplies the renderer.
 //!
 //! # What a source type writes
 //!
-//! 1. Its kind of data, the [`Data`](SourceType::Data) that its sources
+//! 1. How its description loads, if it has one: [`SourceType::load`] says
+//!    what loads for a source's options, which the map's loader fetches and
+//!    hands to [`SourceType::describe`] or [`SourceType::describe_image`].
+//!    The style holds the description without knowing its type, in the
+//!    source's [`SourceData::description`]; the type reads it back with
+//!    [`SourceData::description`]`::<Self::Description>()`.
+//! 2. Its kind of data, the [`Data`](SourceType::Data) that its sources
 //!    supply: tiles of [geometry](GeometryTiles), which the engine lays out
 //!    into the buckets of the layers that draw them, or of
 //!    [raster images](RasterTiles) or [raster-dem elevations](DemTiles),
 //!    which it decodes. A new kind of data is a change to the engine, not a
 //!    source type.
-//! 2. Its [supply](SourceType::supply), made once as a source joins the
+//! 3. Its [supply](SourceType::supply), made once as a source joins the
 //!    renderer's style: tiles that a [`DataOrigin`] loads
 //!    ([`Supply::tiles`]), or, for raster data, one image at four
 //!    coordinates that the engine reads from each version of the source
 //!    ([`Supply::image`]), as the image source type supplies.
-//! 3. Its origin. [`DataOrigin::update`] takes in the source as the style
+//! 4. Its origin. [`DataOrigin::update`] takes in the source as the style
 //!    has it and returns what its tiles [`Cover`]. [`DataOrigin::start`]
 //!    starts each new tile and returns the origin's state of it, its
 //!    [`Tile`](DataOrigin::Tile), which the engine keeps with the tile and
@@ -116,11 +125,12 @@ use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::Error;
 use mln_style::geo::{LatLng, LatLngBounds};
 use mln_style::range::Range;
-use mln_style::source::StyleSourceType;
-use mln_style::tileset::RasterEncoding;
+use mln_style::source::{SourceData, StyleSourceType};
+use mln_style::tileset::{RasterEncoding, Tileset};
 
 use crate::exec::pool::Pool;
 use crate::map::MapMode;
+use crate::query::FeatureExtensionValue;
 use crate::source::erased::{ErasedOrigin, UpdateParts, typed};
 use crate::storage::resource::RequestOrder;
 use crate::storage::{Data, FileSource};
@@ -132,23 +142,91 @@ use crate::tile_store::tile_mut::{CopyAnswer, TileMut};
 use crate::worker::job::TileKey;
 
 pub(crate) mod erased;
-mod geojson;
-mod image;
+mod loading;
 pub(crate) mod render_image_source;
 pub(crate) mod render_source;
 pub(crate) mod render_tile_source;
 pub mod source_state;
-pub(crate) mod tileset;
 
-pub(crate) use geojson::query_feature_extensions;
+pub use loading::{Described, Fetch, Load, OfflineResources, Respond, SourceSummary};
 
-/// The render half of a source type, whose style half is its
-/// [`StyleSourceType`]: what its sources supply the renderer.
-pub trait SourceType: StyleSourceType {
+/// The options of a source of the type `T`.
+pub type OptionsOf<T> = <<T as SourceType>::Style as StyleSourceType>::Options;
+
+/// A source type's engine half: how its sources load, what they report and
+/// what they supply the renderer.
+///
+/// The hooks that take a source's data take it as the style has it, a
+/// [`SourceData`] of the style half.
+pub trait SourceType: Send + Sync + 'static {
+    /// The style half: the type's name, its kind of data and its options.
+    type Style: StyleSourceType;
+
     /// The kind of data its sources supply: the kind its style half's
     /// [`layer_kind`](mln_style::source::SourceTypeInfo::layer_kind) names,
     /// or the type doesn't register.
     type Data: TileKind;
+
+    /// What loading a source finds: a tileset, GeoJSON data, an image. The
+    /// style holds it in [`SourceData::description`].
+    type Description: Send + Sync + 'static;
+
+    /// Whether [`describe`](Self::describe) runs on the thread pool rather
+    /// than on the map's thread, for work such as indexing GeoJSON.
+    const DESCRIBES_IN_BACKGROUND: bool = false;
+
+    /// How `source`'s description loads for its current options. The map
+    /// asks again whenever [`SourceData::load`] grows.
+    fn load(_source: &SourceData<Self::Style>) -> Load<Self::Description> {
+        Load::Done
+    }
+
+    /// Turns `data`, the fetched resource of a [`Fetch::Source`], into the
+    /// description of a source of `options`, and answers through `respond`,
+    /// at once or later. `data` is `None` for a response without content,
+    /// and for a [`Load::Describe`], which describes the options alone.
+    fn describe(_options: &OptionsOf<Self>, _data: Option<Data>, respond: Respond<Described<Self::Description>>) {
+        respond(Err(Error::native(format!("a {} source fetches nothing", Self::Style::INFO.name))));
+    }
+
+    /// Turns `image`, the decoded image of a [`Fetch::Image`], into the
+    /// description of a source of `options`.
+    fn describe_image(_options: &OptionsOf<Self>, _image: PremultipliedImage) -> Described<Self::Description> {
+        Err(Error::native(format!("a {} source fetches no image", Self::Style::INFO.name)))
+    }
+
+    /// Whether `new`, a loaded description that replaces `old`, changes what
+    /// the source says about itself, such as a tileset's tiles and
+    /// attribution, which the map reports as a change of the source.
+    #[must_use]
+    fn metadata_changed(_old: Option<&Self::Description>, _new: Option<&Self::Description>) -> bool {
+        false
+    }
+
+    /// The source's attribution, as its style or its description gives it.
+    fn attribution(_source: &SourceData<Self::Style>) -> Option<String> {
+        None
+    }
+
+    /// What the source reports about itself.
+    fn summary(_source: &SourceData<Self::Style>) -> SourceSummary {
+        SourceSummary::default()
+    }
+
+    /// What an offline download fetches for the source.
+    fn offline(_source: &SourceData<Self::Style>) -> OfflineResources {
+        OfflineResources::None
+    }
+
+    /// The tileset that an offline download takes the source's tiles from,
+    /// once the TileJSON that [`OfflineResources::TileJson`] named arrived.
+    ///
+    /// # Errors
+    ///
+    /// When `tilejson` doesn't give the source a tileset.
+    fn offline_tileset(_source: &SourceData<Self::Style>, _tilejson: &[u8]) -> Result<Tileset, String> {
+        Err(format!("a {} source has no TileJSON", Self::Style::INFO.name))
+    }
 
     /// What `source`, a source of the type, supplies the renderer, which
     /// makes it once, as the source joins the renderer's style. A source
@@ -156,6 +234,24 @@ pub trait SourceType: StyleSourceType {
     /// reload makes, keeps the supply: its origin takes the new source in
     /// [`DataOrigin::update`], and an image's [`ImageOf`] reads it.
     fn supply(source: &Source) -> Supply<Self::Data>;
+
+    /// The `field` of the extension `extension` of `feature`, a feature
+    /// that a query found in a tile of `source`, with `args`: such as a
+    /// GeoJSON cluster's leaves. A null value for an extension the type
+    /// doesn't have.
+    ///
+    /// # Errors
+    ///
+    /// When the source can't answer, such as for a cluster it doesn't have.
+    fn query_feature_extension(
+        _source: &Source,
+        _feature: &crate::tile::feature::Feature,
+        _extension: &str,
+        _field: &str,
+        _args: Option<&feature::PropertyMap>,
+    ) -> Result<FeatureExtensionValue, Error> {
+        Ok(FeatureExtensionValue::default())
+    }
 }
 
 /// What a source supplies the renderer: tiles of the kind `K`, which a data
@@ -168,7 +264,7 @@ pub(crate) enum Supplied {
 }
 
 /// The image of a source, if it is one of the type's.
-pub type ImageOf = for<'a> fn(&'a Source) -> Option<SourceImage<'a>>;
+pub type ImageOf = fn(&Source) -> Option<SourceImage>;
 
 impl<K: TileKind> Supply<K> {
     /// Tiles whose data comes from `origin`.
@@ -267,17 +363,19 @@ pub(crate) mod kind {
 }
 
 /// An image at coordinates: what an image source shows.
-#[derive(Clone, Copy, Debug)]
-pub struct SourceImage<'a> {
-    /// The image, `None` until it arrives or for a source without one.
-    pub image: Option<&'a Arc<PremultipliedImage>>,
+#[derive(Clone, Debug)]
+pub struct SourceImage {
+    /// The image, `None` until it arrives or for a source without one. The
+    /// renderer uploads it again when it's another allocation.
+    pub image: Option<Arc<PremultipliedImage>>,
     /// The image's corners: top left, top right, bottom right, bottom left.
     pub coordinates: [LatLng; 4],
 }
 
-/// What a source's tiles cover: their size in pixels, the zoom levels that
-/// have tiles of their own, beyond which they are drawn scaled up, and the
-/// bounds outside which there are none.
+/// What a source's tiles cover, and how the views they draw choose them:
+/// their size in pixels, the zoom levels that have tiles of their own,
+/// beyond which they are drawn scaled up, the bounds outside which there
+/// are none, and how a view picks and lays out its tiles.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Cover {
     /// The size of the tiles, in pixels.
@@ -286,6 +384,22 @@ pub struct Cover {
     pub zoom_range: Range<u8>,
     /// The bounds outside which there are no tiles.
     pub bounds: Option<LatLngBounds>,
+    /// Whether the tiles that cover a view are of the zoom level nearest the
+    /// view's, as for raster tiles, rather than the level below it. A
+    /// render in tile mode then draws every tile of the cover, not only
+    /// the first.
+    pub round_zoom: bool,
+    /// Whether a view past the highest zoom level that has tiles asks for
+    /// overscaled tiles of its own zoom, rather than drawing that level's
+    /// tiles larger.
+    pub overscale: bool,
+    /// Whether, in continuous mode, the map first loads tiles a few zoom
+    /// levels below the view's, and keeps the globe's lowest level loaded,
+    /// so that something shows while the view's tiles load.
+    pub prefetch: bool,
+    /// Whether the tiles' geometry lays out in the update that delivers it,
+    /// on the renderer's thread, rather than on the tile workers.
+    pub synchronous: bool,
 }
 
 /// Where a source's tiles get their data: what each tile has of the
@@ -394,8 +508,10 @@ pub struct OriginUpdate<'a, O: ?Sized> {
 
 impl<'a, O: ?Sized> OriginUpdate<'a, O> {
     /// This update as one of the origin `P`'s, for an origin that runs its
-    /// hooks through a non-generic core.
-    pub(crate) fn cast<P: ?Sized>(&mut self) -> OriginUpdate<'_, P> {
+    /// hooks through a non-generic core, such as one type that several
+    /// generic origins share: what the update does to the tiles doesn't
+    /// depend on the origin's type.
+    pub fn cast<P: ?Sized>(&mut self) -> OriginUpdate<'_, P> {
         let parts = &mut self.parts;
         OriginUpdate {
             parts: UpdateParts {
@@ -492,8 +608,13 @@ impl<'a, 't, O: ?Sized> LoadContext<'a, 't, O> {
     }
 
     /// This context as one of the origin `P`'s, for an origin that runs its
-    /// hooks through a non-generic core.
-    pub(crate) fn cast<P: ?Sized>(&mut self) -> LoadContext<'_, 't, P> {
+    /// hooks through a non-generic core, as [`OriginUpdate::cast`]. The core
+    /// begins loads and delivers through
+    /// [`begin_load_of`](Self::begin_load_of) and
+    /// [`deliver_of`](Self::deliver_of), which name the reply and the kind
+    /// of data that the origin's own [`begin_load`](Self::begin_load) and
+    /// [`deliver`](Self::deliver) would.
+    pub fn cast<P: ?Sized>(&mut self) -> LoadContext<'_, 't, P> {
         LoadContext { tile: &mut *self.tile, origin: PhantomData }
     }
 
@@ -543,8 +664,10 @@ impl<'a, 't, O: ?Sized> LoadContext<'a, 't, O> {
         self.tile.store().pool.pool()
     }
 
-    /// [`begin_load`](Self::begin_load) of a load whose replies are `R`.
-    pub(crate) fn begin_load_of<R>(&mut self) -> Replier<R> {
+    /// [`begin_load`](Self::begin_load) of a load whose replies are `R`,
+    /// which must be the [`Reply`](DataOrigin::Reply) of the tile's origin:
+    /// the origin gets no other replies.
+    pub fn begin_load_of<R>(&mut self) -> Replier<R> {
         let load = self.tile.next();
         let tile = self.tile.tile_mut();
         tile.load.current = Some(load);
@@ -553,8 +676,9 @@ impl<'a, 't, O: ?Sized> LoadContext<'a, 't, O> {
         Replier { inbox: self.tile.store().inbox.clone(), tile, load, reply: PhantomData }
     }
 
-    /// [`deliver`](Self::deliver) for tiles of the kind `K`.
-    pub(crate) fn deliver_of<K: TileKind>(&mut self, item: Option<K::Item>) {
+    /// [`deliver`](Self::deliver) for tiles of the kind `K`, which must be
+    /// the [`Data`](DataOrigin::Data) of the tile's origin.
+    pub fn deliver_of<K: TileKind>(&mut self, item: Option<K::Item>) {
         self.tile.tile_mut().load.failed = false;
         K::deliver(self.tile, item);
     }
@@ -673,8 +797,9 @@ impl<'a, T> WorldCopy<'a, T> {
         self.take_into(cx)
     }
 
-    /// [`take`](Self::take) through a context of any origin's.
-    pub(crate) fn take_into<O: ?Sized>(self, cx: &mut LoadContext<'_, '_, O>) -> bool {
+    /// [`take`](Self::take) through a context of any origin's, as a
+    /// non-generic core takes it ([`LoadContext::cast`]).
+    pub fn take_into<O: ?Sized>(self, cx: &mut LoadContext<'_, '_, O>) -> bool {
         let Some(answer) = self.answer else {
             return false;
         };

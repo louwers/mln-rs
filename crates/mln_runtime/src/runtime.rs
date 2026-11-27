@@ -575,7 +575,7 @@ impl RuntimeCore {
             Arc::new(mln_engine::offline::region_database(
                 &self.resource_options.cache_path,
                 Some(Arc::clone(self.network())),
-                Arc::clone(self.registry.style()),
+                Arc::clone(&self.registry),
             ))
         })
     }
@@ -640,7 +640,7 @@ impl Runtime {
     /// cache database file can't be opened or created, and in the browser
     /// with [`ErrorKind::Unsupported`](mln_style::error::ErrorKind) for a cache path.
     pub fn new(options: &RuntimeOptions) -> Result<Runtime, Error> {
-        Self::with_registry(options, Registry::with_builtins())
+        Self::with_registry(options, mln_builtins::registry())
     }
 
     /// Starts a runtime and its thread, whose maps parse their styles

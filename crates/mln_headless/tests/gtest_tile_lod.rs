@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use mln_engine::Registry;
 use mln_engine::camera::CameraOptions;
 use mln_engine::exec::pool::Pool;
 use mln_engine::map::{Map, MapMode, MapOptions, TileSettings};
@@ -53,6 +52,7 @@ impl TileLODTest {
         let mut map = Map::with_file_source(
             file_source,
             MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
+            mln_builtins::registry(),
             &pool,
         )
         .unwrap();
@@ -69,7 +69,7 @@ impl TileLODTest {
         let source = vector_source("custom", None, tileset);
         map.add_source(source).unwrap();
 
-        let mut layer = Layer::new(Registry::with_builtins().style(), "circle", "circles", "custom").unwrap();
+        let mut layer = Layer::new(mln_builtins::registry().style(), "circle", "circles", "custom").unwrap();
         let error = layer.set_property("circle-color", &Convertible::from(&serde_json::json!("rgba(0,0,255,0)")), None);
         assert!(error.is_none(), "{error:?}");
         map.edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();

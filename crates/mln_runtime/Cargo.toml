@@ -51,6 +51,7 @@ feature.workspace = true
 geo-types.workspace = true
 geojson.workspace = true
 log.workspace = true
+mln_builtins.workspace = true
 mln_gfx.workspace = true
 # The device's fonts (`text::system_fonts`).
 mln_engine = { workspace = true, features = ["system-fonts"] }

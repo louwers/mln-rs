@@ -31,7 +31,7 @@ fn render(projection: &str, zoom: f64, pitch: f64) -> PremultipliedImage {
     let size = Size::new(SIDE, SIDE);
     let file_source = Arc::new(StubFileSource::new(ResponseType::Synchronous));
     let options = MapOptions { map_mode: MapMode::Static, size, ..Default::default() };
-    let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
+    let mut map = Map::with_file_source(file_source, options, mln_builtins::registry(), &pool).unwrap();
     let mut frontend = HeadlessFrontend::new(size, 1.0, &queue, &pool).expect("a headless frontend");
     frontend.attach(&mut map);
     let [lng, lat] = corner();

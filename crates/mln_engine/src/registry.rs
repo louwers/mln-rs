@@ -1,19 +1,19 @@
 //! The registrations that a runtime, its renderers and its tile workers
 //! share: the expression functions, the layer types and the source types.
 //!
-//! An app fills a [`RegistryBuilder`] by explicit calls, [`register_builtins`]
-//! first, and builds the [`Registry`] once. Tile workers in other wasm
-//! instances make the same calls, since they run the app's own module.
+//! An app fills a [`RegistryBuilder`] by explicit calls, `mln_builtins`'s
+//! `register_builtins` first, and builds the [`Registry`] once. Tile workers
+//! in other wasm instances make the same calls, since they run the app's own
+//! module.
 
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
-use mln_style::StyleRegistry;
 use mln_style::expression::Functions;
-use mln_style::expression::functions::{RegisterError, register_builtin_functions};
+use mln_style::expression::functions::RegisterError;
 use mln_style::layer::{ErasedStyleLayerType, StyleLayerType};
 use mln_style::layers::{Background, Circle, ColorRelief, Fill, FillExtrusion, Heatmap, Hillshade, Line, Raster};
-use mln_style::source::ErasedStyleSourceType;
-use mln_style::sources::{GeoJsonSourceType, ImageSourceType, RasterDemSourceType, RasterSourceType, VectorSourceType};
+use mln_style::source::StyleSourceType;
+use mln_style::{Source, StyleRegistry};
 use mln_vec_map::VecMap;
 
 use crate::layer::layer_type::{ErasedLayerType, LayerType, entry};
@@ -21,7 +21,7 @@ use crate::layer::tile_input::input::Find;
 use crate::layers::custom::Custom;
 use crate::placement::{ErasedPlacement, Placement, participant};
 use crate::source::erased::{self, ErasedSourceType};
-use crate::source::{SourceType, kind};
+use crate::source::{SourceSummary, SourceType, kind};
 use crate::symbol::placement::SymbolPlacement;
 
 /// Makes a renderer's participant of a placing layer type.
@@ -90,11 +90,11 @@ impl RegistryBuilder {
     pub fn add_source_type<T: SourceType>(&mut self) -> Result<(), RegisterError> {
         const {
             assert!(
-                T::INFO.layer_kind as u8 == <T::Data as kind::Deliver>::KIND as u8,
+                T::Style::INFO.layer_kind as u8 == <T::Data as kind::Deliver>::KIND as u8,
                 "a source type's halves name the same kind of data"
             );
         }
-        let name = T::INFO.name;
+        let name = T::Style::INFO.name;
         if self.source_types.contains_key(name) {
             return Err(RegisterError::Duplicate(name.to_owned()));
         }
@@ -112,24 +112,10 @@ fn style_half(layer_type: &'static dyn ErasedLayerType) -> &'static dyn ErasedSt
     layer_type
 }
 
-fn style_source_half(source_type: &'static dyn ErasedSourceType) -> &'static dyn ErasedStyleSourceType {
-    source_type
-}
-
-/// Adds the style specification's expression functions, layer types and
-/// source types and the custom layer type. Fails for a name that an earlier
-/// call took, or a role that an earlier function has.
-pub fn register_builtins(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
-    register_builtin_functions(builder.functions_mut())?;
-    register_builtin_types(builder)
-}
-
-fn register_builtin_types(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
-    register_builtin_layer_types(builder)?;
-    register_builtin_source_types(builder)
-}
-
-fn register_builtin_layer_types(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
+/// Adds the built-in layer types and the custom layer type, which the engine
+/// holds: `mln_builtins`'s `register_builtins` calls it. Fails for a name
+/// that an earlier call took.
+pub fn register_layer_types(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
     builder.add_layer_type::<Fill>()?;
     builder.add_layer_type::<Line>()?;
     builder.add_layer_type::<Circle>()?;
@@ -141,14 +127,6 @@ fn register_builtin_layer_types(builder: &mut RegistryBuilder) -> Result<(), Reg
     builder.add_layer_type::<FillExtrusion>()?;
     builder.add_layer_type::<Heatmap>()?;
     builder.add_layer_type::<Custom>()
-}
-
-fn register_builtin_source_types(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
-    builder.add_source_type::<VectorSourceType>()?;
-    builder.add_source_type::<RasterSourceType>()?;
-    builder.add_source_type::<RasterDemSourceType>()?;
-    builder.add_source_type::<GeoJsonSourceType>()?;
-    builder.add_source_type::<ImageSourceType>()
 }
 
 /// The expression functions, layer types and source types that a style
@@ -172,22 +150,6 @@ impl std::fmt::Debug for Registry {
 }
 
 impl Registry {
-    /// The built-in registrations: what [`register_builtins`] adds. Every
-    /// call returns the same value, built on the first: a registry never
-    /// changes, so sharing it is a cache, and an app with registrations of
-    /// its own still builds its registry with a [`RegistryBuilder`].
-    #[must_use]
-    pub fn with_builtins() -> Arc<Registry> {
-        static BUILTINS: LazyLock<Arc<Registry>> = LazyLock::new(|| {
-            let mut builder = RegistryBuilder::new();
-            // Into no types, the built-ins register.
-            let registered = register_builtin_types(&mut builder);
-            debug_assert_eq!(registered, Ok(()));
-            Registry::new(Functions::with_builtins(), builder.layer_types, builder.placing_types, builder.source_types)
-        });
-        Arc::clone(&BUILTINS)
-    }
-
     fn new(
         functions: Arc<Functions>,
         layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
@@ -195,7 +157,7 @@ impl Registry {
         source_types: VecMap<&'static str, &'static dyn ErasedSourceType>,
     ) -> Arc<Registry> {
         let style_halves = layer_types.values().map(|&layer_type| style_half(layer_type));
-        let style_source_halves = source_types.values().map(|&source_type| style_source_half(source_type));
+        let style_source_halves = source_types.values().map(|&source_type| source_type.style());
         let style = StyleRegistry::new(functions, style_halves, style_source_halves);
         Arc::new(Registry { style: Arc::new(style), layer_types, placing_types, source_types })
     }
@@ -223,6 +185,20 @@ impl Registry {
     pub(crate) fn source_type(&self, name: &str) -> Option<&'static dyn ErasedSourceType> {
         self.source_types.get(name).copied()
     }
+
+    /// The attribution of `source`, as its type gives it: `None` for a type
+    /// the registry lacks.
+    #[must_use]
+    pub fn source_attribution(&self, source: &Source) -> Option<String> {
+        self.source_type(source.info().name)?.attribution(source)
+    }
+
+    /// What `source` reports about itself, as its type says: nothing for a
+    /// type the registry lacks.
+    #[must_use]
+    pub fn source_summary(&self, source: &Source) -> SourceSummary {
+        self.source_type(source.info().name).map(|source_type| source_type.summary(source)).unwrap_or_default()
+    }
 }
 
 /// A context in which the values that the worker codec reads resolve the
@@ -239,29 +215,6 @@ impl mln_wire::Context for &Registry {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn builtins_register_once() {
-        let mut builder = RegistryBuilder::new();
-        register_builtins(&mut builder).unwrap();
-        assert!(matches!(register_builtins(&mut builder), Err(RegisterError::Duplicate(_))));
-    }
-
-    #[test]
-    fn builtins_register_seven_source_types() {
-        let mut builder = RegistryBuilder::new();
-        register_builtins(&mut builder).unwrap();
-        let registry = builder.build();
-        let names: Vec<_> = registry.style().source_types().map(|source_type| source_type.info().name).collect();
-        assert_eq!(names, ["geojson", "image", "raster", "raster-dem", "vector"]);
-    }
-
-    #[test]
-    fn a_source_type_registers_once() {
-        let mut builder = RegistryBuilder::new();
-        builder.add_source_type::<GeoJsonSourceType>().unwrap();
-        assert_eq!(builder.add_source_type::<GeoJsonSourceType>(), Err(RegisterError::Duplicate("geojson".to_owned())));
-    }
 
     #[test]
     fn a_layer_type_registers_once() {

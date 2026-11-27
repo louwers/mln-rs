@@ -28,7 +28,7 @@ use mln_engine::storage::{
 use mln_engine::text::glyph::{GlyphIDType, GlyphRange};
 use mln_engine::tile::OverscaledTileID;
 use mln_engine::tile_store::TileLodMode;
-use mln_engine::{Registry, RenderMode, TileOperation, UpdateParameters, UpdateReader};
+use mln_engine::{RenderMode, TileOperation, UpdateParameters, UpdateReader};
 use mln_headless::HeadlessFrontend;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::color::Color;
@@ -72,7 +72,7 @@ pub(crate) fn style_image(id: &str, image: PremultipliedImage, pixel_ratio: f32)
 }
 
 fn red_background(id: &str) -> Layer {
-    let mut layer = Layer::new(Registry::with_builtins().style(), "background", id, "").unwrap();
+    let mut layer = Layer::new(mln_builtins::registry().style(), "background", id, "").unwrap();
     set(&mut layer, "background-color", &json!("rgba(255,0,0,1)"));
     layer
 }
@@ -916,7 +916,7 @@ fn style_expired() {
     test.map()
         .edit_style(|style| {
             style.apply(Edit::AddLayer {
-                layer: Layer::new(Registry::with_builtins().style(), "background", "bg", "").unwrap(),
+                layer: Layer::new(mln_builtins::registry().style(), "background", "bg", "").unwrap(),
                 before: None,
             })
         })
@@ -1000,7 +1000,7 @@ fn style_early_mutation() {
     test.map()
         .edit_style(|style| {
             style.apply(Edit::AddLayer {
-                layer: Layer::new(Registry::with_builtins().style(), "background", "bg", "").unwrap(),
+                layer: Layer::new(mln_builtins::registry().style(), "background", "bg", "").unwrap(),
                 before: None,
             })
         })
@@ -1541,7 +1541,7 @@ fn issue15216() {
     test.map()
         .edit_style(|style| {
             style.apply(Edit::AddLayer {
-                layer: Layer::new(Registry::with_builtins().style(), "raster", "RasterLayer", "ImageSource").unwrap(),
+                layer: Layer::new(mln_builtins::registry().style(), "raster", "RasterLayer", "ImageSource").unwrap(),
                 before: None,
             })
         })
@@ -1566,7 +1566,7 @@ fn globe_image_source_below_zoom_zero() {
     test.map()
         .edit_style(|style| {
             style.apply(Edit::AddLayer {
-                layer: Layer::new(Registry::with_builtins().style(), "raster", "raster", "image").unwrap(),
+                layer: Layer::new(mln_builtins::registry().style(), "raster", "raster", "image").unwrap(),
                 before: None,
             })
         })
@@ -1592,7 +1592,7 @@ fn image_source_beyond_mercator_latitudes() {
     test.map()
         .edit_style(|style| {
             style.apply(Edit::AddLayer {
-                layer: Layer::new(Registry::with_builtins().style(), "raster", "image", "image").unwrap(),
+                layer: Layer::new(mln_builtins::registry().style(), "raster", "image", "image").unwrap(),
                 before: None,
             })
         })
@@ -1614,7 +1614,7 @@ fn a_still_image_finishes_with_an_image_source_off_screen() {
     test.map()
         .edit_style(|style| {
             style.apply(Edit::AddLayer {
-                layer: Layer::new(Registry::with_builtins().style(), "raster", "image", "image").unwrap(),
+                layer: Layer::new(mln_builtins::registry().style(), "raster", "image", "image").unwrap(),
                 before: None,
             })
         })
@@ -1646,7 +1646,7 @@ fn an_image_source_without_a_url_draws_once_it_has_an_image() {
 
     let mut red = PremultipliedImage::new(Size::new(1, 1));
     red.data.copy_from_slice(&[255, 0, 0, 255]);
-    let edit = ImageSourceType::set_image("image", red);
+    let edit = mln_builtins::sources::image::set_image("image", red);
     test.map().edit_style(|style| style.apply(edit)).unwrap();
     assert_eq!(center_pixel(&test.render().image), [255, 0, 0, 255]);
 
@@ -2318,7 +2318,7 @@ fn expired_sprite_sheet() {
     let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0, run_loop.queue(), &pool).expect("a headless frontend");
     let options =
         MapOptions { map_mode: MapMode::Continuous, size: frontend.size(), pixel_ratio: 1.0, ..Default::default() };
-    let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
+    let mut map = Map::with_file_source(file_source, options, mln_builtins::registry(), &pool).unwrap();
     frontend.attach(&mut map);
     let updates = map.update_reader();
     let map = Rc::new(RefCell::new(map));
@@ -2838,7 +2838,7 @@ fn still_image_after_tile_error() {
     test.map()
         .edit_style(|style| {
             style.apply(Edit::AddLayer {
-                layer: Layer::new(Registry::with_builtins().style(), "line", "line", "mapbox").unwrap(),
+                layer: Layer::new(mln_builtins::registry().style(), "line", "line", "mapbox").unwrap(),
                 before: None,
             })
         })
@@ -2876,7 +2876,7 @@ fn continuous_map_finishes_loading_when_its_tile_requests_fail() {
     test.map()
         .edit_style(|style| {
             style.apply(Edit::AddLayer {
-                layer: Layer::new(Registry::with_builtins().style(), "line", "line", "mapbox").unwrap(),
+                layer: Layer::new(mln_builtins::registry().style(), "line", "line", "mapbox").unwrap(),
                 before: None,
             })
         })
@@ -3018,12 +3018,13 @@ fn observe_tile_lifecycle() {
             asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
             ..ResourceOptions::default()
         },
+        mln_builtins::registry(),
         &pool,
     )
     .unwrap();
     frontend.attach(&mut map);
     map.load_style_json(&read_file("test/fixtures/api/water.json"));
-    let mut layer = Layer::new(Registry::with_builtins().style(), "fill", "landcover", "mapbox").unwrap();
+    let mut layer = Layer::new(mln_builtins::registry().style(), "fill", "landcover", "mapbox").unwrap();
     layer.set_source_layer("landcover");
     set(&mut layer, "fill-color", &json!("rgba(0,255,0,1)"));
     map.edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
@@ -3161,7 +3162,7 @@ fn immediate_style_replacement_retains_color() {
             "layers": [{"id": "underlay", "type": "background", "paint": {"background-color": "white"}}]
         }"#,
         );
-        let mut layer = Layer::new(Registry::with_builtins().style(), "background", "background", "").unwrap();
+        let mut layer = Layer::new(mln_builtins::registry().style(), "background", "background", "").unwrap();
         set(&mut layer, "background-color", &json!("rgba(255,0,0,1)"));
         test.map().edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
 
@@ -3265,6 +3266,7 @@ fn globe_hand_off_keeps_tiles() {
             &pool,
         )),
         MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
+        mln_builtins::registry(),
         &pool,
     )
     .unwrap();
@@ -3345,7 +3347,7 @@ fn a_moved_layer_draws_in_its_new_place_without_a_relayout() {
         result.image
     };
 
-    let mut map = Map::with_file_source(Arc::clone(&file_source), options, &pool).unwrap();
+    let mut map = Map::with_file_source(Arc::clone(&file_source), options, mln_builtins::registry(), &pool).unwrap();
     map.load_style_json(&water_layers_in(["fill", "line"]));
     map.jump_to(&camera);
     let before = render(&mut map);
@@ -3357,7 +3359,7 @@ fn a_moved_layer_draws_in_its_new_place_without_a_relayout() {
     assert_eq!(0, parses.get(), "moving a layer laid its tiles out again");
     assert_ne!(before, moved);
 
-    let mut reordered = Map::with_file_source(file_source, options, &pool).unwrap();
+    let mut reordered = Map::with_file_source(file_source, options, mln_builtins::registry(), &pool).unwrap();
     reordered.load_style_json(&water_layers_in(["line", "fill"]));
     reordered.jump_to(&camera);
     assert_eq!(render(&mut reordered), moved);
@@ -3629,6 +3631,7 @@ fn globe_bounded_source_loads_finer_tiles() {
             &pool,
         )),
         MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
+        mln_builtins::registry(),
         &pool,
     )
     .unwrap();
@@ -3670,7 +3673,7 @@ fn line_layer_depth_distribution() {
 
     test.map().jump_to(&CameraOptions { zoom: Some(0.0), pitch: Some(45.0), ..Default::default() });
 
-    let mut background_layer = Layer::new(Registry::with_builtins().style(), "background", "Background", "").unwrap();
+    let mut background_layer = Layer::new(mln_builtins::registry().style(), "background", "Background", "").unwrap();
     set(&mut background_layer, "background-color", &json!("rgba(255,255,0,1)"));
     test.map().edit_style(|style| style.apply(Edit::AddLayer { layer: background_layer, before: None })).unwrap();
 
@@ -3698,7 +3701,7 @@ fn line_layer_depth_distribution() {
         test.map().add_source(get_source(i)).unwrap();
 
         let mut layer = Layer::new(
-            Registry::with_builtins().style(),
+            mln_builtins::registry().style(),
             "line",
             &format!("LineLayer{i}"),
             &format!("GeoJSONSource_{i}"),
@@ -3786,7 +3789,7 @@ fn add_geojson_symbol(test: &MapTest, index: usize, longitude: f64, synchronous:
     );
     let layer_value: serde_json::Value = serde_json::from_str(&layer_json).unwrap();
     let mut error = ConversionError::default();
-    let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(&layer_value), &mut error);
+    let layer = convert_layer(mln_builtins::registry().style(), &Convertible::from(&layer_value), &mut error);
     let layer = layer.unwrap_or_else(|| panic!("{}", error.message));
     test.map().edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
 }
@@ -4470,7 +4473,7 @@ fn layer_added_with_global_state_change_shows_new_state() {
     )
     .unwrap();
     let mut error = ConversionError::default();
-    let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(&layer_value), &mut error);
+    let layer = convert_layer(mln_builtins::registry().style(), &Convertible::from(&layer_value), &mut error);
     let layer = layer.unwrap_or_else(|| panic!("{}", error.message));
     test.map().edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
 
@@ -4515,6 +4518,7 @@ fn tile_selection_options_publish_updates() {
     let mut map = Map::with_file_source(
         StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous),
         MapOptions { map_mode: MapMode::Continuous, ..Default::default() },
+        mln_builtins::registry(),
         &pool,
     )
     .unwrap();
@@ -4786,7 +4790,7 @@ fn color_ramp_renders_current_state_after_unrelated_state_change(type_: &str) {
     );
     let layer_value: serde_json::Value = serde_json::from_str(&layer_json).unwrap();
     let mut error = ConversionError::default();
-    let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(&layer_value), &mut error);
+    let layer = convert_layer(mln_builtins::registry().style(), &Convertible::from(&layer_value), &mut error);
     let layer = layer.unwrap_or_else(|| panic!("{}", error.message));
 
     // The layer joins the render tree in the same update as a write to a key its ramp does not read.
@@ -4835,6 +4839,7 @@ fn empty_size_is_an_error() {
         let result = Map::with_file_source(
             StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous),
             MapOptions { size, ..Default::default() },
+            mln_builtins::registry(),
             &pool,
         );
         assert_eq!(

@@ -73,7 +73,7 @@ fn render(bearing: f64, paint: &str) -> Option<PremultipliedImage> {
         Some(response)
     });
     let options = MapOptions { map_mode: MapMode::Static, size, ..Default::default() };
-    let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
+    let mut map = Map::with_file_source(file_source, options, mln_builtins::registry(), &pool).unwrap();
     frontend.attach(&mut map);
     map.load_style_json(&style);
     let camera = mln_engine::map::style_camera(map.style());

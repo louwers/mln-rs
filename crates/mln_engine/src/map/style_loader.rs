@@ -13,22 +13,26 @@
 //! The loader watches each version of the style ([`StyleLoader::watch_sources`])
 //! and loads the description of each source whose instance or
 //! [`load`](mln_style::source::SourceData::load) it hasn't seen, as the
-//! source's type says. What a load finds goes back into the style as an
+//! source's type in the map's registry says
+//! ([`SourceType::load`](crate::source::SourceType::load)). What a load finds goes back into the style as an
 //! [`Edit::SetSourceDescription`].
 
 use std::sync::Arc;
 
 use mln_style::error::Error;
 use mln_style::hash::HashMap;
-use mln_style::source::{DescribeImageJob, Described, ErasedDescription, Fetch, Load, Respond};
+use mln_style::source::ErasedDescription;
 use mln_style::sprite::Sprite;
-use mln_style::{Edit, SourceInstance, Style, StyleLoadError, StyleRegistry, image};
+use mln_style::{Edit, Source, SourceInstance, Style, StyleLoadError, StyleRegistry, image};
 
 use crate::exec::event_queue::{EventQueue, Waker};
 use crate::exec::pool::{Pool, TaskGroup};
 use crate::image::decoder;
 use crate::image::sprite::load_sprite;
 use crate::log_target;
+use crate::registry::Registry;
+use crate::source::erased::{DescribeImageJob, DescribeJob, ErasedSourceType};
+use crate::source::{Described, Fetch, Load, Respond};
 use crate::storage::{Data, FileSource, FileSourceExt, Request, Resource, ResourceError, Response};
 use crate::text::glyph::{FontFaces, style_font_faces};
 
@@ -259,12 +263,14 @@ impl StyleLoader {
     }
 
     /// Handles a reply from the inbox for the map whose style is `style`,
-    /// parsing a style document against its registry.
-    pub(crate) fn on_reply(&mut self, style: &Style, reply: Reply) -> Vec<LoadEvent> {
-        let registry = style.registry();
+    /// parsing a style document against its registry, and whose sources
+    /// load through `registry`.
+    pub(crate) fn on_reply(&mut self, registry: &Registry, style: &Style, reply: Reply) -> Vec<LoadEvent> {
         let mut events = Vec::new();
         match reply {
-            Reply::Style { load, response } => self.on_document_response(registry, load, &response, &mut events),
+            Reply::Style { load, response } => {
+                self.on_document_response(style.registry(), load, &response, &mut events);
+            }
             Reply::Sprite { id, load, part, response } => {
                 self.on_sprite_response(&id, load, part, response, &mut events);
             }
@@ -280,7 +286,7 @@ impl StyleLoader {
                 }
             }
             Reply::Source { load, fetch, response } => {
-                self.on_source_response(style, load, fetch, response, &mut events);
+                self.on_source_response(registry, style, load, fetch, response, &mut events);
             }
             Reply::SourceDescribed { load, describing, result } => {
                 let Some(entry) = self.sources.get_mut(&load.id).filter(|entry| entry.load == load) else {
@@ -300,11 +306,11 @@ impl StyleLoader {
     }
 
     /// Loads the description of each source of `style` whose load the
-    /// loader hasn't seen, and forgets the loads of the sources `style`
-    /// lacks. Returns the edits that give sources the descriptions their
-    /// types know without a fetch, for the map to make before it publishes
-    /// `style`.
-    pub(crate) fn watch_sources(&mut self, style: &Style) -> Vec<Edit> {
+    /// loader hasn't seen, through its type in `registry`, and forgets the
+    /// loads of the sources `style` lacks. Returns the edits that give
+    /// sources the descriptions their types know without a fetch, for the
+    /// map to make before it publishes `style`.
+    pub(crate) fn watch_sources(&mut self, registry: &Registry, style: &Style) -> Vec<Edit> {
         let sources = style.get_sources();
         self.sources.retain(|id, entry| sources.get(id).is_some_and(|source| source.instance() == entry.load.instance));
         let mut edits = Vec::new();
@@ -323,14 +329,22 @@ impl StyleLoader {
                 failing: false,
                 image: false,
             };
-            match source.data().plan_load() {
+            let source_type = registry.source_type(source.info().name);
+            match source_type.map_or(Load::Done, |source_type| source_type.plan_load(source)) {
                 Load::Done => {}
                 Load::Ready(description) => edits.push(Edit::SetSourceDescription {
                     id: source.id().to_owned(),
                     instance: load.instance,
                     load: load.load,
-                    result: Ok(Some(description)),
+                    description: Some(description),
                 }),
+                Load::Describe => {
+                    if let Some(source_type) = source_type {
+                        entry.loaded = false;
+                        entry.describing = 1;
+                        self.describe(source_type, source, load.clone(), 1, None);
+                    }
+                }
                 Load::Fetch(target) => {
                     entry.loaded = false;
                     entry.image = matches!(target, Fetch::Image(_));
@@ -359,6 +373,7 @@ impl StyleLoader {
     /// it. A failed response fails the load at once.
     fn on_source_response(
         &mut self,
+        registry: &Registry,
         style: &Style,
         load: SourceLoadId,
         fetch: u64,
@@ -383,20 +398,36 @@ impl StyleLoader {
         if res.not_modified {
             return;
         }
+        let Some(source_type) = registry.source_type(source.info().name) else { return };
         let data = if res.no_content { None } else { Some(res.data.unwrap_or_default()) };
         entry.describing += 1;
         let describing = entry.describing;
-        let image = entry.image;
-        let replies = self.replies.clone();
-        let respond: Respond<_> =
-            Box::new(move |result| replies.push(Reply::SourceDescribed { load, describing, result }));
-        if image {
-            let describe = source.data().describe_image_job();
+        if entry.image {
+            let replies = self.replies.clone();
+            let respond: Respond<_> =
+                Box::new(move |result| replies.push(Reply::SourceDescribed { load, describing, result }));
+            let describe = source_type.describe_image_job(source);
             self.jobs.spawn(move || describe_image(data, describe, respond));
             return;
         }
-        let job = source.data().describe_job(data);
-        if source.data().describes_in_background() {
+        self.describe(source_type, source, load, describing, data);
+    }
+
+    /// Describes `data`, the `describing`th data of `source`'s load `load`,
+    /// through its type: on the thread pool if the type asks for it.
+    fn describe(
+        &self,
+        source_type: &dyn ErasedSourceType,
+        source: &Source,
+        load: SourceLoadId,
+        describing: u64,
+        data: Option<Data>,
+    ) {
+        let replies = self.replies.clone();
+        let respond: Respond<_> =
+            Box::new(move |result| replies.push(Reply::SourceDescribed { load, describing, result }));
+        let job: DescribeJob = source_type.describe_job(source, data);
+        if source_type.describes_in_background() {
             self.jobs.spawn(move || job(respond));
         } else {
             job(respond);

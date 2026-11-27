@@ -10,7 +10,6 @@ use httpmock::MockServer;
 use mln_style::geo::{LatLng, LatLngBounds};
 
 use super::TempDir;
-use crate::Registry;
 use crate::offline::database_file_source::{DatabaseFileSourceExt, RegionDatabase, region_database};
 use crate::storage::OnlineFileSource;
 use crate::storage::offline::{
@@ -36,7 +35,7 @@ fn database_file_source(dir: &TempDir) -> RegionDatabase {
     region_database(
         &dir.path("cache.db"),
         Some(Arc::new(OnlineFileSource::new(Arc::default()))),
-        Arc::clone(Registry::with_builtins().style()),
+        crate::tests::registry(),
     )
 }
 

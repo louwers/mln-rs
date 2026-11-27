@@ -10,8 +10,8 @@ use mln_style::geo::LatLng;
 use mln_style::layer::{Layer, LayerStyle};
 use mln_style::layers::{Circle, Hillshade, Line, Raster};
 use mln_style::size::Size;
-use mln_style::source::{Fetch, Load, SourceData};
-use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, create_geojson_data, geojson_source};
+use mln_style::source::SourceData;
+use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, geojson_source};
 use mln_style::sources::{VectorSourceType, raster_dem_source, raster_source, vector_source};
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
@@ -20,7 +20,6 @@ use mln_style::types::ProjectionDefinition;
 use mln_style::{Edit, Source, Style};
 use parking_lot::Mutex;
 
-use crate::Registry;
 use crate::camera::transform::Transform;
 use crate::camera::{CameraOptions, ConstrainMode, TransformState, ViewportMode};
 use crate::exec::pool::{Pool, TaskGroup};
@@ -28,9 +27,12 @@ use crate::exec::queue::Queue;
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::map::MapMode;
 use crate::source::render_source::RenderSource;
+use crate::source::{Fetch, Load};
 use crate::storage::response::{Reason, ResourceError};
 use crate::storage::stub_file_source::{ResponseType, StubFileSource};
 use crate::storage::{FileSource, FileSourceExt, Kind, RequestOrder, Resource, Responder, Response};
+use crate::tests::builtin_sources::geojson::{create_geojson_data, set_data};
+use crate::tests::builtin_sources::image::set_image;
 use crate::tests::fixture_log::FixtureLog;
 use crate::tile::OverscaledTileID;
 use crate::tile_store::TileLodMode;
@@ -68,7 +70,6 @@ fn tile_parameters(
         tile_lod_mode: TileLodMode::Default,
         subdivision_granularity: SubdivisionGranularitySetting::none(),
         global_state: None,
-        is_update_synchronous: false,
         font_faces: None,
         glyph_pbfs: true,
         placement_commits: 0,
@@ -170,7 +171,7 @@ impl StubStoreObserver {
 
 /// `source` after `edit`, made through a style that holds it.
 fn edited(source: &Source, edit: Edit) -> Source {
-    let mut style = Style::new(Arc::clone(Registry::with_builtins().style()));
+    let mut style = Style::new(Arc::clone(crate::tests::registry().style()));
     style.apply(Edit::AddSource(source.clone())).unwrap();
     style.apply(edit).unwrap();
     style.get_source(source.id()).unwrap().clone()
@@ -180,9 +181,9 @@ fn edited(source: &Source, edit: Edit) -> Source {
 /// tileset's tile URLs.
 fn with_tiles(source: &Source, tiles: &[&str]) -> Source {
     let data = SourceData::<VectorSourceType>::recover(source).expect("a vector source");
-    let tileset = data.description.clone().expect("a loaded tileset");
+    let tileset = data.description::<Tileset>().cloned().expect("a loaded tileset");
     let tileset = Tileset { tiles: tiles.iter().map(|&tile| tile.to_owned()).collect(), ..tileset };
-    source.with_data(SourceData::<VectorSourceType> { description: Some(tileset), ..data.clone() })
+    source.with_data(SourceData::<VectorSourceType> { description: Some(Arc::new(tileset)), ..data.clone() })
 }
 
 /// The three tiled source types that each case runs for.
@@ -199,15 +200,15 @@ impl Tiled {
     fn layers(self) -> Vec<Arc<dyn ErasedEvaluatedLayer>> {
         let properties: Arc<dyn ErasedEvaluatedLayer> = match self {
             Tiled::Raster => {
-                let layer = Layer::new(Registry::with_builtins().style(), "raster", "id", "source").unwrap();
+                let layer = Layer::new(crate::tests::registry().style(), "raster", "id", "source").unwrap();
                 Arc::new(EvaluatedLayer::<Raster>::new(LayerStyle::recover(layer.style()).unwrap()))
             }
             Tiled::RasterDEM => {
-                let layer = Layer::new(Registry::with_builtins().style(), "hillshade", "id", "source").unwrap();
+                let layer = Layer::new(crate::tests::registry().style(), "hillshade", "id", "source").unwrap();
                 Arc::new(EvaluatedLayer::<Hillshade>::new(LayerStyle::recover(layer.style()).unwrap()))
             }
             Tiled::Vector => {
-                let mut layer = Layer::new(Registry::with_builtins().style(), "line", "id", "source").unwrap();
+                let mut layer = Layer::new(crate::tests::registry().style(), "line", "id", "source").unwrap();
                 layer.set_source_layer("water");
                 Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(layer.style()).unwrap()))
             }
@@ -682,7 +683,9 @@ fn tile_attribution(kind: Tiled, attribution: &'static str) {
     );
 
     // The map's loader fetches the TileJSON and describes it.
-    let Load::Fetch(Fetch::Source(url)) = source.data().plan_load() else { panic!("a TileJSON") };
+    let registry = crate::tests::registry();
+    let source_type = registry.source_type(source.info().name).expect("a built-in source type");
+    let Load::Fetch(Fetch::Source(url)) = source_type.plan_load(&source) else { panic!("a TileJSON") };
     let resource = Resource::source(&url);
     let (sender, responses) = std::sync::mpsc::channel();
     let _request = file_source.request(&resource, move |response: Response| {
@@ -700,12 +703,12 @@ fn tile_attribution(kind: Tiled, attribution: &'static str) {
         std::thread::yield_now();
     };
     let (sender, receiver) = std::sync::mpsc::channel();
-    source.data().describe_job(response.data)(Box::new(move |result| {
+    source_type.describe_job(&source, response.data)(Box::new(move |result| {
         let _ = sender.send(result);
     }));
-    let described = source.with_description(receiver.recv().unwrap().unwrap()).expect("a description");
-    assert_eq!(Some(attribution.to_owned()), described.data().attribution());
-    assert!(described.metadata_changed_from(&source));
+    let described = source.with_description(receiver.recv().unwrap().unwrap());
+    assert_eq!(Some(attribution.to_owned()), registry.source_attribution(&described));
+    assert!(source_type.metadata_changed(&source, &described));
 }
 
 // gtest: Source.RasterTileAttribution
@@ -788,11 +791,11 @@ fn geojson_source_tiles_after_data_reset() {
         .parse::<GeoJson>()
         .unwrap();
     let geojson_data = create_geojson_data(geojson, &GeoJSONOptions::default_options()).unwrap();
-    source = edited(&source, GeoJsonSourceType::set_data("source", Some(Arc::clone(&geojson_data))));
+    source = edited(&source, set_data("source", Some(Arc::clone(&geojson_data))));
     let mut store = test.store();
     let mut render_source = crate::tests::create_render_source(&source, &mut store);
 
-    let layer = Layer::new(Registry::with_builtins().style(), "circle", "id", "source").unwrap();
+    let layer = Layer::new(crate::tests::registry().style(), "circle", "id", "source").unwrap();
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
         Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(layer.style()).unwrap()));
     let layers = vec![layer_properties];
@@ -802,22 +805,22 @@ fn geojson_source_tiles_after_data_reset() {
     // loaded == false, means that the source contains pending tiles.
     assert!(!render_source.is_loaded(&store));
 
-    source = edited(&source, GeoJsonSourceType::set_data("source", None));
+    source = edited(&source, set_data("source", None));
     render_source.update(&mut store, source.clone(), &layers, true, true, &continuous);
     assert!(!render_source.is_loaded(&store)); // Tiles remain in continuous mode.
 
-    source = edited(&source, GeoJsonSourceType::set_data("source", Some(geojson_data)));
+    source = edited(&source, set_data("source", Some(geojson_data)));
     render_source.update(&mut store, source.clone(), &layers, true, true, &continuous);
     assert!(!render_source.is_loaded(&store));
 
-    source = edited(&source, GeoJsonSourceType::set_data("source", None));
+    source = edited(&source, set_data("source", None));
     render_source.update(&mut store, source.clone(), &layers, true, true, &test.tile_parameters(MapMode::Static));
     assert!(render_source.is_loaded(&store)); // Tiles are reset in static mode.
 }
 
 /// A circle layer "id" on "source", as evaluated values.
 fn circle_layers() -> Vec<Arc<dyn ErasedEvaluatedLayer>> {
-    let layer = Layer::new(Registry::with_builtins().style(), "circle", "id", "source").unwrap();
+    let layer = Layer::new(crate::tests::registry().style(), "circle", "id", "source").unwrap();
     vec![Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(layer.style()).unwrap()))]
 }
 
@@ -853,9 +856,8 @@ impl SynchronousUpdateSource {
             .parse::<GeoJson>()
             .unwrap();
         let data = Some(create_geojson_data(geojson, &self.options).unwrap());
-        self.source = edited(&self.source, GeoJsonSourceType::set_data("source", data));
-        let mut parameters = test.tile_parameters(MapMode::Continuous);
-        parameters.is_update_synchronous = self.source.data().is_update_synchronous();
+        self.source = edited(&self.source, set_data("source", data));
+        let parameters = test.tile_parameters(MapMode::Continuous);
         self.render_source.update(&mut self.store, self.source.clone(), &self.layers, true, true, &parameters);
         // The end of the renderer's update.
         self.store.drive();
@@ -910,13 +912,12 @@ fn geojson_source_slices_inline_while_a_background_slice_runs() {
         .parse::<GeoJson>()
         .unwrap();
     let data = create_geojson_data(geojson, &GeoJSONOptions::default_options()).unwrap();
-    source = edited(&source, GeoJsonSourceType::set_data("source", Some(data)));
+    source = edited(&source, set_data("source", Some(data)));
     let mut store = crate::tests::pool_store(&TaskGroup::new(&pool));
     let mut render_source = crate::tests::create_render_source(&source, &mut store);
     let layers = circle_layers();
     let update = |render_source: &mut Box<dyn RenderSource>, store: &mut TileStore, source: &Source| {
-        let mut parameters = test.tile_parameters(MapMode::Continuous);
-        parameters.is_update_synchronous = source.data().is_update_synchronous();
+        let parameters = test.tile_parameters(MapMode::Continuous);
         render_source.update(store, source.clone(), &layers, true, true, &parameters);
         store.drive();
     };
@@ -1575,11 +1576,11 @@ fn image_view(width: u32, zoom: f64, lng: f64) -> SourceTest {
 /// An image source with an image, from `west` to `east` and from 10° north
 /// to 10° south, updated for `test`'s view.
 fn image_seen_by(test: &SourceTest, west: f64, east: f64) -> crate::source::render_image_source::RenderImageSource {
-    use mln_style::sources::{ImageSourceType, image_source};
+    use mln_style::sources::image_source;
     let corners =
         [(10.0, west), (10.0, east), (-10.0, east), (-10.0, west)].map(|(lat, lng)| LatLng::new(lat, lng).unwrap());
     let image = mln_style::bitmap::PremultipliedImage::from_vec(Size::new(1, 1), vec![255, 0, 0, 255]);
-    let source = edited(&image_source("image", corners), ImageSourceType::set_image("image", image));
+    let source = edited(&image_source("image", corners), set_image("image", image));
     let mut store = test.store();
     let mut render_source =
         crate::source::render_image_source::RenderImageSource::new(source.clone(), crate::tests::image_of(&source));

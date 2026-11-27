@@ -28,7 +28,6 @@ geojson.workspace = true
 geo-types.workspace = true
 geometry.workspace = true
 log.workspace = true
-mln_geojson.workspace = true
 mln_vec_map.workspace = true
 parking_lot.workspace = true
 mln_wire.workspace = true

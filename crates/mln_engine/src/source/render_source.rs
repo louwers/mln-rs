@@ -135,7 +135,7 @@ pub(crate) fn create(registry: &Registry, source: &Source, store: &mut TileStore
     let name = source.info().name;
     let render_source = registry.source_type(name).map(|source_type| -> Box<dyn RenderSource> {
         match source_type.supply(source) {
-            Supplied::Tiles(origin) => Box::new(RenderTileSource::new(source.clone(), origin, store)),
+            Supplied::Tiles(origin) => Box::new(RenderTileSource::new(source.clone(), source_type, origin, store)),
             Supplied::Image(image_of) => Box::new(RenderImageSource::new(source.clone(), image_of)),
         }
     });

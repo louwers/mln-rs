@@ -76,7 +76,7 @@ fn render(centers: &[f64]) -> Option<PremultipliedImage> {
         HeadlessFrontend::with_device(device, size, 1.0, Arc::default(), &queue, &pool).expect("a frontend");
     let file_source = Arc::new(StubFileSource::new(ResponseType::Synchronous));
     let options = MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() };
-    let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
+    let mut map = Map::with_file_source(file_source, options, mln_builtins::registry(), &pool).unwrap();
     frontend.attach(&mut map);
     map.load_style_json(&style());
     let mut image = None;

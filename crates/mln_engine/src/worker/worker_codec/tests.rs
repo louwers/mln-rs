@@ -15,7 +15,6 @@ use mln_vec_map::VecSet;
 use super::map_side::MapCodec;
 use super::worker_side::WorkerCodec;
 use super::{Encoded, TileWorkerHost, envelope, fields};
-use crate::Registry;
 use crate::draw::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::image::image_store::{ImageMap, ImageType};
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
@@ -45,7 +44,7 @@ fn tile_data() -> TileData {
 fn convert(json: &str) -> Layer {
     let json: serde_json::Value = serde_json::from_str(json).unwrap();
     let mut error = ConversionError::default();
-    convert_layer(Registry::with_builtins().style(), &Convertible::from(&json), &mut error)
+    convert_layer(crate::tests::registry().style(), &Convertible::from(&json), &mut error)
         .unwrap_or_else(|| panic!("{}", error.message))
 }
 
@@ -185,8 +184,8 @@ struct ThroughCodec {
 impl ThroughCodec {
     fn new() -> Self {
         ThroughCodec {
-            map: MapCodec::new(Registry::with_builtins()),
-            worker: WorkerCodec::new(Registry::with_builtins()),
+            map: MapCodec::new(crate::tests::registry()),
+            worker: WorkerCodec::new(crate::tests::registry()),
             cache: DataCache::new(1 << 20),
         }
     }
@@ -546,7 +545,7 @@ fn forgotten(request: &[u8]) -> Vec<Vec<u64>> {
 /// forgets each value when it is gone on the map side.
 #[test]
 fn styles_and_layers_are_defined_once() {
-    let mut map = MapCodec::new(Registry::with_builtins());
+    let mut map = MapCodec::new(crate::tests::registry());
     let data = DataInput::Cached(key(1));
     let layers = layers(&[FILL, LINE]);
     let first_style = style(&layers);
@@ -587,7 +586,7 @@ fn data_input(data: &DataInput) -> DataInput {
 /// a CJK tile's resume stays small.
 #[test]
 fn answers_cross_without_pixels() {
-    let mut map = MapCodec::new(Registry::with_builtins());
+    let mut map = MapCodec::new(crate::tests::registry());
     let ids = (0..256).map(crate::text::glyph::GlyphID::new).collect();
     let dependencies = Dependencies {
         glyphs: crate::text::glyph::GlyphDependencies {
@@ -634,7 +633,7 @@ impl ErasedEvaluatedLayer for Unknown {
 /// is still defined with the next job.
 #[test]
 fn failed_jobs_define_nothing() {
-    let mut map = MapCodec::new(Registry::with_builtins());
+    let mut map = MapCodec::new(crate::tests::registry());
     let fill = layer(FILL, 0.0);
     let unknown: Arc<dyn ErasedEvaluatedLayer> = Arc::new(Unknown(layer(LINE, 0.0).shared_style()));
     let failed = style(&[Arc::clone(&fill), unknown]);
@@ -643,7 +642,7 @@ fn failed_jobs_define_nothing() {
     // Decoded without the failed job, the next one defines the layer.
     let request = map.encode_run(&job(&style(&[fill]), DataInput::Cached(key(1)), Resolved::default())).unwrap();
     let (_, body) = envelope::read_job_id(&request).unwrap();
-    let Job::Layout(job) = WorkerCodec::new(Registry::with_builtins()).decode_job(body).unwrap() else {
+    let Job::Layout(job) = WorkerCodec::new(crate::tests::registry()).decode_job(body).unwrap() else {
         panic!("not a layout job");
     };
     assert_eq!(job.style.layers[0].style().base().id, "water");
@@ -653,7 +652,7 @@ fn failed_jobs_define_nothing() {
 /// job's decoding.
 #[test]
 fn a_missing_layer_type_fails_its_job() {
-    let mut map = MapCodec::new(Registry::with_builtins());
+    let mut map = MapCodec::new(crate::tests::registry());
     let request =
         map.encode_run(&job(&style(&layers(&[FILL])), DataInput::Cached(key(1)), Resolved::default())).unwrap();
     let (_, body) = envelope::read_job_id(&request).unwrap();
@@ -673,7 +672,7 @@ fn a_missing_layer_type_fails_its_job() {
 fn an_undecodable_body_fails_its_job() {
     let replies = Arc::new(parking_lot::Mutex::new(Vec::new()));
     let sink = Arc::clone(&replies);
-    let host = TileWorkerHost::new(Registry::with_builtins(), move |reply| sink.lock().push(reply));
+    let host = TileWorkerHost::new(crate::tests::registry(), move |reply| sink.lock().push(reply));
     let mut request = Vec::new();
     envelope::write_job_header(&mut request, &id(4));
     request.extend_from_slice(&[0xff; 16]);
@@ -722,7 +721,7 @@ fn evicted_data_needs_sending_again() {
 fn an_ancestor_crosses_once_for_its_cut_tiles() {
     use crate::tile::cut::{Ancestor, Cut, CutData};
 
-    let mut map = MapCodec::new(Registry::with_builtins());
+    let mut map = MapCodec::new(crate::tests::registry());
     let style = style(&layers(&[FILL]));
     let ancestor = Arc::new(Ancestor::new(tile_data()));
     let cut = |x| TileData::Cut(Arc::new(CutData::new(Arc::clone(&ancestor), Cut { dz: 1, x, y: 0 })));
@@ -833,7 +832,7 @@ fn malformed_dems_fail() {
     let decode = |dim, stride, image| {
         let mut bytes = Vec::new();
         envelope::append(&mut bytes, &Malformed::Dem(dim, stride, RasterEncoding::Mapbox, image), ()).unwrap();
-        MapCodec::new(Registry::with_builtins()).decode_result(Encoded::from(bytes))
+        MapCodec::new(crate::tests::registry()).decode_result(Encoded::from(bytes))
     };
     for (dim, stride, image) in dems {
         let JobResult::Failed(_) = decode(dim, stride, image) else {

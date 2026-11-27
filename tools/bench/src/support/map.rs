@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 pub(crate) use mln_bench_workload::paths::{tile_at, tile_center};
+use mln_builtins::sources::geojson::{create_geojson_data, set_data};
 use mln_engine::RenderMode;
 use mln_engine::camera::CameraOptions;
 use mln_engine::exec::pool::Pool;
@@ -20,7 +21,7 @@ use mln_engine::storage::FileSource;
 use mln_headless::HeadlessFrontend;
 use mln_runtime::{BackendRef, Device};
 use mln_style::size::Size;
-use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, create_geojson_data, geojson_source};
+use mln_style::sources::geojson::{GeoJSONOptions, geojson_source};
 use mln_webgpu::bench::PipelineStatistics;
 
 use super::fixtures::Fixtures;
@@ -172,7 +173,8 @@ impl HeadlessMap {
     pub(crate) fn new(mut frontend: Frontend, mode: MapMode, file_source: Arc<dyn FileSource>) -> HeadlessMap {
         let size = frontend.frontend.size();
         let options = MapOptions { map_mode: mode, size, pixel_ratio: 1.0, ..Default::default() };
-        let mut map = Map::with_file_source(file_source, options, &frontend.pool).expect("a map");
+        let mut map =
+            Map::with_file_source(file_source, options, mln_builtins::registry(), &frontend.pool).expect("a map");
         frontend.frontend.attach(&mut map);
         let clock = Instant::now() + Duration::from_hours(24);
         HeadlessMap { map, frontend, clock, frames: 0, incomplete: 0, last_frame: None, drained: 0 }
@@ -354,9 +356,7 @@ impl HeadlessMap {
     pub(crate) fn set_geojson(&mut self, id: &str, json: &str) {
         let geojson = mln_runtime::bench::parse_geojson(json).expect("GeoJSON");
         let data = create_geojson_data(geojson, &GeoJSONOptions::default_options()).expect("GeoJSON that tiles");
-        self.map
-            .edit_style(|style| style.apply(GeoJsonSourceType::set_data(id, Some(data))))
-            .expect("a GeoJSON source");
+        self.map.edit_style(|style| style.apply(set_data(id, Some(data)))).expect("a GeoJSON source");
     }
 
     /// The vertex and index buffers the GPU held after the last frame.

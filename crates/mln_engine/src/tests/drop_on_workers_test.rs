@@ -29,7 +29,7 @@ fn orchestrator(pool: &Pool) -> RenderOrchestrator {
         crate::text::local_fonts::LocalGlyphs::default(),
         Arc::default(),
         crate::text::font_face_engine::default_engine(),
-        crate::Registry::with_builtins(),
+        crate::tests::registry(),
         Arc::new(|| {}),
         pool,
     )

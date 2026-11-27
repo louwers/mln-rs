@@ -27,7 +27,8 @@
 //! - Loading isn't here: the map's loader fetches documents, sprites and
 //!   source descriptions, and [`Style::from_json`] parses a document. A
 //!   style holds its sources as values ([`SourceList`]), and what their
-//!   loads find arrives as edits.
+//!   loads find, of a type that the source type's engine half names,
+//!   arrives as edits.
 //!
 //! Layers:
 //! - `layer::Layer` is a layer of any type. Its style data is an

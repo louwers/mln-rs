@@ -17,8 +17,12 @@ fn render_style(style: &str, size: Size, pixel_ratio: f32) -> PremultipliedImage
     let run_loop = Queue::new();
     let pool = Pool::new(4);
     let mut frontend = HeadlessFrontend::new(size, pixel_ratio, &run_loop, &pool).expect("a headless frontend");
-    let mut map =
-        Map::new(MapOptions { map_mode: MapMode::Static, size, pixel_ratio, ..Default::default() }, &pool).unwrap();
+    let mut map = Map::new(
+        MapOptions { map_mode: MapMode::Static, size, pixel_ratio, ..Default::default() },
+        mln_builtins::registry(),
+        &pool,
+    )
+    .unwrap();
     frontend.attach(&mut map);
     map.load_style_json(style);
     frontend.render(&mut map).expect("render").image
@@ -38,7 +42,7 @@ fn render_still_in_continuous_mode_is_an_error() {
     let pool = Pool::new(4);
     let size = Size::new(16, 16);
     let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
-    let mut map = Map::new(MapOptions { size, ..Default::default() }, &pool).unwrap();
+    let mut map = Map::new(MapOptions { size, ..Default::default() }, mln_builtins::registry(), &pool).unwrap();
     frontend.attach(&mut map);
     let error = frontend.render(&mut map).err().expect("error");
     assert_eq!(error, Error::invalid_state("Map is not in static or tile image render modes"));
@@ -62,7 +66,7 @@ fn render_update_draws_each_update_of_the_attached_map_once() {
     let pool = Pool::new(4);
     let size = Size::new(16, 16);
     let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
-    let mut map = Map::new(MapOptions { size, ..Default::default() }, &pool).unwrap();
+    let mut map = Map::new(MapOptions { size, ..Default::default() }, mln_builtins::registry(), &pool).unwrap();
     map.load_style_json(&background_style("red"));
     map.drain_events();
     // The map published before the frontend attached: the frontend draws the
@@ -89,7 +93,7 @@ fn render_update_drops_the_renderer_once_the_map_is_gone() {
     let pool = Pool::new(4);
     let size = Size::new(16, 16);
     let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
-    let mut map = Map::new(MapOptions { size, ..Default::default() }, &pool).unwrap();
+    let mut map = Map::new(MapOptions { size, ..Default::default() }, mln_builtins::registry(), &pool).unwrap();
     map.load_style_json(&background_style("red"));
     map.process_events();
     frontend.attach(&mut map);
@@ -106,8 +110,8 @@ fn attaching_another_map_renders_that_map() {
     let pool = Pool::new(4);
     let size = Size::new(16, 16);
     let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
-    let mut first = Map::new(MapOptions { size, ..Default::default() }, &pool).unwrap();
-    let mut second = Map::new(MapOptions { size, ..Default::default() }, &pool).unwrap();
+    let mut first = Map::new(MapOptions { size, ..Default::default() }, mln_builtins::registry(), &pool).unwrap();
+    let mut second = Map::new(MapOptions { size, ..Default::default() }, mln_builtins::registry(), &pool).unwrap();
     first.load_style_json(&background_style("red"));
     second.load_style_json(&background_style("blue"));
     first.drain_events();
@@ -191,7 +195,7 @@ fn a_viewport_lit_hillshade_turns_its_lights_with_the_map() {
         });
         let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
         let options = MapOptions { map_mode: MapMode::Static, size, ..Default::default() };
-        let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
+        let mut map = Map::with_file_source(file_source, options, mln_builtins::registry(), &pool).unwrap();
         frontend.attach(&mut map);
         map.load_style_json(style);
         let mut image = PremultipliedImage::new(Size::default());
@@ -230,7 +234,7 @@ fn a_hillshade_prepares_its_slopes_once() {
     let pool = Pool::new(4);
     let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
     let options = MapOptions { map_mode: MapMode::Static, size, ..Default::default() };
-    let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
+    let mut map = Map::with_file_source(file_source, options, mln_builtins::registry(), &pool).unwrap();
     frontend.attach(&mut map);
     map.load_style_json(
         r#"{
@@ -307,7 +311,7 @@ fn a_still_image_over_terrain_draws_one_frame_of_the_camera_on_the_ground() {
     let pool = Pool::new(4);
     let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
     let options = MapOptions { map_mode: MapMode::Static, size, ..Default::default() };
-    let mut map = Map::with_file_source(dem_source(true), options, &pool).unwrap();
+    let mut map = Map::with_file_source(dem_source(true), options, mln_builtins::registry(), &pool).unwrap();
     frontend.attach(&mut map);
     map.load_style_json(TERRAIN_STYLE);
     let result = frontend.render(&mut map).expect("the still image");
@@ -336,7 +340,7 @@ fn a_still_image_over_terrain_without_its_dem_tile_ends() {
     let pool = Pool::new(4);
     let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
     let options = MapOptions { map_mode: MapMode::Static, size, ..Default::default() };
-    let mut map = Map::with_file_source(dem_source(false), options, &pool).unwrap();
+    let mut map = Map::with_file_source(dem_source(false), options, mln_builtins::registry(), &pool).unwrap();
     frontend.attach(&mut map);
     map.load_style_json(TERRAIN_STYLE);
     let result = frontend.render(&mut map).expect("the still image");
@@ -354,7 +358,7 @@ fn a_still_image_whose_terrain_goes_away_ends_flat() {
     let pool = Pool::new(4);
     let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
     let options = MapOptions { map_mode: MapMode::Static, size, ..Default::default() };
-    let mut map = Map::with_file_source(dem_source(true), options, &pool).unwrap();
+    let mut map = Map::with_file_source(dem_source(true), options, mln_builtins::registry(), &pool).unwrap();
     frontend.attach(&mut map);
     map.load_style_json(TERRAIN_STYLE);
     map.process_events();
@@ -403,7 +407,7 @@ fn a_still_image_over_terrain_removed_and_restored_draws() {
     let pool = Pool::new(4);
     let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
     let options = MapOptions { map_mode: MapMode::Static, size, ..Default::default() };
-    let mut map = Map::with_file_source(dem_source(true), options, &pool).unwrap();
+    let mut map = Map::with_file_source(dem_source(true), options, mln_builtins::registry(), &pool).unwrap();
     frontend.attach(&mut map);
     map.load_style_json(TERRAIN_STYLE);
     assert_eq!(Some(Ok(())), try_still(&mut map, &mut frontend, &run_loop));
@@ -505,7 +509,7 @@ fn a_still_image_over_far_dem_tiles_that_flip_draws_in_one_frame() {
     let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
     frontend.renderer().set_tile_cache_enabled(false);
     let options = MapOptions { map_mode: MapMode::Static, size, ..Default::default() };
-    let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
+    let mut map = Map::with_file_source(file_source, options, mln_builtins::registry(), &pool).unwrap();
     frontend.attach(&mut map);
     map.load_style_json(FAR_DEM_STYLE);
     assert_eq!(Some(Ok(())), try_still(&mut map, &mut frontend, &run_loop), "the still never ended");
@@ -532,7 +536,7 @@ fn a_continuous_map_over_far_dem_tiles_that_flip_settles() {
     let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
     frontend.renderer().set_tile_cache_enabled(false);
     let options = MapOptions { size, ..Default::default() };
-    let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
+    let mut map = Map::with_file_source(file_source, options, mln_builtins::registry(), &pool).unwrap();
     frontend.attach(&mut map);
     map.load_style_json(FAR_DEM_STYLE);
     // Draws the map's updates for at most `iterations` turns, and returns
@@ -568,7 +572,7 @@ fn a_continuous_map_over_terrain_goes_idle_on_the_ground() {
     let pool = Pool::new(4);
     let mut frontend = HeadlessFrontend::new(size, 1.0, &run_loop, &pool).expect("a headless frontend");
     let options = MapOptions { size, ..Default::default() };
-    let mut map = Map::with_file_source(dem_source(true), options, &pool).unwrap();
+    let mut map = Map::with_file_source(dem_source(true), options, mln_builtins::registry(), &pool).unwrap();
     frontend.attach(&mut map);
     map.load_style_json(TERRAIN_STYLE);
     let idle = (0..10_000).any(|_| {

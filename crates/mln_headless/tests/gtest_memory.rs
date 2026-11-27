@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use mln_engine::Registry;
 use mln_engine::camera::CameraOptions;
 use mln_engine::exec::pool::Pool;
 use mln_engine::map::{Map, MapMode, MapOptions};
@@ -66,6 +65,7 @@ impl MemoryTest {
         let mut map = Map::with_file_source(
             Arc::<StubFileSource>::clone(&self.file_source),
             MapOptions { map_mode: MapMode::Static, size: frontend.size(), pixel_ratio: ratio, ..Default::default() },
+            mln_builtins::registry(),
             &self.pool,
         )
         .unwrap();
@@ -229,7 +229,7 @@ fn rendering_stats_count_live_resources() {
         "source-layer": "poi_label", "layout": {"text-field": "x", "text-allow-overlap": true}});
     let mut error = mln_style::conversion::Error::default();
     let labels = mln_style::layer::convert_layer(
-        Registry::with_builtins().style(),
+        mln_builtins::registry().style(),
         &mln_style::conversion::Convertible::from(&labels),
         &mut error,
     );

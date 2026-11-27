@@ -206,7 +206,8 @@ impl HeadlessFrontend {
         })
     }
 
-    /// The renderer, made on first use, which reports to the attached map.
+    /// The renderer, made on first use, which reports to the attached map
+    /// and draws the built-in registrations (`mln_builtins::registry`).
     pub fn renderer(&mut self) -> &mut Renderer {
         let HeadlessFrontend { target, pixel_ratio, glyph_cache, local_glyphs, pool, reports_to, .. } = self;
         target.renderer_or(|gpu| {
@@ -217,6 +218,7 @@ impl HeadlessFrontend {
                 *pixel_ratio,
                 local_glyphs.clone(),
                 Arc::clone(glyph_cache),
+                mln_builtins::registry(),
                 Arc::new(move || {
                     let events = reports_to.lock().clone();
                     if let Some(events) = events {

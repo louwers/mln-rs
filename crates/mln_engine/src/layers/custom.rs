@@ -355,7 +355,6 @@ mod tests {
     use mln_style::layer::LayerStyle;
 
     use super::{Custom, CustomLayerHost};
-    use crate::Registry;
 
     struct Host;
 
@@ -367,7 +366,7 @@ mod tests {
     #[test]
     fn the_style_data_of_a_removed_layer_doesnt_keep_its_host() {
         let host: Arc<dyn CustomLayerHost> = Arc::new(Host);
-        let layer = Custom::layer(Registry::with_builtins().style(), "custom", Arc::clone(&host));
+        let layer = Custom::layer(crate::tests::registry().style(), "custom", Arc::clone(&host));
         let style = LayerStyle::<Custom>::recover(layer.style()).unwrap();
         assert!(style.extra.is(&host));
         assert!(style.extra.get().is_some());

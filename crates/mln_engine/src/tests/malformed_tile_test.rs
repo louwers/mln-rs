@@ -17,7 +17,6 @@ use mln_style::tileset::PartialTileset;
 use proptest::prelude::*;
 use serde_json::json;
 
-use crate::Registry;
 use crate::camera::transform::Transform;
 use crate::camera::{CameraOptions, ConstrainMode, ViewportMode};
 use crate::exec::pool::TaskGroup;
@@ -41,7 +40,7 @@ enum Outcome {
 /// A layer of the given style JSON, as the worker gets it.
 fn layer(json: &serde_json::Value) -> Arc<dyn ErasedEvaluatedLayer> {
     let mut error = ConversionError::default();
-    let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(json), &mut error)
+    let layer = convert_layer(crate::tests::registry().style(), &Convertible::from(json), &mut error)
         .unwrap_or_else(|| panic!("{}", error.message));
     let style = layer.style();
     match json["type"].as_str().unwrap() {
@@ -105,7 +104,6 @@ fn load(tile: Vec<u8>, layers: &[Arc<dyn ErasedEvaluatedLayer>]) -> Outcome {
             tile_lod_mode: TileLodMode::Default,
             subdivision_granularity: SubdivisionGranularitySetting::none(),
             global_state: None,
-            is_update_synchronous: false,
             font_faces: None,
             glyph_pbfs: true,
             placement_commits: 0,

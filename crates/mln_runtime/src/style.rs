@@ -7,6 +7,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use geojson::{GeoJson, GeometryValue};
+use mln_builtins::sources::geojson::{GeoJSONData, create_geojson_data, set_data};
+use mln_builtins::sources::image::set_image;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::Error;
 use mln_style::expression::Functions;
@@ -15,7 +17,6 @@ use mln_style::hash::HashMap;
 use mln_style::image::Impl as StyleImage;
 use mln_style::range::Range;
 use mln_style::source::SourceData;
-use mln_style::sources::geojson::{GeoJSONData, GeoJSONDataBuilder};
 use mln_style::sources::image::ImageSourceOptions;
 use mln_style::sources::{GeoJSONOptions, GeoJsonSourceType, ImageSourceType, geojson_source};
 use mln_style::tileset::{RasterEncoding, Scheme, VectorEncoding};
@@ -363,13 +364,13 @@ fn cluster_properties_json(options: &GeoJSONOptions) -> Option<String> {
 }
 
 /// What the API reports about `source`.
-fn source_info(source: &Source) -> SourceInfo {
-    let summary = source.data().summary();
+fn source_info(registry: &mln_engine::Registry, source: &Source) -> SourceInfo {
+    let summary = registry.source_summary(source);
     SourceInfo {
         id: source.id().to_owned(),
         source_type: source.info().name,
         is_volatile: source.common().volatile,
-        attribution: source.data().attribution().filter(|attribution| !attribution.is_empty()),
+        attribution: registry.source_attribution(source).filter(|attribution| !attribution.is_empty()),
         url: summary.url,
         tiles: summary.inline_tileset.map(|tileset| SourceTiles {
             urls: tileset.tiles,
@@ -452,12 +453,12 @@ impl Map {
     /// A source of the style, or `None` when the style has no such source.
     pub fn style_source(&self, source_id: impl Into<String>) -> Result<Completion<Option<SourceInfo>>, Error> {
         let source_id = source_id.into();
-        self.query(move |map| Ok(map.source(&source_id).map(source_info)))
+        self.query(move |map| Ok(map.source(&source_id).map(|source| source_info(map.registry(), source))))
     }
 
     /// The style's sources, in style order.
     pub fn style_sources(&self) -> Result<Completion<Vec<SourceInfo>>, Error> {
-        self.query(|map| Ok(map.sources().map(source_info).collect()))
+        self.query(|map| Ok(map.sources().map(|source| source_info(map.registry(), source)).collect()))
     }
 
     /// Sets whether a source keeps its tiles out of the persistent cache.
@@ -717,7 +718,7 @@ impl Map {
         let source_id = source_id.into();
         self.command(move |map| {
             require_loaded(map)?;
-            map.edit_style(|style| style.apply(ImageSourceType::set_image(source_id, image)))
+            map.edit_style(|style| style.apply(set_image(source_id, image)))
         })
     }
 
@@ -799,16 +800,16 @@ fn queue_geojson(
             check_clusterable(&geojson)?;
         }
         let instance = find_source(&entry.core, source_id)?.instance();
-        Ok((instance, data.load, data.options.data_builder(), data.options.synchronous_update, geojson))
+        Ok((instance, data.load, Arc::clone(&data.options.options), data.options.synchronous_update, geojson))
     })();
-    let (instance, load, builder, synchronous, geojson) = match found {
+    let (instance, load, options, synchronous, geojson) = match found {
         Ok(found) => found,
         Err(error) => return Err((error, resolver)),
     };
     if synchronous {
-        return match builder.build(geojson) {
+        return match create_geojson_data(geojson, &options) {
             Ok(data) => {
-                let edit = GeoJsonSourceType::set_data(source_id, Some(data));
+                let edit = set_data(source_id, Some(data));
                 match entry.core.edit_style(|style| style.apply(edit)) {
                     Ok(()) => Ok(Some(resolver)),
                     Err(error) => Err((error, resolver)),
@@ -824,21 +825,21 @@ fn queue_geojson(
     });
     if update.building.is_none() {
         update.instance = instance;
-        start_geojson(update, map_id, source_id.to_owned(), (builder, load), geojson, resolver, background);
+        start_geojson(update, map_id, source_id.to_owned(), (options, load), geojson, resolver, background);
     } else if let Some((_, replaced)) = update.waiting.replace((geojson, resolver)) {
         outbox.resolve(replaced, Err(Error::cancelled("newer data for the source replaced it")));
     }
     Ok(None)
 }
 
-/// Builds `geojson` with `builder` for `update`'s source, whose data is at
+/// Builds `geojson` with `options` for `update`'s source, whose data is at
 /// `load`, on a background thread, then installs it from the runtime's
 /// thread.
 fn start_geojson(
     update: &mut GeoJsonUpdate,
     map_id: MapId,
     source_id: String,
-    (builder, load): (GeoJSONDataBuilder, u64),
+    (options, load): (Arc<GeoJSONOptions>, u64),
     geojson: GeoJson,
     resolver: Resolver<Applied>,
     background: Background,
@@ -850,23 +851,23 @@ fn start_geojson(
     update.building = Some((build, resolver));
     let next = background.clone();
     background.pool.spawn(move || {
-        let data = builder.build(geojson);
+        let data = create_geojson_data(geojson, &options);
         post(&background.queue, move |core, outbox| {
             install_geojson(core, map_id, &source_id, (build, load), data, next, outbox);
         });
     });
 }
 
-/// The builder and the data's load of the source `id`, if it's the GeoJSON
+/// The options and the data's load of the source `id`, if it's the GeoJSON
 /// source `instance`.
 fn current_geojson(
     map: &mln_engine::map::Map,
     id: &str,
     instance: SourceInstance,
-) -> Option<(GeoJSONDataBuilder, u64)> {
+) -> Option<(Arc<GeoJSONOptions>, u64)> {
     let source = map.source(id).filter(|source| source.instance() == instance)?;
     let data = SourceData::<GeoJsonSourceType>::recover(source)?;
-    Some((data.options.data_builder(), data.load))
+    Some((Arc::clone(&data.options.options), data.load))
 }
 
 /// Installs data that a background thread built, unless something replaced
@@ -891,7 +892,7 @@ fn install_geojson(
             Err(Error::cancelled("the source's data was replaced before this data was ready"))
         }
         Ok(data) => {
-            let edit = GeoJsonSourceType::set_data(source_id, Some(data));
+            let edit = set_data(source_id, Some(data));
             entry.core.edit_style(|style| style.apply(edit))
         }
     };

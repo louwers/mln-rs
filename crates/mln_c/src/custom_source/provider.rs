@@ -5,13 +5,13 @@
 
 use std::sync::{Arc, Weak};
 
+use mln_builtins::sources::geojson::TileFeatures;
 use mln_engine::exec::pool::{Pool, TaskGroup};
 use mln_engine::tile::OverscaledTileID;
 use mln_engine::tile::tile_range::TileRange;
 use mln_style::error::Error;
 use mln_style::geo::LatLngBounds;
 use mln_style::hash::HashMap;
-use mln_style::sources::geojson::TileFeatures;
 use mln_style::tile_id::CanonicalTileID;
 use parking_lot::Mutex;
 

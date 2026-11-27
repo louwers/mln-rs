@@ -114,7 +114,9 @@ impl StyleInfo {
         let attributions = style
             .get_sources()
             .iter()
-            .filter_map(|source| source.data().attribution().filter(|attribution| !attribution.is_empty()))
+            .filter_map(|source| {
+                map.registry().source_attribution(source).filter(|attribution| !attribution.is_empty())
+            })
             .collect();
         StyleInfo {
             name: style.get_name().to_owned(),

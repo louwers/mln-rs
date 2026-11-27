@@ -27,6 +27,7 @@ fn map(options: MapOptions, run_loop: &Queue<()>) -> Map {
     Map::with_file_source(
         StubFileSource::on_queue(run_loop, ResponseType::Asynchronous),
         options,
+        crate::tests::registry(),
         &crate::map::tests::pool(),
     )
     .expect("map")
@@ -233,8 +234,13 @@ fn a_source_that_reloads_its_description_changes_the_generation() {
     map.load_style_json(
         r#"{"version":8,"sources":{"points":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},"layers":[]}"#,
     );
-    map.process_events();
-    assert!(map.style_loaded());
+    // The source indexes its GeoJSON in the background.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !map.style_loaded() {
+        assert!(Instant::now() < deadline, "the style didn't load");
+        map.process_events();
+        std::thread::yield_now();
+    }
     let generation = map.generation();
 
     let edit = GeoJsonSourceType::set_url("points", "http://points");

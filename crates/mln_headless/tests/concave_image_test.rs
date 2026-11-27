@@ -33,7 +33,7 @@ fn render(coordinates: [[f64; 2]; 4]) -> (PremultipliedImage, [ScreenCoordinate;
         Some(response)
     });
     let options = MapOptions { map_mode: MapMode::Static, size, ..Default::default() };
-    let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
+    let mut map = Map::with_file_source(file_source, options, mln_builtins::registry(), &pool).unwrap();
     let mut frontend = HeadlessFrontend::new(size, 1.0, &queue, &pool).expect("a headless frontend");
     frontend.attach(&mut map);
     let json = coordinates.map(|[lng, lat]| format!("[{lng}, {lat}]")).join(", ");

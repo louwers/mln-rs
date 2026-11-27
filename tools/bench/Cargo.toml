@@ -27,6 +27,8 @@ feature = { package = "mln-rs-feature", path = "../../vendor/feature" }
 # The fixture snapshot and the camera paths, which the desktop example's
 # benchmark mode shares.
 mln_bench_workload = { package = "mln-rs-bench-workload", path = "workload" }
+# The built-in registrations that the maps draw with.
+mln_builtins = { package = "mln-rs-builtins", path = "../../crates/mln_builtins" }
 mln_gfx = { package = "mln-rs-gfx", path = "../../crates/mln_gfx" }
 # The OpenGL backend's renderer name (support/map.rs).
 mln_gl = { package = "mln-rs-gl", path = "../../crates/mln_gl" }

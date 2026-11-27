@@ -9,8 +9,8 @@ use crate::source::SourceData;
 use crate::sources::geojson::{GeoJSONOptions, GeoJsonSourceOptions, GeoJsonSourceType};
 use crate::sources::image::{ImageSourceOptions, ImageSourceType};
 
-/// A GeoJSON source's data from its style JSON: its options, and its data,
-/// built at once, or the URL it loads it from.
+/// A GeoJSON source's data from its style JSON: its options, and its
+/// GeoJSON or the URL it loads it from.
 pub(crate) fn convert_geojson_source(
     value: &Convertible<'_>,
     functions: &Arc<Functions>,
@@ -29,15 +29,12 @@ pub(crate) fn convert_geojson_source(
     let mut options = GeoJsonSourceOptions::new(options);
 
     if data_value.is_object() {
-        let geojson = GeoJson::convert(&data_value, error)?;
-        match options.data_builder().build(geojson) {
-            Ok(data) => Some(SourceData::with_description(options, data)),
-            Err(e) => {
-                // A clustered non-point feature fails the style's parse.
-                error.message = e.message;
-                None
-            }
-        }
+        // GeoJSON that doesn't convert fails the source as it loads, not
+        // the style.
+        let mut geojson_error = Error::default();
+        let geojson = GeoJson::convert(&data_value, &mut geojson_error).ok_or(geojson_error.message);
+        options.inline = Some(Arc::new(geojson));
+        Some(SourceData::new(options))
     } else if let Some(url) = data_value.to_string() {
         options.url = Some(url);
         Some(SourceData::new(options))

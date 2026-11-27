@@ -13,7 +13,6 @@ use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 use serde_json::json;
 
-use crate::Registry;
 use crate::buckets::circle_bucket::CircleBucket;
 use crate::buckets::fill_bucket::FillBucket;
 use crate::buckets::line_bucket::LineBucket;
@@ -75,7 +74,7 @@ fn layer(mut json: serde_json::Value, sort_key_name: &str, type_: SortKeyType) -
         json["layout"][sort_key_name] = sort_key;
     }
     let mut error = ConversionError::default();
-    let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(&json), &mut error)
+    let layer = convert_layer(crate::tests::registry().style(), &Convertible::from(&json), &mut error)
         .unwrap_or_else(|| panic!("{}", error.message));
     let style = layer.style();
     match json["type"].as_str().unwrap() {

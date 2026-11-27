@@ -10,11 +10,8 @@ use crate::conversion::tileset::{convert_tileset, optional_member};
 use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
 use crate::layer::SourceKind;
-use crate::source::{
-    Data, Described, Fetch, Load, OfflineResources, Respond, Source, SourceData, SourceSummary, SourceTypeInfo,
-    StyleSourceType,
-};
-use crate::tileset::{PartialTileset, Tileset, VectorEncoding};
+use crate::source::{Source, SourceData, SourceTypeInfo, StyleSourceType};
+use crate::tileset::{PartialTileset, Tileset};
 
 /// Which of the tileset source types a [`TilesetSourceType`] is.
 pub trait TilesetKind: Send + Sync + 'static {
@@ -26,38 +23,16 @@ pub struct RasterKind;
 pub struct RasterDemKind;
 
 impl TilesetKind for VectorKind {
-    const INFO: SourceTypeInfo = SourceTypeInfo {
-        name: "vector",
-        layer_kind: SourceKind::Geometry,
-        from_json: true,
-        round_zoom: false,
-        overscale: true,
-        prefetch: true,
-    };
+    const INFO: SourceTypeInfo = SourceTypeInfo { name: "vector", layer_kind: SourceKind::Geometry, from_json: true };
 }
 
 impl TilesetKind for RasterKind {
-    const INFO: SourceTypeInfo = SourceTypeInfo {
-        name: "raster",
-        layer_kind: SourceKind::Raster,
-        from_json: true,
-        round_zoom: true,
-        overscale: false,
-        prefetch: true,
-    };
+    const INFO: SourceTypeInfo = SourceTypeInfo { name: "raster", layer_kind: SourceKind::Raster, from_json: true };
 }
 
 impl TilesetKind for RasterDemKind {
-    const INFO: SourceTypeInfo = SourceTypeInfo {
-        name: "raster-dem",
-        layer_kind: SourceKind::RasterDem,
-        from_json: true,
-        round_zoom: true,
-        // As a raster source's: a DEM tile is the same at every zoom past
-        // the maxzoom, so the map draws it larger rather than load it again.
-        overscale: false,
-        prefetch: true,
-    };
+    const INFO: SourceTypeInfo =
+        SourceTypeInfo { name: "raster-dem", layer_kind: SourceKind::RasterDem, from_json: true };
 }
 
 /// A source type whose tiles a tileset lists.
@@ -130,7 +105,6 @@ impl<K: TilesetKind> StyleSourceType for TilesetSourceType<K> {
     const INFO: SourceTypeInfo = K::INFO;
 
     type Options = TilesetSourceOptions;
-    type Description = Tileset;
 
     fn from_json(value: &Convertible<'_>, _functions: &Arc<Functions>, error: &mut Error) -> Option<SourceData<Self>> {
         match convert_options(value, K::INFO.layer_kind) {
@@ -140,60 +114,6 @@ impl<K: TilesetKind> StyleSourceType for TilesetSourceType<K> {
                 None
             }
         }
-    }
-
-    /// The TileJSON at the source's URL, or else the tileset the style lists.
-    fn load(source: &SourceData<Self>) -> Load<Tileset> {
-        match &source.options.url {
-            Some(url) => Load::Fetch(Fetch::Source(url.clone())),
-            None => Load::Ready(source.options.tileset.clone().into()),
-        }
-    }
-
-    fn describe(options: &TilesetSourceOptions, data: Option<Data>, respond: Respond<Described<Tileset>>) {
-        let tileset = match data {
-            None => Err("unexpectedly empty TileJSON".to_owned()),
-            Some(data) => options.tileset_with_tilejson(&data, K::INFO.layer_kind),
-        };
-        respond(tileset.map(Some).map_err(crate::error::Error::native));
-    }
-
-    fn metadata_changed(old: Option<&Tileset>, new: Option<&Tileset>) -> bool {
-        old != new
-    }
-
-    fn attribution(source: &SourceData<Self>) -> Option<String> {
-        source.description.as_ref().map(|tileset| tileset.attribution.clone())
-    }
-
-    fn summary(source: &SourceData<Self>) -> SourceSummary {
-        let options = &source.options;
-        let vector_encoding = (K::INFO.layer_kind == SourceKind::Geometry).then(|| {
-            let loaded = source.description.as_ref().and_then(|tileset| tileset.vector_encoding);
-            loaded.or(options.tileset.vector_encoding).unwrap_or(VectorEncoding::Mapbox)
-        });
-        SourceSummary {
-            url: options.url.clone(),
-            tile_size: Some(options.tile_size),
-            inline_tileset: options.inline_tileset(),
-            vector_encoding,
-            geojson: None,
-        }
-    }
-
-    fn offline(source: &SourceData<Self>) -> OfflineResources {
-        let options = &source.options;
-        match &options.url {
-            Some(url) => OfflineResources::TileJson { url: url.clone(), tile_size: options.tile_size },
-            None => match options.inline_tileset() {
-                Some(tileset) => OfflineResources::Tiles { tileset, tile_size: options.tile_size },
-                None => OfflineResources::None,
-            },
-        }
-    }
-
-    fn offline_tileset(source: &SourceData<Self>, tilejson: &[u8]) -> Result<Tileset, String> {
-        source.options.tileset_with_tilejson(tilejson, K::INFO.layer_kind)
     }
 }
 

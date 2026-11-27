@@ -20,7 +20,6 @@ use mln_style::tile_id::CanonicalTileID;
 use mln_vec_map::VecMap;
 
 use super::with_context;
-use crate::Registry;
 use crate::buckets::circle_bucket::CircleBucket;
 use crate::buckets::fill_bucket::FillBucket;
 use crate::buckets::fill_extrusion_bucket::{FillExtrusionBucket, tile_units_per_meter};
@@ -307,7 +306,7 @@ fn tile_units_per_meter_grows_with_zoom_and_latitude() {
 fn data_driven_fill_bucket(fill_color: &serde_json::Value) -> FillBucket {
     let json = serde_json::json!({"type": "fill", "id": "fill", "source": "s", "paint": {"fill-color": fill_color}});
     let mut error = ConversionError::default();
-    let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(&json), &mut error)
+    let layer = convert_layer(crate::tests::registry().style(), &Convertible::from(&json), &mut error)
         .unwrap_or_else(|| panic!("{}", error.message));
     let evaluated = FillPaintProperties::PossiblyEvaluated {
         fill_color: Evaluated::PerFeature {
@@ -756,7 +755,7 @@ fn line_bucket_vertices(
 ) -> Vec<LineLayoutVertex> {
     let json = serde_json::json!({"type": "line", "id": "line", "source": "s", "layout": layout});
     let mut error = ConversionError::default();
-    let layer = convert_layer(Registry::with_builtins().style(), &Convertible::from(&json), &mut error)
+    let layer = convert_layer(crate::tests::registry().style(), &Convertible::from(&json), &mut error)
         .unwrap_or_else(|| panic!("{}", error.message));
     let layout = LayerStyle::<Line>::recover_ref(&**layer.style())
         .expect("line layer")

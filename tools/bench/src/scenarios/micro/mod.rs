@@ -56,7 +56,7 @@ pub(crate) fn tile_data(tiles: Tiles, bytes: &Arc<Vec<u8>>) -> TileData {
 
 /// What a map's styles parse against.
 pub(crate) fn registry() -> Arc<StyleRegistry> {
-    Arc::clone(mln_engine::Registry::with_builtins().style())
+    Arc::clone(mln_builtins::registry().style())
 }
 
 /// The Liberty style over the street tiles, as JSON, with its layers

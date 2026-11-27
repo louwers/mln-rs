@@ -94,6 +94,7 @@ impl LocalGlyphRasterizerTest {
         let mut map = Map::with_file_source(
             file_source,
             MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
+            mln_builtins::registry(),
             &pool,
         )
         .unwrap();

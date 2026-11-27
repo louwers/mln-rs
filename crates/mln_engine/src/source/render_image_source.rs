@@ -323,7 +323,7 @@ impl RenderImageSource {
         self.tile.is_some() || self.image().is_none_or(|image| image.image.is_none())
     }
 
-    fn image(&self) -> Option<SourceImage<'_>> {
+    fn image(&self) -> Option<SourceImage> {
         (self.image_of)(&self.base.style_source)
     }
 }
@@ -361,7 +361,7 @@ impl RenderSource for RenderImageSource {
             return;
         };
         let coords = source_image.coordinates;
-        let image = source_image.image.cloned();
+        let image = source_image.image;
 
         let Some(image) = image.filter(|image| image.valid()) else {
             self.base.enabled = false;

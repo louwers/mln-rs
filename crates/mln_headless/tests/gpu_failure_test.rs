@@ -263,13 +263,14 @@ impl FailingMap {
             Some(response)
         });
         let options = MapOptions { map_mode: mode, size, ..Default::default() };
-        let mut map = Map::with_file_source(file_source, options, &pool).unwrap();
+        let mut map = Map::with_file_source(file_source, options, mln_builtins::registry(), &pool).unwrap();
         let events = map.renderer_events();
         let invalidate = events.clone();
         let mut renderer = Renderer::new(
             backend.gpu(),
             1.0,
             mln_engine::text::local_fonts::LocalGlyphs::default(),
+            mln_builtins::registry(),
             Arc::new(move || invalidate.push(RendererEvent::Invalidate)),
             &pool,
         );
@@ -430,7 +431,9 @@ fn a_still_whose_target_cant_make_its_textures_ends_with_the_error() {
     let (queue, pool) = (Queue::new(), Pool::new(4));
     let size = Size::new(1 << 17, 1);
     let mut frontend = HeadlessFrontend::new(size, 1.0, &queue, &pool).expect("a headless frontend");
-    let mut map = Map::new(MapOptions { map_mode: MapMode::Static, size, ..Default::default() }, &pool).unwrap();
+    let mut map =
+        Map::new(MapOptions { map_mode: MapMode::Static, size, ..Default::default() }, mln_builtins::registry(), &pool)
+            .unwrap();
     frontend.attach(&mut map);
     map.load_style_json(r#"{"version": 8, "sources": {}, "layers": []}"#);
     let error = frontend.render(&mut map).err().expect("a still of a target without textures");

@@ -8,6 +8,7 @@ use feature::Value;
 use mln_style::error::ErrorKind;
 use mln_style::feature::FeatureState;
 use mln_style::size::Size;
+use mln_style::source::SourceData;
 use mln_style::sources::GeoJsonSourceType;
 use parking_lot::Mutex;
 
@@ -24,6 +25,7 @@ fn map(run_loop: &Queue<()>) -> Map {
     Map::with_file_source(
         StubFileSource::on_queue(run_loop, ResponseType::Asynchronous),
         options,
+        crate::tests::registry(),
         &crate::map::tests::pool(),
     )
     .expect("map")
@@ -125,7 +127,8 @@ fn updates_carry_the_terrain_options_of_the_map_options() {
     let terrain = TerrainOptions { skirt_length: TerrainSkirtLength::None, drape_memory_limit: Some(1 << 20) };
     let options = MapOptions { size: Size::new(256, 256), terrain, ..Default::default() };
     let file_source = StubFileSource::on_queue(&run_loop, ResponseType::Asynchronous);
-    let mut map = Map::with_file_source(file_source, options, &crate::map::tests::pool()).expect("map");
+    let mut map =
+        Map::with_file_source(file_source, options, crate::tests::registry(), &crate::map::tests::pool()).expect("map");
     let reader = map.update_reader();
     map.jump_to(&CameraOptions { zoom: Some(2.0), ..Default::default() });
     let update = reader.latest().expect("an update");
@@ -217,7 +220,8 @@ fn a_url_style_never_publishes_its_sources_with_the_old_feature_state() {
         Some(response)
     });
     let options = MapOptions { size: Size::new(256, 256), ..Default::default() };
-    let mut map = Map::with_file_source(file_source, options, &crate::map::tests::pool()).expect("map");
+    let mut map =
+        Map::with_file_source(file_source, options, crate::tests::registry(), &crate::map::tests::pool()).expect("map");
     map.jump_to(&CameraOptions::default());
     map.set_feature_state("points", None, "1", hover(true));
 
@@ -305,7 +309,8 @@ fn each_reader_wakes_until_it_drops() {
 
 /// Whether `update`'s only source updates synchronously.
 fn publishes_synchronous(update: &Update) -> bool {
-    update.parameters.style.get_sources().iter().next().expect("a source").data().is_update_synchronous()
+    let source = update.parameters.style.get_sources().iter().next().expect("a source");
+    SourceData::<GeoJsonSourceType>::recover(source).is_some_and(|source| source.options.synchronous_update)
 }
 
 fn set_override_synchronous_update(map: &mut Map, value: bool) {

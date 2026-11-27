@@ -51,6 +51,7 @@ fn prefetch_tiles() {
     let mut map = Map::with_file_source(
         Arc::<StubFileSource>::clone(&file_source),
         MapOptions { map_mode: MapMode::Continuous, size: frontend.size(), ..Default::default() },
+        mln_builtins::registry(),
         &pool,
     )
     .unwrap();

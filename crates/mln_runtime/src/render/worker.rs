@@ -12,6 +12,7 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
+use mln_builtins::sources::GeoJSONData;
 use mln_engine::exec::event_queue::Waker;
 use mln_engine::exec::pool::Pool;
 use mln_engine::exec::queue::Queue;
@@ -24,7 +25,7 @@ use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::Error;
 use mln_style::size::Size;
 use mln_style::source::SourceData;
-use mln_style::sources::{GeoJSONData, GeoJsonSourceType};
+use mln_style::sources::GeoJsonSourceType;
 
 use super::frame::{DemandMode, FrameDemand, FrameDisposition, FrameResult};
 use super::local::LocalTarget;
@@ -1616,7 +1617,7 @@ impl Worker {
         if !geojson.options.options.cluster {
             return Err(Error::invalid_argument(format!("GeoJSON source {source_id} does not cluster")));
         }
-        let data = geojson.description.clone();
+        let data = geojson.description::<Arc<dyn GeoJSONData>>().cloned();
         let children = data
             .as_ref()
             .filter(|_| cluster_id & ZOOM_BITS != 0)

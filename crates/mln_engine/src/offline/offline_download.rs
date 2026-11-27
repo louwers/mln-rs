@@ -13,16 +13,18 @@ use std::collections::VecDeque;
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
+use mln_style::Parser;
 use mln_style::hash::{HashMap, HashSet};
 use mln_style::i18n::glyph_range_is_entirely_locally_generated;
 use mln_style::layer::SourceKind;
 use mln_style::range::Range;
-use mln_style::source::{OfflineResources, SourceTypeInfo};
+use mln_style::source::SourceTypeInfo;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::tileset::{Tileset, VectorEncoding};
-use mln_style::{Parser, StyleRegistry};
 use mln_vec_map::VecMap;
 
+use crate::registry::Registry;
+use crate::source::OfflineResources;
 use crate::storage::chrono::now;
 use crate::storage::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS;
 use crate::storage::offline::{
@@ -115,14 +117,14 @@ pub struct Downloads {
     downloads: HashMap<i64, OfflineDownload>,
     network: Option<Arc<dyn FileSource>>,
     post: Post,
-    registry: Arc<StyleRegistry>,
+    registry: Arc<Registry>,
 }
 
 impl Downloads {
     /// Downloads that load through `network`, come back through `post`, and
     /// read their styles against `registry`.
     #[must_use]
-    pub fn new(network: Option<Arc<dyn FileSource>>, post: Post, registry: Arc<StyleRegistry>) -> Self {
+    pub fn new(network: Option<Arc<dyn FileSource>>, post: Post, registry: Arc<Registry>) -> Self {
         Downloads { downloads: HashMap::default(), network, post, registry }
     }
 
@@ -195,7 +197,7 @@ enum Then {
     /// The style, which lists the sources, glyphs and sprites.
     Style,
     /// A source's TileJSON, which lists its tiles.
-    Source { url: String, source: mln_style::Source, tile_size: u16 },
+    Source { url: String, source: mln_style::Source, tile_size: u16, round_zoom: bool },
 }
 
 impl Then {
@@ -219,7 +221,7 @@ pub struct OfflineDownload {
     definition: OfflineRegionDefinition,
     network: Arc<dyn FileSource>,
     post: Post,
-    registry: Arc<StyleRegistry>,
+    registry: Arc<Registry>,
     /// The most requests the download has in flight at once.
     maximum_concurrent_requests: u32,
     status: OfflineRegionStatus,
@@ -242,7 +244,7 @@ impl OfflineDownload {
         definition: OfflineRegionDefinition,
         network: Arc<dyn FileSource>,
         post: Post,
-        registry: Arc<StyleRegistry>,
+        registry: Arc<Registry>,
     ) -> Self {
         OfflineDownload {
             id,
@@ -319,7 +321,7 @@ impl OfflineDownload {
 
         result.required_resource_count += 1;
         let style_response = db.get(&Resource::style(self.definition.style_url()));
-        let mut parser = Parser::new(&self.registry);
+        let mut parser = Parser::new(self.registry.style());
         // A download reports a style it can't read, and the count stays
         // imprecise.
         let Some(style_data) = style_response.and_then(|response| response.data) else {
@@ -333,28 +335,28 @@ impl OfflineDownload {
 
         for source in &parser.sources {
             let record = source.clone();
-            let round_zoom = record.info().round_zoom;
-            let (tileset, tile_size) = match record.data().offline() {
+            let Some(source_type) = self.registry.source_type(record.info().name) else { continue };
+            let (tileset, tile_size, round_zoom) = match source_type.offline(&record) {
                 OfflineResources::None => continue,
                 OfflineResources::Source { .. } | OfflineResources::Image { .. } => {
                     result.required_resource_count += 1;
                     continue;
                 }
                 // A source without tile URLs has no tiles to download.
-                OfflineResources::Tiles { tileset, tile_size } => (Some(tileset), tile_size),
-                OfflineResources::TileJson { url, tile_size } => {
+                OfflineResources::Tiles { tileset, tile_size, round_zoom } => (Some(tileset), tile_size, round_zoom),
+                OfflineResources::TileJson { url, tile_size, round_zoom } => {
                     result.required_resource_count += 1;
                     let source_response = db.get(&Resource::source(&url));
                     let tileset = source_response
                         .and_then(|response| response.data)
-                        .and_then(|data| record.data().offline_tileset(&data).ok());
+                        .and_then(|data| source_type.offline_tileset(&record, &data).ok());
                     // As a download does, count no tiles for a TileJSON that
                     // is missing, can't be read, or has no tile URLs, and
                     // leave the count imprecise.
                     if tileset.as_ref().is_none_or(|tileset| tileset.tiles.is_empty()) {
                         result.required_resource_count_is_precise = false;
                     }
-                    (tileset, tile_size)
+                    (tileset, tile_size, round_zoom)
                 }
             };
             if let Some(tileset) = tileset.filter(|tileset| !tileset.tiles.is_empty()) {
@@ -397,15 +399,17 @@ impl OfflineDownload {
         match then {
             Then::Nothing => Ok(()),
             Then::Style => self.on_style_response(response),
-            Then::Source { url, source, tile_size } => {
+            Then::Source { url, source, tile_size, round_zoom } => {
                 let Some(data) = &response.data else {
                     return Err("the TileJSON has no content".to_owned());
                 };
-                let tileset = source.data().offline_tileset(data)?;
+                let source_type = self.registry.source_type(source.info().name);
+                let source_type = source_type.ok_or_else(|| "a source of a type the registry lacks".to_owned())?;
+                let tileset = source_type.offline_tileset(source, data)?;
                 if tileset.tiles.is_empty() {
                     return Err("the TileJSON has no tile URLs".to_owned());
                 }
-                self.queue_tiles(source.info(), *tile_size, &tileset);
+                self.queue_tiles(source.info(), *tile_size, *round_zoom, &tileset);
                 if self.required_source_urls.remove(url) && self.required_source_urls.is_empty() {
                     self.status.required_resource_count_is_precise = true;
                 }
@@ -419,18 +423,19 @@ impl OfflineDownload {
         let Some(style_data) = &style_response.data else {
             return Err("the style has no content".to_owned());
         };
-        let mut parser = Parser::new(&self.registry);
+        let mut parser = Parser::new(self.registry.style());
         parser.parse(&String::from_utf8_lossy(style_data)).map_err(|error| error.to_string())?;
         self.status.required_resource_count_is_precise = true;
 
         for source in &parser.sources {
             let record = source.clone();
-            match record.data().offline() {
+            let Some(source_type) = self.registry.source_type(record.info().name) else { continue };
+            match source_type.offline(&record) {
                 OfflineResources::None => {}
-                OfflineResources::Tiles { tileset, tile_size } => {
-                    self.queue_tiles(record.info(), tile_size, &tileset);
+                OfflineResources::Tiles { tileset, tile_size, round_zoom } => {
+                    self.queue_tiles(record.info(), tile_size, round_zoom, &tileset);
                 }
-                OfflineResources::TileJson { url, tile_size } => {
+                OfflineResources::TileJson { url, tile_size, round_zoom } => {
                     self.status.required_resource_count_is_precise = false;
                     self.status.required_resource_count += 1;
                     self.required_source_urls.insert(url.clone());
@@ -438,7 +443,7 @@ impl OfflineDownload {
                     let mut source_resource = Resource::source(&url);
                     source_resource.set_priority(Priority::Low);
                     source_resource.set_usage(Usage::Offline);
-                    self.ensure_resource(source_resource, Then::Source { url, source: record, tile_size });
+                    self.ensure_resource(source_resource, Then::Source { url, source: record, tile_size, round_zoom });
                 }
                 OfflineResources::Source { url } => self.queue_resource(Resource::source(&url)),
                 OfflineResources::Image { url } => {
@@ -561,8 +566,9 @@ impl OfflineDownload {
     }
 
     /// Queues the tiles of `tileset`, of a source of type `source`, that cover
-    /// the region.
-    fn queue_tiles(&mut self, source: SourceTypeInfo, tile_size: u16, tileset: &Tileset) {
+    /// the region, at the zoom level nearest each of its zooms if
+    /// `round_zoom`.
+    fn queue_tiles(&mut self, source: SourceTypeInfo, tile_size: u16, round_zoom: bool, tileset: &Tileset) {
         // A source without tile URLs has no tiles to download.
         let Some(url_template) = tileset.tiles.first() else {
             return;
@@ -574,7 +580,7 @@ impl OfflineDownload {
         };
         let (status, remaining) = (&mut self.status, &mut self.resources_remaining);
         let pixel_ratio = self.definition.pixel_ratio();
-        tile_cover(&self.definition, source.round_zoom, tile_size, tileset.zoom_range, |tile: CanonicalTileID| {
+        tile_cover(&self.definition, round_zoom, tile_size, tileset.zoom_range, |tile: CanonicalTileID| {
             status.required_resource_count += 1;
             status.required_tile_count += 1;
 

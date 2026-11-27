@@ -10,7 +10,7 @@ use crate::query::FeatureExtensionValue;
 use crate::render::tile::{RenderTile, TileContent};
 use crate::render::update_parameters::UpdateParameters;
 use crate::source::MapSettings;
-use crate::source::erased::ErasedOrigin;
+use crate::source::erased::{ErasedOrigin, ErasedSourceType};
 use crate::source::render_source::{RenderSource, RenderSourceBase, RenderTileParameters, TileOrder};
 use crate::tile_store::source_tiles::{CoverUpdate, SourceTiles};
 use crate::tile_store::store::TileStore;
@@ -22,6 +22,9 @@ use crate::worker::job::SourceKey;
 /// `update_render_tiles`.
 pub(crate) struct RenderTileSource {
     pub(crate) base: RenderSourceBase,
+    /// The source's type, which answers the queries of its features'
+    /// extensions.
+    source_type: &'static dyn ErasedSourceType,
     key: SourceKey,
     fast_pfor_enabled: bool,
     /// The deepest zoom of the last cover's tiles.
@@ -51,12 +54,18 @@ impl RenderTileSource {
         });
     }
 
-    /// The render source of `style_source`, whose tiles go in `store` and
-    /// get their data through `origin`.
-    pub(crate) fn new(style_source: Source, origin: Box<dyn ErasedOrigin>, store: &mut TileStore) -> Self {
+    /// The render source of `style_source`, a source of `source_type`,
+    /// whose tiles go in `store` and get their data through `origin`.
+    pub(crate) fn new(
+        style_source: Source,
+        source_type: &'static dyn ErasedSourceType,
+        origin: Box<dyn ErasedOrigin>,
+        store: &mut TileStore,
+    ) -> Self {
         let key = store.add_source(style_source.id().to_owned(), origin);
         RenderTileSource {
             base: RenderSourceBase::new(style_source),
+            source_type,
             key,
             fast_pfor_enabled: false,
             max_zoom: crate::tile::dem::TERRAIN_RGB_MAXZOOM,
@@ -117,9 +126,7 @@ impl RenderSource for RenderTileSource {
             terrain_reads: terrain_reads.map_or(&[], |terrain| &terrain.dem_tiles),
             parameters,
             style_source: &self.base.style_source,
-            tile_size: cover.tile_size,
-            zoom_range: cover.zoom_range,
-            bounds: cover.bounds,
+            cover,
         };
         source.update_cover(&update, ctx);
     }
@@ -182,7 +189,7 @@ impl RenderSource for RenderTileSource {
         extension_field: &str,
         args: Option<&feature::PropertyMap>,
     ) -> Result<FeatureExtensionValue, Error> {
-        crate::source::query_feature_extensions(&self.base.style_source, feature, extension, extension_field, args)
+        self.source_type.query_feature_extension(&self.base.style_source, feature, extension, extension_field, args)
     }
 
     fn update_origin(&mut self, store: &mut TileStore, style_source: &Source, parameters: &UpdateParameters) {
