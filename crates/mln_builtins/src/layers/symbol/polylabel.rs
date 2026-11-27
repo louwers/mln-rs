@@ -11,9 +11,9 @@ use std::collections::BinaryHeap;
 use geometry::Point;
 
 /// `mapbox::geometry::linear_ring<T>`
-pub type LinearRing<T> = Vec<Point<T>>;
+pub(crate) type LinearRing<T> = Vec<Point<T>>;
 /// `mapbox::geometry::polygon<T>`: the exterior ring, then the holes.
-pub type Polygon<T> = Vec<LinearRing<T>>;
+pub(crate) type Polygon<T> = Vec<LinearRing<T>>;
 
 /// `polygon.at(0)` / `ring.at(0)` on an empty vector (`std::out_of_range`).
 const OUT_OF_RANGE: &str = "vector::_M_range_check: __n (which is 0) >= this->size() (which is 0)";
@@ -159,7 +159,7 @@ fn envelope(ring: &LinearRing<f64>) -> (Point<f64>, Point<f64>) {
 
 /// `polylabel(polygon, precision)` (C++ default precision: 1). `Err` is the
 /// `std::out_of_range` of an empty polygon or outer ring.
-pub fn polylabel(polygon: &Polygon<f64>, precision: f64) -> Result<Point<f64>, String> {
+pub(crate) fn polylabel(polygon: &Polygon<f64>, precision: f64) -> Result<Point<f64>, String> {
     // find the bounding box of the outer ring
     let (min, max) = envelope(polygon.first().ok_or(OUT_OF_RANGE)?);
 
@@ -218,3 +218,6 @@ pub fn polylabel(polygon: &Polygon<f64>, precision: f64) -> Result<Point<f64>, S
 
     Ok(best_cell.c)
 }
+
+#[cfg(test)]
+mod tests;

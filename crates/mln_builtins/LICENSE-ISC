@@ -1,3 +1,6 @@
+The symbol layout's label points (src/layers/symbol/polylabel.rs) follow
+polylabel (https://github.com/mapbox/polylabel), under this license:
+
 ISC License
 Copyright (c) 2016 Mapbox
 

@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description.workspace = true
-license.workspace = true
+license = "BSD-2-Clause AND ISC"
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
@@ -38,7 +38,6 @@ mln_gfx.workspace = true
 mln_style.workspace = true
 mln_wire = { workspace = true, features = ["geo-types", "glam", "parking_lot"] }
 parking_lot.workspace = true
-polylabel.workspace = true
 serde_json.workspace = true
 
 # `conformance::host_writes`'s bytes in a JS array.

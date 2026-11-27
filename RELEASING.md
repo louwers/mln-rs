@@ -5,10 +5,10 @@ version:
 
 - **mln-rs**, the package in the repository root. It re-exports the libraries
   under their crate names: `mln_rs::mln_engine`, `mln_rs::mln_style`,
-  `mln_rs::polylabel`, and so on. Users depend on this one.
+  `mln_rs::geometry`, and so on. Users depend on this one.
 - **`mln-rs-<name>`**, one package per library under `crates/` and `vendor/`
-  (for example `mln-rs-engine` for `mln_engine`, `mln-rs-polylabel` for
-  `polylabel`). Their library names are unchanged, so the code still says
+  (for example `mln-rs-engine` for `mln_engine`, `mln-rs-geometry` for
+  `geometry`). Their library names are unchanged, so the code still says
   `mln_engine::`. They exist for mln-rs only.
 
 The `publish = false` packages (the desktop app, the browser build in

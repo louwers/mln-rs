@@ -2,10 +2,10 @@
 //! turns a tile's features into labels and icons (`layout`, `feature`,
 //! `instance`), the anchors, lines and quads it places them along
 //! (`get_anchors`, `anchor`, `check_max_angle`, `clip_lines`, `merge_lines`,
-//! `quads`), its bucket (`bucket`), the projections that draw and place them
-//! (`projection`), its part of placement, which decides which symbols show
-//! (`placement`), and its programs, the blocks they read, and their text in
-//! each language.
+//! `quads`) and a polygon's label point (`polylabel`), its bucket
+//! (`bucket`), the projections that draw and place them (`projection`), its
+//! part of placement, which decides which symbols show (`placement`), and its
+//! programs, the blocks they read, and their text in each language.
 
 pub(crate) mod anchor;
 pub(crate) mod bucket;
@@ -24,6 +24,7 @@ pub(crate) mod merge_lines;
 #[rustfmt::skip]
 mod msl;
 pub(crate) mod placement;
+pub(crate) mod polylabel;
 pub(crate) mod pool;
 pub mod programs;
 pub(crate) mod projection;

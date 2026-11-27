@@ -59,5 +59,4 @@ pub use mln_vulkan;
 pub use mln_web_host;
 #[cfg(feature = "webgpu")]
 pub use mln_webgpu;
-pub use polylabel;
 pub mod source;

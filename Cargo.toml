@@ -75,7 +75,6 @@ mln_wire_derive = { package = "mln-rs-wire-derive", path = "crates/mln_wire_deri
 mln_web_host = { package = "mln-rs-web-host", path = "crates/mln_web_host", version = "=0.0.18" }
 mln_webgpu = { package = "mln-rs-webgpu", path = "crates/mln_webgpu", version = "=0.0.18" }
 pixelmatch = { package = "mln-rs-pixelmatch", path = "vendor/pixelmatch", version = "=0.0.18" }
-polylabel = { package = "mln-rs-polylabel", path = "vendor/polylabel", version = "=0.0.18" }
 # The render and query test runner, for the render tests of the layer
 # types outside mln_builtins (the tests of crates/mln_ngon,
 # crates/mln_image_process and crates/mln_location_puck). Not published.
@@ -555,7 +554,6 @@ mln_style.workspace = true
 mln_vulkan = { workspace = true, optional = true }
 mln_web_host.workspace = true
 mln_webgpu = { workspace = true, optional = true }
-polylabel.workspace = true
 
 [lints]
 workspace = true

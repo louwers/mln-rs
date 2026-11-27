@@ -2482,7 +2482,6 @@ dependencies = [
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-mtl",
- "mln-rs-polylabel",
  "mln-rs-runtime",
  "mln-rs-style",
  "mln-rs-vulkan",
@@ -2557,7 +2556,6 @@ dependencies = [
  "mln-rs-geometry",
  "mln-rs-gfx",
  "mln-rs-pixelmatch",
- "mln-rs-polylabel",
  "mln-rs-style",
  "mln-rs-webgpu",
  "mln-rs-wire",
@@ -2919,14 +2917,6 @@ dependencies = [
 [[package]]
 name = "mln-rs-pixelmatch"
 version = "0.0.18"
-
-[[package]]
-name = "mln-rs-polylabel"
-version = "0.0.18"
-dependencies = [
- "mln-rs-geometry",
- "serde_json",
-]
 
 [[package]]
 name = "mln-rs-ratchet"

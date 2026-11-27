@@ -60,7 +60,6 @@ changelog_include = [
   "mln-rs-location-puck",
   "mln-rs-mtl",
   "mln-rs-ngon",
-  "mln-rs-polylabel",
   "mln-rs-runtime",
   "mln-rs-shelf-pack",
   "mln-rs-style",

@@ -58,6 +58,7 @@ use crate::layers::symbol::instance::{
 use crate::layers::symbol::merge_lines::merge_lines;
 use crate::layers::symbol::placement::collision::{icon_overlap, text_overlap};
 use crate::layers::symbol::placement::collision_feature::{AlongLine, BoxLayout, CollisionBox, CollisionFeature};
+use crate::layers::symbol::polylabel;
 use crate::layers::symbol::pool::PoolRange;
 use crate::layers::symbol::quads::{SymbolQuad, SymbolQuads, glyph_quads, icon_quads};
 

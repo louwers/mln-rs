@@ -11,7 +11,9 @@ contract: vector, raster and raster-dem tilesets, GeoJSON and image sources, and
 how they load. `register_builtins` fills a registry with them and the built-in
 layer types.
 
-Its code is under the root license ([LICENSE.md](LICENSE.md)).
+Its code is under the root license ([LICENSE.md](LICENSE.md)); the symbol
+layout's label points follow Mapbox's polylabel, under the ISC License
+([LICENSE-ISC](LICENSE-ISC)).
 
 Part of [mln-rs](https://github.com/maplibre/mln-rs), a Rust port of the
 [MapLibre Native](https://github.com/maplibre/maplibre-native) map rendering
