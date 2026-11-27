@@ -2861,6 +2861,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "mln-rs-ngon"
+version = "0.0.18"
+dependencies = [
+ "bytemuck",
+ "glam",
+ "mln-rs-builtins",
+ "mln-rs-engine",
+ "mln-rs-geometry",
+ "mln-rs-gfx",
+ "mln-rs-headless",
+ "mln-rs-render-test",
+ "mln-rs-style",
+ "mln-rs-wire",
+]
+
+[[package]]
 name = "mln-rs-pixelmatch"
 version = "0.0.18"
 

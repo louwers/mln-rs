@@ -1,0 +1,172 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 320,
+      "height": 96
+    }
+  },
+  "center": [0, 0],
+  "zoom": 4,
+  "sources": {
+    "points": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 3,
+              "fill": "#e76f51"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [-6.15234375, 0.7909905]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 4,
+              "fill": "#f4a261"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [-4.39453125, 0.7909905]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 5,
+              "fill": "#e9c46a"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [-2.63671875, 0.7909905]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 6,
+              "fill": "#2a9d8f"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [-0.87890625, 0.7909905]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 8,
+              "fill": "#457b9d"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [0.87890625, 0.7909905]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 12,
+              "fill": "#1d3557"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [2.63671875, 0.7909905]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 24,
+              "fill": "#9067c6"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [4.39453125, 0.7909905]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 360,
+              "fill": "#ef476f"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [6.15234375, 0.7909905]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 2,
+              "fill": "#e76f51"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [-6.15234375, -1.1425024]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 3.4,
+              "fill": "#f4a261"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [-4.39453125, -1.1425024]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 3.5,
+              "fill": "#e9c46a"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [-2.63671875, -1.1425024]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 400,
+              "fill": "#ef476f"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [6.15234375, -1.1425024]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#eef2f7"
+      }
+    },
+    {
+      "id": "ngons",
+      "type": "org.maplibre.ngon",
+      "source": "points",
+      "paint": {
+        "ngon-radius": 15,
+        "ngon-corners": ["get", "n"],
+        "ngon-color": ["get", "fill"]
+      }
+    }
+  ]
+}

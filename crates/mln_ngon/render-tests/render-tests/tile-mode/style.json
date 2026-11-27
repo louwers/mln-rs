@@ -1,0 +1,61 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "mapMode": "tile"
+    }
+  },
+  "center": [45, 40.97989807],
+  "zoom": 2,
+  "sources": {
+    "points": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 6
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [-3, 40.97989807]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "n": 5
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [30, 40.97989807]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#eef2f7"
+      }
+    },
+    {
+      "id": "ngons",
+      "type": "org.maplibre.ngon",
+      "source": "points",
+      "paint": {
+        "ngon-radius": 40,
+        "ngon-corners": ["get", "n"],
+        "ngon-color": "#2a9d8f",
+        "ngon-stroke-width": 3,
+        "ngon-stroke-color": "#1d3557"
+      }
+    }
+  ]
+}

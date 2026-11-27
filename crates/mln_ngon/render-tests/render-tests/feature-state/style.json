@@ -1,0 +1,108 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 192,
+      "height": 64,
+      "operations": [
+        [
+          "setFeatureState",
+          {
+            "source": "points",
+            "id": 2
+          },
+          {
+            "hover": true
+          }
+        ],
+        ["wait"]
+      ]
+    }
+  },
+  "center": [0, 0],
+  "zoom": 4,
+  "sources": {
+    "points": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Point",
+              "coordinates": [-2.4609375, 0.0]
+            },
+            "id": 1
+          },
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Point",
+              "coordinates": [0.0, 0.0]
+            },
+            "id": 2
+          },
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Point",
+              "coordinates": [2.4609375, 0.0]
+            },
+            "id": 3
+          }
+        ]
+      }
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#eef2f7"
+      }
+    },
+    {
+      "id": "ngons",
+      "type": "org.maplibre.ngon",
+      "source": "points",
+      "paint": {
+        "ngon-radius": [
+          "case",
+          ["boolean", ["feature-state", "hover"], false],
+          20,
+          14
+        ],
+        "ngon-corners": [
+          "case",
+          ["boolean", ["feature-state", "hover"], false],
+          6,
+          5
+        ],
+        "ngon-color": [
+          "case",
+          ["boolean", ["feature-state", "hover"], false],
+          "#e63946",
+          "#457b9d"
+        ],
+        "ngon-stroke-width": [
+          "case",
+          ["boolean", ["feature-state", "hover"], false],
+          3,
+          0
+        ],
+        "ngon-stroke-color": "#1d3557",
+        "ngon-rotate": [
+          "case",
+          ["boolean", ["feature-state", "hover"], false],
+          30,
+          0
+        ]
+      }
+    }
+  ]
+}

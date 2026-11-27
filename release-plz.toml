@@ -57,6 +57,7 @@ changelog_include = [
   "mln-rs-gl",
   "mln-rs-glsl",
   "mln-rs-mtl",
+  "mln-rs-ngon",
   "mln-rs-polylabel",
   "mln-rs-runtime",
   "mln-rs-shelf-pack",
