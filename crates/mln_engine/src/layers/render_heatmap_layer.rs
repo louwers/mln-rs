@@ -1,5 +1,5 @@
-// The tiles are drawn (additively, kernel density) into an offscreen
-// half-float render target; the layer's draw on the frame colors that
+// The tiles are drawn (additively, kernel density) into a half-float
+// target of the layer's own; the layer's draw on the frame colors that
 // texture through the color ramp.
 
 use std::mem::offset_of;
@@ -7,7 +7,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use glam::dcamera::rh::proj::opengl::orthographic;
-use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::texture2d::SamplerState;
@@ -25,19 +24,19 @@ use mln_style::types::TranslateAnchorType;
 use super::render_line_layer::apply_color_ramp;
 use super::{cast_matrix, refresh_paint_attributes};
 use crate::buckets::heatmap_bucket::{HeatmapBinders, HeatmapLayoutVertex};
-use crate::draw::draws::{Depth, Draw, Draws, LayerFrame};
+use crate::draw::draws::{Depth, Draw, Draws, Group, LayerFrame};
 use crate::draw::indexes::DrawIndexes;
 use crate::draw::objects::{DrawGeometry, Mesh, Textures};
 use crate::draw::segment::SegmentBase;
 use crate::draw::store::SharedTexture;
+use crate::draw::target::Target;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::SharedVertices;
 use crate::layer::bucket_geometry::{bucket_indexes, bucket_vertices, copied_vertices, paint_vertices};
 use crate::layer::layer_type::LayerType;
 use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, Hosted, LayerValues, OnTerrain, OwnGpuWork, PrepareCx, RenderLayer, RenderLayerBase,
-    TileCx, TypedLayer,
+    EvaluateCx, Evaluation, Hosted, LayerValues, OnTerrain, PrepareCx, RenderLayer, TileCx, TypedLayer,
 };
 use crate::layer::tile_input::{Features, TileData};
 use crate::layers::heatmap::programs;
@@ -45,7 +44,6 @@ use crate::layers::heatmap::ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO, 
 use crate::layout::heatmap_layout::HeatmapLayout;
 use crate::render::pass::RenderPass;
 use crate::render::static_data::RenderStaticData;
-use crate::render::target::RenderTarget;
 use crate::render::terrain::StandingDraw;
 use crate::render::tile::FrameTile;
 use crate::render::tile_matrix::{globe_extrude_scale, projection_data, to_projection_ubo};
@@ -73,9 +71,9 @@ pub(crate) struct RenderHeatmapLayer {
     /// detect when it needs to be rebuilt.
     color_ramp_global_state: Option<Arc<GlobalStateMap>>,
 
-    /// The texture the tiles draw their heat into, which the layer's draw
+    /// The target the tiles draw their heat into, which the layer's draw
     /// colors onto the frame.
-    render_target: Option<RenderTarget>,
+    target: Option<Target>,
 
     shared_texture_vertices: Option<SharedVertices>,
     /// The mesh of the layer's draw of the frame, built on its first frame.
@@ -109,7 +107,7 @@ impl TypedLayer for RenderHeatmapLayer {
         RenderHeatmapLayer {
             color_ramp: Rc::new(PremultipliedImage::new(Size::new(256, 1))),
             color_ramp_global_state: None,
-            render_target: None,
+            target: None,
             shared_texture_vertices: None,
             texture: None,
             color_ramp_texture: None,
@@ -142,7 +140,7 @@ impl TypedLayer for RenderHeatmapLayer {
         if *evaluated.paint.heatmap_opacity.uniform() > 0.0 { Evaluation::TRANSLUCENT } else { Evaluation::NONE }
     }
 
-    /// The draw of a tile's kernels into the render target.
+    /// The draw of a tile's kernels into the layer's target.
     fn tile(
         &mut self,
         cx: &mut TileCx<'_, '_, Self>,
@@ -187,44 +185,27 @@ impl TypedLayer for RenderHeatmapLayer {
         Some(StandingDraw::new(mesh))
     }
 
-    /// Pushes the tiles' draws into the render target and the layer's draw
-    /// of the frame, which colors the render target's heat onto it.
+    /// Pushes the tiles' draws into the layer's target, of half the
+    /// view's size, and the layer's draw of the frame, which colors the
+    /// target's heat onto it.
     fn prepare(&mut self, cx: &mut PrepareCx<'_, '_, Self>, render_tiles: &[FrameTile<'_, Heatmap>], out: &mut Draws) {
-        let state = cx.frame.view;
-
-        let viewport_size = state.size();
+        let viewport_size = cx.frame.view.size();
         let size = mln_gfx::Size::new(viewport_size.width / 2, viewport_size.height / 2);
-        let render_target = self
-            .render_target
-            .get_or_insert_with(|| RenderTarget::new(cx.context, size, TextureChannelDataType::HalfFloat));
-        render_target.set_size(cx.context, size);
-        Self::draw_tiles(cx, render_tiles, out);
+        let target =
+            self.target.get_or_insert_with(|| Target::new(cx.context, size, TextureChannelDataType::HalfFloat));
+        target.set_size(cx.context, size);
+        Self::draw_tiles(cx, render_tiles, out.target(target));
         self.draw_texture(cx, out);
-    }
-
-    /// Draws the tiles' draws, `group`, into the render target.
-    fn own_gpu_work(&mut self, base: &RenderLayerBase, gpu: &mut dyn Gpu, at: OwnGpuWork<'_, '_>) {
-        if let OwnGpuWork::Targets(parameters, group) = at
-            && base.is_renderable
-            && let Some(render_target) = &mut self.render_target
-            && let Some(mut passes) = render_target.begin(gpu, parameters)
-        {
-            while passes.next(parameters) {
-                group.render(gpu, parameters);
-            }
-            passes.end(gpu, parameters);
-        }
     }
 }
 
 impl RenderHeatmapLayer {
-    /// Pushes the tiles' draws into the render target, `out`'s own target,
-    /// with their meshes in the tiles' values.
-    fn draw_tiles(cx: &mut PrepareCx<'_, '_, Self>, render_tiles: &[FrameTile<'_, Heatmap>], out: &mut Draws) {
+    /// Pushes the tiles' draws into `target`, the group of the layer's
+    /// target, with their meshes in the tiles' values.
+    fn draw_tiles(cx: &mut PrepareCx<'_, '_, Self>, render_tiles: &[FrameTile<'_, Heatmap>], target: &mut Group) {
         let PrepareCx { base, values, tiles, context, frame, .. } = cx;
 
         let evaluated = &values.evaluated.paint;
-        let target = out.own_target();
         for tile in render_tiles {
             let tile_id = tile.id();
 
@@ -298,7 +279,7 @@ impl RenderHeatmapLayer {
         (drawable, to_projection_ubo(&projection))
     }
 
-    /// The block that the tiles' draws into the render target share, of a
+    /// The block that the tiles' draws into the target share, of a
     /// layer of the paint values `evaluated`.
     fn tile_props(evaluated: &HeatmapPaintProperties::PossiblyEvaluated) -> HeatmapEvaluatedPropsUBO {
         HeatmapEvaluatedPropsUBO {
@@ -310,13 +291,11 @@ impl RenderHeatmapLayer {
     }
 
     /// Pushes into `out`'s main group the layer's draw of the frame, which
-    /// colors the heat of the render target onto it through the layer's
+    /// colors the heat of the layer's target onto it through the layer's
     /// color ramp, with a mesh it builds once.
     fn draw_texture(&mut self, cx: &mut PrepareCx<'_, '_, Self>, out: &mut Draws) {
-        let RenderHeatmapLayer {
-            color_ramp, render_target, shared_texture_vertices, texture, color_ramp_texture, ..
-        } = self;
-        let Some(render_target) = render_target.as_ref() else {
+        let RenderHeatmapLayer { color_ramp, target, shared_texture_vertices, texture, color_ramp_texture, .. } = self;
+        let Some(target) = target.as_ref() else {
             return;
         };
         let context = &mut *cx.context;
@@ -335,10 +314,7 @@ impl RenderHeatmapLayer {
             *color_ramp_texture = Some((Rc::clone(color_ramp), texture));
         }
         let color_ramp = color_ramp_texture.as_ref().map(|(_, texture)| texture);
-        let render_target_texture = render_target.texture();
         if let Some(draw) = texture {
-            // The render target's texture is made again with its size.
-            draw.set_texture(context, IMAGE_SLOT, Some(render_target_texture));
             draw.set_texture(context, COLOR_RAMP_SLOT, color_ramp);
         } else {
             let vertices = shared_texture_vertices
@@ -363,7 +339,7 @@ impl RenderHeatmapLayer {
                 instances: None,
             };
             let mut textures = Textures::default();
-            textures[IMAGE_SLOT] = Some(render_target_texture.clone());
+            textures[IMAGE_SLOT] = Some(target.texture().clone());
             textures[COLOR_RAMP_SLOT] = color_ramp.cloned();
             let mesh = Mesh::new(
                 context,
