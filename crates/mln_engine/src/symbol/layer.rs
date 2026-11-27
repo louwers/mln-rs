@@ -4,8 +4,6 @@
 // the draw update replaces just those attributes (opacity, dynamic
 // positions, binders) and the triangle indices of the tile's draws.
 
-use std::sync::Arc;
-
 use glam::dcamera::rh::proj::opengl::orthographic;
 use glam::{DMat4, DVec3};
 use mln_gfx::projection_variant::ProjectionVariant;
@@ -15,7 +13,7 @@ use mln_style::StyleValue as _;
 use mln_style::color::Color;
 use mln_style::constants::EXTENT;
 use mln_style::hash::HashMap;
-use mln_style::layer::{ErasedLayerStyle as _, LayerStyle};
+use mln_style::layer::ErasedLayerStyle as _;
 use mln_style::layers::Symbol;
 use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
 use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
@@ -31,11 +29,9 @@ use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeAr
 use crate::draw::vertices::{SharedVertices, TypedVertices};
 use crate::layer::bucket_geometry::{BucketGeometry, bucket_vertices, copied_indexes, paint_vertices};
 use crate::layer::layer_drawing::BucketChanges;
-use crate::layer::layer_type::{EvaluatedLayer, LayerType};
+use crate::layer::layer_type::EvaluatedLayer;
 use crate::layer::paint_property_binder::PaintBinders as _;
-use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, Hosted, LayerValues, OnTerrain, PrepareCx, RenderLayer, TypedLayer,
-};
+use crate::layer::render_layer::{EvaluateCx, Evaluation, Layer, LayerValues, OnTerrain, PrepareCx};
 use crate::layer::tile_input::Features;
 use crate::layers::cast_matrix;
 use crate::render::pass::RenderPass;
@@ -449,14 +445,6 @@ impl SegmentGroup {
     }
 }
 
-impl LayerType for Symbol {
-    type Input = Features<SymbolLayout>;
-
-    fn render_layer(style: Arc<LayerStyle<Symbol>>) -> Box<dyn RenderLayer> {
-        Hosted::<RenderSymbolLayer>::boxed(style)
-    }
-}
-
 pub(crate) struct RenderSymbolLayer {
     /// The segments of the tiles the update builds draws of, as it sorts
     /// them, kept from frame to frame for their memory.
@@ -606,7 +594,7 @@ impl RenderSymbolLayer {
     /// where they draw with a variant that stands on terrain (`stands`).
     fn push_draws(
         cx: &mut PrepareCx<'_, '_, Self>,
-        tiles: &[FrameTile<'_, Symbol>],
+        tiles: &[FrameTile<'_, RenderSymbolLayer>],
         passes: RenderPass,
         stands: bool,
         out: &mut Draws,
@@ -661,13 +649,18 @@ fn props(evaluated: &SymbolPaintProperties::PossiblyEvaluated) -> SymbolEvaluate
     }
 }
 
-impl TypedLayer for RenderSymbolLayer {
-    type Type = Symbol;
+impl Layer for RenderSymbolLayer {
+    type Style = Symbol;
+    type Input = Features<SymbolLayout>;
     type Tile = SymbolTile;
 
     /// Symbols draw the lower of two tiles' overlapping symbols over the
     /// higher's.
     const TILE_ORDER: TileOrder = TileOrder::ByY;
+
+    /// Symbols fade out with the tiles they were placed on.
+    const FADES_TILES: bool = true;
+    const PLACES: bool = true;
 
     /// Over terrain, the symbols stand on the ground under their anchors,
     /// which placement gives them from the surface the frame drew, and hide
@@ -711,10 +704,15 @@ impl TypedLayer for RenderSymbolLayer {
     /// Pushes the frame's draws of the layer: those of each of its tiles,
     /// which it builds for a tile it keeps none of and refreshes where the
     /// tile's bucket changed. It builds them here rather than in
-    /// [`tile`](TypedLayer::tile): their meshes, whose
+    /// [`tile`](Layer::tile): their meshes, whose
     /// [`seq`](Mesh::seq) orders the frame's draws, are made in the order of
     /// the segments sorted across the tiles.
-    fn prepare(&mut self, cx: &mut PrepareCx<'_, '_, Self>, render_tiles: &[FrameTile<'_, Symbol>], out: &mut Draws) {
+    fn prepare(
+        &mut self,
+        cx: &mut PrepareCx<'_, '_, Self>,
+        render_tiles: &[FrameTile<'_, RenderSymbolLayer>],
+        out: &mut Draws,
+    ) {
         /// The atlases' textures given to one tile's draws.
         #[derive(Default)]
         struct TileAtlases {

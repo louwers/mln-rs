@@ -47,6 +47,7 @@ use crate::render::terrain::TerrainElevation;
 use crate::render::tile::{FrameTile, RenderTile};
 use crate::symbol::bucket::{SortKeyRange, SymbolBucket};
 use crate::symbol::instance::SymbolInstance;
+use crate::symbol::layer::RenderSymbolLayer;
 use crate::tile::{OverscaledTileID, UnwrappedTileID};
 
 /// The opacity of a symbol's text or icon, and whether it fades in or out.
@@ -525,9 +526,13 @@ impl SymbolPlacement {
 }
 
 impl Placement for SymbolPlacement {
-    type Layer = Symbol;
+    type Layer = RenderSymbolLayer;
 
-    fn collect(&mut self, layer: &CollectCx<'_, Symbol>, tiles: &[FrameTile<'_, Symbol>]) -> bool {
+    fn collect(
+        &mut self,
+        layer: &CollectCx<'_, RenderSymbolLayer>,
+        tiles: &[FrameTile<'_, RenderSymbolLayer>],
+    ) -> bool {
         let Some(source) = layer.source else {
             return false;
         };
