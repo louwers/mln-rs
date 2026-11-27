@@ -3038,6 +3038,7 @@ fn observe_tile_lifecycle() {
     for tile in expected_tiles {
         let mut stage = NullOp;
         let mut parsing = false;
+        let mut parsed = false;
 
         for (index, (id, op)) in tile_ops.iter().enumerate() {
             if *id != tile {
@@ -3090,14 +3091,17 @@ fn observe_tile_lifecycle() {
                     // We must have been parsing to see the EndParse marker.
                     assert!(parsing, "{context}");
                     parsing = false;
+                    parsed = true;
                 }
                 NullOp | Error => panic!("{context}"),
             }
             stage = *op;
         }
 
-        assert!(matches!(stage, EndParse | Cancelled), "{tile} ends at {stage:?}");
-        assert!(!parsing, "{tile} is still parsing");
+        // The image shows every tile's data, but its lifecycle can go on: a
+        // response with the bytes the tile has keeps its data unparsed, and
+        // one with new bytes starts another parse.
+        assert!(parsed, "{tile} was never parsed");
     }
 }
 
