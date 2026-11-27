@@ -1,14 +1,19 @@
-//! The GPU objects of a draw, which the renderer keeps between frames and
-//! makes again only when what they are made of changes.
+//! Meshes, the GPU objects of what a draw draws, which the renderer keeps
+//! between frames and makes again only when what they are made of changes,
+//! and the buffers a frame's draws bind with the bindings made of them.
 //!
-//! A draw owns what is its own, its own indexes and attribute data, and
-//! holds what it shares with other draws, its textures and the indexes and
+//! A mesh owns what is its own, its own indexes and attribute data, and
+//! holds what it shares with other meshes, its textures and the indexes and
 //! vertices of buckets and static geometry, through handles of the context's
-//! stores (`store`), which keep them while the draw lasts.
+//! stores (`store`), which keep them while the mesh lasts. It binds no
+//! uniform buffers: the frame that draws it does ([`DrawBuffers`]), so that
+//! frames with buffers of their own can draw one mesh.
 //!
 //! A shader reads vertices as attributes, or, where the device binds vertex
 //! buffers (`Caps::binds_vertex_buffers`), as a storage buffer that it
-//! indexes itself (`DrawObjects::read_as_storage`).
+//! indexes itself (`Mesh::read_as_storage`).
+
+use std::rc::{Rc, Weak};
 
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
@@ -23,10 +28,14 @@ use mln_gfx::gpu::{
 use mln_gfx::shaders::bindings::{BUFFER_IDS, MAX_TEXTURES};
 use mln_gfx::shaders::program::Program;
 use mln_gfx::stencil_mode::StencilMode;
+use mln_style::hash::HashMap;
 
+use crate::draw::buffer::Buffer;
 use crate::draw::context::Context;
+use crate::draw::identity::SimpleIdentity;
 use crate::draw::indexes::DrawIndexes;
 use crate::draw::owned::{Held, Owned};
+use crate::draw::resources::Device;
 use crate::draw::segment::SegmentBase;
 use crate::draw::store::SharedTexture;
 use crate::draw::uniform_buffer::UniformBufferArray;
@@ -42,7 +51,7 @@ pub(crate) type Textures = [Option<SharedTexture>; MAX_TEXTURES];
 /// The most vertex buffers a draw binds, WebGPU's default limit.
 const MAX_VERTEX_BUFFERS: usize = 8;
 
-/// What a draw draws: its vertices, and the primitives its segments draw of
+/// What a mesh draws: its vertices, and the primitives its segments draw of
 /// them.
 pub(crate) struct DrawGeometry {
     /// The vertex attributes, by the names of the program's attributes.
@@ -115,17 +124,151 @@ struct VertexSlot {
     layout: VertexBufferLayout,
 }
 
-/// What a draw's bindings were made of: the epochs of the global uniform
-/// buffers, those of its frame's draws and its own, how often the buffers
-/// of the vertices it reads as storage buffers changed, and the texture and
+/// What a mesh's bindings were made of besides its frame's buffers: the
+/// epoch of the global uniform buffers, how often the buffers of the
+/// vertices the mesh reads as storage buffers changed, and the texture and
 /// sampler it bound at each texture slot.
 #[derive(Clone, Copy, PartialEq)]
 struct BindingsStamp {
     global: u64,
-    frame: u64,
-    own: u64,
     storage: u64,
     textures: [Option<(TextureId, SamplerId)>; MAX_TEXTURES],
+}
+
+/// The bindings a frame made of a mesh, while the mesh lasts.
+struct MeshBindings {
+    mesh: Weak<()>,
+    bindings: Owned<BindingsId>,
+    stamp: BindingsStamp,
+}
+
+/// The uniform and storage buffers that a frame's draws bind, by id, and
+/// the bindings of each mesh the draws drew, made of them, of the context's
+/// global buffers and of the mesh's textures and vertices read as storage
+/// buffers. The bindings of a mesh go when the mesh drops, by the next
+/// [`sweep`](Self::sweep), and all of them when a buffer is made or
+/// replaced, before the buffer they were made of goes.
+#[derive(Default)]
+pub(crate) struct DrawBuffers {
+    buffers: UniformBufferArray,
+    bindings: HashMap<SimpleIdentity, MeshBindings>,
+}
+
+impl DrawBuffers {
+    /// The buffer `id`, if the frame has one.
+    pub(crate) fn get(&self, id: usize) -> Option<&Buffer> {
+        self.buffers.get(id)
+    }
+
+    /// Writes `value` to the uniform buffer `id`, as
+    /// [`UniformBufferArray::write_pod`] does.
+    pub(crate) fn write_pod<T: bytemuck::Pod>(&mut self, gpu: &mut dyn Gpu, id: usize, value: &T, device: &mut Device) {
+        let epoch = self.buffers.epoch();
+        let _replaced = self.buffers.write_pod(gpu, id, value, device);
+        self.made(epoch);
+    }
+
+    /// Writes `data` to the storage buffer `id`, as
+    /// [`UniformBufferArray::write_storage`] does.
+    pub(crate) fn write_storage(&mut self, gpu: &mut dyn Gpu, id: usize, data: &[u8], device: &mut Device) {
+        let epoch = self.buffers.epoch();
+        let _replaced = self.buffers.write_storage(gpu, id, data, device);
+        self.made(epoch);
+    }
+
+    /// Drops the bindings where a write since the buffers were at `epoch`
+    /// made or replaced a buffer, which they don't bind.
+    fn made(&mut self, epoch: u64) {
+        if self.buffers.epoch() != epoch {
+            self.bindings.clear();
+        }
+    }
+
+    /// Drops the bindings of the meshes that dropped.
+    pub(crate) fn sweep(&mut self) {
+        self.bindings.retain(|_, made| made.mesh.strong_count() > 0);
+    }
+
+    /// The bindings of what `mesh`'s shader, `shader_id` on `gpu`, reads of
+    /// the context's global buffers, the frame's buffers, and the mesh's
+    /// textures and vertices read as storage buffers, made again where one
+    /// of them changed since the frame last drew the mesh.
+    fn bindings(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        context: &mut Context,
+        mesh: &Mesh,
+        shader_id: ShaderId,
+    ) -> Result<BindingsId, GpuError> {
+        let program = mesh.shader.program();
+        let mut textures = [None; MAX_TEXTURES];
+        for slot in sampled_slots(program) {
+            if let Some(texture) = mesh.textures.get(slot).and_then(Option::as_ref) {
+                textures[slot] = Some(context.texture_binding(gpu, texture)?);
+            }
+        }
+        let global = context.global_uniform_buffers();
+        let stamp = BindingsStamp { global: global.epoch(), storage: mesh.storage_epoch, textures };
+        if let Some(made) = self.bindings.get(&mesh.id)
+            && made.stamp == stamp
+        {
+            return Ok(made.bindings.id());
+        }
+        self.bindings.remove(&mesh.id);
+        let mut entries = Entries::new();
+        for id in 0..BUFFER_IDS {
+            // The frame's buffer wins over the global one.
+            let buffer = self.buffers.get(id).or_else(|| global.get(id));
+            if let Some(buffer) = buffer {
+                entries.push(BindGroupEntry::Buffer {
+                    id: id as u32,
+                    buffer: buffer.id(),
+                    offset: 0,
+                    size: buffer.size() as u64,
+                });
+            }
+        }
+        let mut held = Vec::new();
+        for (id, vertices, buffer) in &mesh.storage_vertices {
+            let size = context.vertices(vertices).map_or(0, |stored| stored.count() * stored.vertex_size());
+            if let Some(buffer) = buffer.filter(|_| size > 0) {
+                entries.push(BindGroupEntry::Buffer { id: *id as u32, buffer, offset: 0, size: size as u64 });
+                held.push(vertices.held());
+            }
+        }
+        for (slot, binding) in textures.iter().enumerate() {
+            if let Some((texture, sampler)) = *binding {
+                entries.push(BindGroupEntry::Texture { slot: slot as u32, texture, sampler });
+            }
+        }
+        held.extend(
+            sampled_slots(program)
+                .filter_map(|slot| context.gpu_texture(mesh.textures.get(slot)?.as_ref()?).cloned().map(Held::Texture)),
+        );
+        let bindings =
+            gpu.create_bindings(&BindingsDesc { label: program.name, shader: shader_id, entries: entries.as_slice() })?;
+        let made = MeshBindings { mesh: Rc::downgrade(&mesh.alive), bindings: context.own(bindings, held), stamp };
+        self.bindings.insert(mesh.id, made);
+        Ok(bindings)
+    }
+
+    /// The frame's bindings of `mesh`, as a draw of it binds them.
+    #[cfg(test)]
+    pub(crate) fn bind(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        context: &mut Context,
+        mesh: &Mesh,
+    ) -> Result<BindingsId, GpuError> {
+        let shader = context.shader(gpu, &mesh.shader)?;
+        self.bindings(gpu, context, mesh, shader)
+    }
+
+    /// How many meshes the frame keeps bindings of.
+    #[cfg(test)]
+    pub(crate) fn bound_meshes(&self) -> usize {
+        self.bindings.len()
+    }
 }
 
 /// What, besides the draw's own state, a draw's pipeline depends on.
@@ -138,11 +281,17 @@ struct PipelineVariant {
 }
 
 /// Geometry drawn with one program, and the GPU objects that draw it: its
-/// vertices, indexes and segments, the buffers and textures it binds, the
-/// color and cull modes it draws with, and the shader, pipelines, bindings
-/// and geometry it made of them on the context's `Gpu`, which it makes again
-/// when what they are made of changes.
-pub(crate) struct DrawObjects {
+/// vertices, indexes and segments, the textures it binds, the color and cull
+/// modes it draws with, and the shader, pipelines and geometry it made of
+/// them on the context's `Gpu`, which it makes again when what they are made
+/// of changes. The frames that draw it bind it with their buffers
+/// ([`DrawBuffers`]).
+pub(crate) struct Mesh {
+    /// Tells the mesh apart from the others, and orders it after those made
+    /// before it.
+    id: SimpleIdentity,
+    /// Lives while the mesh does, for the frames' bindings of it.
+    alive: Rc<()>,
     shader: ShaderKey,
     vertex_attributes: VertexAttributeArray,
     /// The attributes of each instance, for a draw of instances.
@@ -159,9 +308,6 @@ pub(crate) struct DrawObjects {
     instance_slots_of: AttributeSlots,
     /// The textures it binds, by slot.
     textures: Textures,
-    /// The draw's own uniform and storage buffers, by id, which win over
-    /// its layer's and the frame's.
-    uniform_buffers: UniformBufferArray,
     /// The vertices the shader reads as storage buffers, each with the
     /// buffer id it binds at, past the uniform buffers' ids, and its buffer
     /// as of the last upload.
@@ -188,16 +334,14 @@ pub(crate) struct DrawObjects {
     /// The vertex buffer layouts of the vertex slots the pipelines were made
     /// for.
     pipeline_layouts: Vec<VertexBufferLayout>,
-    /// What it bound at its last draw, and what that was made of.
-    bindings: Option<(Owned<BindingsId>, BindingsStamp)>,
     /// The geometry of its vertex slots and the index buffer it was made
     /// with.
     geometry: Option<(Owned<GeometryId>, BufferId)>,
 }
 
-impl DrawObjects {
-    /// The objects of a draw of `geometry` with `shader`, in `color_mode`
-    /// and `cull_face_mode`, binding `textures`, without buffers of its own.
+impl Mesh {
+    /// The mesh of `geometry`, drawn with `shader` in `color_mode` and
+    /// `cull_face_mode`, binding `textures`.
     #[must_use]
     pub(crate) fn new(
         shader: ShaderKey,
@@ -207,7 +351,9 @@ impl DrawObjects {
         textures: Textures,
     ) -> Self {
         let DrawGeometry { vertices, vertex_count, mode, indexes, segments, instances } = geometry;
-        DrawObjects {
+        Mesh {
+            id: SimpleIdentity::new(),
+            alive: Rc::new(()),
             shader,
             vertex_attributes: vertices,
             instance_attributes: instances,
@@ -216,7 +362,6 @@ impl DrawObjects {
             vertex_slots_of: AttributeSlots::default(),
             instance_slots_of: AttributeSlots::default(),
             textures,
-            uniform_buffers: UniformBufferArray::new(),
             storage_vertices: Vec::new(),
             storage_epoch: 0,
             color_mode,
@@ -231,7 +376,6 @@ impl DrawObjects {
             shader_id: None,
             pipelines: Vec::new(),
             pipeline_layouts: Vec::new(),
-            bindings: None,
             geometry: None,
         }
     }
@@ -317,6 +461,12 @@ impl DrawObjects {
         Ok(())
     }
 
+    /// The mesh's id, which orders it after the meshes made before it.
+    #[must_use]
+    pub(crate) fn id(&self) -> SimpleIdentity {
+        self.id
+    }
+
     /// Draws the segments into `parameters`' open pass on `gpu`, the
     /// context's, with `depth_mode` and `stencil_mode`, binding the buffers
     /// of the draws in `frame`. Shaders read the draw's entries in those
@@ -327,7 +477,7 @@ impl DrawObjects {
         &mut self,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
-        frame: &UniformBufferArray,
+        frame: &mut DrawBuffers,
         depth_mode: DepthMode,
         stencil_mode: StencilMode,
         global_index: u32,
@@ -343,7 +493,7 @@ impl DrawObjects {
         &mut self,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
-        frame: &UniformBufferArray,
+        frame: &mut DrawBuffers,
         depth_mode: DepthMode,
         stencil_mode: StencilMode,
         global_index: u32,
@@ -367,7 +517,7 @@ impl DrawObjects {
             Some(id) => id,
             None => *self.shader_id.insert(context.shader(gpu, &self.shader)?),
         };
-        let bindings = self.bindings(gpu, context, shader_id, frame)?;
+        let bindings = frame.bindings(gpu, context, self, shader_id)?;
         let slots = if let Some(slots) = &self.vertex_slots {
             slots
         } else {
@@ -457,77 +607,6 @@ impl DrawObjects {
         Ok(())
     }
 
-    /// The bindings of what the shader, `shader_id` on `gpu`, reads of the
-    /// context's global buffers, the buffers of the draws in `frame`, the
-    /// draw's own and its textures, made again where one of them changed
-    /// since the last draw.
-    fn bindings(
-        &mut self,
-        gpu: &mut dyn Gpu,
-        context: &mut Context,
-        shader_id: ShaderId,
-        frame: &UniformBufferArray,
-    ) -> Result<BindingsId, GpuError> {
-        let mut textures = [None; MAX_TEXTURES];
-        for slot in sampled_slots(self.shader.program()) {
-            if let Some(texture) = self.textures.get(slot).and_then(Option::as_ref) {
-                textures[slot] = Some(context.texture_binding(gpu, texture)?);
-            }
-        }
-        let global = context.global_uniform_buffers();
-        let stamp = BindingsStamp {
-            global: global.epoch(),
-            frame: frame.epoch(),
-            own: self.uniform_buffers.epoch(),
-            storage: self.storage_epoch,
-            textures,
-        };
-        if let Some((bindings, made)) = &self.bindings
-            && *made == stamp
-        {
-            return Ok(bindings.id());
-        }
-        self.bindings = None;
-        let mut entries = Entries::new();
-        for id in 0..BUFFER_IDS {
-            // The draw's buffer wins over its frame's, and that over the
-            // global one.
-            let buffer = self.uniform_buffers.get(id).or_else(|| frame.get(id)).or_else(|| global.get(id));
-            if let Some(buffer) = buffer {
-                entries.push(BindGroupEntry::Buffer {
-                    id: id as u32,
-                    buffer: buffer.id(),
-                    offset: 0,
-                    size: buffer.size() as u64,
-                });
-            }
-        }
-        let mut held = Vec::new();
-        for (id, vertices, buffer) in &self.storage_vertices {
-            let size = context.vertices(vertices).map_or(0, |stored| stored.count() * stored.vertex_size());
-            if let Some(buffer) = buffer.filter(|_| size > 0) {
-                entries.push(BindGroupEntry::Buffer { id: *id as u32, buffer, offset: 0, size: size as u64 });
-                held.push(vertices.held());
-            }
-        }
-        for (slot, binding) in textures.iter().enumerate() {
-            if let Some((texture, sampler)) = *binding {
-                entries.push(BindGroupEntry::Texture { slot: slot as u32, texture, sampler });
-            }
-        }
-        held.extend(
-            sampled_slots(self.shader.program())
-                .filter_map(|slot| context.gpu_texture(self.textures.get(slot)?.as_ref()?).cloned().map(Held::Texture)),
-        );
-        let bindings = gpu.create_bindings(&BindingsDesc {
-            label: self.shader.program().name,
-            shader: shader_id,
-            entries: entries.as_slice(),
-        })?;
-        self.bindings = Some((context.own(bindings, held), stamp));
-        Ok(bindings)
-    }
-
     /// The vertex attributes, to change, which the next upload binds again.
     /// The draw drops its geometry where they have values of their own,
     /// whose buffers a change may drop.
@@ -583,7 +662,7 @@ impl DrawObjects {
 
     /// Replaces the vertex attributes with a copy of those of `other`
     /// ([`copy_shared_attributes`]), which the next upload binds.
-    pub(crate) fn share_vertex_attributes(&mut self, other: &DrawObjects) {
+    pub(crate) fn share_vertex_attributes(&mut self, other: &Mesh) {
         *self.vertex_attributes_mut() = copy_shared_attributes(&other.vertex_attributes);
     }
 
@@ -618,13 +697,6 @@ impl DrawObjects {
             // The pipelines bake the culling in.
             self.pipelines.clear();
         }
-    }
-
-    /// Drops the bindings, for an owner that replaces a buffer they bind.
-    // Not inlined: every layer type's loop over its draws calls it.
-    #[inline(never)]
-    pub(crate) fn drop_bindings(&mut self) {
-        self.bindings = None;
     }
 
     #[must_use]

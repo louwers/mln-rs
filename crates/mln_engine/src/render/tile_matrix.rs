@@ -11,7 +11,7 @@ use mln_style::types::TranslateAnchorType;
 
 use crate::camera::{ProjectionData, View};
 use crate::draw::context::Context;
-use crate::draw::uniform_buffer::UniformBufferArray;
+use crate::draw::objects::DrawBuffers;
 use crate::geo::constants::M2PI;
 use crate::layers::cast_matrix;
 use crate::render::paint_parameters::{PaintParameters, TransformParameters};
@@ -22,7 +22,7 @@ use crate::tile::UnwrappedTileID;
 /// projection, a projection block of zeros if they have none. GL's programs
 /// declare the block whether they read it or not, so a draw binds it all the
 /// same.
-pub(crate) fn bind_no_projection(gpu: &mut dyn Gpu, layer_uniforms: &mut UniformBufferArray, context: &mut Context) {
+pub(crate) fn bind_no_projection(gpu: &mut dyn Gpu, layer_uniforms: &mut DrawBuffers, context: &mut Context) {
     if layer_uniforms.get(PROJECTION_ID).is_none() {
         layer_uniforms.write_storage(
             gpu,

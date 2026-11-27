@@ -4,7 +4,8 @@
 //! queue that releases it in order (`release`), the attributes that read
 //! vertices (`vertex_attribute`), the bindings and geometry made of them
 //! (`owned`, `uniform_buffer`, `upload`), the segments that draw meshes
-//! (`segment`, `mesh`), and the GPU objects of a draw (`objects`).
+//! (`segment`, `mesh`), and the GPU objects that draws draw, with the
+//! buffers that frames bind them with (`objects`).
 
 pub(crate) mod atlas_binding;
 pub(crate) mod buffer;

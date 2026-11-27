@@ -1,20 +1,20 @@
 //! What a layer keeps of its drawing between frames, and the draws of a
 //! frame.
 //!
-//! Each layer type keeps the GPU objects of its draws in types of its own,
-//! those of a tile in its tile value, which the engine keeps in a
-//! [`TileMap`] that also says what the tile's value was made from and what
-//! of that bucket's vertex data changed since. Its draw update makes the
-//! frame's draws, values
-//! ([`FrameDraw`]) in a [`DrawList`] with their uniform values and the part
-//! of the layer's GPU objects each binds, which it writes to the buffers of
-//! their [`LayerDraws`]. The layer type then uploads and draws them in
-//! loops of its own: [`FrameDraws::begin`] begins a pass's draws, and
-//! [`DrawPass::draw`] draws one draw's objects. A layer type that draws one
-//! group of its tiles' draws keeps them in a [`TileDraws`], whose tiles name
-//! the objects of their draws by a part of their own type
-//! ([`TileObjects`]). A layer that drapes over terrain has tile values and a
-//! drawing of its type in each drape too ([`DrapeDrawing`]).
+//! Each layer type keeps the meshes it draws in types of its own, those of
+//! a tile in its tile value, which the engine keeps in a [`TileMap`] that
+//! also says what the tile's value was made from and what of that bucket's
+//! vertex data changed since. Its draw update makes the frame's draws,
+//! values ([`FrameDraw`]) in a [`DrawList`] with their uniform values and
+//! the part of the layer's meshes each draws, which it writes to the
+//! buffers of their [`LayerDraws`]. The layer type then uploads and draws
+//! them in loops of its own: [`FrameDraws::begin`] begins a pass's draws,
+//! and [`DrawPass::draw`] draws one draw's mesh, bound with the draws'
+//! buffers. A layer type that draws one group of its tiles' draws keeps
+//! them in a [`TileDraws`], whose tiles name the meshes of their draws by a
+//! part of their own type ([`TileObjects`]). A layer that drapes over
+//! terrain has tile values and a drawing of its type in each drape too
+//! ([`DrapeDrawing`]).
 
 use std::any::Any;
 use std::ops::BitOrAssign;
@@ -28,8 +28,7 @@ use mln_style::hash::HashMap;
 use crate::draw::atlas_binding::AtlasBinding;
 use crate::draw::context::Context;
 use crate::draw::identity::SimpleIdentity;
-use crate::draw::objects::DrawObjects;
-use crate::draw::uniform_buffer::UniformBufferArray;
+use crate::draw::objects::{DrawBuffers, Mesh};
 use crate::render::layer_composite::Composite;
 use crate::render::paint_parameters::{Composited, PaintParameters, StencilClear};
 use crate::render::pass::RenderPass;
@@ -343,11 +342,6 @@ impl<T> TileMap<T> {
         self.values.fill_with(|| None);
     }
 
-    /// What the layer keeps of the tiles.
-    pub(crate) fn values_mut(&mut self) -> impl Iterator<Item = &mut T> {
-        self.values.iter_mut().flatten()
-    }
-
     /// Whether `tile_id` is one of the frame's tiles of the layer.
     #[cfg(test)]
     #[must_use]
@@ -430,105 +424,46 @@ impl<T> TileEntry<'_, T> {
     }
 }
 
-/// The GPU objects of one draw a layer keeps, with the id that orders the
-/// draws by when their objects were made.
-pub(crate) struct KeptDraw {
-    pub(crate) id: SimpleIdentity,
-    pub(crate) objects: DrawObjects,
-}
-
-impl KeptDraw {
-    #[must_use]
-    pub(crate) fn new(objects: DrawObjects) -> KeptDraw {
-        KeptDraw { id: SimpleIdentity::new(), objects }
-    }
-
-    /// A draw of the objects, which `tile` holds, or the layer for `None`
-    /// (see [`FrameDraw::new`]).
-    #[must_use]
-    pub(crate) fn frame_draw(&self, tile: Option<OverscaledTileID>) -> FrameDraw {
-        FrameDraw::new(tile, self.id)
-    }
-}
-
-/// The GPU objects of a draw, with what gives them the textures of their
-/// tile's atlases where they sample them.
-pub(crate) struct DrawObjectsMut<'a> {
-    pub(crate) objects: &'a mut DrawObjects,
+/// A mesh a draw draws, with what gives it the textures of its tile's
+/// atlases where it samples them.
+pub(crate) struct MeshMut<'a> {
+    pub(crate) mesh: &'a mut Mesh,
     pub(crate) atlases: Option<&'a AtlasBinding>,
 }
 
-impl<'a> From<&'a mut DrawObjects> for DrawObjectsMut<'a> {
-    /// GPU objects that sample no atlases.
-    fn from(objects: &'a mut DrawObjects) -> Self {
-        DrawObjectsMut { objects, atlases: None }
+impl<'a> From<&'a mut Mesh> for MeshMut<'a> {
+    /// A mesh that samples no atlases.
+    fn from(mesh: &'a mut Mesh) -> Self {
+        MeshMut { mesh, atlases: None }
     }
 }
 
-/// What a layer keeps of a tile, whose draws a frame's draws name by a part
-/// of the layer's own type.
+/// What a layer keeps of a tile, whose meshes a frame's draws name by a
+/// part of the layer's own type.
 pub(crate) trait TileObjects {
-    /// Which of the tile's draws a frame's draw draws.
+    /// Which of the tile's meshes a frame's draw draws.
     type Part: Copy;
 
-    /// The GPU objects of the tile's draw `part`.
-    fn objects(&mut self, part: Self::Part) -> Option<DrawObjectsMut<'_>>;
-
-    /// Drops the bindings of the tile's draws ([`DrawObjects::drop_bindings`]).
-    fn drop_bindings(&mut self);
+    /// The tile's mesh `part`.
+    fn objects(&mut self, part: Self::Part) -> Option<MeshMut<'_>>;
 }
 
-impl TileObjects for KeptDraw {
+/// A tile's one mesh.
+impl TileObjects for Mesh {
     type Part = ();
 
-    fn objects(&mut self, (): ()) -> Option<DrawObjectsMut<'_>> {
-        Some((&mut self.objects).into())
-    }
-
-    fn drop_bindings(&mut self) {
-        self.objects.drop_bindings();
-    }
-}
-
-/// A tile's one draw, without an id of its own: the layer's draws of the
-/// frame all carry the id of its draws ([`LayerDraws::id`]), so they draw in
-/// the order the layer pushes them, that of the frame's tiles, however long
-/// each was kept.
-impl TileObjects for DrawObjects {
-    type Part = ();
-
-    fn objects(&mut self, (): ()) -> Option<DrawObjectsMut<'_>> {
+    fn objects(&mut self, (): ()) -> Option<MeshMut<'_>> {
         Some(self.into())
     }
-
-    fn drop_bindings(&mut self) {
-        DrawObjects::drop_bindings(self);
-    }
 }
 
-/// Makes the draws of `list` those of `layer`, as [`DrawList::finish`]
-/// does, and drops the bindings of the draws of `tiles` where that replaced
-/// a buffer they bind.
-pub(crate) fn finish_tiles<U, T: TileObjects>(
-    list: &mut DrawList<U, T::Part>,
-    layer: &mut LayerDraws<T::Part>,
-    tiles: &mut TileMap<T>,
-    gpu: &mut dyn Gpu,
-    context: &mut Context,
-    write: impl FnOnce(&mut UniformWriter<'_, U>),
-) {
-    if list.finish(layer, gpu, context, write) {
-        tiles.values_mut().for_each(T::drop_bindings);
-    }
-}
-
-/// The GPU objects of `draw`, `part` of its tile's, as
-/// [`LayerDraws::upload`] and [`LayerDraws::render`] find them.
+/// The mesh of `draw`, `part` of its tile's, as [`LayerDraws::upload`] and
+/// [`LayerDraws::render`] find it.
 pub(crate) fn tile_objects<'a, T: TileObjects>(
     tiles: &'a mut TileMap<T>,
     draw: &FrameDraw,
     part: T::Part,
-) -> Option<DrawObjectsMut<'a>> {
+) -> Option<MeshMut<'a>> {
     tiles.get_mut(&draw.tile?)?.objects(part)
 }
 
@@ -545,16 +480,16 @@ pub(crate) enum DrawDepth {
     Volume { mask: DepthMaskType },
 }
 
-/// One draw of a frame: the state it draws its GPU objects with. Its uniform
+/// One draw of a frame: the state it draws its mesh with. Its uniform
 /// values are the entries at its index in the storage buffers of its
 /// [`FrameDraws`].
 pub(crate) struct FrameDraw {
     /// The tile whose draw it is, or `None` for a draw of the layer's.
     pub(crate) tile: Option<OverscaledTileID>,
     /// The id that orders the layer's draws of one priority: that of the
-    /// draw's GPU objects, which orders them by when the objects were made,
-    /// or one that the layer's draws share ([`LayerDraws::id`]), which keeps
-    /// them in the order the layer pushed them.
+    /// draw's mesh ([`Mesh::id`]), which orders them by when the meshes were
+    /// made, or one that the layer's draws share ([`LayerDraws::id`]), which
+    /// keeps them in the order the layer pushed them.
     pub(crate) id: SimpleIdentity,
     pub(crate) priority: DrawPriority,
     /// The passes the draw draws in.
@@ -567,7 +502,7 @@ pub(crate) struct FrameDraw {
 }
 
 impl FrameDraw {
-    /// A draw of the GPU objects `id`, of `tile` or of the layer for `None`,
+    /// A draw ordered by `id`, of `tile` or of the layer for `None`,
     /// in the translucent pass at the layer's depth, which it reads, without
     /// clipping.
     #[must_use]
@@ -590,7 +525,7 @@ impl FrameDraw {
 }
 
 /// The draws an update makes for a frame, each with its uniform values of
-/// type `U` and the part of the layer's GPU objects it binds, of type `P`,
+/// type `U` and the part of the layer's meshes it draws, of type `P`,
 /// before they become the draws of a [`LayerDraws`]. The list keeps its
 /// memory from frame to frame, so that a frame of no more draws than one
 /// before it allocates nothing.
@@ -626,7 +561,7 @@ impl<U, P: Copy> DrawList<U, P> {
         self.parts.clear();
     }
 
-    /// Adds `draw`, of the GPU objects of the layer's `part`.
+    /// Adds `draw`, of the layer's mesh `part`.
     pub(crate) fn push_part(&mut self, draw: FrameDraw, part: P, uniforms: U) {
         self.draws.push((draw, self.uniforms.len()));
         self.uniforms.push(uniforms);
@@ -636,37 +571,32 @@ impl<U, P: Copy> DrawList<U, P> {
     /// Makes the list's draws `layer`'s, in [`FrameDraw::order`] and in the
     /// order they were pushed among draws of the same order, and empties the
     /// list. Where there are any, `write` first writes the buffers they read
-    /// to `layer`'s. Returns whether that replaced one of `layer`'s buffers,
-    /// whose owner then drops the bindings of the draws that bind them
-    /// ([`DrawObjects::drop_bindings`]).
-    #[must_use]
+    /// to `layer`'s.
     pub(crate) fn finish(
         &mut self,
         layer: &mut LayerDraws<P>,
         gpu: &mut dyn Gpu,
         context: &mut Context,
         write: impl FnOnce(&mut UniformWriter<'_, U>),
-    ) -> bool {
+    ) {
         sort_draws(&mut self.draws);
         let mut writer = UniformWriter {
             draws: &self.draws,
             uniforms: &self.uniforms,
             bytes: &mut self.bytes,
-            buffers: &mut layer.frame.uniform_buffers,
+            buffers: &mut layer.frame.buffers,
             gpu,
             context,
-            replaced: false,
         };
         if !self.draws.is_empty() {
             write(&mut writer);
         }
-        let replaced = writer.replaced;
         layer.parts.clear();
         layer.parts.extend(self.draws.iter().map(|&(_, index)| self.parts[index]));
         take_draws(&mut self.draws, &mut layer.frame.draws);
+        layer.frame.buffers.sweep();
         self.uniforms.clear();
         self.parts.clear();
-        replaced
     }
 }
 
@@ -690,11 +620,9 @@ pub(crate) struct UniformWriter<'a, U> {
     draws: &'a [(FrameDraw, usize)],
     uniforms: &'a [U],
     bytes: &'a mut Vec<u8>,
-    buffers: &'a mut UniformBufferArray,
+    buffers: &'a mut DrawBuffers,
     gpu: &'a mut dyn Gpu,
     context: &'a mut Context,
-    /// Whether a write replaced a buffer.
-    replaced: bool,
 }
 
 impl<U> UniformWriter<'_, U> {
@@ -705,12 +633,12 @@ impl<U> UniformWriter<'_, U> {
         for &(_, index) in self.draws {
             self.bytes.extend_from_slice(bytemuck::bytes_of(&entry(&self.uniforms[index])));
         }
-        self.replaced |= self.buffers.write_storage(self.gpu, id, self.bytes, self.context.device());
+        self.buffers.write_storage(self.gpu, id, self.bytes, self.context.device());
     }
 
     /// Writes `value`, which all the draws read, to the uniform buffer `id`.
     pub(crate) fn uniform<P: bytemuck::Pod>(&mut self, id: usize, value: &P) {
-        self.replaced |= self.buffers.write_pod(self.gpu, id, value, self.context.device());
+        self.buffers.write_pod(self.gpu, id, value, self.context.device());
     }
 }
 
@@ -721,8 +649,9 @@ pub(crate) struct FrameDraws {
     /// The draws, in [`FrameDraw::order`]. A draw's index is the index of its
     /// entries in the storage buffers, which shaders read as `globalIndex`.
     draws: Vec<FrameDraw>,
-    /// The buffers the draws bind, by id.
-    pub(crate) uniform_buffers: UniformBufferArray,
+    /// The buffers the draws bind, by id, and the bindings of the meshes
+    /// they draw.
+    pub(crate) buffers: DrawBuffers,
     /// How the draws composite onto the frame in the translucent pass, as one
     /// surface, after they draw into a texture of their own; `None` where
     /// they draw straight onto the frame.
@@ -739,7 +668,7 @@ impl Default for FrameDraws {
         FrameDraws {
             id: SimpleIdentity::new(),
             draws: Vec::new(),
-            uniform_buffers: UniformBufferArray::new(),
+            buffers: DrawBuffers::default(),
             composite: None,
             stencil_tiles: Vec::new(),
         }
@@ -752,9 +681,10 @@ impl FrameDraws {
         self.draws.push(draw);
     }
 
-    /// Drops the draws.
+    /// Drops the draws, and the bindings of the meshes that dropped.
     pub(crate) fn clear(&mut self) {
         self.draws.clear();
+        self.buffers.sweep();
     }
 
     /// Makes the draws composite onto the frame as `composite` says, or
@@ -784,7 +714,7 @@ impl FrameDraws {
     /// tiles that those that clip clip to; 3D draws that clip share one
     /// stencil value of their own. `None` where there is nothing to draw
     /// into or there are no draws; [`DrawPass::end`] ends what this begins.
-    pub(crate) fn begin(&self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> Option<DrawPass<'_>> {
+    pub(crate) fn begin(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> Option<DrawPass<'_>> {
         if self.draws.is_empty() || parameters.pass_target().is_none() {
             return None;
         }
@@ -804,7 +734,15 @@ impl FrameDraws {
         } else {
             RenderPass::None
         };
-        let mut pass = DrawPass { frame: self, draws, pass: parameters.pass, skip, volume_stencil: None, composited };
+        let stencil_tiles = &self.stencil_tiles;
+        let mut pass = DrawPass {
+            buffers: &mut self.buffers,
+            draws,
+            pass: parameters.pass,
+            skip,
+            volume_stencil: None,
+            composited,
+        };
         let (volume, volume_clips) =
             pass.draws().fold((false, false), |(volume, clips), PassDraw { draw, .. }| match draw.depth {
                 DrawDepth::Volume { .. } => (true, clips || draw.clip),
@@ -812,33 +750,33 @@ impl FrameDraws {
             });
         if volume {
             pass.volume_stencil = volume_clips.then(|| parameters.stencil_mode_for_3d(gpu));
-        } else if drawing && !self.stencil_tiles.is_empty() {
-            parameters.render_tile_clipping_masks(gpu, &self.stencil_tiles);
+        } else if drawing && !stencil_tiles.is_empty() {
+            parameters.render_tile_clipping_masks(gpu, stencil_tiles);
         }
         Some(pass)
     }
 
-    /// Uploads `objects`, which all the draws bind, if there are any draws.
-    pub(crate) fn upload_one(&self, gpu: &mut dyn Gpu, objects: &mut DrawObjects, context: &mut Context) {
+    /// Uploads `mesh`, which all the draws draw, if there are any draws.
+    pub(crate) fn upload_one(&self, gpu: &mut dyn Gpu, mesh: &mut Mesh, context: &mut Context) {
         if !self.draws.is_empty() {
-            objects.upload(gpu, context);
+            mesh.upload(gpu, context);
         }
     }
 
-    /// Draws the pass's draws, all of which bind `objects`, into the open
-    /// pass of `gpu`, the context's. Returns whether none failed.
+    /// Draws the pass's draws, all of which draw `mesh`, into the open pass
+    /// of `gpu`, the context's. Returns whether none failed.
     pub(crate) fn render_one(
-        &self,
-        objects: &mut DrawObjects,
+        &mut self,
+        mesh: &mut Mesh,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
     ) -> bool {
-        let Some(pass) = self.begin(gpu, parameters) else {
+        let Some(mut pass) = self.begin(gpu, parameters) else {
             return true;
         };
         let mut drawn = true;
         for draw in pass.draws() {
-            drawn &= pass.draw(gpu, parameters, objects.into(), draw);
+            drawn &= pass.draw(gpu, parameters, mesh.into(), draw);
         }
         pass.end(gpu, parameters);
         drawn
@@ -849,7 +787,8 @@ impl FrameDraws {
 /// [`DrawPass::end`], which every pass that begins must reach.
 #[must_use = "a pass's draws end with `DrawPass::end`"]
 pub(crate) struct DrawPass<'a> {
-    frame: &'a FrameDraws,
+    /// The buffers the draws bind, with the bindings made of them.
+    buffers: &'a mut DrawBuffers,
     /// The frame's draws, none where their layer composite's pass didn't
     /// begin.
     draws: &'a [FrameDraw],
@@ -888,19 +827,19 @@ impl<'a> DrawPass<'a> {
             .map(|(index, draw)| PassDraw { index, draw })
     }
 
-    /// Draws `objects`, the GPU objects of `draw`, one of the pass's.
-    /// Returns whether it didn't fail.
+    /// Draws `mesh`, the mesh of `draw`, one of the pass's. Returns whether
+    /// it didn't fail.
     pub(crate) fn draw(
-        &self,
+        &mut self,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
-        objects: DrawObjectsMut<'_>,
+        mesh: MeshMut<'_>,
         draw: PassDraw<'_>,
     ) -> bool {
-        let DrawObjectsMut { objects, atlases } = objects;
+        let MeshMut { mesh, atlases } = mesh;
         let PassDraw { index, draw } = draw;
         if let Some(atlases) = atlases {
-            atlases.bind(objects, parameters);
+            atlases.bind(mesh, parameters);
         }
         let tile_stencil = || match draw.tile.filter(|_| draw.clip) {
             Some(tile) => parameters.stencil_mode_for_clipping(&tile.to_unwrapped()),
@@ -916,7 +855,7 @@ impl<'a> DrawPass<'a> {
                 self.volume_stencil.filter(|_| draw.clip).unwrap_or_else(StencilMode::disabled),
             ),
         };
-        objects.draw(gpu, parameters, &self.frame.uniform_buffers, depth, stencil, index as u32)
+        mesh.draw(gpu, parameters, self.buffers, depth, stencil, index as u32)
     }
 
     /// Ends the pass's draws: composites what they drew where they drew
@@ -928,8 +867,8 @@ impl<'a> DrawPass<'a> {
     }
 }
 
-/// A layer's draws of a frame, each with the part of the layer's GPU objects
-/// it binds, of the layer's type `P`.
+/// A layer's draws of a frame, each with the part of the layer's meshes it
+/// draws, of the layer's type `P`.
 pub(crate) struct LayerDraws<P = ()> {
     frame: FrameDraws,
     /// Each draw's part, at the draw's index.
@@ -968,78 +907,78 @@ impl<P: Copy> LayerDraws<P> {
     }
 
     /// The buffers the draws bind.
-    pub(crate) fn uniform_buffers_mut(&mut self) -> &mut UniformBufferArray {
-        &mut self.frame.uniform_buffers
+    pub(crate) fn buffers_mut(&mut self) -> &mut DrawBuffers {
+        &mut self.frame.buffers
     }
 
-    /// Drops the draws.
+    /// Drops the draws, and the bindings of the meshes that dropped.
     pub(crate) fn clear(&mut self) {
-        self.frame.draws.clear();
+        self.frame.clear();
         self.parts.clear();
     }
 
-    /// Uploads the GPU objects of the draws, in drawing order, which
-    /// `objects` finds in `caches`.
+    /// Uploads the meshes of the draws, in drawing order, which `meshes`
+    /// finds in `caches`.
     pub(crate) fn upload<C: ?Sized>(
         &self,
         gpu: &mut dyn Gpu,
         caches: &mut C,
-        objects: impl for<'c> Fn(&'c mut C, &FrameDraw, P) -> Option<DrawObjectsMut<'c>>,
+        meshes: impl for<'c> Fn(&'c mut C, &FrameDraw, P) -> Option<MeshMut<'c>>,
         context: &mut Context,
     ) {
         for (draw, &part) in self.frame.draws.iter().zip(&self.parts) {
-            if let Some(objects) = objects(caches, draw, part) {
-                objects.objects.upload(gpu, context);
+            if let Some(mesh) = meshes(caches, draw, part) {
+                mesh.mesh.upload(gpu, context);
             }
         }
     }
 
-    /// Draws the pass's draws, whose GPU objects `objects` finds in
-    /// `caches`, into the open pass of `gpu`, the context's.
+    /// Draws the pass's draws, whose meshes `meshes` finds in `caches`, into
+    /// the open pass of `gpu`, the context's.
     pub(crate) fn render<C: ?Sized>(
-        &self,
+        &mut self,
         caches: &mut C,
-        objects: impl for<'c> Fn(&'c mut C, &FrameDraw, P) -> Option<DrawObjectsMut<'c>>,
+        meshes: impl for<'c> Fn(&'c mut C, &FrameDraw, P) -> Option<MeshMut<'c>>,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
     ) {
-        let Some(pass) = self.frame.begin(gpu, parameters) else {
+        let LayerDraws { frame, parts } = self;
+        let Some(mut pass) = frame.begin(gpu, parameters) else {
             return;
         };
         for draw in pass.draws() {
-            match objects(caches, draw.draw(), self.parts[draw.index]) {
-                Some(objects) => {
-                    pass.draw(gpu, parameters, objects, draw);
+            match meshes(caches, draw.draw(), parts[draw.index]) {
+                Some(mesh) => {
+                    pass.draw(gpu, parameters, mesh, draw);
                 }
-                None => debug_assert!(false, "a draw of tile {:?} has no GPU objects", draw.draw().tile),
+                None => debug_assert!(false, "a draw of tile {:?} has no mesh", draw.draw().tile),
             }
         }
         pass.end(gpu, parameters);
     }
 }
 
-/// One draw's GPU objects and a frame's draws of them, with the buffers they
-/// bind.
+/// One mesh and a frame's draws of it, with the buffers they bind.
 pub(crate) struct SingleDraw {
-    pub(crate) objects: DrawObjects,
+    pub(crate) mesh: Mesh,
     pub(crate) frame: FrameDraws,
 }
 
 impl SingleDraw {
-    /// One draw of `objects`, as `draw` draws, without buffers.
+    /// One draw of `mesh`, as `draw` draws, without buffers.
     #[must_use]
-    pub(crate) fn new(objects: DrawObjects, draw: FrameDraw) -> SingleDraw {
+    pub(crate) fn new(mesh: Mesh, draw: FrameDraw) -> SingleDraw {
         let mut frame = FrameDraws::default();
         frame.push(draw);
-        SingleDraw { objects, frame }
+        SingleDraw { mesh, frame }
     }
 
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
-        self.frame.upload_one(gpu, &mut self.objects, context);
+        self.frame.upload_one(gpu, &mut self.mesh, context);
     }
 
     /// Writes `value` to the frame's uniform buffer `id`, as
-    /// [`UniformBufferArray::write_pod`] does.
+    /// [`DrawBuffers::write_pod`] does.
     pub(crate) fn write_pod<T: bytemuck::Pod>(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -1047,15 +986,13 @@ impl SingleDraw {
         value: &T,
         context: &mut Context,
     ) {
-        if self.frame.uniform_buffers.write_pod(gpu, id, value, context.device()) {
-            self.objects.drop_bindings();
-        }
+        self.frame.buffers.write_pod(gpu, id, value, context.device());
     }
 
     /// Draws the draw, if it draws in the pass, into the open pass of `gpu`,
     /// the context's. Returns whether it didn't fail.
     pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) -> bool {
-        self.frame.render_one(&mut self.objects, gpu, parameters)
+        self.frame.render_one(&mut self.mesh, gpu, parameters)
     }
 }
 
@@ -1063,7 +1000,7 @@ impl SingleDraw {
 /// depth.
 #[derive(Clone, Copy)]
 pub(crate) enum DrawGroup<'a> {
-    /// Draws of the layer's GPU objects.
+    /// Draws of the layer's meshes.
     Draws(&'a FrameDraws),
     /// What a custom layer's host draws, with objects of its own.
     Custom,
@@ -1198,18 +1135,15 @@ impl<T: TileObjects> TileDraws<T> {
         self.frame.get_or_insert_default()
     }
 
-    /// Makes the draws of `list` the frame's, as [`DrawList::finish`] does,
-    /// and drops the bindings of the draws of `tiles` where that replaced a
-    /// buffer they bind.
+    /// Makes the draws of `list` the frame's, as [`DrawList::finish`] does.
     pub(crate) fn finish<U>(
         &mut self,
         list: &mut DrawList<U, T::Part>,
-        tiles: &mut TileMap<T>,
         gpu: &mut dyn Gpu,
         context: &mut Context,
         write: impl FnOnce(&mut UniformWriter<'_, U>),
     ) {
-        finish_tiles(list, self.frame.get_or_insert_default(), tiles, gpu, context, write);
+        list.finish(self.frame.get_or_insert_default(), gpu, context, write);
     }
 }
 
@@ -1243,22 +1177,22 @@ impl<T: TileObjects> LayerDrawing<T> for TileDraws<T> {
         parameters: &mut PaintParameters<'_>,
         order: DrawOrder,
     ) {
-        if let Some(frame) = &self.frame {
+        if let Some(frame) = &mut self.frame {
             frame.render(tiles, tile_objects, gpu, parameters);
             order.step(parameters);
         }
     }
 
-    fn frame_buffers(&mut self) -> Option<&mut UniformBufferArray> {
-        Some(self.frame.as_mut()?.uniform_buffers_mut())
+    fn frame_buffers(&mut self) -> Option<&mut DrawBuffers> {
+        Some(self.frame.as_mut()?.buffers_mut())
     }
 }
 
 /// What a layer type keeps of its drawing besides its tile values, which
 /// the engine keeps ([`TileMap`]) of the tile type `T`: its draw groups of
 /// the frame, whose draws it uploads and draws in loops of its own, finding
-/// the GPU objects of the tiles' draws in their values, and any GPU objects
-/// of draws of its own.
+/// the meshes of the tiles' draws in their values, and any meshes of draws
+/// of its own.
 pub(crate) trait LayerDrawing<T> {
     /// Visits the layer's draw groups of the frame, in drawing order: from
     /// its first update with something to draw, a group of its draws, and
@@ -1266,7 +1200,7 @@ pub(crate) trait LayerDrawing<T> {
     /// a place in the layers' order and depth, even when it has no draws.
     fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>));
 
-    /// Drops the frame's draws and the GPU objects of the drawing's own
+    /// Drops the frame's draws and the meshes of the drawing's own
     /// draws, as the engine drops the tiles' values.
     fn clear(&mut self) {
         self.clear_frame();
@@ -1278,11 +1212,11 @@ pub(crate) trait LayerDrawing<T> {
     /// its place from the layer's first such frame starts the group here.
     fn begin_frame(&mut self);
 
-    /// Drops the frame's draws, keeping the GPU objects of the drawing's
+    /// Drops the frame's draws, keeping the meshes of the drawing's
     /// own draws, for a frame the layer draws nothing in.
     fn clear_frame(&mut self);
 
-    /// Uploads the GPU objects of the draw groups' draws, those of the
+    /// Uploads the meshes of the draw groups' draws, those of the
     /// tiles' draws in `tiles`.
     fn upload(&mut self, tiles: &mut TileMap<T>, gpu: &mut dyn Gpu, context: &mut Context);
 
@@ -1299,7 +1233,7 @@ pub(crate) trait LayerDrawing<T> {
 
     /// The buffers that the draws of the drawing's one draw group share,
     /// once it has the group; `None` for a drawing of other groups.
-    fn frame_buffers(&mut self) -> Option<&mut UniformBufferArray> {
+    fn frame_buffers(&mut self) -> Option<&mut DrawBuffers> {
         None
     }
 }
@@ -1313,7 +1247,7 @@ trait AnyDrawing {
     fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>));
     fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context);
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder);
-    fn frame_buffers(&mut self) -> Option<&mut UniformBufferArray>;
+    fn frame_buffers(&mut self) -> Option<&mut DrawBuffers>;
 }
 
 impl<T: 'static, D: LayerDrawing<T> + 'static> AnyDrawing for (TileMap<T>, D) {
@@ -1339,7 +1273,7 @@ impl<T: 'static, D: LayerDrawing<T> + 'static> AnyDrawing for (TileMap<T>, D) {
         drawing.render(tiles, gpu, parameters, order);
     }
 
-    fn frame_buffers(&mut self) -> Option<&mut UniformBufferArray> {
+    fn frame_buffers(&mut self) -> Option<&mut DrawBuffers> {
         self.1.frame_buffers()
     }
 }
@@ -1395,9 +1329,7 @@ impl DrapeDrawing {
         context: &mut Context,
     ) {
         if let Some(buffers) = self.0.frame_buffers() {
-            // A replaced buffer has a new epoch, which remakes the bindings
-            // of the draws.
-            let _replaced = buffers.write_pod(gpu, id, value, context.device());
+            buffers.write_pod(gpu, id, value, context.device());
         }
     }
 }

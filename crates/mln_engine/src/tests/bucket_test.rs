@@ -881,7 +881,7 @@ fn typed_vertices_take_updates_of_as_many_vertices() {
 fn a_draw_writes_an_update_of_the_vertices_it_binds() {
     use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 
-    use crate::draw::objects::{DrawGeometry, DrawObjects};
+    use crate::draw::objects::{DrawGeometry, Mesh};
     use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 
     with_context(|gpu, context| {
@@ -905,24 +905,19 @@ fn a_draw_writes_an_update_of_the_vertices_it_binds() {
             segments: vec![SegmentBase::new(0, 0)],
             instances: None,
         };
-        let mut objects = DrawObjects::new(
-            shader,
-            ColorMode::alpha_blended(),
-            CullFaceMode::disabled(),
-            geometry,
-            Default::default(),
-        );
-        objects.upload(gpu, context);
+        let mut mesh =
+            Mesh::new(shader, ColorMode::alpha_blended(), CullFaceMode::disabled(), geometry, Default::default());
+        mesh.upload(gpu, context);
         let uploaded = context.rendering_stats().buffer_updates;
 
         for x in 3..6 {
             assert!(context.update_vertices(&typed, &[vertex(x), vertex(x), vertex(x)]));
-            objects.upload(gpu, context);
+            mesh.upload(gpu, context);
             assert!(context.vertices(typed.shared()).is_some_and(|stored| !stored.needs_upload()), "{x}");
             assert_eq!(context.rendering_stats().buffer_updates, uploaded + x as usize - 2, "{x}");
         }
         // Without an update, an upload writes nothing.
-        objects.upload(gpu, context);
+        mesh.upload(gpu, context);
         assert_eq!(context.rendering_stats().buffer_updates, uploaded + 3);
     });
 }
@@ -934,7 +929,7 @@ fn a_draw_binds_the_vertices_it_reads_as_a_storage_buffer() {
     const ID: usize = crate::layers::fill_extrusion::programs::FILL_EXTRUSION_PULLED.buffer_id("wallVertices");
     use mln_gfx::{ColorMode, CullFaceMode, DrawMode};
 
-    use crate::draw::objects::{DrawGeometry, DrawObjects};
+    use crate::draw::objects::{DrawGeometry, Mesh};
     use crate::draw::vertex_attribute::{Uniforms, VertexAttributeArray};
 
     with_context(|gpu, context| {
@@ -953,30 +948,25 @@ fn a_draw_binds_the_vertices_it_reads_as_a_storage_buffer() {
             segments: vec![SegmentBase::new(0, 0)],
             instances: None,
         };
-        let mut objects = DrawObjects::new(
-            shader,
-            ColorMode::alpha_blended(),
-            CullFaceMode::back_ccw(),
-            geometry,
-            Default::default(),
-        );
-        objects.read_as_storage(ID, Some(typed.shared().clone()));
-        assert!(objects.storage_buffer(ID).is_none(), "bound before the upload");
+        let mut mesh =
+            Mesh::new(shader, ColorMode::alpha_blended(), CullFaceMode::back_ccw(), geometry, Default::default());
+        mesh.read_as_storage(ID, Some(typed.shared().clone()));
+        assert!(mesh.storage_buffer(ID).is_none(), "bound before the upload");
 
-        objects.upload(gpu, context);
+        mesh.upload(gpu, context);
         let buffer = context.upload_vertices(gpu, typed.shared()).expect("uploads");
-        assert!(buffer.is_some() && objects.storage_buffer(ID) == buffer);
+        assert!(buffer.is_some() && mesh.storage_buffer(ID) == buffer);
         let uploaded = context.rendering_stats().buffer_updates;
 
         // An update goes to the same buffer.
         assert!(context.update_vertices(&typed, &[[2; 2], [3; 2]]));
-        objects.upload(gpu, context);
+        mesh.upload(gpu, context);
         assert_eq!(context.rendering_stats().buffer_updates, uploaded + 1);
-        assert_eq!(objects.storage_buffer(ID), buffer);
+        assert_eq!(mesh.storage_buffer(ID), buffer);
 
-        objects.read_as_storage(ID, None);
-        objects.upload(gpu, context);
-        assert!(objects.storage_buffer(ID).is_none());
+        mesh.read_as_storage(ID, None);
+        mesh.upload(gpu, context);
+        assert!(mesh.storage_buffer(ID).is_none());
     });
 }
 

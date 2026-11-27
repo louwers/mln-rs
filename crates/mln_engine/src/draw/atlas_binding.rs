@@ -4,7 +4,7 @@ use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_style::types::AlignmentType;
 
 use crate::draw::context::Context;
-use crate::draw::objects::{DrawObjects, Textures};
+use crate::draw::objects::{Mesh, Textures};
 use crate::draw::store::SharedTexture;
 use crate::draw::tile_render_data::TileAtlasTextures;
 use crate::render::paint_parameters::PaintParameters;
@@ -61,10 +61,10 @@ impl AtlasBinding {
         textures
     }
 
-    /// Gives the draw the atlases' textures before it draws, and sets the
+    /// Gives the mesh the atlases' textures before it draws, and sets the
     /// samplers of the atlases, which the tile's draws share, to filter as
     /// the frame's view asks.
-    pub(crate) fn bind(&self, objects: &mut DrawObjects, parameters: &mut PaintParameters<'_>) {
+    pub(crate) fn bind(&self, mesh: &mut Mesh, parameters: &mut PaintParameters<'_>) {
         let state = parameters.view;
         let transformed = self.rotation_alignment == AlignmentType::Map || state.pitch() != 0.0;
         let linear_filter_for_icons = if self.is_text {
@@ -77,8 +77,8 @@ impl AtlasBinding {
         {
             set_samplers(parameters.context, glyph.as_ref(), icon.as_ref(), linear_filter_for_icons);
         }
-        let samples_icon = self.samples_icon(objects.shader());
-        self.set_textures(samples_icon, |slot, texture| objects.set_texture(slot, texture));
+        let samples_icon = self.samples_icon(mesh.shader());
+        self.set_textures(samples_icon, |slot, texture| mesh.set_texture(slot, texture));
     }
 
     /// Sets the atlases' textures, those of a shader that samples the icon

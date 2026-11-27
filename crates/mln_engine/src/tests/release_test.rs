@@ -81,6 +81,56 @@ fn bindings_and_geometry_go_before_what_they_were_made_of() {
 
 // The shaders and pipelines that a new pixel ratio replaces go with the
 // next destroy, and the context makes new ones for their keys.
+// Each frame binds a mesh with its own buffers, once while they and the
+// mesh's textures stay. Its bindings of the mesh go with the mesh, and all
+// of its bindings with a buffer it replaces, before that buffer goes.
+#[test]
+fn a_frames_bindings_of_a_mesh_go_with_the_mesh_and_with_its_buffers() {
+    use mln_gfx::{ColorMode, CullFaceMode, DrawMode};
+
+    use crate::draw::objects::{DrawBuffers, DrawGeometry, Mesh, Textures};
+    use crate::draw::vertex_attribute::VertexAttributeArray;
+
+    with_context(|gpu, context| {
+        let geometry = DrawGeometry {
+            vertices: VertexAttributeArray::new(),
+            vertex_count: 0,
+            mode: DrawMode::Triangles(),
+            indexes: DrawIndexes::new(vec![0, 1, 2]),
+            segments: Vec::new(),
+            instances: None,
+        };
+        let shader = ShaderKey::new(&programs::CLIPPING_MASK, []);
+        let mesh = Mesh::new(shader, ColorMode::disabled(), CullFaceMode::disabled(), geometry, Textures::default());
+        let (mut frame, mut other) = (DrawBuffers::default(), DrawBuffers::default());
+        for buffers in [&mut frame, &mut other] {
+            buffers.write_pod(gpu, PROJECTION_ID, &ProjectionUBO::default(), context.device());
+        }
+
+        let bound = frame.bind(gpu, context, &mesh).expect("the frame's bindings");
+        assert_eq!(frame.bind(gpu, context, &mesh).expect("the frame's bindings"), bound);
+        assert_ne!(other.bind(gpu, context, &mesh).expect("the other frame's bindings"), bound);
+        frame.write_pod(gpu, PROJECTION_ID, &ProjectionUBO::default(), context.device());
+        assert_eq!(frame.bind(gpu, context, &mesh).expect("the frame's bindings"), bound, "a write that fits");
+
+        // A larger value replaces the buffer, and the bindings made of it.
+        frame.write_pod(gpu, PROJECTION_ID, &[ProjectionUBO::default(); 2], context.device());
+        assert_eq!(frame.bound_meshes(), 0);
+        frame.bind(gpu, context, &mesh).expect("the frame's new bindings");
+        context.destroy_released(gpu);
+        assert!(!context.device().failed(), "the replaced buffer went after its bindings");
+
+        drop(mesh);
+        frame.sweep();
+        assert_eq!((frame.bound_meshes(), other.bound_meshes()), (0, 1));
+        other.sweep();
+        assert_eq!(other.bound_meshes(), 0);
+        drop((frame, other));
+        context.destroy_released(gpu);
+        assert!(!context.device().failed());
+    });
+}
+
 #[test]
 fn released_shaders_and_pipelines_go() {
     with_context(|gpu, context| {

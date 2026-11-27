@@ -23,23 +23,23 @@ pub(crate) mod render_hillshade_layer; // dem-heatmap
 pub(crate) mod render_line_layer;
 pub(crate) mod render_raster_layer;
 
-use crate::draw::objects::DrawObjects;
+use crate::draw::objects::Mesh;
 use crate::draw::vertex_attribute::VertexAttributeArray;
 use crate::layer::layer_drawing::BucketChanges;
 
-/// Copies the bucket's data-driven attributes into a draw again where
+/// Copies the bucket's data-driven attributes into a mesh again where
 /// `changes` says their values changed: `refresh(attrs)` reads them into its
 /// instance attributes where it has them, else into its vertex attributes,
 /// which then upload again.
 pub(crate) fn refresh_paint_attributes(
-    objects: &mut DrawObjects,
+    mesh: &mut Mesh,
     changes: BucketChanges,
     refresh: impl FnOnce(&mut VertexAttributeArray),
 ) {
     if !changes.paint {
         return;
     }
-    refresh(objects.paint_attributes_mut());
+    refresh(mesh.paint_attributes_mut());
 }
 
 #[must_use]

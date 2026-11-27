@@ -23,14 +23,12 @@ use super::{DemBindings, DrapeStacks, Drapes, Surface, TerrainCover};
 use crate::camera::View;
 use crate::draw::context::Context;
 use crate::draw::indexes::Indexes;
-use crate::draw::objects::{DrawGeometry, DrawObjects, Textures};
+use crate::draw::objects::{DrawGeometry, Mesh, Textures};
 use crate::draw::segment::SegmentBase;
 use crate::draw::store::SharedIndexes;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::SharedVertices;
-use crate::layer::layer_drawing::{
-    DrawDepth, DrawList, FrameDraw, KeptDraw, LayerDraws, TileMap, finish_tiles, tile_objects,
-};
+use crate::layer::layer_drawing::{DrawDepth, DrawList, FrameDraw, LayerDraws, TileMap, tile_objects};
 use crate::layers::render_hillshade_layer::lat_range;
 use crate::log_target;
 use crate::render::frame_projection::zero_to_one_clip_z;
@@ -73,8 +71,8 @@ struct TileUniforms {
 /// The draws of the terrain's tiles for one stack of draped layers.
 #[derive(Default)]
 struct StackDraws {
-    /// The GPU objects of each tile's draw.
-    tiles: TileMap<KeptDraw>,
+    /// The mesh of each tile's draw.
+    tiles: TileMap<Mesh>,
     /// The frame's draws of them.
     frame: LayerDraws,
     /// The frame's draws as the update makes them, with their uniforms.
@@ -212,8 +210,8 @@ impl TerrainDraws {
                     let Some(mesh) = ground_mesh.map(|index| &meshes[index]) else {
                         continue;
                     };
-                    let objects = || mesh_objects(&depth_shader, ColorMode::unblended(), mesh, cull_face_mode);
-                    entry.value.get_or_insert_with(|| KeptDraw::new(objects()))
+                    let mesh = || mesh_objects(&depth_shader, ColorMode::unblended(), mesh, cull_face_mode);
+                    entry.value.get_or_insert_with(mesh)
                 } else {
                     let drape = match set {
                         Set::Stack(stack) => {
@@ -226,16 +224,16 @@ impl TerrainDraws {
                         continue;
                     };
                     let mesh = &meshes[surface_mesh];
-                    let objects = || mesh_objects(&shader, ColorMode::alpha_blended(), mesh, cull_face_mode);
-                    let draw = entry.value.get_or_insert_with(|| KeptDraw::new(objects()));
-                    draw.objects.set_texture(DRAPE_SLOT, Some(&drape));
+                    let mesh = || mesh_objects(&shader, ColorMode::alpha_blended(), mesh, cull_face_mode);
+                    let draw = entry.value.get_or_insert_with(mesh);
+                    draw.set_texture(DRAPE_SLOT, Some(&drape));
                     draw
                 };
-                draw.objects.set_texture(GROUND_DEM_SLOT, Some(dem_texture));
+                draw.set_texture(GROUND_DEM_SLOT, Some(dem_texture));
                 let frame_draw = FrameDraw {
                     priority: index as i64,
                     depth: DrawDepth::Volume { mask: DepthMaskType::ReadWrite },
-                    ..draw.frame_draw(Some(tile.id))
+                    ..FrameDraw::new(Some(tile.id), draw.id())
                 };
                 // A stack without a light, and the surface depth's draws,
                 // draw their drapes' colors.
@@ -247,9 +245,9 @@ impl TerrainDraws {
             }
         }
         let surface_ubo = TerrainSurfaceUBO::new(&surface.props, &fog);
-        for (set, StackDraws { tiles, frame, draw_list }) in sets(&mut self.stacks, &mut self.depth, &mut self.ground) {
+        for (set, StackDraws { frame, draw_list, .. }) in sets(&mut self.stacks, &mut self.depth, &mut self.ground) {
             let light = set.stack().and_then(|stack| lights.light(stack)).map(|light| light.props).unwrap_or_default();
-            finish_tiles(draw_list, frame, tiles, gpu, context, |writer| {
+            draw_list.finish(frame, gpu, context, |writer| {
                 writer.storage(DRAWABLE_ID, |uniforms| uniforms.drawable);
                 writer.storage(PROJECTION_ID, |uniforms| uniforms.projection);
                 writer.storage(LIGHT_TILE_ID, |uniforms| uniforms.light);
@@ -288,7 +286,7 @@ impl TerrainDraws {
         Some(self.shaders.insert((variant, shaders)).1.clone())
     }
 
-    /// Uploads the GPU objects of the frame's draws.
+    /// Uploads the meshes of the frame's draws.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         for StackDraws { tiles, frame, .. } in self.stacks.iter_mut().chain(&mut self.depth).chain(&mut self.ground) {
             frame.upload(gpu, tiles, tile_objects, context);
@@ -391,14 +389,9 @@ fn mesh(meshes: &mut Vec<SharedMesh>, context: &mut Context, skirts: bool, poles
     meshes.len() - 1
 }
 
-/// The GPU objects of a tile's draw of `mesh` with `shader`, in
+/// The mesh of a tile's draw of the grid `mesh` with `shader`, in
 /// `color_mode`, culling as `cull_face_mode` says.
-fn mesh_objects(
-    shader: &ShaderKey,
-    color_mode: ColorMode,
-    mesh: &SharedMesh,
-    cull_face_mode: CullFaceMode,
-) -> DrawObjects {
+fn mesh_objects(shader: &ShaderKey, color_mode: ColorMode, mesh: &SharedMesh, cull_face_mode: CullFaceMode) -> Mesh {
     let mut vertices = VertexAttributeArray::new();
     vertices.set_shared(
         "pos",
@@ -412,5 +405,5 @@ fn mesh_objects(
         segments: vec![SegmentBase::with_lengths(0, 0, mesh.vertex_count, mesh.index_count)],
         instances: None,
     };
-    DrawObjects::new(shader.clone(), color_mode, cull_face_mode, geometry, Textures::default())
+    Mesh::new(shader.clone(), color_mode, cull_face_mode, geometry, Textures::default())
 }

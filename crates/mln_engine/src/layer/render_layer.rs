@@ -578,8 +578,8 @@ pub(crate) trait TypedLayer: Sized + 'static {
     /// the layer makes it ([`tile`](Self::tile)) until what the tile shows
     /// the layer changes.
     type Tile: 'static;
-    /// The layer's draw groups of the frame, which find the GPU objects of
-    /// the tiles' draws in their values.
+    /// The layer's draw groups of the frame, which find the meshes of the
+    /// tiles' draws in their values.
     type Drawing: LayerDrawing<Self::Tile> + Default + 'static;
 
     /// The order the layer draws its source's tiles in.

@@ -13,12 +13,12 @@ use mln_gfx::{AttributeDataType, Rgba, Size};
 
 use super::{TerrainElevation, TileGround};
 use crate::draw::context::Context;
-use crate::draw::objects::DrawObjects;
+use crate::draw::objects::Mesh;
 use crate::draw::resources::GpuTexture;
 use crate::draw::store::SharedTexture;
 use crate::draw::vertex_attribute::SharedAttribute;
 use crate::draw::vertices::{SharedVertices, TypedVertices};
-use crate::layer::layer_drawing::{DrawObjectsMut, TileObjects};
+use crate::layer::layer_drawing::{MeshMut, TileObjects};
 use crate::render::paint_parameters::OpenPass;
 use crate::tile::UnwrappedTileID;
 
@@ -110,18 +110,18 @@ pub(crate) fn height_attribute(heights: &SharedVertices) -> SharedAttribute {
     SharedAttribute::new(heights.clone(), AttributeDataType::Float, 0, size_of::<f32>() as u32)
 }
 
-/// A tile's draw whose points stand on the ground: its GPU objects, and the
+/// A tile's draw whose points stand on the ground: its mesh, and the
 /// heights of the ground under its vertices, which an attribute of theirs
 /// reads.
 pub(crate) struct StandingDraw {
-    pub(crate) objects: DrawObjects,
+    pub(crate) mesh: Mesh,
     heights: GroundHeights,
 }
 
 impl StandingDraw {
-    /// The draw of `objects`, which stands on no ground yet.
-    pub(crate) fn new(objects: DrawObjects) -> Self {
-        StandingDraw { objects, heights: GroundHeights::default() }
+    /// The draw of `mesh`, which stands on no ground yet.
+    pub(crate) fn new(mesh: Mesh) -> Self {
+        StandingDraw { mesh, heights: GroundHeights::default() }
     }
 
     /// Over `ground`, has the attribute `name` of the draw's vertices read the
@@ -143,7 +143,7 @@ impl StandingDraw {
         let heights: Vec<f32> =
             centers.iter().map(|&[x, y]| tile_ground.height(glam::Vec2::new(f32::from(x), f32::from(y)))).collect();
         if let Some(vertices) = self.heights.write(context, ground, &heights) {
-            self.objects.vertex_attributes_mut().set_shared(name, height_attribute(&vertices));
+            self.mesh.vertex_attributes_mut().set_shared(name, height_attribute(&vertices));
         }
     }
 }
@@ -151,12 +151,8 @@ impl StandingDraw {
 impl TileObjects for StandingDraw {
     type Part = ();
 
-    fn objects(&mut self, (): ()) -> Option<DrawObjectsMut<'_>> {
-        Some((&mut self.objects).into())
-    }
-
-    fn drop_bindings(&mut self) {
-        self.objects.drop_bindings();
+    fn objects(&mut self, (): ()) -> Option<MeshMut<'_>> {
+        Some((&mut self.mesh).into())
     }
 }
 

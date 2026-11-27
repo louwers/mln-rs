@@ -14,7 +14,7 @@ use crate::camera::View;
 use crate::draw::context::Context;
 use crate::draw::identity::SimpleIdentity;
 use crate::draw::indexes::DrawIndexes;
-use crate::draw::objects::{DrawGeometry, DrawObjects, Textures, raw_vertices};
+use crate::draw::objects::{DrawGeometry, Mesh, Textures, raw_vertices};
 use crate::draw::segment::SegmentBase;
 use crate::draw::vertex_attribute::Uniforms;
 use crate::layer::layer_drawing::{DrawDepth, FrameDraw, SingleDraw};
@@ -42,9 +42,8 @@ fn fullscreen_draw(shader: ShaderKey, vertex_attribute: &'static str, depth: Dra
         segments: vec![SegmentBase::with_lengths(0, 0, 4, 6)],
         instances: None,
     };
-    let objects =
-        DrawObjects::new(shader, ColorMode::alpha_blended(), CullFaceMode::disabled(), geometry, Textures::default());
-    SingleDraw::new(objects, FrameDraw { depth, ..FrameDraw::new(None, SimpleIdentity::new()) })
+    let mesh = Mesh::new(shader, ColorMode::alpha_blended(), CullFaceMode::disabled(), geometry, Textures::default());
+    SingleDraw::new(mesh, FrameDraw { depth, ..FrameDraw::new(None, SimpleIdentity::new()) })
 }
 
 /// The direction of the sun in the globe's frame, where the atmosphere traces
@@ -130,7 +129,7 @@ impl SkyPass {
                 sky_blend: projection_transition as f32,
             };
             sky.write_pod(gpu, SKY_PROPS_ID, &props, context);
-            bind_no_projection(gpu, &mut sky.frame.uniform_buffers, context);
+            bind_no_projection(gpu, &mut sky.frame.buffers, context);
         } else {
             self.sky = None;
         }
@@ -153,7 +152,7 @@ impl SkyPass {
             sun_position: sun_position(light, state, atmosphere_blend),
         };
         atmosphere.write_pod(gpu, ATMOSPHERE_PROPS_ID, &props, context);
-        bind_no_projection(gpu, &mut atmosphere.frame.uniform_buffers, context);
+        bind_no_projection(gpu, &mut atmosphere.frame.buffers, context);
     }
 
     /// The planar sky, which draws before the layers, if the frame draws it.
