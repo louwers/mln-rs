@@ -39,7 +39,7 @@ use crate::camera::{FrameProjection, MapView};
 use crate::draw::context::Context;
 use crate::layer::layer_drawing::{DrawGroup, DrawOrder, LayerDrawing, TileMap};
 use crate::layer::layer_type::LayerType;
-use crate::layer::render_layer::{LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
+use crate::layer::render_layer::{Hosted, LayerCx, LayerValues, RenderLayer, TypedLayer};
 use crate::layer::tile_input::NoTiles;
 use crate::log_target;
 use crate::render::paint_parameters::PaintParameters;
@@ -172,14 +172,14 @@ impl LayerType for Custom {
     type Input = NoTiles;
 
     fn render_layer(style: Arc<LayerStyle<Custom>>) -> Box<dyn RenderLayer> {
-        Box::new(RenderCustomLayer::new(style))
+        Hosted::<RenderCustomLayer>::boxed(style)
     }
 }
 
 pub(crate) struct RenderCustomLayer {
-    base: RenderLayerBase,
-    values: LayerValues<Custom>,
-    drawing: CustomDrawing,
+    /// The host of the layer's style when the layer was made, until a hook
+    /// gives it to the drawing ([`drawing`](Self::drawing)).
+    host: Option<Arc<dyn CustomLayerHost>>,
 }
 
 /// The layer's drawing, which keeps no tiles and no draws of its own: its
@@ -199,12 +199,13 @@ pub(crate) struct CustomDrawing {
 }
 
 impl RenderCustomLayer {
-    pub(crate) fn new(impl_: Arc<LayerStyle<Custom>>) -> Self {
-        let host = impl_.extra.get();
-        let (mut base, values) = LayerValues::new(impl_);
-        base.passes = RenderPass::Translucent;
-        let drawing = CustomDrawing { host, frame: None, used: false, updated: false };
-        RenderCustomLayer { base, values, drawing }
+    /// `drawing`, the layer's, once it holds the host the layer was made
+    /// with, unless an earlier hook gave it that host.
+    fn drawing<'a>(&mut self, drawing: &'a mut CustomDrawing) -> &'a mut CustomDrawing {
+        if let Some(host) = self.host.take() {
+            drawing.host = Some(host);
+        }
+        drawing
     }
 }
 
@@ -270,13 +271,7 @@ impl Drop for CustomDrawing {
     }
 }
 
-impl LayerDrawing for CustomDrawing {
-    type Tile = ();
-
-    fn tiles(&mut self) -> Option<&mut TileMap<()>> {
-        None
-    }
-
+impl LayerDrawing<()> for CustomDrawing {
     fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
         if self.updated {
             visit(DrawGroup::Custom);
@@ -292,9 +287,15 @@ impl LayerDrawing for CustomDrawing {
 
     fn clear_frame(&mut self) {}
 
-    fn upload(&mut self, _gpu: &mut dyn Gpu, _context: &mut Context) {}
+    fn upload(&mut self, _tiles: &mut TileMap<()>, _gpu: &mut dyn Gpu, _context: &mut Context) {}
 
-    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
+    fn render(
+        &mut self,
+        _tiles: &mut TileMap<()>,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+        order: DrawOrder,
+    ) {
         if self.updated {
             self.lend_pass(gpu, parameters);
             order.step(parameters);
@@ -304,36 +305,29 @@ impl LayerDrawing for CustomDrawing {
 
 impl TypedLayer for RenderCustomLayer {
     type Type = Custom;
+    type Tile = ();
     type Drawing = CustomDrawing;
 
-    fn parts(&self) -> Parts<'_, Self> {
-        Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
-    }
-
-    fn parts_mut(&mut self) -> PartsMut<'_, Self> {
-        PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
+    fn new(values: &LayerValues<Custom>) -> Self {
+        RenderCustomLayer { host: values.style.extra.get() }
     }
 
     /// A new host for the same layer ID is a new layer to the host: the old
     /// one goes to `ended`, to hear that the renderer stopped.
-    fn style_changed(&mut self, ended: &mut EndedHosts) {
-        let drawing = &mut self.drawing;
-        let same = drawing.host.as_ref().is_some_and(|host| self.values.style.extra.is(host));
+    fn style_changed(&mut self, cx: LayerCx<'_, Self>, ended: &mut EndedHosts) {
+        let drawing = self.drawing(cx.drawing);
+        let same = drawing.host.as_ref().is_some_and(|host| cx.values.style.extra.is(host));
         if !same {
             ended.extend(drawing.take_host());
-            drawing.host = self.values.style.extra.get();
+            drawing.host = cx.values.style.extra.get();
         }
     }
-}
 
-impl RenderLayer for RenderCustomLayer {
-    /// The layer has no properties: it only keeps drawing in the
-    /// translucent pass.
-    fn prerender(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+    fn prerender(&mut self, cx: LayerCx<'_, Self>, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        let drawing = self.drawing(cx.drawing);
         let Some(frame) = parameters.custom_layer_frame else {
             return;
         };
-        let drawing = &mut self.drawing;
         drawing.frame = Some(frame);
         let Some(host) = &drawing.host else { return };
         let lent = gpu.lend(&mut |encoder| {
@@ -345,12 +339,12 @@ impl RenderLayer for RenderCustomLayer {
         }
     }
 
-    fn leave(&mut self, ended: &mut EndedHosts) {
-        ended.extend(self.drawing.take_host());
+    fn leave(&mut self, cx: LayerCx<'_, Self>, ended: &mut EndedHosts) {
+        ended.extend(self.drawing(cx.drawing).take_host());
     }
 
-    fn lose_context(&mut self) {
-        self.drawing.lose();
+    fn lose_context(&mut self, cx: LayerCx<'_, Self>) {
+        self.drawing(cx.drawing).lose();
     }
 }
 
