@@ -41,9 +41,9 @@ use crate::layer::layer_drawing::{
 use crate::layer::layer_type::LayerType;
 use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, LayerBucket, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer, RenderLayerBase,
-    TypedLayer,
+    EvaluateCx, Evaluation, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
+use crate::layer::tile_input::Features;
 use crate::layers::heatmap::programs;
 use crate::layers::heatmap::ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO, HeatmapTexturePropsUBO};
 use crate::layout::heatmap_layout::HeatmapLayout;
@@ -164,8 +164,7 @@ impl LayerDrawing for HeatmapDrawing {
 }
 
 impl LayerType for Heatmap {
-    type Layout = HeatmapLayout;
-    type TileBucket<'a> = LayerBucket<'a, Heatmap>;
+    type Input = Features<HeatmapLayout>;
 
     fn render_layer(style: Arc<LayerStyle<Heatmap>>) -> Box<dyn RenderLayer> {
         Box::new(RenderHeatmapLayer::new(style))
@@ -319,7 +318,7 @@ impl RenderHeatmapLayer {
         for tile in render_tiles {
             let tile_id = tile.id();
 
-            let Some(render_data) = tile.bucket_for_pass(RENDER_PASS) else {
+            let Some(render_data) = tile.data_for_pass(RENDER_PASS) else {
                 drawing.tiles.drop_value(&tile_id);
                 continue;
             };
