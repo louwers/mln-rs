@@ -550,6 +550,12 @@ impl Placement for SymbolPlacement {
     }
 
     fn prepare(&mut self, layers: &[PlacingLayer], cx: &mut PrepareCx<'_>) -> Prepared {
+        // The layers the frame didn't collect let go of what they held, the
+        // tiles' feature indexes among it, and keep their allocations.
+        for layer in &mut self.layers[self.active..] {
+            layer.placement_data.clear();
+            layer.follower_data.clear();
+        }
         self.placing.clear();
         self.placing.extend_from_slice(layers);
         let longitude = cx.view.center(mln_style::geo::WrapMode::Unwrapped).longitude() as f32;
