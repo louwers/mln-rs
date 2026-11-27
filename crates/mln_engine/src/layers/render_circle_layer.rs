@@ -25,7 +25,7 @@ use crate::layer::layer_drawing::{DrawList, FrameDraw, TileDraws, UniformWriter}
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+    EvaluateCx, Evaluation, Hosted, LayerCx, LayerValues, OnTerrain, RenderLayer, TileCx, TypedLayer,
 };
 use crate::layer::tile_input::{Features, TileData};
 use crate::layers::circle::programs;
@@ -122,24 +122,16 @@ impl LayerType for Circle {
     }
 
     fn render_layer(style: Arc<LayerStyle<Circle>>) -> Box<dyn RenderLayer> {
-        Box::new(RenderCircleLayer::new(style))
+        Hosted::<RenderCircleLayer>::boxed(style)
     }
 }
 
 pub(crate) struct RenderCircleLayer {
-    base: RenderLayerBase,
-    values: LayerValues<Circle>,
-    drawing: TileDraws<StandingDraw>,
     /// The frame's draws as the update makes them.
     draw_list: DrawList<CircleUniforms>,
 }
 
 impl RenderCircleLayer {
-    pub(crate) fn new(impl_: Arc<LayerStyle<Circle>>) -> Self {
-        let (base, values) = LayerValues::new(impl_);
-        RenderCircleLayer { base, values, drawing: TileDraws::default(), draw_list: DrawList::default() }
-    }
-
     /// The entries in the layer's storage buffers of the draw of `tile_id`,
     /// whose bucket's binders are `binders`, with the layer's values `layer`:
     /// its matrix, the scales of its circles' extrusion, and the
@@ -221,16 +213,13 @@ struct CircleUniforms {
 
 impl TypedLayer for RenderCircleLayer {
     type Type = Circle;
+    type Tile = StandingDraw;
     type Drawing = TileDraws<StandingDraw>;
 
     const TERRAIN: OnTerrain = OnTerrain::Stands { hides_behind_ground: true };
 
-    fn parts(&self) -> Parts<'_, Self> {
-        Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
-    }
-
-    fn parts_mut(&mut self) -> PartsMut<'_, Self> {
-        PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
+    fn new(_values: &LayerValues<Circle>) -> Self {
+        RenderCircleLayer { draw_list: DrawList::default() }
     }
 
     fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
@@ -247,96 +236,97 @@ impl TypedLayer for RenderCircleLayer {
         }
     }
 
-    /// Makes the frame's draws of the layer, one of each of its tiles, which
-    /// it builds for a tile it keeps none of, and writes the layer's buffers
-    /// they read.
+    /// The draw of a tile's circles.
+    fn tile(
+        &mut self,
+        cx: &mut TileCx<'_, '_, Self>,
+        tile: FrameTile<'_, Circle>,
+        _data: TileData<'_, Circle>,
+    ) -> Option<StandingDraw> {
+        let render_data = tile.data_for_pass(RENDER_PASS)?;
+        let bucket = render_data.bucket;
+        let binders = bucket.paint_property_binders.get(&cx.base.style.base().id)?;
+        let geometry = render_data.geometry();
+        if bucket.vertices.is_empty() {
+            return None;
+        }
+        let (vertices, indexes) =
+            (bucket_vertices(geometry, &bucket.vertices)?, bucket_indexes(geometry, &bucket.triangles)?);
+        let context = &mut *cx.parameters.context;
+        let paint =
+            paint_vertices(context, geometry, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state());
+        let mut uniforms = Uniforms::default();
+        let mut attrs = VertexAttributeArray::new();
+        binders.bind(&cx.values.evaluated.paint, paint.as_ref(), &mut attrs, &mut uniforms);
+        attrs.set_shared(
+            "pos",
+            SharedAttribute::new(
+                vertices,
+                AttributeDataType::Short2,
+                offset_of!(CircleLayoutVertex, a1) as u32,
+                size_of::<CircleLayoutVertex>() as u32,
+            ),
+        );
+        let vertex_count = if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() };
+        let objects = DrawObjects::new(
+            context.shader_key(&programs::CIRCLE, uniforms, cx.base.projection_variant),
+            ColorMode::alpha_blended(),
+            CullFaceMode::disabled(),
+            DrawGeometry {
+                vertices: attrs,
+                vertex_count,
+                mode: DrawMode::Triangles(),
+                indexes: indexes.into(),
+                segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
+                instances: None,
+            },
+            Textures::default(),
+        );
+        Some(StandingDraw::new(objects))
+    }
+
+    /// Makes the frame's draws of the layer, one of each of its tiles, and
+    /// writes the layer's buffers they read.
     fn update_draws(
         &mut self,
+        cx: LayerCx<'_, Self>,
         gpu: &mut dyn Gpu,
         paint_parameters: &mut PaintParameters<'_>,
         render_tiles: &[FrameTile<'_, Circle>],
     ) {
-        let layer_id = self.base.style.base().id.as_str();
-        let layer = &*self.values.evaluated;
+        let layer_id = cx.base.style.base().id.as_str();
+        let layer = &*cx.values.evaluated;
         let evaluated = &layer.paint;
         // Over terrain, the circles stand on the frame's ground and hide
         // behind it.
         let ground = paint_parameters.ground.clone();
         // The draws keep the order they're pushed in, the tiles'.
-        let order = self.drawing.frame_mut().id();
+        let order = cx.drawing.frame_mut().id();
         for tile in render_tiles {
             let tile_id = tile.id();
-            let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
-                continue;
-            };
-
-            let render_data = tile.data_for_pass(RENDER_PASS);
-            let Some(render_data) = render_data else {
-                *entry.value = None;
+            let Some(render_data) = tile.data_for_pass(RENDER_PASS) else {
                 continue;
             };
             let bucket = render_data.bucket;
             let Some(binders) = bucket.paint_property_binders.get(layer_id) else {
                 continue;
             };
-            let geometry = render_data.geometry();
-            let paint = |context: &mut _| {
-                paint_vertices(
-                    context,
-                    geometry,
-                    &binders.interleaved_vertex_buffer,
-                    binders.depends_on_feature_state(),
-                )
+            let Some(mut entry) = cx.tiles.entry(&tile_id) else {
+                continue;
             };
-
-            // A draw built from another bucket goes.
-            entry.set_bucket(render_data.id);
-
             // The draw's attributes read the bucket's vertices in the
             // context's store, which upload again when they change.
             let changes = entry.take_changes();
-            let context = &mut *paint_parameters.context;
-            if let Some(cached) = entry.value.as_mut() {
-                refresh_paint_attributes(&mut cached.objects, changes, |attrs| {
-                    binders.bind(evaluated, paint(context).as_ref(), attrs, &mut Uniforms::default());
-                });
-            } else if !bucket.vertices.is_empty()
-                && let (Some(vertices), Some(indexes)) =
-                    (bucket_vertices(geometry, &bucket.vertices), bucket_indexes(geometry, &bucket.triangles))
-            {
-                let mut uniforms = Uniforms::default();
-                let mut attrs = VertexAttributeArray::new();
-                binders.bind(evaluated, paint(context).as_ref(), &mut attrs, &mut uniforms);
-                attrs.set_shared(
-                    "pos",
-                    SharedAttribute::new(
-                        vertices,
-                        AttributeDataType::Short2,
-                        offset_of!(CircleLayoutVertex, a1) as u32,
-                        size_of::<CircleLayoutVertex>() as u32,
-                    ),
-                );
-                let vertex_count = if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() };
-                let objects = DrawObjects::new(
-                    context.shader_key(&programs::CIRCLE, uniforms, self.base.projection_variant),
-                    ColorMode::alpha_blended(),
-                    CullFaceMode::disabled(),
-                    DrawGeometry {
-                        vertices: attrs,
-                        vertex_count,
-                        mode: DrawMode::Triangles(),
-                        indexes: indexes.into(),
-                        segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
-                        instances: None,
-                    },
-                    Textures::default(),
-                );
-                *entry.value = Some(StandingDraw::new(objects));
-            }
-
             let Some(draw) = entry.value.as_mut() else {
                 continue;
             };
+            let context = &mut *paint_parameters.context;
+            refresh_paint_attributes(&mut draw.objects, changes, |attrs| {
+                let geometry = render_data.geometry();
+                let buffer = &binders.interleaved_vertex_buffer;
+                let paint = paint_vertices(context, geometry, buffer, binders.depends_on_feature_state());
+                binders.bind(evaluated, paint.as_ref(), attrs, &mut Uniforms::default());
+            });
             let ground = ground.as_deref();
             draw.stand(context, ground, tile_id.to_unwrapped(), "ground_height", &bucket.centers);
             draw.objects.set_texture(GROUND_DEPTH_SLOT, ground.and_then(FrameGround::depth));
@@ -344,16 +334,15 @@ impl TypedLayer for RenderCircleLayer {
             self.draw_list.push(draw, Self::uniforms(layer, &tile_id, binders, paint_parameters));
         }
 
-        self.drawing.finish(&mut self.draw_list, gpu, paint_parameters.context, |writer| {
+        cx.drawing.finish(&mut self.draw_list, cx.tiles, gpu, paint_parameters.context, |writer| {
             Self::write_uniforms(layer, writer);
         });
     }
-}
 
-impl RenderLayer for RenderCircleLayer {
     // query
     fn query_intersects_feature(
         &self,
+        values: &LayerValues<Circle>,
         region: &QueryRegion<'_>,
         feature: &dyn mln_style::feature::GeometryTileFeature,
         geometry: &mln_style::feature::GeometryCollection,
@@ -364,7 +353,7 @@ impl RenderLayer for RenderCircleLayer {
         let QueryRegion { geometry: query_geometry, screen, ground, view, projector, pixels_to_tile_units, .. } =
             *region;
         let zoom = view.zoom() as f32;
-        let evaluated = &self.values.evaluated.paint;
+        let evaluated = &values.evaluated.paint;
         // Translate query geometry
         let translated = FeatureIndex::translate_query_geometry(
             query_geometry,
