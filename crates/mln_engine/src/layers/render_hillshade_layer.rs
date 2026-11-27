@@ -1,13 +1,12 @@
 // Each DEM tile is first drawn into a target of its own by the prepare
 // shader (slopes from the DEM), then the tile's draw, with the quads of the
-// tile's mask, shades that texture. The layer keeps the targets per tile
-// contents' id (`dem_targets`), each with the generation of the DEM's border
-// it was made at, which outlive the draws that a new mask builds again. The
-// slopes depend on nothing but the DEM and its tile's zoom, so the layer
+// tile's mask, shades that texture. The tile's value keeps the target, with
+// the id of the tile's contents and the generation of the DEM's border it
+// was made at, which the tile's next value takes while they are the same.
+// The slopes depend on nothing but the DEM and its tile's zoom, so the layer
 // draws into each target until it holds them (`Target::holds`): once, unless
 // the frame that drew them failed.
 
-use std::collections::hash_map::Entry;
 use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -23,7 +22,6 @@ use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, Size};
 use mln_style::color::Color;
 use mln_style::constants::EXTENT;
 use mln_style::geo::LatLng;
-use mln_style::hash::{HashMap, HashSet};
 use mln_style::layer::LayerStyle;
 use mln_style::layers::Hillshade;
 use mln_style::layers::hillshade_layer_properties::HillshadePaintProperties;
@@ -73,9 +71,18 @@ impl LayerType for Hillshade {
     }
 }
 
+/// What the layer keeps of a tile: the draw that shades its DEM's slopes,
+/// and the target they are prepared in.
+pub(crate) struct HillshadeTile {
+    mesh: Mesh,
+    dem: DemTarget,
+}
+
 /// What the layer keeps of a tile's DEM: the target its slopes are
 /// prepared in, and the draw that prepares them.
 struct DemTarget {
+    /// The id of the tile's contents.
+    id: SimpleIdentity,
     target: Target,
     /// The DEM, which `prepare` samples.
     _dem: SharedTexture,
@@ -95,10 +102,6 @@ pub(crate) struct RenderHillshadeLayer {
     static_data_indices: Option<SharedIndexes>,
     globe_meshes: GlobeTileMeshCache<RasterLayoutVertex>,
 
-    /// Each DEM's target, by the id of its tile's contents.
-    dem_targets: HashMap<SimpleIdentity, DemTarget>,
-    /// The contents of the frame's tiles, which keep their targets.
-    live_dems: HashSet<SimpleIdentity>,
     /// The illumination of the evaluation the draws last drew with, before
     /// a viewport anchor turns it by the map's bearing.
     illumination: Option<(Arc<EvaluatedLayer<Hillshade>>, Illumination)>,
@@ -236,26 +239,25 @@ fn static_quad<'a>(
     )
 }
 
-/// The target of the slopes of `dem`, the DEM of the tile `tile_id`,
-/// of a source of `maxzoom`, in `dem_targets`, which this makes where it has
-/// none made at the DEM's border's generation, drawn over `quad`, the static
-/// data's ([`static_quad`]).
-fn dem_target<'a>(
-    dem_targets: &'a mut HashMap<SimpleIdentity, DemTarget>,
+/// The target of the slopes of `dem`, the DEM of the tile `tile_id`, of a
+/// source of `maxzoom`: `previous`, if that was made of the same DEM at its
+/// border's generation, or a new one, drawn over `quad`, the static data's
+/// ([`static_quad`]).
+fn dem_target(
+    previous: Option<DemTarget>,
     context: &mut Context,
     dem: &DemContents,
     tile_id: &UnwrappedTileID,
     maxzoom: u8,
     (vertices, indexes): (&SharedVertices, &SharedIndexes),
-) -> &'a mut DemTarget {
-    match dem_targets.entry(dem.id()) {
-        Entry::Occupied(entry) if entry.get().generation == dem.generation() => entry.into_mut(),
-        entry => {
+) -> DemTarget {
+    match previous {
+        Some(previous) if previous.id == dem.id() && previous.generation == dem.generation() => previous,
+        _ => {
             let shader =
                 context.shader_key(&programs::HILLSHADE_PREPARE, Uniforms::default(), ProjectionVariant::Mercator);
             let attrs = hillshade_vertex_attributes(vertices);
-            let target = DemTarget::new(context, dem, tile_id, maxzoom, &shader, attrs, indexes);
-            entry.insert_entry(target).into_mut()
+            DemTarget::new(context, dem, tile_id, maxzoom, &shader, attrs, indexes)
         }
     }
 }
@@ -268,7 +270,7 @@ fn lit_by_bearing(evaluated: &EvaluatedLayer<Hillshade>) -> bool {
 
 impl TypedLayer for RenderHillshadeLayer {
     type Type = Hillshade;
-    type Tile = Mesh;
+    type Tile = HillshadeTile;
     const TERRAIN: OnTerrain = OnTerrain::Drapes;
     // A tile's draw holds its mask's geometry and samples its DEM's render
     // target, whose sampler each frame sets: nothing of the style's values.
@@ -280,8 +282,6 @@ impl TypedLayer for RenderHillshadeLayer {
             static_data_shared_vertices: None,
             static_data_indices: None,
             globe_meshes: GlobeTileMeshCache::new(),
-            dem_targets: HashMap::default(),
-            live_dems: HashSet::default(),
             illumination: None,
         }
     }
@@ -316,32 +316,27 @@ impl TypedLayer for RenderHillshadeLayer {
         Evaluation { drapes_by_bearing: lit_by_bearing(evaluated), ..evaluation }
     }
 
-    /// The draw that shades the slopes of a tile's DEM, which makes the
-    /// DEM's target if the layer has none of it; none for a tile
-    /// without a DEM to draw.
+    /// The draw that shades the slopes of a tile's DEM, with the DEM's
+    /// target of the tile's previous value where that is of the same DEM,
+    /// or a new one; none for a tile without a DEM to draw.
     fn tile(
         &mut self,
         cx: &mut TileCx<'_, '_, Self>,
         tile: FrameTile<'_, Hillshade>,
         dem: TileData<'_, Hillshade>,
-    ) -> Option<Mesh> {
+        previous: Option<HillshadeTile>,
+    ) -> Option<HillshadeTile> {
         if !dem.has_data() {
             return None;
         }
-        let RenderHillshadeLayer {
-            maxzoom,
-            static_data_shared_vertices,
-            static_data_indices,
-            globe_meshes,
-            dem_targets,
-            ..
-        } = self;
+        let RenderHillshadeLayer { maxzoom, static_data_shared_vertices, static_data_indices, globe_meshes, .. } = self;
         let context = &mut *cx.context;
         let hillshade_shader =
             context.shader_key(&programs::HILLSHADE, Uniforms::default(), cx.base.projection_variant);
         let quad = static_quad(static_data_shared_vertices, static_data_indices, context);
         let tile_id = tile.draw_id();
-        let target = dem_target(dem_targets, context, dem, &tile_id.to_unwrapped(), *maxzoom, quad);
+        let previous = previous.map(|previous| previous.dem);
+        let target = dem_target(previous, context, dem, &tile_id.to_unwrapped(), *maxzoom, quad);
         let target_texture = target.target.texture();
 
         let masking = &dem.masking;
@@ -385,11 +380,11 @@ impl TypedLayer for RenderHillshadeLayer {
             geometry,
             textures,
         );
-        Some(mesh)
+        Some(HillshadeTile { mesh, dem: target })
     }
 
-    /// Makes the target of each DEM it has none of, pushes the draw that
-    /// prepares the slopes into each target that doesn't hold them, and
+    /// Pushes the draw that prepares the slopes into each target of the
+    /// tiles' values that doesn't hold them, and
     /// pushes the frame's draws of the layer, one of each of its tiles,
     /// which shade the slopes. In a drape that the surface shades
     /// ([`LayerFrame::drape_lit`]), they draw the slopes as they were
@@ -414,16 +409,14 @@ impl TypedLayer for RenderHillshadeLayer {
         let mut illumination = None;
         for tile in render_tiles {
             let tile_id = tile.draw_id();
-            let Some(dem) = tile.data().filter(|dem| dem.has_data()) else {
+            if !tile.data().is_some_and(DemContents::has_data) {
                 cx.tiles.drop_value(&tile.id());
                 continue;
-            };
-            let Some(entry) = cx.tiles.entry(&tile.id()) else {
+            }
+            let Some(HillshadeTile { mesh: kept, dem: target }) = cx.tiles.get_mut(&tile.id()) else {
                 continue;
             };
             let context = &mut *cx.context;
-            let quad = static_quad(&mut self.static_data_shared_vertices, &mut self.static_data_indices, context);
-            let target = dem_target(&mut self.dem_targets, context, dem, &tile_id.to_unwrapped(), self.maxzoom, quad);
             if !target.target.holds(context) {
                 out.target(&target.target).push(&target.prepare, Draw::DEFAULT, target.blocks);
             }
@@ -437,11 +430,6 @@ impl TypedLayer for RenderHillshadeLayer {
                 });
             }
 
-            let Some(kept) = entry.value.as_ref() else {
-                continue;
-            };
-            // The DEM's target is made again with its generation.
-            kept.set_texture(context, IMAGE_SLOT, Some(target_texture));
             let draw = Draw { order: kept.seq(), ..Draw::DEFAULT };
             let Illumination { num_lights, .. } = *illumination
                 .get_or_insert_with(|| Self::illumination(&mut self.illumination, &cx.values.evaluated, cx.frame));
@@ -456,21 +444,11 @@ impl TypedLayer for RenderHillshadeLayer {
         }
     }
 
-    /// Keeps the source's maximum zoom, which the DEMs' preparation reads,
-    /// and drops the targets of the tiles the frame doesn't draw, in every
-    /// frame, including one the layer draws nothing in.
-    fn update(&mut self, cx: UpdateCx<'_, '_, Self>, tiles: &[FrameTile<'_, Hillshade>]) {
+    /// Keeps the source's maximum zoom, which the DEMs' preparation reads.
+    fn update(&mut self, cx: UpdateCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Hillshade>]) {
         if let Some(max_zoom) = cx.parameters.source.and_then(RenderSource::max_zoom) {
             self.maxzoom = max_zoom;
         }
-        let live_dems = &mut self.live_dems;
-        live_dems.clear();
-        live_dems.extend(tiles.iter().filter_map(|tile| Some(tile.data()?.id())));
-        self.dem_targets.retain(|id, _| live_dems.contains(id));
-    }
-
-    fn release(&mut self) {
-        self.dem_targets.clear();
     }
 }
 
@@ -488,7 +466,7 @@ impl DemTarget {
         attrs: VertexAttributeArray,
         indexes: &SharedIndexes,
     ) -> DemTarget {
-        let generation = dem.generation();
+        let (dem_contents_id, generation) = (dem.id(), dem.generation());
         let (tilesize, stride, encoding, dem_image) = {
             let dem = dem.dem();
             (dem.dim as u16, dem.stride, dem.encoding, dem.image().clone())
@@ -534,7 +512,7 @@ impl DemTarget {
             unpack_scale: unpack.scale,
             ..HillshadePrepareTilePropsUBO::default()
         };
-        DemTarget { target, _dem: dem, prepare, blocks: (draw_ubo, tile_props), generation }
+        DemTarget { id: dem_contents_id, target, _dem: dem, prepare, blocks: (draw_ubo, tile_props), generation }
     }
 }
 
