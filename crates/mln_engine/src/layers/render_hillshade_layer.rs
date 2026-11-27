@@ -36,13 +36,13 @@ use crate::buckets::raster_bucket::{MaskQuads, RasterLayoutVertex};
 use crate::draw::context::Context;
 use crate::draw::identity::SimpleIdentity;
 use crate::draw::indexes::{DrawIndexes, Indexes, SharedIndexes};
-use crate::draw::objects::{DrawGeometry, DrawObjects, Textures};
+use crate::draw::objects::{DrawGeometry, Mesh, Textures};
 use crate::draw::segment::SegmentBase;
 use crate::draw::store::SharedTexture;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::SharedVertices;
 use crate::layer::bucket_geometry::copied_vertices;
-use crate::layer::layer_drawing::{DrawList, FrameDraw, KeptDraw, SingleDraw, TileDraws};
+use crate::layer::layer_drawing::{DrawList, FrameDraw, SingleDraw, TileDraws};
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::render_layer::{
     EvaluateCx, Evaluation, Hosted, LayerCx, LayerValues, OnTerrain, RenderLayer, TileCx, TypedLayer, UpdateCx,
@@ -294,8 +294,8 @@ fn lit_by_bearing(evaluated: &EvaluatedLayer<Hillshade>) -> bool {
 
 impl TypedLayer for RenderHillshadeLayer {
     type Type = Hillshade;
-    type Tile = KeptDraw;
-    type Drawing = TileDraws<KeptDraw>;
+    type Tile = Mesh;
+    type Drawing = TileDraws<Mesh>;
     const TERRAIN: OnTerrain = OnTerrain::Drapes;
     // A tile's draw holds its mask's geometry and samples its DEM's render
     // target, whose sampler each frame sets: nothing of the style's values.
@@ -358,7 +358,7 @@ impl TypedLayer for RenderHillshadeLayer {
         cx: &mut TileCx<'_, '_, Self>,
         tile: FrameTile<'_, Hillshade>,
         dem: TileData<'_, Hillshade>,
-    ) -> Option<KeptDraw> {
+    ) -> Option<Mesh> {
         if !dem.has_data() {
             return None;
         }
@@ -412,14 +412,9 @@ impl TypedLayer for RenderHillshadeLayer {
         };
         let mut textures = Textures::default();
         textures[IMAGE_SLOT] = Some(render_target_texture.clone());
-        let objects = DrawObjects::new(
-            hillshade_shader,
-            ColorMode::alpha_blended(),
-            CullFaceMode::disabled(),
-            geometry,
-            textures,
-        );
-        Some(KeptDraw::new(objects))
+        let mesh =
+            Mesh::new(hillshade_shader, ColorMode::alpha_blended(), CullFaceMode::disabled(), geometry, textures);
+        Some(mesh)
     }
 
     /// Makes the render target of each DEM it has none of, which prepares
@@ -474,8 +469,8 @@ impl TypedLayer for RenderHillshadeLayer {
                 continue;
             };
             // The DEM's render target is made again with its generation.
-            kept.objects.set_texture(IMAGE_SLOT, Some(render_target_texture));
-            let draw = kept.frame_draw(Some(tile_id));
+            kept.set_texture(IMAGE_SLOT, Some(render_target_texture));
+            let draw = FrameDraw::new(Some(tile_id), kept.id());
             let Illumination { num_lights, .. } = *illumination.get_or_insert_with(|| {
                 Self::illumination(&mut self.illumination, &cx.values.evaluated, paint_parameters)
             });
@@ -485,7 +480,7 @@ impl TypedLayer for RenderHillshadeLayer {
             self.draw_list.push(draw, uniforms);
         }
 
-        cx.drawing.finish(&mut self.draw_list, cx.tiles, gpu, paint_parameters.context, |writer| {
+        cx.drawing.finish(&mut self.draw_list, gpu, paint_parameters.context, |writer| {
             if let Some(Illumination { props, .. }) = &illumination {
                 writer.uniform(PROPS_ID, props);
             }
@@ -604,13 +599,12 @@ impl DemTarget {
         };
         let mut textures = Textures::default();
         textures[IMAGE_SLOT] = Some(dem.clone());
-        let objects =
-            DrawObjects::new(shader.clone(), ColorMode::unblended(), CullFaceMode::disabled(), geometry, textures);
-        let mut prepare = SingleDraw::new(objects, FrameDraw::new(None, SimpleIdentity::new()));
+        let mesh = Mesh::new(shader.clone(), ColorMode::unblended(), CullFaceMode::disabled(), geometry, textures);
+        let mut prepare = SingleDraw::new(mesh, FrameDraw::new(None, SimpleIdentity::new()));
         let extent = f64::from(EXTENT);
         let m =
             orthographic(0.0, extent, -extent, 0.0, -1.0, 1.0) * DMat4::from_translation(DVec3::new(0.0, -extent, 0.0));
-        bind_no_projection(gpu, &mut prepare.frame.uniform_buffers, context);
+        bind_no_projection(gpu, &mut prepare.frame.buffers, context);
         let draw_ubo = HillshadePrepareDrawableUBO { matrix: cast_matrix(&m) };
         prepare.write_pod(gpu, PREPARE_DRAWABLE_ID, &draw_ubo, context);
         let unpack = DemUnpack::of(encoding);
