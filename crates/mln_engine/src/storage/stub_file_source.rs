@@ -17,7 +17,7 @@ use crate::storage::response::Response;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResponseType {
-    /// Requests wait for a [`poll`](StubFileSource::poll), which the waker
+    /// Requests wait for the stub to be polled, which the waker
     /// asks for.
     Asynchronous,
     /// Requests are answered inside `load`.
@@ -29,7 +29,7 @@ pub enum ResponseType {
 /// What answers a request: its response, or `None` to answer it later.
 type Answer = Arc<dyn Fn(&Resource) -> Option<Response> + Send + Sync>;
 
-/// What a stub runs when it wants a [`poll`](StubFileSource::poll).
+/// What a stub runs when it wants to be polled.
 pub(crate) type Waker = Arc<dyn Fn() + Send + Sync>;
 
 struct Pending {
