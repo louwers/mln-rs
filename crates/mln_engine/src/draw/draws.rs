@@ -7,7 +7,10 @@
 //! with the values of its program's blocks of each draw ([`DrawBlocks`]),
 //! and, for a draw of a tile, the tile's projection. The blocks the group's
 //! draws share go in once ([`Group::block`]), and the group may composite
-//! onto the frame as one surface ([`Group::composite`]). The engine then
+//! onto the frame as one surface ([`Group::composite`]). A layer can also
+//! push draws into textures of its own ([`Draws::target`]), which its draws
+//! of the frame sample, and have the frame lend it the backend's commands
+//! at its time in the frame ([`Draws::lend`]). The engine then
 //! sorts the draws, writes the buffers they read once for the group, with
 //! a drape's paint parameters where the frame is a drape's, uploads their
 //! meshes, places the group in the layers' order and depth, and draws it in
@@ -15,6 +18,7 @@
 //! where its draws clip. A layer sees its frame as a [`LayerFrame`]: the
 //! map's, or a drape's.
 
+use std::any::Any;
 use std::ops::Range;
 use std::rc::Rc;
 
@@ -33,6 +37,8 @@ use crate::camera::{ProjectionData, View, ViewportMode};
 use crate::draw::context::Context;
 use crate::draw::identity::SimpleIdentity;
 use crate::draw::objects::{DrawBuffers, Mesh};
+use crate::draw::target::Target;
+use crate::layers::custom::CustomLayerFrame;
 use crate::render::layer_composite::Composite;
 use crate::render::light::EvaluatedLight;
 use crate::render::paint_parameters::{Composited, PaintParameters, StencilClear, TransformParameters};
@@ -621,18 +627,53 @@ impl Group {
     }
 }
 
+/// When a frame lends a layer the backend's commands ([`Draws::lend`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LendAt {
+    /// Before the frame's passes, after the layer drew into its targets
+    /// ([`Draws::target`]): the frame's commands outside a pass.
+    BeforePasses,
+    /// In the frame's translucent pass, at the layer's place in the layers'
+    /// order and depth, after the layer's draws there: the open pass.
+    Pass,
+}
+
+/// What a frame lends a layer
+/// ([`TypedLayer::lend`](crate::layer::render_layer::TypedLayer::lend)).
+pub(crate) struct Lent<'a> {
+    /// The backend's commands, as its `Gpu` lends them
+    /// ([`Gpu::lend`]): before the passes `mln_vulkan::CustomLayerEncoder`,
+    /// `mln_mtl::CustomLayerEncoder`, `mln_gl::CustomLayerEncoder`,
+    /// `mln_webgpu::CustomLayerEncoder` or `mln_d3d12::CustomLayerEncoder`,
+    /// and in a pass the same crate's `CustomLayerPass`, whose docs say what
+    /// the layer may change.
+    pub(crate) raw: &'a mut dyn Any,
+    /// The frame, and where it draws the map.
+    pub(crate) frame: &'a CustomLayerFrame,
+    /// The depth that the frame's 2D layers write at the layer's place in
+    /// the layers' order, in a pass; `None` before the passes.
+    pub(crate) layer_depth: Option<f64>,
+}
+
 /// A layer's draws of a frame, the map's or a drape's, which the engine
 /// keeps between frames: its main group, which takes a place in the layers'
 /// order and depth from the first frame that the layer has something to
-/// draw in, even with no draws.
+/// draw in, even with no draws; a group of draws into each target of the
+/// layer's that the frame draws into ([`target`](Self::target)); and where
+/// the frame lends the layer the backend's commands ([`lend`](Self::lend)).
 #[derive(Default)]
 pub(crate) struct Draws {
     main: Group,
-    /// The draws into the layer's render target, which the layer draws
-    /// itself ([`OwnGpuWork::Targets`]).
-    ///
-    /// [`OwnGpuWork::Targets`]: crate::layer::render_layer::OwnGpuWork::Targets
-    own_target: Group,
+    /// The groups of the draws into the layer's targets, each with its
+    /// target: the frame's, in the order the layer first pushed into them,
+    /// then those of the last frame that the frame hasn't drawn into yet,
+    /// which keep their buffers for it until the draws are written.
+    targets: Vec<(Target, Group)>,
+    /// How many of `targets` are the frame's.
+    frame_targets: usize,
+    /// Whether the frame lends the layer the backend's commands, at each
+    /// [`LendAt`].
+    lends: [bool; 2],
     /// Whether a frame started the draws, from which the main group takes
     /// its place.
     started: bool,
@@ -645,31 +686,71 @@ impl Draws {
         &mut self.main
     }
 
-    /// The draws into the layer's render target, which draw before the
-    /// frame's passes, and which the layer draws into its target itself.
-    ///
-    /// Temporary, as [`OwnGpuWork`] says.
-    ///
-    /// [`OwnGpuWork`]: crate::layer::render_layer::OwnGpuWork
-    pub(crate) fn own_target(&mut self) -> &mut Group {
-        &mut self.own_target
+    /// The group of the frame's draws into `target`, a target of the
+    /// layer's own. Once the frame's draws are written, the engine clears
+    /// the target and draws the group into it, before the frame's passes
+    /// or, in a drape, the drape's: in the opaque pass and then the
+    /// translucent one, without depth from the frame, and without clipping
+    /// to tiles. A target the frame asks for draws, cleared, even without
+    /// draws. The frame's draws sample what it drew.
+    pub(crate) fn target(&mut self, target: &Target) -> &mut Group {
+        let frame = self.frame_targets;
+        let at = match self.targets.iter().position(|(given, _)| given == target) {
+            Some(at) if at < frame => return &mut self.targets[at].1,
+            Some(at) => at,
+            None => {
+                self.targets.push((target.clone(), Group::default()));
+                self.targets.len() - 1
+            }
+        };
+        self.targets.swap(at, frame);
+        self.frame_targets += 1;
+        &mut self.targets[frame].1
+    }
+
+    /// Makes the frame lend the layer the backend's commands `at` its time
+    /// in the frame
+    /// ([`TypedLayer::lend`](crate::layer::render_layer::TypedLayer::lend)).
+    pub(crate) fn lend(&mut self, at: LendAt) -> &mut Self {
+        self.lends[at as usize] = true;
+        self
+    }
+
+    /// Whether the frame lends the layer the backend's commands `at` its
+    /// time in the frame.
+    #[must_use]
+    pub(crate) fn lends(&self, at: LendAt) -> bool {
+        self.lends[at as usize]
     }
 
     /// Starts the draws of a frame the layer has something to draw in: none
     /// yet, and the main group from now on takes its place.
     pub(crate) fn begin(&mut self) {
         self.started = true;
-        self.clear();
+        self.reset();
     }
 
-    /// Drops the frame's draws. The main group keeps its place.
+    /// Drops the frame's draws, and the groups of the draws into targets.
+    /// The main group keeps its place.
     pub(crate) fn clear(&mut self) {
-        self.own_target.clear();
+        self.reset();
+        self.targets.clear();
+    }
+
+    /// Drops the frame's draws and lends.
+    fn reset(&mut self) {
+        for (_, group) in &mut self.targets {
+            group.clear();
+        }
+        self.frame_targets = 0;
+        self.lends = [false; 2];
         self.main.clear();
     }
 
-    /// See [`Group::finish`], for every group: the draws into the layer's
-    /// target, which don't clip, first.
+    /// See [`Group::finish`], for every group: the draws into the frame's
+    /// targets, which don't clip, first, whose targets then hold what the
+    /// draws draw ([`Context::declare_target`]). The groups of the targets
+    /// the frame doesn't draw into go.
     pub(crate) fn finish(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -677,8 +758,24 @@ impl Draws {
         paint_params: Option<&GlobalPaintParamsUBO>,
         tiles: impl IntoIterator<Item = UnwrappedTileID>,
     ) {
-        self.own_target.finish(gpu, context, paint_params, []);
+        self.finish_targets(gpu, context, paint_params);
         self.main.finish(gpu, context, paint_params, tiles);
+    }
+
+    /// The targets' part of [`finish`](Self::finish), which doesn't depend
+    /// on the type of the tiles.
+    fn finish_targets(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        context: &mut Context,
+        paint_params: Option<&GlobalPaintParamsUBO>,
+    ) {
+        self.targets.truncate(self.frame_targets);
+        for (target, group) in &mut self.targets {
+            debug_assert!(group.composite.is_none(), "draws into a target that composite");
+            group.finish(gpu, context, paint_params, []);
+            context.declare_target(target);
+        }
     }
 
     /// Visits the groups that take a place in the layers' order and depth,
@@ -689,26 +786,40 @@ impl Draws {
         }
     }
 
-    /// Uploads the meshes of the groups' draws.
+    /// Uploads the meshes of the groups' draws: those into the frame's
+    /// targets, then the main group's.
     pub(crate) fn upload(&self, gpu: &mut dyn Gpu, context: &mut Context) {
         if self.started {
+            for (_, group) in &self.targets[..self.frame_targets] {
+                group.upload(gpu, context);
+            }
             self.main.upload(gpu, context);
         }
     }
 
+    /// Clears each of the frame's targets and draws the draws into it
+    /// ([`Target::render`]), outside any pass of `gpu`, the context's.
+    pub(crate) fn render_targets(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        for (target, group) in &mut self.targets[..self.frame_targets] {
+            target.render(gpu, parameters, |gpu, parameters| group.render(gpu, parameters));
+        }
+    }
+
     /// Draws the pass's draws of the groups into the open pass of `gpu`,
-    /// the context's, each at its depth, in `order`; `in_pass` runs where
-    /// the main group draws, after it, before the depth steps on.
+    /// the context's, each at its depth, in `order`; `in_pass`, if any, runs
+    /// where the main group draws, after it, before the depth steps on.
     pub(crate) fn render(
         &mut self,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
         order: DrawOrder,
-        in_pass: impl FnOnce(&mut dyn Gpu, &mut PaintParameters<'_>),
+        in_pass: Option<&mut dyn FnMut(&mut dyn Gpu, &mut PaintParameters<'_>)>,
     ) {
         if self.started {
             self.main.render(gpu, parameters);
-            in_pass(gpu, parameters);
+            if let Some(in_pass) = in_pass {
+                in_pass(gpu, parameters);
+            }
             order.step(parameters);
         }
     }

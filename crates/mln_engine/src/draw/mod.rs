@@ -5,8 +5,9 @@
 //! vertices (`vertex_attribute`), the bindings and geometry made of them
 //! (`owned`, `uniform_buffer`, `upload`), the segments that draw meshes
 //! (`segment`, `mesh`), the GPU objects that draws draw, with the buffers
-//! that frames bind them with (`objects`), and the layers' draws of a
-//! frame, which the engine holds and draws (`draws`).
+//! that frames bind them with (`objects`), the layers' draws of a frame,
+//! which the engine holds and draws (`draws`), and the textures of a
+//! layer's own that its draws draw into ahead of the frame (`target`).
 
 pub(crate) mod atlas_binding;
 pub(crate) mod buffer;
@@ -23,6 +24,7 @@ pub(crate) mod release;
 pub(crate) mod resources;
 pub(crate) mod segment;
 pub(crate) mod store;
+pub(crate) mod target;
 pub(crate) mod texture2d;
 pub(crate) mod tile_render_data;
 pub(crate) mod uniform_buffer;

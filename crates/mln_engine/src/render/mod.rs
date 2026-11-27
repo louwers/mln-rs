@@ -16,7 +16,6 @@ pub(crate) mod renderer;
 pub(crate) mod sky;
 pub(crate) mod sky_pass;
 pub(crate) mod static_data;
-pub(crate) mod target;
 pub(crate) mod terrain;
 pub(crate) mod tile;
 pub(crate) mod tile_matrix;

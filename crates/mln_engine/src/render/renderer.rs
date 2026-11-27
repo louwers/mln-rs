@@ -643,12 +643,13 @@ impl Encoder {
 
         // - DRAW ----------------------------------------------------------
         // The 3D layers draw into depth from 0 to the passes' depth range
-        // size, which the draw groups' count sets, and custom layers record
-        // their work with the projection that the frame's result reports.
+        // size, which the draw groups' count sets, and the layers that the
+        // frame lends its commands draw with the projection that the frame's
+        // result reports.
         let depth_range_size = draw_groups.depth_range_size();
         let clip_depth = parameters.context.caps().clip_depth;
         let frame_projection = frame_projection::compute(&frame.transform, depth_range_size, clip_depth, frame.terrain);
-        parameters.custom_layer_frame = Some(CustomLayerFrame {
+        parameters.lent_frame = Some(CustomLayerFrame {
             view: state.map_view(pixel_ratio),
             projection: frame_projection,
             width: renderable_size.width,
@@ -661,15 +662,14 @@ impl Encoder {
         if let Err(error) = &submitted {
             parameters.context.fail(format!("Submitting the frame failed: {error}"));
         }
+        // A target that a frame that failed drew may hold nothing.
+        parameters.context.end_targets(submitted.is_ok());
         let error = parameters.context.device().take_failure().map(Error::native);
         drop(parameters);
         // A drape of a frame that failed may lack what failed: every drape
         // draws again in the next frame.
         if error.is_some() {
             orchestrator.terrain().redraw_drapes();
-        }
-        if submitted.is_err() {
-            orchestrator.visit_render_layers(|layer| layer.frame_failed(gpu));
         }
 
         self.timings.layers = layers_updated - uploaded;
@@ -770,20 +770,16 @@ fn draw(
     num_draw_groups: usize,
     depth_range_size: f32,
 ) {
-    // Custom layers record their own work before the first pass.
-    for &index in frame.layers.keys() {
-        orchestrator.layer_mut(index as usize).prerender(gpu, parameters);
-    }
-
     // The ground's depth, which the layers that stand on terrain hide
     // behind, in a pass of its own.
     parameters.pass = RenderPass::Translucent;
     parameters.depth_range_size = depth_range_size;
     orchestrator.terrain().render_ground(gpu, parameters);
 
-    // The layers' render targets, which the passes sample, and the
-    // terrain's drapes.
-    orchestrator.visit_render_layers(|layer| layer.render_targets(gpu, parameters));
+    // The layers' targets, which the passes sample, and what the layers do
+    // with the frame's commands before its passes, bottom to top; then the
+    // terrain's drapes, each after its layers' targets.
+    orchestrator.visit_render_layers(|layer| layer.before_passes(gpu, parameters));
     orchestrator.terrain().render_drapes(gpu, parameters);
 
     // The frame's pass, cleared to the backdrop, which shows where there are

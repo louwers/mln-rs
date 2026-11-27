@@ -20,7 +20,7 @@ use smallvec::SmallVec;
 
 use crate::camera::View;
 use crate::draw::context::Context;
-use crate::draw::draws::{DrawOrder, Draws, Group, LayerFrame};
+use crate::draw::draws::{DrawOrder, Draws, Group, LayerFrame, LendAt, Lent};
 use crate::layer::bucket::ErasedBucket;
 use crate::layer::layer_drawing::{ChangedBuckets, TileMap};
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
@@ -389,29 +389,6 @@ pub(crate) struct PrepareCx<'a, 'f, L: TypedLayer> {
     pub(crate) frame: &'a LayerFrame<'f>,
 }
 
-/// Where the engine runs GPU work of a layer's own
-/// ([`TypedLayer::own_gpu_work`]).
-///
-/// Temporary: heatmap's and hillshade's render targets and a custom
-/// layer's host work this way until a layer's draws can go into targets of
-/// its own and a frame can lend a layer the backend's commands.
-pub(crate) enum OwnGpuWork<'a, 'p> {
-    /// After the frame's draws upload, while the layer is renderable: what
-    /// draws into the layer's render targets uploads.
-    Upload(&'a mut Context),
-    /// Before the frame's first pass, of a layer the frame draws.
-    Prerender(&'a mut PaintParameters<'p>),
-    /// Before the frame's passes, which sample them, after the ground's
-    /// depth: the layer draws its render targets, with `group`, the draws
-    /// it pushed into its target ([`Draws::own_target`]).
-    Targets(&'a mut PaintParameters<'p>, &'a mut Group),
-    /// In each pass, at the layer's place in the layers' order and depth,
-    /// after its draws, while the layer is renderable.
-    Pass(&'a mut PaintParameters<'p>),
-    /// The frame failed: what its targets drew may hold nothing.
-    Failed,
-}
-
 /// What a layer's [`TypedLayer::tile`] reads to make a tile's value.
 pub(crate) struct TileCx<'a, 'f, L: TypedLayer> {
     pub(crate) base: &'a RenderLayerBase,
@@ -576,11 +553,12 @@ pub(crate) trait TypedLayer: Sized + 'static {
     /// the old host that drew in `ended`.
     fn style_changed(&mut self, _values: &LayerValues<Self::Type>, _ended: &mut EndedHosts) {}
 
-    /// Runs GPU work of the layer's own, of the layer of `base`, at `at` in
-    /// the frame's encode.
-    ///
-    /// Temporary, as [`OwnGpuWork`] says.
-    fn own_gpu_work(&mut self, _base: &RenderLayerBase, _gpu: &mut dyn Gpu, _at: OwnGpuWork<'_, '_>) {}
+    /// Draws with the backend's commands that the frame lends the layer
+    /// `at` its time in the frame, where its draws asked for them
+    /// ([`Draws::lend`]): `lent`, which the layer may use only until this
+    /// returns. A frame without commands to lend, such as one outside a
+    /// pass at [`LendAt::Pass`], lends none.
+    fn lend(&mut self, _at: LendAt, _lent: Lent<'_>) {}
 
     /// Lets go of a custom layer's host as the layer leaves the renderer: a
     /// host that drew goes to `ended`, to hear that the renderer stopped.
@@ -721,6 +699,22 @@ impl<L: TypedLayer> Hosted<L> {
         let paint_params = parameters.own_paint_params();
         let clip_tiles = tiles.iter().map(|tile| tile.draw_id().to_unwrapped());
         draws.finish(gpu, parameters.context, paint_params.as_ref(), clip_tiles);
+    }
+}
+
+/// Lends `layer` the backend's commands of `gpu` `at` its time in the frame
+/// of `parameters`, where the frame has them to lend: in a pass, the open
+/// one. A lend that fails fails the frame.
+fn lend<L: TypedLayer>(layer: &mut L, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, at: LendAt) {
+    let Some(frame) = parameters.lent_frame else { return };
+    let layer_depth = match at {
+        LendAt::BeforePasses => None,
+        LendAt::Pass if parameters.pass_target().is_some() => Some(f64::from(parameters.layer_depth())),
+        LendAt::Pass => return,
+    };
+    let lent = gpu.lend(&mut |raw| layer.lend(at, Lent { raw, frame: &frame, layer_depth }));
+    if let Err(error) = lent {
+        parameters.context.fail(format!("Lending a layer the frame's commands failed: {error}"));
     }
 }
 
@@ -866,22 +860,16 @@ pub(crate) trait RenderLayer {
     fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context);
 
     /// Draws the pass's draws of the layer's groups into the open pass of
-    /// `gpu`, the context's, in `order`, each at its depth.
+    /// `gpu`, the context's, in `order`, each at its depth, and, in the
+    /// translucent pass, lends the layer the pass after its main group where
+    /// its draws asked for it ([`LendAt::Pass`]).
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder);
 
-    /// Uploads what draws into the layer's render targets, while it is
-    /// renderable ([`OwnGpuWork::Upload`]).
-    fn upload_render_targets(&mut self, gpu: &mut dyn Gpu, context: &mut Context);
-
-    /// Draws the layer's render targets ([`OwnGpuWork::Targets`]).
-    fn render_targets(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>);
-
-    /// Tells the layer that the frame failed ([`OwnGpuWork::Failed`]).
-    fn frame_failed(&mut self, gpu: &mut dyn Gpu);
-
-    /// Runs the layer's work before the frame's first pass
-    /// ([`OwnGpuWork::Prerender`]).
-    fn prerender(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>);
+    /// Before the frame's passes, outside any pass of `gpu`, the context's:
+    /// draws into the targets of the layer's draws of the frame
+    /// ([`Draws::target`]), and then lends the layer the frame's commands
+    /// where its draws asked for them ([`LendAt::BeforePasses`]).
+    fn before_passes(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>);
 
     /// See [`TypedLayer::leave`]. The orchestrator calls it before it drops
     /// the layer.
@@ -1121,30 +1109,21 @@ impl<L: TypedLayer> RenderLayer for Hosted<L> {
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
         let Hosted { base, draws, layer, .. } = self;
         if base.is_renderable {
-            draws.render(gpu, parameters, order, |gpu, parameters| {
-                layer.own_gpu_work(base, gpu, OwnGpuWork::Pass(parameters));
-            });
+            let lends = draws.lends(LendAt::Pass) && parameters.pass == RenderPass::Translucent;
+            let mut lend_pass = |gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>| {
+                lend(layer, gpu, parameters, LendAt::Pass);
+            };
+            draws.render(gpu, parameters, order, lends.then_some(&mut lend_pass));
         }
     }
 
-    fn upload_render_targets(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+    fn before_passes(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
         if self.base.is_renderable {
-            self.draws.own_target().upload(gpu, context);
-            self.layer.own_gpu_work(&self.base, gpu, OwnGpuWork::Upload(context));
+            self.draws.render_targets(gpu, parameters);
+            if self.draws.lends(LendAt::BeforePasses) {
+                lend(&mut self.layer, gpu, parameters, LendAt::BeforePasses);
+            }
         }
-    }
-
-    fn render_targets(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        let Hosted { base, draws, layer, .. } = self;
-        layer.own_gpu_work(base, gpu, OwnGpuWork::Targets(parameters, draws.own_target()));
-    }
-
-    fn frame_failed(&mut self, gpu: &mut dyn Gpu) {
-        self.layer.own_gpu_work(&self.base, gpu, OwnGpuWork::Failed);
-    }
-
-    fn prerender(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        self.layer.own_gpu_work(&self.base, gpu, OwnGpuWork::Prerender(parameters));
     }
 
     fn leave(&mut self, ended: &mut EndedHosts) {

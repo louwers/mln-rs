@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::rc::Rc;
 
 use glam::{DMat4, DVec4};
@@ -236,8 +235,10 @@ pub(crate) struct PaintParameters<'a> {
     pub(crate) symbol_fade_change: f32,
 
     pub(crate) scissor_rect: ScissorRect,
-    /// The frame that custom layers draw into, set before their prerender.
-    pub(crate) custom_layer_frame: Option<crate::layers::custom::CustomLayerFrame>,
+    /// The frame as the frame lends layers the backend's commands
+    /// ([`Lent::frame`](crate::draw::draws::Lent::frame)), set before the
+    /// first lend.
+    pub(crate) lent_frame: Option<crate::layers::custom::CustomLayerFrame>,
 }
 
 impl<'a> PaintParameters<'a> {
@@ -296,7 +297,7 @@ impl<'a> PaintParameters<'a> {
             opaque_pass_cutoff: 0,
             symbol_fade_change: frame.symbol_fade_change,
             scissor_rect,
-            custom_layer_frame: None,
+            lent_frame: None,
         }
     }
 
@@ -355,7 +356,7 @@ impl<'a> PaintParameters<'a> {
             // A drape draws no symbols, and keeps no fade of theirs.
             symbol_fade_change: 1.0,
             scissor_rect: ScissorRect { x: 0, y: 0, width: size.width, height: size.height },
-            custom_layer_frame: None,
+            lent_frame: None,
         }
     }
 
@@ -525,16 +526,6 @@ impl<'a> PaintParameters<'a> {
         self.end_pass(gpu)?;
         self.begin_pass(gpu, present)?;
         self.copy_frame(gpu)
-    }
-
-    /// Runs `f` with `gpu`'s, the context's, commands inside the pass
-    /// begun, after what drew there so far, as a custom layer draws: `f`
-    /// gets the backend's `CustomLayerPass`. Returns whether `f` ran.
-    pub(crate) fn lend_pass(&self, gpu: &mut dyn Gpu, f: &mut dyn FnMut(&mut dyn Any)) -> Result<bool, GpuError> {
-        if self.open_pass.is_none() {
-            return Ok(false);
-        }
-        gpu.lend(f).map(|()| true)
     }
 
     /// Whether the current layer draws in the opaque pass: front to back,

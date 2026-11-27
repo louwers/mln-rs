@@ -1,5 +1,5 @@
-//! The context's stores of what draws share on the GPU: textures, indexes
-//! and vertices. Each entry is held through [`Shared`] handles, which the
+//! The context's stores of what draws share on the GPU: textures, indexes,
+//! vertices, meshes and render targets. Each entry is held through [`Shared`] handles, which the
 //! entry's owner and every draw, bindings or geometry that reads it clone:
 //! the entry stays while a handle to it does, so nothing names one that is
 //! gone. When the last handle drops, its key goes to the renderer's release
@@ -58,6 +58,8 @@ keys! {
     VerticesKey => Vertices,
     /// A mesh of the context's store.
     MeshKey => Mesh,
+    /// A layer's render target of the context's store.
+    TargetKey => Target,
 }
 
 /// A key of one of the context's stores.
@@ -67,6 +69,7 @@ pub(crate) enum StoreKey {
     Indexes(IndexesKey),
     Vertices(VerticesKey),
     Mesh(MeshKey),
+    Target(TargetKey),
 }
 
 /// A handle of the store entry `key`, which stays in its store while a

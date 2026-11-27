@@ -616,8 +616,8 @@ impl Drapes {
     }
 
     /// Draws each drape that draws again into its texture, through `gpu`,
-    /// the context of `parameters`, the frame's, outside any pass, and then
-    /// its texture's mips: its layers' opaque draws front to back, then
+    /// the context of `parameters`, the frame's, outside any pass, after
+    /// the targets of its layers' draws, and then its texture's mips: its layers' opaque draws front to back, then
     /// their translucent ones back to front, over transparent texels. A
     /// drape with a layer that blends in the shader draws into the layer
     /// composite's frame texture, which is then copied into its own. A drape
@@ -637,6 +637,10 @@ impl Drapes {
                     continue;
                 };
                 let (depth_stencil, size) = (depth_stencil.id(), Size::new(*side, *side));
+                // The targets of the layers' draws, which they sample.
+                for layer in layers.iter_mut() {
+                    layer.draws.render_targets(gpu, parameters);
+                }
                 let color = match parameters.context.create_texture(gpu, texture) {
                     Ok(color) => color,
                     Err(error) => {
@@ -665,12 +669,12 @@ impl Drapes {
                     drape_parameters.pass = RenderPass::Opaque;
                     drape_parameters.current_layer = 0;
                     for layer in layers.iter_mut().rev() {
-                        layer.draws.render(gpu, &mut drape_parameters, DrawOrder::TopDown, |_, _| {});
+                        layer.draws.render(gpu, &mut drape_parameters, DrawOrder::TopDown, None);
                     }
                     drape_parameters.pass = RenderPass::Translucent;
                     drape_parameters.current_layer = (groups.count as u32).wrapping_sub(1);
                     for layer in layers.iter_mut() {
-                        layer.draws.render(gpu, &mut drape_parameters, DrawOrder::BottomUp, |_, _| {});
+                        layer.draws.render(gpu, &mut drape_parameters, DrawOrder::BottomUp, None);
                     }
                     // A drape whose frame doesn't reach it failed, as one
                     // whose pass did.

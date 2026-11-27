@@ -1092,8 +1092,8 @@ impl RenderOrchestrator {
     }
 
     /// Uploads the GPU objects of the frame's draws: the layers' draw
-    /// groups in drawing order, the globe's depth, the terrain, the sky and
-    /// the atmosphere, and what draws into the layers' render targets.
+    /// groups and what draws into their targets, in drawing order, the
+    /// globe's depth, the terrain, the sky and the atmosphere.
     pub(crate) fn upload_draws(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         for layer in &mut self.layers {
             layer.upload(gpu, context);
@@ -1105,9 +1105,6 @@ impl RenderOrchestrator {
         }
         if let Some(atmosphere) = self.sky_pass.atmosphere() {
             atmosphere.upload(gpu, context);
-        }
-        for layer in &mut self.layers {
-            layer.upload_render_targets(gpu, context);
         }
     }
 
@@ -1270,11 +1267,6 @@ impl RenderOrchestrator {
         let fog = crate::render::terrain::terrain_fog(frame.sky.as_ref(), paint_parameters.view);
         let ground = paint_parameters.ground.as_ref().is_some_and(|ground| ground.depth().is_some());
         self.terrain.update_draws(gpu, paint_parameters, &self.stacks, fog, (needs_depth && surface, ground));
-    }
-
-    /// The render layer at `index` in the drawing order.
-    pub(crate) fn layer_mut(&mut self, index: usize) -> &mut dyn RenderLayer {
-        &mut *self.layers[index]
     }
 
     /// The planar sky, which draws before the layers, if the frame draws it.

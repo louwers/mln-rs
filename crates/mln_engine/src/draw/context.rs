@@ -30,7 +30,10 @@ use crate::draw::objects::{DrawObjects, Mesh};
 use crate::draw::owned::{Held, Owned};
 use crate::draw::release::{Release, destroy_order};
 use crate::draw::resources::{Device, SharedGpuTexture};
-use crate::draw::store::{IndexesKey, MeshKey, Shared, SharedTexture, Store, StoreKey, TextureKey, WeakShared};
+use crate::draw::store::{
+    IndexesKey, MeshKey, Shared, SharedTexture, Store, StoreKey, TargetKey, TextureKey, WeakShared,
+};
+use crate::draw::target::{Target, TargetObjects};
 use crate::draw::texture2d::{Texture2D, TextureMut};
 use crate::draw::uniform_buffer::UniformBufferArray;
 use crate::draw::vertex_attribute::Uniforms;
@@ -65,6 +68,11 @@ pub(crate) struct Context {
     /// The meshes, which their layers and the draws of them hold as
     /// [`Mesh`]es; `None` while one draws or uploads.
     meshes: Store<MeshKey, Option<Box<DrawObjects>>>,
+    /// The layers' render targets, which they hold as [`Target`]s.
+    targets: Store<TargetKey, TargetObjects>,
+    /// The targets whose draws the frame wrote, until it ends
+    /// ([`end_targets`](Self::end_targets)).
+    frame_targets: Vec<Target>,
     /// The vertices that draws share, which they hold as [`SharedVertices`].
     vertices: VertexStore,
     /// What a [`destroy_released`](Self::destroy_released) takes from the
@@ -94,6 +102,8 @@ impl Context {
             indexes: Store::default(),
             quad_indexes: WeakShared::default(),
             meshes: Store::default(),
+            targets: Store::default(),
+            frame_targets: Vec::new(),
             vertices: VertexStore::default(),
             releases: Vec::new(),
             doomed: Vec::new(),
@@ -160,7 +170,7 @@ impl Context {
     /// dropped keeps its GPU memory until then. Not while a pass is open on
     /// `gpu`.
     pub(crate) fn destroy_released(&mut self, gpu: &mut dyn Gpu) {
-        let Context { device, textures, indexes, vertices, meshes, releases, doomed, .. } = self;
+        let Context { device, textures, indexes, vertices, meshes, targets, releases, doomed, .. } = self;
         loop {
             device.queue.take_into(releases);
             if releases.is_empty() {
@@ -173,6 +183,7 @@ impl Context {
                     Release::Entry(StoreKey::Indexes(key)) => drop(indexes.remove(key)),
                     Release::Entry(StoreKey::Vertices(key)) => drop(vertices.remove(key)),
                     Release::Entry(StoreKey::Mesh(key)) => drop(meshes.remove(key)),
+                    Release::Entry(StoreKey::Target(key)) => drop(targets.remove(key)),
                     Release::Buffer(id, usage, allocated) => {
                         buffer::count(&mut device.stats, usage, allocated, -1);
                         doomed.push(id.into());
@@ -236,6 +247,43 @@ impl Context {
     pub(crate) fn put_mesh(&mut self, mesh: &Mesh, objects: Box<DrawObjects>) {
         if let Some(slot) = self.meshes.get_mut(mesh.key()) {
             *slot = Some(objects);
+        }
+    }
+
+    /// Keeps `objects` of a render target, while a clone of the returned
+    /// handle lasts.
+    pub(crate) fn add_target(&mut self, objects: TargetObjects) -> Shared<TargetKey> {
+        self.targets.add(objects, &self.device.queue)
+    }
+
+    /// What the context keeps of `target`.
+    pub(crate) fn target(&self, target: &Target) -> Option<&TargetObjects> {
+        self.targets.get(target.key())
+    }
+
+    /// What the context keeps of `target`, to change.
+    pub(crate) fn target_mut(&mut self, target: &Target) -> Option<&mut TargetObjects> {
+        self.targets.get_mut(target.key())
+    }
+
+    /// Records that the frame wrote the draws into `target`, which holds
+    /// what they draw from now on, unless the frame doesn't draw them
+    /// ([`end_targets`](Self::end_targets)).
+    pub(crate) fn declare_target(&mut self, target: &Target) {
+        if let Some(objects) = self.targets.get_mut(target.key()) {
+            objects.declare();
+            self.frame_targets.push(target.clone());
+        }
+    }
+
+    /// Ends the frame's draws into the targets it wrote them for: a target
+    /// that the frame drew holds what it drew if `submitted`, the frame's
+    /// work reached the GPU, and one that it didn't draw holds nothing.
+    pub(crate) fn end_targets(&mut self, submitted: bool) {
+        for target in self.frame_targets.drain(..) {
+            if let Some(objects) = self.targets.get_mut(target.key()) {
+                objects.end(submitted);
+            }
         }
     }
 
@@ -577,6 +625,8 @@ impl Context {
         self.default_vertex_buffers.clear();
         // The meshes first, which hold what the other stores keep.
         self.meshes.clear();
+        self.frame_targets.clear();
+        self.targets.clear();
         self.textures.clear();
         self.indexes.clear();
         self.vertices.clear();
