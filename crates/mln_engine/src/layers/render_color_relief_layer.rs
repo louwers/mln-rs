@@ -1,7 +1,8 @@
-// A tile's draw is built again when the tile's mask or its DEM's border
-// changes, and the layer keeps each DEM's texture and the quads of each mask
-// by the id of the tile's contents. The elevation stops texture is made anew
-// when the ramp changes, since its size changes with the ramp.
+// A tile's draw, with the quads of the tile's mask, is built again when the
+// tile's mask or its DEM's border changes, and the layer keeps each DEM's
+// texture by the id of the tile's contents, which outlives the draws that a
+// new mask builds again. The elevation stops texture is made anew when the
+// ramp changes, since its size changes with the ramp.
 
 use std::collections::hash_map::Entry;
 use std::mem::offset_of;
@@ -27,7 +28,7 @@ use mln_style::size::Size;
 use mln_style::types::ResamplingType;
 
 use super::cast_matrix;
-use crate::buckets::raster_bucket::{MaskQuads, RasterLayoutVertex};
+use crate::buckets::raster_bucket::{RasterLayoutVertex, StoredQuads};
 use crate::draw::context::Context;
 use crate::draw::draws::{Draw, Draws};
 use crate::draw::identity::SimpleIdentity;
@@ -99,9 +100,7 @@ pub(crate) struct RenderColorReliefLayer {
     /// its current, possibly backfilled, image, with the generation of the
     /// DEM's border it was made at.
     dem_textures: HashMap<SimpleIdentity, (SharedTexture, u64)>,
-    /// The quads of each tile's mask, by the id of its contents.
-    mask_quads: MaskQuads,
-    /// The contents of the frame's tiles, whose DEM textures and quads stay.
+    /// The contents of the frame's tiles, whose DEM textures stay.
     live_dems: HashSet<SimpleIdentity>,
 }
 
@@ -306,7 +305,6 @@ impl TypedLayer for RenderColorReliefLayer {
             static_data_indices: None,
             globe_meshes: GlobeTileMeshCache::new(),
             dem_textures: HashMap::default(),
-            mask_quads: MaskQuads::default(),
             live_dems: HashSet::default(),
         };
 
@@ -363,7 +361,6 @@ impl TypedLayer for RenderColorReliefLayer {
             static_data_indices,
             globe_meshes,
             dem_textures,
-            mask_quads,
             ..
         } = self;
 
@@ -404,7 +401,7 @@ impl TypedLayer for RenderColorReliefLayer {
                     globe_mesh.indexes(),
                     globe_mesh.segments.iter().map(SegmentBase::copy).collect(),
                 )
-            } else if let Some(quads) = mask_quads.get(context, dem.id(), masking) {
+            } else if let Some(quads) = StoredQuads::of_mask(context, masking) {
                 (
                     quads.vertices.clone(),
                     quads.vertices.count(),
@@ -475,10 +472,10 @@ impl TypedLayer for RenderColorReliefLayer {
         for tile in render_tiles {
             let tile_id = tile.draw_id();
             let Some(dem) = tile.data().filter(|dem| dem.has_data()) else {
-                cx.tiles.drop_value(&tile_id);
+                cx.tiles.drop_value(&tile.id());
                 continue;
             };
-            let Some(entry) = cx.tiles.entry(&tile_id) else {
+            let Some(entry) = cx.tiles.entry(&tile.id()) else {
                 continue;
             };
             let context = &mut *cx.context;
@@ -511,18 +508,16 @@ impl TypedLayer for RenderColorReliefLayer {
         out.main().block(&props);
     }
 
-    /// Drops the DEM textures and quads of the tiles the frame doesn't draw,
-    /// in every frame, including one the layer draws nothing in.
+    /// Drops the DEM textures of the tiles the frame doesn't draw, in every
+    /// frame, including one the layer draws nothing in.
     fn update(&mut self, _cx: UpdateCx<'_, '_, Self>, tiles: &[FrameTile<'_, ColorRelief>]) {
         let live_dems = &mut self.live_dems;
         live_dems.clear();
         live_dems.extend(tiles.iter().filter_map(|tile| Some(tile.data()?.id())));
         self.dem_textures.retain(|id, _| live_dems.contains(id));
-        self.mask_quads.retain(live_dems);
     }
 
     fn release(&mut self) {
         self.dem_textures.clear();
-        self.mask_quads.clear();
     }
 }
