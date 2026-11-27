@@ -643,7 +643,7 @@ impl TypedLayer for RenderFillLayer {
             let Some(binders) = bucket.paint_property_binders.get(layer_id) else {
                 continue;
             };
-            let Some(mut entry) = cx.tiles.entry(&tile_id) else {
+            let Some(mut entry) = cx.tiles.entry(&tile.id()) else {
                 continue;
             };
 
