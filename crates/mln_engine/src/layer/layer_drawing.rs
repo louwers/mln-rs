@@ -129,6 +129,9 @@ struct TileSet {
     /// The ids that `set_tiles` makes the set's; after it, the ids the set
     /// had, whose memory the next change reuses.
     incoming: Vec<OverscaledTileID>,
+    /// The index after the tile that [`find`](Self::find) last found,
+    /// where it looks first.
+    next: usize,
 }
 
 /// How the indexes of a set's tiles change, as swaps of the values at them
@@ -235,6 +238,19 @@ impl TileSet {
     /// The index of `tile_id`, if it is one of the set's.
     fn index_of(&self, tile_id: &OverscaledTileID) -> Option<usize> {
         self.ids.binary_search(tile_id).ok()
+    }
+
+    /// [`index_of`](Self::index_of), looking first at the index after the
+    /// tile it last found: the engine readies a layer's tile values and the
+    /// layer then makes its draws of them in the same order, the tiles' id
+    /// order for most layer types.
+    fn find(&mut self, tile_id: &OverscaledTileID) -> Option<usize> {
+        let index = match self.ids.get(self.next) {
+            Some(id) if id == tile_id => self.next,
+            _ => self.index_of(tile_id)?,
+        };
+        self.next = index + 1;
+        Some(index)
     }
 
     fn clear(&mut self) {
@@ -350,12 +366,12 @@ impl<T> TileMap<T> {
     /// What the layer keeps of `tile_id`, if the tile is one of the frame's
     /// and the layer keeps anything of it.
     pub(crate) fn get_mut(&mut self, tile_id: &OverscaledTileID) -> Option<&mut T> {
-        self.values.get_mut(self.set.index_of(tile_id)?)?.as_mut()
+        self.values.get_mut(self.set.find(tile_id)?)?.as_mut()
     }
 
     /// Drops what the layer keeps of `tile_id`.
     pub(crate) fn drop_value(&mut self, tile_id: &OverscaledTileID) {
-        if let Some(value) = self.set.index_of(tile_id).and_then(|index| self.values.get_mut(index)) {
+        if let Some(value) = self.set.find(tile_id).and_then(|index| self.values.get_mut(index)) {
             *value = None;
         }
     }
@@ -368,7 +384,7 @@ impl<T> TileMap<T> {
 
     /// The entry of `tile_id`, if the tile is one of the frame's.
     pub(crate) fn entry(&mut self, tile_id: &OverscaledTileID) -> Option<TileEntry<'_, T>> {
-        let index = self.set.index_of(tile_id)?;
+        let index = self.set.find(tile_id)?;
         Some(TileEntry { state: self.set.states.get_mut(index)?, value: self.values.get_mut(index)? })
     }
 }
