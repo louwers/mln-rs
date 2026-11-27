@@ -399,6 +399,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
         cx: &mut TileCx<'_, '_, Self>,
         tile: FrameTile<'_, FillExtrusion>,
         _data: TileData<'_, FillExtrusion>,
+        _previous: Option<ExtrusionTile>,
     ) -> Option<ExtrusionTile> {
         let render_data = tile.data_for_pass(RENDER_PASS)?;
         let binders = render_data.bucket.paint_property_binders.get(cx.base.style.base().id.as_str())?;

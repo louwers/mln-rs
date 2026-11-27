@@ -220,6 +220,7 @@ impl TypedLayer for RenderCircleLayer {
         cx: &mut TileCx<'_, '_, Self>,
         tile: FrameTile<'_, Circle>,
         _data: TileData<'_, Circle>,
+        _previous: Option<StandingDraw>,
     ) -> Option<StandingDraw> {
         let render_data = tile.data_for_pass(RENDER_PASS)?;
         let bucket = render_data.bucket;

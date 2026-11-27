@@ -502,8 +502,8 @@ pub(crate) trait TypedLayer: Sized + 'static {
     fn update(&mut self, _cx: UpdateCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Self::Type>]) {}
 
     /// Whether `tile`, a tile's value the layer made, still draws the tile
-    /// with the layer's `values` of the frame. The engine drops a value the
-    /// layer doesn't keep before the layer makes the frame's draws.
+    /// with the layer's `values` of the frame. The engine retires a value
+    /// the layer doesn't keep before the layer makes the frame's draws.
     fn keeps(&self, _values: &LayerValues<Self::Type>, _tile: &Self::Tile) -> bool {
         true
     }
@@ -515,11 +515,20 @@ pub(crate) trait TypedLayer: Sized + 'static {
     /// frame, or the layer's draws drop. The map's frame and every drape
     /// the tile overlaps, in any world copy, draw the same value, so it
     /// holds nothing of the frame or the copy it is first drawn in.
+    ///
+    /// `previous` is the tile's value before, if the engine retired it
+    /// rather than dropped it: when the tile came to show other contents or
+    /// another generation of them, the layer stopped keeping it
+    /// ([`keeps`](Self::keeps)), or its draws dropped for a restyle or the
+    /// frame's projection. A layer takes from it what it made of contents
+    /// that are still the tile's, such as a texture of the tile's image,
+    /// rather than making them again.
     fn tile(
         &mut self,
         _cx: &mut TileCx<'_, '_, Self>,
         _tile: FrameTile<'_, Self::Type>,
         _data: TileData<'_, Self::Type>,
+        _previous: Option<Self::Tile>,
     ) -> Option<Self::Tile> {
         None
     }
@@ -541,11 +550,6 @@ pub(crate) trait TypedLayer: Sized + 'static {
     ///
     /// [`TileEntry::take_changes`]: crate::layer::layer_drawing::TileEntry::take_changes
     fn prepare(&mut self, _cx: &mut PrepareCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Self::Type>], _out: &mut Draws) {}
-
-    /// Drops what the layer keeps by its tiles' contents besides their
-    /// values, which outlives a value that a new mask or border of the
-    /// tile's contents makes again, when it stops rendering.
-    fn release(&mut self) {}
 
     /// Called when the layer's style changed to another of the same id and
     /// type, once it is the layer's, of the values `values`, and before its
@@ -618,20 +622,30 @@ impl<L: TypedLayer> Hosted<L> {
     }
 
     /// Makes `variant` the projection the layer draws in: where its draws
-    /// were of another, drops them and its tile values.
+    /// were of another, drops them and retires its tile values.
     fn use_projection_variant(&mut self, variant: ProjectionVariant) {
         if variant != self.base.projection_variant {
             self.base.projection_variant = variant;
-            self.remove_all_draws();
+            self.retire_draws();
         }
     }
 
+    /// Drops the frame's draws of the layer and retires its tile values,
+    /// which the next values of their tiles may take from: until the
+    /// layer's next draws are done, the draws keep what they kept for the
+    /// retired values' meshes. The tiles stay.
+    fn retire_draws(&mut self) {
+        self.tiles.retire();
+        self.draws.clear();
+    }
+
     /// Readies the values of `tiles`, the tiles the layer draws, before the
-    /// layer makes its draws of them: drops each that was made from
+    /// layer makes its draws of them: retires each that was made from
     /// something else than what its tile shows the layer, or that the layer
     /// doesn't keep ([`TypedLayer::keeps`]), and makes those the layer has
-    /// none of ([`TypedLayer::tile`]). For a layer that picks its tiles,
-    /// drops those of its picked tiles that it doesn't keep.
+    /// none of ([`TypedLayer::tile`]), from their previous values. For a
+    /// layer that picks its tiles, retires those of its picked tiles that it
+    /// doesn't keep.
     fn ready_tiles(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -641,9 +655,9 @@ impl<L: TypedLayer> Hosted<L> {
     ) {
         let Hosted { base, values, tiles: map, layer, .. } = self;
         if !has_tiles::<L>() {
-            for (_, entry) in map.entries() {
+            for (_, mut entry) in map.entries() {
                 if entry.value.as_ref().is_some_and(|value| !layer.keeps(values, value)) {
-                    *entry.value = None;
+                    entry.retire();
                 }
             }
             return;
@@ -652,14 +666,15 @@ impl<L: TypedLayer> Hosted<L> {
             let Some(mut entry) = map.entry(&tile.id()) else { continue };
             entry.show(tile.made_from());
             if entry.value.as_ref().is_some_and(|value| !layer.keeps(values, value)) {
-                *entry.value = None;
+                entry.retire();
             }
             if entry.value.is_none()
                 && let Some(data) = tile.data()
             {
                 // A new value copies its bucket as it is.
                 entry.take_changes();
-                *entry.value = layer.tile(&mut TileCx { base, values, gpu, context, frame }, tile, data);
+                let previous = entry.take_previous();
+                *entry.value = layer.tile(&mut TileCx { base, values, gpu, context, frame }, tile, data, previous);
             }
         }
     }
@@ -836,14 +851,14 @@ pub(crate) trait RenderLayer {
     fn handle_wrap_jump(&mut self, wrap_delta: i16);
 
     /// Includes the layer in the frame's drawing or excludes it. A layer
-    /// excluded drops its draws, its tiles with their values and what its
-    /// type keeps for them ([`TypedLayer::release`]): its updates don't run
-    /// until it is included again, and they then rebuild everything from
-    /// the source's tiles.
+    /// excluded drops its draws and its tiles with their values, previous
+    /// ones too: its updates don't run until it is included again, and they
+    /// then rebuild everything from the source's tiles.
     fn set_renderable(&mut self, renderable: bool);
 
-    /// Drops the frame's draws of the layer, its tile values and the caches
-    /// of their GPU objects. The tiles stay.
+    /// Drops the layer's tile values, previous ones too, and the frame's
+    /// draws of the layer, which then let go of what they kept for the
+    /// values' meshes. The tiles stay.
     fn remove_all_draws(&mut self);
 
     /// Drops the map frame's draws of the layer, which a frame over terrain
@@ -928,7 +943,7 @@ impl<L: TypedLayer> RenderLayer for Hosted<L> {
         if L::RESTYLE_KEEPS_TILES {
             self.draws.clear();
         } else {
-            self.remove_all_draws();
+            self.retire_draws();
         }
         if let Some(recovered) = LayerStyle::recover(style) {
             self.values.style = recovered;
@@ -1079,9 +1094,8 @@ impl<L: TypedLayer> RenderLayer for Hosted<L> {
     fn set_renderable(&mut self, renderable: bool) {
         self.base.is_renderable = renderable;
         if !renderable {
-            self.remove_all_draws();
             self.tiles.clear_tiles();
-            self.layer.release();
+            self.draws.clear();
         }
     }
 

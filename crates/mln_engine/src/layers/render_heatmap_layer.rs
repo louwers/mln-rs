@@ -146,6 +146,7 @@ impl TypedLayer for RenderHeatmapLayer {
         cx: &mut TileCx<'_, '_, Self>,
         tile: FrameTile<'_, Heatmap>,
         _data: TileData<'_, Heatmap>,
+        _previous: Option<StandingDraw>,
     ) -> Option<StandingDraw> {
         let render_data = tile.data_for_pass(RENDER_PASS)?;
         let bucket = render_data.bucket;

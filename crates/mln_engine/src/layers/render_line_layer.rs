@@ -352,6 +352,7 @@ impl TypedLayer for RenderLineLayer {
         cx: &mut TileCx<'_, '_, Self>,
         tile: FrameTile<'_, Line>,
         _data: TileData<'_, Line>,
+        _previous: Option<LineTile>,
     ) -> Option<LineTile> {
         let render_pass = render_pass(cx.values);
         let render_data = tile.data_for_pass(render_pass)?;

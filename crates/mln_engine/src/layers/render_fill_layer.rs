@@ -593,6 +593,7 @@ impl TypedLayer for RenderFillLayer {
         cx: &mut TileCx<'_, '_, Self>,
         tile: FrameTile<'_, Fill>,
         _data: TileData<'_, Fill>,
+        _previous: Option<FillTile>,
     ) -> Option<FillTile> {
         let render_data = tile.data_for_pass(RENDER_PASS)?;
         let binders = render_data.bucket.paint_property_binders.get(&cx.base.style.base().id)?;

@@ -1,8 +1,9 @@
 //! What the engine keeps of a layer's tiles between frames: its value of
 //! each tile it draws, a value of the layer's type, in a [`TileMap`], which
 //! also says what the tile's value was made from and what of that bucket's
-//! vertex data changed since. The frame and every drape the layer draws in
-//! draw the same values.
+//! vertex data changed since, and the tile's previous value, which the next
+//! value the layer makes of the tile may take from. The frame and every
+//! drape the layer draws in draw the same values.
 
 use std::ops::BitOrAssign;
 
@@ -256,13 +257,36 @@ fn kept_tiles<'a>(
 /// A layer's values of the frame's tiles, which the engine keeps, by tile id:
 /// what each tile's value was made from and what of its bucket changed
 /// since, and the value, a `T` of the layer's type, from when the layer
-/// makes one ([`TypedLayer::tile`]).
+/// makes one ([`TypedLayer::tile`]). A value that the map retires, rather
+/// than drops, stays as the tile's previous value until the layer makes the
+/// tile's next one, which takes it, or the tile leaves.
 ///
 /// [`TypedLayer::tile`]: crate::layer::render_layer::TypedLayer::tile
 pub(crate) struct TileMap<T> {
     set: TileSet,
-    /// Each tile's `T`, at the tile's index in the set.
-    values: Vec<Option<T>>,
+    /// Each tile's values, at the tile's index in the set.
+    values: Vec<Slot<T>>,
+}
+
+/// A tile's value in a [`TileMap`], and its previous one.
+struct Slot<T> {
+    value: Option<T>,
+    previous: Option<T>,
+}
+
+impl<T> Default for Slot<T> {
+    fn default() -> Self {
+        Slot { value: None, previous: None }
+    }
+}
+
+impl<T> Slot<T> {
+    /// Makes the value, if there is one, the previous one.
+    fn retire(&mut self) {
+        if let Some(value) = self.value.take() {
+            self.previous = Some(value);
+        }
+    }
 }
 
 impl<T> Default for TileMap<T> {
@@ -279,7 +303,7 @@ impl<T> TileMap<T> {
         self.set.incoming.clear();
         self.set.incoming.extend(tiles);
         if self.set.set_tiles() {
-            self.set.moves.apply(&mut self.values, || None);
+            self.set.moves.apply(&mut self.values, Slot::default);
         }
     }
 
@@ -299,7 +323,7 @@ impl<T> TileMap<T> {
     /// of theirs.
     pub(crate) fn shift_wraps(&mut self, wrap_delta: i16) {
         if self.set.shift_wraps(wrap_delta) {
-            self.set.moves.apply(&mut self.values, || None);
+            self.set.moves.apply(&mut self.values, Slot::default);
         }
     }
 
@@ -309,9 +333,15 @@ impl<T> TileMap<T> {
         self.set.mark_changed(changed);
     }
 
-    /// Drops the tiles' values. The tiles' entries stay.
+    /// Drops the tiles' values and their previous ones. The tiles' entries
+    /// stay.
     pub(crate) fn clear(&mut self) {
-        self.values.fill_with(|| None);
+        self.values.fill_with(Slot::default);
+    }
+
+    /// Makes the tiles' values their previous ones. The tiles' entries stay.
+    pub(crate) fn retire(&mut self) {
+        self.values.iter_mut().for_each(Slot::retire);
     }
 
     /// Whether `tile_id` is one of the frame's tiles of the layer.
@@ -326,32 +356,32 @@ impl<T> TileMap<T> {
     #[cfg(test)]
     #[must_use]
     pub(crate) fn get(&self, tile_id: &OverscaledTileID) -> Option<&T> {
-        self.values.get(self.set.index_of(tile_id)?)?.as_ref()
+        self.values.get(self.set.index_of(tile_id)?)?.value.as_ref()
     }
 
     /// What the layer keeps of `tile_id`, if the tile is one of the frame's
     /// and the layer keeps anything of it.
     pub(crate) fn get_mut(&mut self, tile_id: &OverscaledTileID) -> Option<&mut T> {
-        self.values.get_mut(self.set.find(tile_id)?)?.as_mut()
+        self.values.get_mut(self.set.find(tile_id)?)?.value.as_mut()
     }
 
-    /// Drops what the layer keeps of `tile_id`.
+    /// Drops what the layer keeps of `tile_id`, its previous value too.
     pub(crate) fn drop_value(&mut self, tile_id: &OverscaledTileID) {
-        if let Some(value) = self.set.find(tile_id).and_then(|index| self.values.get_mut(index)) {
-            *value = None;
+        if let Some(slot) = self.set.find(tile_id).and_then(|index| self.values.get_mut(index)) {
+            *slot = Slot::default();
         }
     }
 
     /// The tiles, in order, each with its entry.
     pub(crate) fn entries(&mut self) -> impl Iterator<Item = (OverscaledTileID, TileEntry<'_, T>)> {
         let TileSet { ids, states, .. } = &mut self.set;
-        ids.iter().zip(states).zip(&mut self.values).map(|((&id, state), value)| (id, TileEntry { state, value }))
+        ids.iter().zip(states).zip(&mut self.values).map(|((&id, state), slot)| (id, TileEntry::new(state, slot)))
     }
 
     /// The entry of `tile_id`, if the tile is one of the frame's.
     pub(crate) fn entry(&mut self, tile_id: &OverscaledTileID) -> Option<TileEntry<'_, T>> {
         let index = self.set.find(tile_id)?;
-        Some(TileEntry { state: self.set.states.get_mut(index)?, value: self.values.get_mut(index)? })
+        Some(TileEntry::new(self.set.states.get_mut(index)?, self.values.get_mut(index)?))
     }
 }
 
@@ -360,9 +390,28 @@ pub(crate) struct TileEntry<'a, T> {
     state: &'a mut TileState,
     /// What the layer keeps of the tile, if anything.
     pub(crate) value: &'a mut Option<T>,
+    /// The tile's previous value, which the map retired.
+    previous: &'a mut Option<T>,
 }
 
-impl<T> TileEntry<'_, T> {
+impl<'a, T> TileEntry<'a, T> {
+    fn new(state: &'a mut TileState, Slot { value, previous }: &'a mut Slot<T>) -> Self {
+        TileEntry { state, value, previous }
+    }
+
+    /// Makes the tile's value, if it has one, its previous one.
+    pub(crate) fn retire(&mut self) {
+        if let Some(value) = self.value.take() {
+            *self.previous = Some(value);
+        }
+    }
+
+    /// Takes the tile's previous value, for the layer's next value of the
+    /// tile.
+    pub(crate) fn take_previous(&mut self) -> Option<T> {
+        self.previous.take()
+    }
+
     /// What the tile's value was made from, if the engine saw it show the
     /// layer something.
     #[cfg(test)]
@@ -372,15 +421,18 @@ impl<T> TileEntry<'_, T> {
     }
 
     /// Records what the tile shows the layer: `made_from`, or `None` for
-    /// nothing. The tile's value drops for nothing, and where it was made
-    /// from something else, which drops the changes of what it was made
-    /// from too.
+    /// nothing. The tile's value drops for nothing, with its previous one,
+    /// and retires where it was made from something else, which drops the
+    /// changes of what it was made from too.
     pub(crate) fn show(&mut self, made_from: Option<MadeFrom>) {
         match made_from {
-            None => *self.value = None,
+            None => {
+                *self.value = None;
+                *self.previous = None;
+            }
             Some(made_from) if self.state.made_from != Some(made_from) => {
                 if self.state.made_from.is_some() {
-                    *self.value = None;
+                    self.retire();
                 }
                 self.state.made_from = Some(made_from);
                 self.state.changes = BucketChanges::default();
@@ -450,10 +502,10 @@ mod tests {
     }
 
     /// A tile that shows another bucket, or bucket of another generation,
-    /// drops its value and the changes of the bucket before; one that shows
-    /// nothing drops its value.
+    /// retires its value and drops the changes of the bucket before; one
+    /// that shows nothing drops its value and its previous one.
     #[test]
-    fn another_bucket_drops_the_value() {
+    fn another_bucket_retires_the_value() {
         let tile = OverscaledTileID::with_zxy(1, 0, 1, 1, 0);
         let (bucket, other_bucket) = (SimpleIdentity::new(), SimpleIdentity::new());
         let mut tiles = TileMap::<u32>::default();
@@ -467,6 +519,8 @@ mod tests {
         assert!(show(&mut tiles, &tile, other_bucket));
         assert!(tiles.get(&tile).is_none());
         assert_eq!(Some(BucketChanges::default()), tiles.entry(&tile).map(|mut entry| entry.take_changes()));
+        assert_eq!(Some(1), tiles.entry(&tile).unwrap().take_previous());
+        assert_eq!(None, tiles.entry(&tile).unwrap().take_previous());
 
         assert!(set(&mut tiles, &tile, 2));
         tiles.entry(&tile).unwrap().show(Some((other_bucket, [1, 0])));
@@ -474,6 +528,12 @@ mod tests {
         assert!(set(&mut tiles, &tile, 3));
         tiles.entry(&tile).unwrap().show(None);
         assert!(tiles.get(&tile).is_none());
+        assert_eq!(None, tiles.entry(&tile).unwrap().take_previous());
+
+        assert!(set(&mut tiles, &tile, 4));
+        tiles.retire();
+        assert!(tiles.get(&tile).is_none());
+        assert_eq!(Some(4), tiles.entry(&tile).unwrap().take_previous());
     }
 
     /// Each tile keeps its value and bucket as tiles before and after it
