@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+#MISE description="Link the C library against glibc 2.17, the oldest that Rust supports on Linux"
+#MISE tools={"core:zig"="0.17.1","github:rust-cross/cargo-zigbuild"="0.24.1"}
+# cargo-zigbuild links with Zig's stubs of glibc 2.17 for this machine's
+# architecture. A shared library may leave symbols undefined, so `-z defs`
+# makes a strong reference to a function that 2.17 lacks fail the link. Weak
+# references, such as std's to `statx`, link, since their callers fall back
+# without them.
+set -euo pipefail
+
+triple="$(uname -m)-unknown-linux-gnu"
+rustflags_var="CARGO_TARGET_$(tr 'a-z-' 'A-Z_' <<<"$triple")_RUSTFLAGS"
+export "$rustflags_var=${!rustflags_var:-} -C link-arg=-Wl,-z,defs"
+cargo zigbuild -p mln-rs-c --lib --target "$triple.2.17"

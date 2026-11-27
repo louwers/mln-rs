@@ -44,17 +44,18 @@ ci:
       covers: >-
         Linux x64 workspace and render tests on WebGPU (lavapipe), backend-only
         tests on Vulkan (with validation) and OpenGL ES (EGL/llvmpipe), and the
-        native C ABI suite. This is the general correctness check for shared
-        Rust crates, rendering, and the C library. Docs-only, browser-only, or
-        macOS/Windows-only changes do not need it.
+        native C ABI suite, and the C library linked against glibc 2.17. This is
+        the general correctness check for shared Rust crates, rendering, and the
+        C library. Docs-only, browser-only, or macOS/Windows-only changes do not
+        need it.
     linux-arm64:
       covers: >-
         Linux ARM64 workspace and render tests on WebGPU (lavapipe),
         backend-only tests on Vulkan (with validation) and OpenGL ES
-        (EGL/llvmpipe), and the native C ABI suite. Catches ARM64 architecture,
-        alignment/SIMD/char-signedness, and ARM64 Linux packaging or CI issues.
-        Routine architecture-independent changes that `linux-x64` already covers
-        do not need it.
+        (EGL/llvmpipe), the native C ABI suite, and the C library linked against
+        glibc 2.17. Catches ARM64 architecture, alignment/SIMD/char-signedness,
+        and ARM64 Linux packaging or CI issues. Routine architecture-independent
+        changes that `linux-x64` already covers do not need it.
       rules:
         - if:
             files:

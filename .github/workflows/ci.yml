@@ -129,7 +129,8 @@ jobs:
   # lavapipe, Mesa's software rasterizer), on the Metal backend on macOS under
   # Metal's API validation, and on Direct3D 12 on Windows (WARP with DXC), with
   # coverage uploaded to Codecov (.github/codecov.yml) where enabled. Non-Linux
-  # runners also run clippy on the code that only they build.
+  # runners also run clippy on the code that only they build, and Linux runners
+  # link the C library against glibc 2.17 (`mise run check:glibc`).
   test:
     needs: plan
     if:
@@ -175,6 +176,10 @@ jobs:
           else
             mise run ci:test --no-coverage "$BACKEND"
           fi
+
+      - name: Check the glibc floor
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        run: mise run check:glibc
 
       # The render suites' reports and actual/diff images.
       - name: Upload the render test results

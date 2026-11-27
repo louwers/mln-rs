@@ -266,8 +266,18 @@ fn udmabuf_allocate(device: &OwnedFd, size: Size) -> Result<Memory, Error> {
     // SAFETY: a plain query.
     let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) }.max(4096) as u64;
     let bytes = (u64::from(stride) * u64::from(size.height)).div_ceil(page) * page;
+    // The system call, not glibc's wrapper, which glibc only has from 2.27.
     // SAFETY: a new memfd, which the buffer owns.
-    let memory = unsafe { libc::memfd_create(c"mln-dma-buf".as_ptr(), libc::MFD_ALLOW_SEALING | libc::MFD_CLOEXEC) };
+    #[cfg_attr(
+        target_pointer_width = "32",
+        expect(
+            trivial_numeric_casts,
+            reason = "`syscall` returns a `c_long`, the width of a `c_int` on 32-bit targets"
+        )
+    )]
+    let memory = unsafe {
+        libc::syscall(libc::SYS_memfd_create, c"mln-dma-buf".as_ptr(), libc::MFD_ALLOW_SEALING | libc::MFD_CLOEXEC)
+    } as libc::c_int;
     if memory < 0 {
         return Err(Error::native("allocating the dmabuf's memory failed"));
     }
