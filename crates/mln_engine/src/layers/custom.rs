@@ -39,12 +39,11 @@ use crate::camera::{FrameProjection, MapView};
 use crate::draw::context::Context;
 use crate::layer::layer_drawing::{DrawGroup, DrawOrder, LayerDrawing, TileMap};
 use crate::layer::layer_type::LayerType;
-use crate::layer::layout::NoLayout;
 use crate::layer::render_layer::{LayerValues, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer};
+use crate::layer::tile_input::NoTiles;
 use crate::log_target;
 use crate::render::paint_parameters::PaintParameters;
 use crate::render::pass::RenderPass;
-use crate::render::tile::NoTileBucket;
 
 /// The frame that a custom layer draws into.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -170,8 +169,7 @@ impl CustomHost {
 }
 
 impl LayerType for Custom {
-    type Layout = NoLayout;
-    type TileBucket<'a> = NoTileBucket;
+    type Input = NoTiles;
 
     fn render_layer(style: Arc<LayerStyle<Custom>>) -> Box<dyn RenderLayer> {
         Box::new(RenderCustomLayer::new(style))
