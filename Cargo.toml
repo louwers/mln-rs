@@ -62,6 +62,7 @@ mln_gl = { package = "mln-rs-gl", path = "crates/mln_gl", version = "=0.0.18" }
 mln_glsl = { package = "mln-rs-glsl", path = "crates/mln_glsl", version = "=0.0.18" }
 mln_headless = { package = "mln-rs-headless", path = "crates/mln_headless", version = "=0.0.18" }
 mln_image_process = { package = "mln-rs-image-process", path = "crates/mln_image_process", version = "=0.0.18" }
+mln_location_puck = { package = "mln-rs-location-puck", path = "crates/mln_location_puck", version = "=0.0.18" }
 mln_mtl = { package = "mln-rs-mtl", path = "crates/mln_mtl", version = "=0.0.18" }
 mln_ngon = { package = "mln-rs-ngon", path = "crates/mln_ngon", version = "=0.0.18" }
 # Without its backends (its default features) unless a package asks for
@@ -76,8 +77,8 @@ mln_webgpu = { package = "mln-rs-webgpu", path = "crates/mln_webgpu", version = 
 pixelmatch = { package = "mln-rs-pixelmatch", path = "vendor/pixelmatch", version = "=0.0.18" }
 polylabel = { package = "mln-rs-polylabel", path = "vendor/polylabel", version = "=0.0.18" }
 # The render and query test runner, for the render tests of the layer
-# types outside mln_builtins (crates/mln_ngon/tests,
-# crates/mln_image_process/tests). Not published.
+# types outside mln_builtins (the tests of crates/mln_ngon,
+# crates/mln_image_process and crates/mln_location_puck). Not published.
 render_test = { package = "mln-rs-render-test", path = "tools/render-test" }
 style_codegen = { package = "mln-rs-style-codegen", path = "tools/style-codegen", version = "=0.0.18" }
 

@@ -2856,6 +2856,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "mln-rs-location-puck"
+version = "0.0.18"
+dependencies = [
+ "bytemuck",
+ "geo-types",
+ "glam",
+ "mln-rs-builtins",
+ "mln-rs-engine",
+ "mln-rs-geometry",
+ "mln-rs-gfx",
+ "mln-rs-headless",
+ "mln-rs-render-test",
+ "mln-rs-style",
+ "serde_json",
+]
+
+[[package]]
 name = "mln-rs-mtl"
 version = "0.0.18"
 dependencies = [

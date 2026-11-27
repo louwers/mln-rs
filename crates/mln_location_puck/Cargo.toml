@@ -1,0 +1,37 @@
+# The `org.maplibre.location-puck` layer type, written on the layer contract
+# that the engine opens to other crates. Its render and query tests
+# (render-tests/) run through tools/render-test's runner
+# (tests/render_tests.rs).
+[package]
+name = "mln-rs-location-puck"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "A layer type for mln-rs that draws a device's location: a puck, its heading and its accuracy"
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+include.workspace = true
+
+[lib]
+name = "mln_location_puck"
+
+[dependencies]
+bytemuck.workspace = true
+geo-types.workspace = true
+geometry.workspace = true
+glam.workspace = true
+mln_engine.workspace = true
+mln_gfx.workspace = true
+mln_style.workspace = true
+
+[dev-dependencies]
+mln_builtins.workspace = true
+# Unpublished: without a version, `cargo package` drops it.
+mln_headless = { package = "mln-rs-headless", path = "../mln_headless" }
+render_test.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,68 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 256,
+      "height": 192
+    }
+  },
+  "center": [2.8125, 1.4114],
+  "zoom": 6.5,
+  "pitch": 60,
+  "sources": {
+    "dem": {
+      "type": "raster-dem",
+      "tiles": ["local://tiles/hill.terrain.png"],
+      "maxzoom": 6,
+      "tileSize": 256
+    }
+  },
+  "terrain": {
+    "source": "dem",
+    "exaggeration": 1
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#eef2f7"
+      }
+    },
+    {
+      "id": "hillshade",
+      "type": "hillshade",
+      "source": "dem",
+      "paint": {
+        "hillshade-exaggeration": 0.3
+      }
+    },
+    {
+      "id": "on-the-hill",
+      "type": "org.maplibre.location-puck",
+      "paint": {
+        "puck-position": [2.5125, 2.8114],
+        "puck-bearing": 45,
+        "puck-bearing-visible": true,
+        "puck-accuracy-radius": 30000,
+        "puck-accuracy-border-width": 1
+      }
+    },
+    {
+      "id": "behind-the-hill",
+      "type": "org.maplibre.location-puck",
+      "paint": {
+        "puck-position": [2.9125, 3.5114]
+      }
+    },
+    {
+      "id": "beside-the-hill",
+      "type": "org.maplibre.location-puck",
+      "paint": {
+        "puck-position": [1.9125, 1.5114],
+        "puck-shadow-radius": 14,
+        "puck-tilt-displacement": 12
+      }
+    }
+  ]
+}

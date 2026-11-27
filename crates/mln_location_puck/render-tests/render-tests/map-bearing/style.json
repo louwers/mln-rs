@@ -1,0 +1,33 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 96,
+      "height": 96
+    }
+  },
+  "center": [0, 0],
+  "zoom": 5,
+  "bearing": 90,
+  "sources": {},
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#eeeeee"
+      }
+    },
+    {
+      "id": "puck",
+      "type": "org.maplibre.location-puck",
+      "paint": {
+        "puck-position": [0, 0],
+        "puck-bearing": 0,
+        "puck-bearing-visible": true,
+        "puck-bearing-accuracy": 20,
+        "puck-bearing-accuracy-radius": 40
+      }
+    }
+  ]
+}
