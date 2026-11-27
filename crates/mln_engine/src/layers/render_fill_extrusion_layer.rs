@@ -34,7 +34,6 @@ use std::mem::offset_of;
 use std::sync::Arc;
 
 use mln_gfx::gpu::{Caps, ClipDepthRange, Gpu, ShaderKey};
-use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
@@ -61,9 +60,7 @@ use crate::draw::vertices::SharedVertices;
 use crate::layer::bucket_geometry::{
     BucketGeometry, bucket_indexes, bucket_vertices, copied_vertices, derived_vertices, paint_vertices,
 };
-use crate::layer::layer_drawing::{
-    DrawDepth, DrawList, DrawPriority, FrameDraw, MeshMut, TileDraws, TileObjects, UniformWriter,
-};
+use crate::layer::layer_drawing::{DrawDepth, DrawPriority, FrameDraw, MeshMut, TileDraws, TileObjects};
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
@@ -86,9 +83,6 @@ use crate::render::tile_matrix::{projection_data, to_projection_ubo};
 use crate::tile::{OverscaledTileID, UnwrappedTileID};
 
 /// The ids of the buffers that the draws bind.
-const DRAWABLE_ID: usize = programs::FILL_EXTRUSION.buffer_id("drawableVector");
-const TILE_PROPS_ID: usize = programs::FILL_EXTRUSION_PATTERN.buffer_id("tilePropsVector");
-const PROPS_ID: usize = programs::FILL_EXTRUSION.buffer_id("props");
 const WALL_VERTICES_ID: usize = programs::FILL_EXTRUSION_PULLED.buffer_id("wallVertices");
 const WALL_PAINT_ID: usize = programs::FILL_EXTRUSION_PULLED.buffer_id("wallPaint");
 const WALL_HEIGHTS_ID: usize = programs::FILL_EXTRUSION_PULLED.buffer_id("wallHeights");
@@ -205,13 +199,6 @@ impl TileObjects for ExtrusionTile {
     fn objects(&mut self, index: usize) -> Option<MeshMut<'_>> {
         Some(MeshMut { mesh: &mut self.draws.get_mut(index)?.mesh, atlases: self.atlases.as_ref() })
     }
-}
-
-/// A draw's entries in the layer's storage buffers.
-struct ExtrusionUniforms {
-    draw_ubo: FillExtrusionDrawableUBO,
-    tile_props: FillExtrusionTilePropsUBO,
-    projection: ProjectionUBO,
 }
 
 /// The geometry of draws: vertices in their attributes, which each draw
@@ -362,9 +349,6 @@ impl LayerType for FillExtrusion {
 }
 
 pub(crate) struct RenderFillExtrusionLayer {
-    /// The frame's draws as the update makes them.
-    draw_list: DrawList<ExtrusionUniforms, usize>,
-
     /// The wall quad (`RenderStaticData::fill_extrusion_vertices`) of the
     /// instanced walls.
     static_data_vertices: Option<SharedVertices>,
@@ -407,12 +391,7 @@ impl TypedLayer for RenderFillExtrusionLayer {
     const VOLUME: bool = true;
 
     fn new(_values: &LayerValues<FillExtrusion>) -> Self {
-        RenderFillExtrusionLayer {
-            draw_list: DrawList::default(),
-            static_data_vertices: None,
-            strip_indices: None,
-            wall_indices: None,
-        }
+        RenderFillExtrusionLayer { static_data_vertices: None, strip_indices: None, wall_indices: None }
     }
 
     fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
@@ -526,8 +505,14 @@ impl TypedLayer for RenderFillExtrusionLayer {
                     ..FrameDraw::new(Some(tile_id), draw.mesh.id())
                 };
                 let layout = cached.paint_layout;
-                let uniforms = Self::uniforms(layer, tile_id, render_data, binders, draw, layout, paint_parameters);
-                self.draw_list.push_part(frame_draw, index, uniforms);
+                let (drawable, tile_props, projection) =
+                    Self::uniforms(layer, tile_id, render_data, binders, draw, layout, paint_parameters);
+                let frame = cx.drawing.frame_mut();
+                if has_pattern {
+                    frame.push_at(frame_draw, index, &draw.mesh, &projection, (drawable, tile_props));
+                } else {
+                    frame.push_at(frame_draw, index, &draw.mesh, &projection, drawable);
+                }
             }
         }
 
@@ -538,9 +523,8 @@ impl TypedLayer for RenderFillExtrusionLayer {
         // The draws that composite draw opaque: the composite has the
         // layer's opacity.
         let opacity = if composite.is_some() { 1.0 } else { opacity };
-        cx.drawing.finish(&mut self.draw_list, gpu, paint_parameters.context, |writer| {
-            Self::write_uniforms(layer, writer, light, state, opacity);
-        });
+        cx.drawing.frame_mut().block(&Self::props(layer, light, state, opacity));
+        cx.drawing.finish(gpu, paint_parameters);
     }
 
     // query
@@ -791,10 +775,10 @@ impl ExtrusionTile {
 }
 
 impl RenderFillExtrusionLayer {
-    /// The entries in the layer's storage buffers of `draw`, a draw of
-    /// `tile`, whose bucket's binders are `binders` and whose pulled walls
-    /// find their paint values by `paint_layout`, with the layer's values
-    /// `layer`.
+    /// The blocks and the projection of `draw`, a draw of `tile`, whose
+    /// bucket's binders are `binders` and whose pulled walls find their
+    /// paint values by `paint_layout`, with the layer's values `layer`. The
+    /// tile's block is read only with a pattern.
     fn uniforms(
         layer: &EvaluatedLayer<FillExtrusion>,
         tile_id: OverscaledTileID,
@@ -803,7 +787,7 @@ impl RenderFillExtrusionLayer {
         draw: &ExtrusionDraw,
         paint_layout: u32,
         parameters: &PaintParameters<'_>,
-    ) -> ExtrusionUniforms {
+    ) -> (FillExtrusionDrawableUBO, FillExtrusionTilePropsUBO, ProjectionUBO) {
         const IN_VIEWPORT_PIXEL_UNITS: bool = false;
         // The near-clipped projection keeps the depth buffer's precision for
         // the extrusions, but over terrain they test the frame's depth of the
@@ -857,43 +841,40 @@ impl RenderFillExtrusionLayer {
         let tlbr = |id: &str| tile_bucket.pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
 
         let pattern_t = binders.fill_extrusion_pattern.interpolation_factor(zoom).0;
-        ExtrusionUniforms {
-            draw_ubo: FillExtrusionDrawableUBO {
-                matrix: cast_matrix(&projection.fallback_matrix),
-                pixel_coord_upper: [(pixel_x >> 16) as f32, (pixel_y >> 16) as f32],
-                pixel_coord_lower: [(pixel_x & 0xFFFF) as f32, (pixel_y & 0xFFFF) as f32],
-                height_factor,
-                tile_ratio,
-                base_t: binders.fill_extrusion_base.interpolation_factor(zoom),
-                height_t: binders.fill_extrusion_height.interpolation_factor(zoom),
-                color_t: binders.fill_extrusion_color.interpolation_factor(zoom),
-                pattern_from_t: pattern_t,
-                pattern_to_t: pattern_t,
-                paint_layout,
-            },
-            tile_props: FillExtrusionTilePropsUBO {
-                pattern_from: tlbr(pattern.from.id()),
-                pattern_to: tlbr(pattern.to.id()),
-                texsize: [texture_size.width as f32, texture_size.height as f32],
-                pad1: 0.0,
-                pad2: 0.0,
-            },
-            projection: to_projection_ubo(&projection),
-        }
+        let drawable = FillExtrusionDrawableUBO {
+            matrix: cast_matrix(&projection.fallback_matrix),
+            pixel_coord_upper: [(pixel_x >> 16) as f32, (pixel_y >> 16) as f32],
+            pixel_coord_lower: [(pixel_x & 0xFFFF) as f32, (pixel_y & 0xFFFF) as f32],
+            height_factor,
+            tile_ratio,
+            base_t: binders.fill_extrusion_base.interpolation_factor(zoom),
+            height_t: binders.fill_extrusion_height.interpolation_factor(zoom),
+            color_t: binders.fill_extrusion_color.interpolation_factor(zoom),
+            pattern_from_t: pattern_t,
+            pattern_to_t: pattern_t,
+            paint_layout,
+        };
+        let tile_props = FillExtrusionTilePropsUBO {
+            pattern_from: tlbr(pattern.from.id()),
+            pattern_to: tlbr(pattern.to.id()),
+            texsize: [texture_size.width as f32, texture_size.height as f32],
+            pad1: 0.0,
+            pad2: 0.0,
+        };
+        (drawable, tile_props, to_projection_ubo(&projection))
     }
 
-    /// Writes the layer's buffers of the frame's draws, which draw at
+    /// The block of the layer's values that its draws share, which draw at
     /// `opacity`.
-    fn write_uniforms(
+    fn props(
         layer: &EvaluatedLayer<FillExtrusion>,
-        writer: &mut UniformWriter<'_, ExtrusionUniforms>,
         light: &EvaluatedLight,
         state: &View,
         opacity: f32,
-    ) {
+    ) -> FillExtrusionPropsUBO {
         let evaluated = &layer.paint;
         let crossfade = layer.crossfade;
-        let props = FillExtrusionPropsUBO {
+        FillExtrusionPropsUBO {
             color: evaluated
                 .fill_extrusion_color
                 .constant_or(&FillExtrusionPaintProperties::Defaults::fill_extrusion_color())
@@ -914,11 +895,7 @@ impl RenderFillExtrusionLayer {
             from_scale: crossfade.from_scale,
             to_scale: crossfade.to_scale,
             pad2: 0.0,
-        };
-        writer.uniform(PROPS_ID, &props);
-        writer.storage(DRAWABLE_ID, |uniforms| uniforms.draw_ubo);
-        writer.storage(TILE_PROPS_ID, |uniforms| uniforms.tile_props);
-        writer.storage(PROJECTION_ID, |uniforms| uniforms.projection);
+        }
     }
 }
 
