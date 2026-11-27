@@ -13,8 +13,6 @@
 //! buffers (`Caps::binds_vertex_buffers`), as a storage buffer that it
 //! indexes itself (`Mesh::read_as_storage`).
 
-use std::rc::{Rc, Weak};
-
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
@@ -30,6 +28,7 @@ use mln_gfx::shaders::program::Program;
 use mln_gfx::stencil_mode::StencilMode;
 use mln_style::hash::HashMap;
 
+use crate::draw::atlas_binding::AtlasBinding;
 use crate::draw::buffer::Buffer;
 use crate::draw::context::Context;
 use crate::draw::identity::SimpleIdentity;
@@ -37,7 +36,7 @@ use crate::draw::indexes::DrawIndexes;
 use crate::draw::owned::{Held, Owned};
 use crate::draw::resources::Device;
 use crate::draw::segment::SegmentBase;
-use crate::draw::store::SharedTexture;
+use crate::draw::store::{MeshKey, Shared, SharedTexture, WeakShared};
 use crate::draw::uniform_buffer::UniformBufferArray;
 use crate::draw::upload::{self, AttributeBindingArray, AttributeSlots};
 use crate::draw::vertex_attribute::VertexAttributeArray;
@@ -137,7 +136,7 @@ struct BindingsStamp {
 
 /// The bindings a frame made of a mesh, while the mesh lasts.
 struct MeshBindings {
-    mesh: Weak<()>,
+    mesh: WeakShared<MeshKey>,
     bindings: Owned<BindingsId>,
     stamp: BindingsStamp,
 }
@@ -194,7 +193,7 @@ impl DrawBuffers {
 
     /// Drops the bindings of the meshes that dropped.
     pub(crate) fn sweep(&mut self) {
-        self.bindings.retain(|_, made| made.mesh.strong_count() > 0);
+        self.bindings.retain(|_, made| made.mesh.is_held());
     }
 
     /// The bindings of what `mesh`'s shader, `shader_id` on `gpu`, reads of
@@ -205,7 +204,7 @@ impl DrawBuffers {
         &mut self,
         gpu: &mut dyn Gpu,
         context: &mut Context,
-        mesh: &Mesh,
+        mesh: &DrawObjects,
         shader_id: ShaderId,
     ) -> Result<BindingsId, GpuError> {
         let program = mesh.shader.program();
@@ -255,7 +254,7 @@ impl DrawBuffers {
         );
         let bindings =
             gpu.create_bindings(&BindingsDesc { label: program.name, shader: shader_id, entries: entries.as_slice() })?;
-        let made = MeshBindings { mesh: Rc::downgrade(&mesh.alive), bindings: context.own(bindings, held), stamp };
+        let made = MeshBindings { mesh: mesh.handle.clone(), bindings: context.own(bindings, held), stamp };
         self.bindings.insert(mesh.id, made);
         Ok(bindings)
     }
@@ -268,8 +267,11 @@ impl DrawBuffers {
         context: &mut Context,
         mesh: &Mesh,
     ) -> Result<BindingsId, GpuError> {
-        let shader = context.shader(gpu, &mesh.shader)?;
-        self.bindings(gpu, context, mesh, shader)
+        let objects = context.take_mesh(mesh).ok_or(GpuError::UnknownId("mesh"))?;
+        let bound =
+            context.shader(gpu, &objects.shader).and_then(|shader| self.bindings(gpu, context, &objects, shader));
+        context.put_mesh(mesh, objects);
+        bound
     }
 
     /// How many meshes the frame keeps bindings of.
@@ -294,12 +296,13 @@ struct PipelineVariant {
 /// them on the context's `Gpu`, which it makes again when what they are made
 /// of changes. The frames that draw it bind it with their buffers
 /// ([`DrawBuffers`]).
-pub(crate) struct Mesh {
+pub(crate) struct DrawObjects {
     /// Tells the mesh apart from the others, and orders it after those made
     /// before it.
     id: SimpleIdentity,
-    /// Lives while the mesh does, for the frames' bindings of it.
-    alive: Rc<()>,
+    /// The mesh's handles, which the frames' bindings of it last while one
+    /// does.
+    handle: WeakShared<MeshKey>,
     shader: ShaderKey,
     vertex_attributes: VertexAttributeArray,
     /// The attributes of each instance, for a draw of instances.
@@ -345,10 +348,12 @@ pub(crate) struct Mesh {
     /// The geometry of its vertex slots and the index buffer it was made
     /// with.
     geometry: Option<(Owned<GeometryId>, BufferId)>,
+    /// Gives it the textures of its tile's atlases before each draw.
+    atlases: Option<AtlasBinding>,
 }
 
-impl Mesh {
-    /// The mesh of `geometry`, drawn with `shader` in `color_mode` and
+impl DrawObjects {
+    /// The objects of `geometry`, drawn with `shader` in `color_mode` and
     /// `cull_face_mode`, binding `textures`.
     #[must_use]
     pub(crate) fn new(
@@ -359,9 +364,9 @@ impl Mesh {
         textures: Textures,
     ) -> Self {
         let DrawGeometry { vertices, vertex_count, mode, indexes, segments, instances } = geometry;
-        Mesh {
+        DrawObjects {
             id: SimpleIdentity::new(),
-            alive: Rc::new(()),
+            handle: WeakShared::default(),
             shader,
             vertex_attributes: vertices,
             instance_attributes: instances,
@@ -385,6 +390,7 @@ impl Mesh {
             pipelines: Vec::new(),
             pipeline_layouts: Vec::new(),
             geometry: None,
+            atlases: None,
         }
     }
 
@@ -469,12 +475,6 @@ impl Mesh {
         Ok(())
     }
 
-    /// The mesh's id, which orders it after the meshes made before it.
-    #[must_use]
-    pub(crate) fn id(&self) -> SimpleIdentity {
-        self.id
-    }
-
     /// The program the mesh draws with.
     #[must_use]
     pub(crate) fn program(&self) -> &'static Program {
@@ -496,6 +496,10 @@ impl Mesh {
         stencil_mode: StencilMode,
         global_index: u32,
     ) -> bool {
+        if let Some(atlases) = self.atlases.take() {
+            atlases.bind(self, parameters);
+            self.atlases = Some(atlases);
+        }
         let drawn = self.draw_in(gpu, parameters, frame, depth_mode, stencil_mode, global_index);
         if let Err(error) = &drawn {
             parameters.context.fail(format!("Drawing {} failed: {error}", self.shader.program().name));
@@ -674,12 +678,6 @@ impl Mesh {
         self.instance_attributes.is_some()
     }
 
-    /// Replaces the vertex attributes with a copy of those of `other`
-    /// ([`copy_shared_attributes`]), which the next upload binds.
-    pub(crate) fn share_vertex_attributes(&mut self, other: &Mesh) {
-        *self.vertex_attributes_mut() = copy_shared_attributes(&other.vertex_attributes);
-    }
-
     /// The texture it binds at its program's texture slot `slot`.
     #[must_use]
     pub(crate) fn texture(&self, slot: usize) -> Option<&SharedTexture> {
@@ -716,6 +714,158 @@ impl Mesh {
     #[must_use]
     pub(crate) fn shader(&self) -> &ShaderKey {
         &self.shader
+    }
+}
+
+/// A handle of a mesh, the GPU objects of what a draw draws
+/// ([`DrawObjects`]), which the context's store keeps while a clone of the
+/// handle lasts ([`Context::mesh`]). A layer keeps its meshes' handles, in
+/// its tile values or its own state, and the draws it pushes name them
+/// ([`Group::push`]), so that the engine uploads and draws them after the
+/// layer made its draws. Clones of a handle are the same mesh. A mesh
+/// changes through the context, which the methods here take.
+///
+/// [`Group::push`]: crate::draw::draws::Group::push
+#[derive(Clone)]
+pub(crate) struct Mesh {
+    key: Shared<MeshKey>,
+    id: SimpleIdentity,
+    program: &'static Program,
+}
+
+impl Mesh {
+    /// The mesh of `geometry`, drawn with `shader` in `color_mode` and
+    /// `cull_face_mode`, binding `textures`, in `context`'s store.
+    #[must_use]
+    pub(crate) fn new(
+        context: &mut Context,
+        shader: ShaderKey,
+        color_mode: ColorMode,
+        cull_face_mode: CullFaceMode,
+        geometry: DrawGeometry,
+        textures: Textures,
+    ) -> Self {
+        let mut objects = DrawObjects::new(shader, color_mode, cull_face_mode, geometry, textures);
+        let (id, program) = (objects.id, objects.program());
+        let key = context.add_mesh_with(|key| {
+            objects.handle = key.downgrade();
+            objects
+        });
+        Mesh { key, id, program }
+    }
+
+    /// The handle of the mesh's entry in the context's store.
+    pub(crate) fn key(&self) -> &Shared<MeshKey> {
+        &self.key
+    }
+
+    /// The place of the mesh among the meshes, by when they were made, as a
+    /// draw's order ([`Draw::order`](crate::draw::draws::Draw::order)).
+    #[must_use]
+    pub(crate) fn seq(&self) -> i64 {
+        self.id.get() as i64
+    }
+
+    /// The program the mesh draws with.
+    #[must_use]
+    pub(crate) fn program(&self) -> &'static Program {
+        self.program
+    }
+
+    /// Runs `f` with the mesh's objects, taken out of `context`'s store
+    /// while it runs, and the context; `None` without them.
+    pub(crate) fn update<R>(
+        &self,
+        context: &mut Context,
+        f: impl FnOnce(&mut DrawObjects, &mut Context) -> R,
+    ) -> Option<R> {
+        let mut objects = context.take_mesh(self)?;
+        let result = f(&mut objects, context);
+        context.put_mesh(self, objects);
+        Some(result)
+    }
+
+    /// See [`DrawObjects::upload`].
+    pub(crate) fn upload(&self, gpu: &mut dyn Gpu, context: &mut Context) {
+        self.update(context, |objects, context| objects.upload(gpu, context));
+    }
+
+    /// See [`DrawObjects::vertex_attributes_mut`].
+    pub(crate) fn vertex_attributes_mut<'c>(&self, context: &'c mut Context) -> Option<&'c mut VertexAttributeArray> {
+        context.mesh_mut(self).map(DrawObjects::vertex_attributes_mut)
+    }
+
+    /// See [`DrawObjects::paint_attributes_mut`].
+    pub(crate) fn paint_attributes_mut<'c>(&self, context: &'c mut Context) -> Option<&'c mut VertexAttributeArray> {
+        context.mesh_mut(self).map(DrawObjects::paint_attributes_mut)
+    }
+
+    /// See [`DrawObjects::read_as_storage`].
+    pub(crate) fn read_as_storage(&self, context: &mut Context, id: usize, vertices: Option<SharedVertices>) {
+        if let Some(objects) = context.mesh_mut(self) {
+            objects.read_as_storage(id, vertices);
+        }
+    }
+
+    /// See [`DrawObjects::storage_buffer`].
+    #[cfg(test)]
+    pub(crate) fn storage_buffer(&self, context: &Context, id: usize) -> Option<BufferId> {
+        context.mesh(self)?.storage_buffer(id)
+    }
+
+    /// See [`DrawObjects::has_instances`].
+    #[must_use]
+    pub(crate) fn has_instances(&self, context: &Context) -> bool {
+        context.mesh(self).is_some_and(DrawObjects::has_instances)
+    }
+
+    /// Replaces the vertex attributes with a copy of those of `other`
+    /// ([`copy_shared_attributes`]), which the next upload binds.
+    pub(crate) fn share_vertex_attributes(&self, context: &mut Context, other: &Mesh) {
+        if self.key == other.key {
+            return;
+        }
+        let Some(copy) = context.mesh(other).map(|other| copy_shared_attributes(&other.vertex_attributes)) else {
+            return;
+        };
+        if let Some(objects) = context.mesh_mut(self) {
+            *objects.vertex_attributes_mut() = copy;
+        }
+    }
+
+    /// See [`DrawObjects::texture`].
+    #[must_use]
+    pub(crate) fn texture<'c>(&self, context: &'c Context, slot: usize) -> Option<&'c SharedTexture> {
+        context.mesh(self)?.texture(slot)
+    }
+
+    /// See [`DrawObjects::set_texture`].
+    pub(crate) fn set_texture(&self, context: &mut Context, slot: usize, texture: Option<&SharedTexture>) {
+        if let Some(objects) = context.mesh_mut(self) {
+            objects.set_texture(slot, texture);
+        }
+    }
+
+    /// See [`DrawObjects::replace_indexes`].
+    pub(crate) fn replace_indexes(&self, context: &mut Context, indexes: DrawIndexes, segments: Vec<SegmentBase>) {
+        if let Some(objects) = context.mesh_mut(self) {
+            objects.replace_indexes(indexes, segments);
+        }
+    }
+
+    /// See [`DrawObjects::set_cull_face_mode`].
+    pub(crate) fn set_cull_face_mode(&self, context: &mut Context, cull_face_mode: CullFaceMode) {
+        if let Some(objects) = context.mesh_mut(self) {
+            objects.set_cull_face_mode(cull_face_mode);
+        }
+    }
+
+    /// Makes `atlases` what gives the mesh the textures of its tile's glyph
+    /// and icon atlases before each draw.
+    pub(crate) fn set_atlases(&self, context: &mut Context, atlases: Option<AtlasBinding>) {
+        if let Some(objects) = context.mesh_mut(self) {
+            objects.atlases = atlases;
+        }
     }
 }
 

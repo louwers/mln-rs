@@ -10,10 +10,10 @@
 //! drape draws the tiles over its own tile: on Mercator those of its world
 //! copy; on the globe, which has no copies, those of any, in its own, so
 //! that near the antimeridian it holds the tiles that the cover puts in the
-//! next copy. Each draped layer has tile values and a drawing of its own in
-//! each drape of its stack, made by the layer's own draw update
-//! ([`RenderLayer::update_drape_draws`]), with the drape's uniforms, clip
-//! masks and stencil.
+//! next copy. Each draped layer has tile values and draws of its own in
+//! each drape of its stack, which the layer makes as it makes the frame's,
+//! for the drape's frame ([`RenderLayer::update_drape_draws`]), and which
+//! the engine draws with the drape's uniforms, clip masks and stencil.
 //!
 //! A drape draws again only when what its layers would draw it from differs
 //! from what they last drew it from ([`DrapeKey`]), or its side changes;
@@ -26,7 +26,7 @@
 //! of the tiles farthest from the view's center, last in the cover, where
 //! the drapes' textures and the depth and stencil they draw with would
 //! hold more; it never drops a tile. The sides are settled before the
-//! layers update their drawings, so a drape that changes takes its tile's
+//! layers update their draws, so a drape that changes takes its tile's
 //! side at once. The cap counts as holding a texture every drape that
 //! does, and every drape whose layers draw from something new, which may
 //! draw something.
@@ -56,9 +56,10 @@ use smallvec::SmallVec;
 use super::TerrainCover;
 use crate::camera::View;
 use crate::draw::context::Context;
+use crate::draw::draws::{DrawGroups, DrawOrder, Draws};
 use crate::draw::resources::{GpuTexture, attachment_bytes};
 use crate::draw::store::SharedTexture;
-use crate::layer::layer_drawing::{ChangedBuckets, DrapeDrawing, DrawGroups, DrawOrder};
+use crate::layer::layer_drawing::{ChangedBuckets, DrapeTiles};
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::layer::render_layer::{FrameSourceTiles, RenderLayer};
 use crate::render::clip_masks::ClipMasks;
@@ -129,10 +130,12 @@ fn cap_sizes(sizes: &mut [u32], held: &[usize], cap: u64) {
     }
 }
 
-/// A drawing of a layer that a drape keeps, with the style it was made for.
+/// What a drape keeps of a layer: its tile values and its draws there,
+/// with the style they were made for.
 struct DrapeLayer {
     style: Arc<dyn ErasedLayerStyle>,
-    drawing: DrapeDrawing,
+    tiles: DrapeTiles,
+    draws: Draws,
 }
 
 /// What a draped layer draws a drape with: its values, which it evaluates
@@ -191,20 +194,20 @@ struct StackDrape {
     /// The texture, and its side in texels, while the stack's layers draw
     /// something in the tile.
     texture: Option<(SharedTexture, u32)>,
-    /// The stack's layers' drawings, in drawing order.
+    /// What the drape keeps of the stack's layers, in drawing order.
     layers: Vec<DrapeLayer>,
-    /// The drawings of the last frame that this frame's layers haven't
-    /// taken yet, which go once it has updated them.
+    /// What it kept of the layers in the last frame that this frame's
+    /// layers haven't taken yet, which goes once it has updated them.
     previous: Vec<DrapeLayer>,
-    /// The draw groups of the layers' drawings, which set the pass's depths
-    /// and the masks it clips to.
+    /// The groups of the layers' draws, which set the pass's depths and the
+    /// masks it clips to.
     groups: DrawGroups,
     /// What the layers last drew it from, or found nothing to draw in it
     /// from; `None` before they first do, and once it must draw again.
     drawn: Option<DrapeKey>,
     /// What the frame's layers would draw it from.
     key: DrapeKey,
-    /// Whether the frame's layers update its drawings, and it draws again
+    /// Whether the frame's layers update its draws, and it draws again
     /// if they draw something.
     updated: bool,
 }
@@ -248,12 +251,12 @@ pub(crate) struct Drapes {
 impl Drapes {
     /// Starts a frame's update of the drapes, those of `cover`'s tiles in
     /// `view`, and of `stacks` stacks: keeps the drapes of the tiles and
-    /// stacks it had, with their drawings and what they were drawn from, and
+    /// stacks it had, with what they keep of their layers and what they were drawn from, and
     /// drops the others. Each tile's drapes take GL JS's side, at most
     /// `max_texture_size` ([`drape_size`]), lowered where they would hold
     /// more than `byte_cap` bytes ([`choose`](Self::choose)). The frame's
     /// draped layers then give their keys ([`key_layer`](Self::key_layer)),
-    /// from which `choose` picks the drapes whose drawings they update
+    /// from which `choose` picks the drapes whose draws they update
     /// ([`update_layer`](Self::update_layer)). The layers draw into the
     /// drapes as on Mercator, on the globe too ([`View::mercator`]).
     pub(crate) fn begin(
@@ -325,7 +328,7 @@ impl Drapes {
     }
 
     /// Settles the side of each tile's drapes and chooses the drapes whose
-    /// drawings the frame's layers update, once every draped layer gave its
+    /// draws the frame's layers update, once every draped layer gave its
     /// key, with the frame's `parameters`.
     ///
     /// Each tile's drapes take the largest side, lowered where the drapes
@@ -386,25 +389,25 @@ impl Drapes {
             let Some(StackDrape { layers, previous, .. }) = stacks.get_mut(stack).filter(|drape| drape.updated) else {
                 continue;
             };
-            // A drawing made for another style of the layer goes, as the
+            // What was made for another style of the layer goes, as the
             // layer's own draws do.
             let kept = previous.iter().position(|kept| Arc::ptr_eq(&kept.style, &style));
             let kept = kept.map(|index| previous.swap_remove(index)).or_else(|| {
-                let drawing = layer.new_drape_drawing();
-                debug_assert!(drawing.is_some(), "a layer that doesn't drape in a drape");
-                Some(DrapeLayer { style: Arc::clone(&style), drawing: drawing? })
+                let tiles = layer.new_drape_tiles();
+                debug_assert!(tiles.is_some(), "a layer that doesn't drape in a drape");
+                Some(DrapeLayer { style: Arc::clone(&style), tiles: tiles?, draws: Draws::default() })
             });
             let Some(mut kept) = kept else { continue };
             let (unwrapped, size) = (tile.to_unwrapped(), Size::new(*size, *size));
             let mut parameters = parameters.drape(transform, clip_masks, layer_composite, size, unwrapped);
             parameters.drape_lit = lit;
-            layer.update_drape_draws(gpu, &mut parameters, source, (*tile, globe), &mut kept.drawing);
+            layer.update_drape_draws(gpu, &mut parameters, source, (*tile, globe), &mut kept.tiles, &mut kept.draws);
             layers.push(kept);
         }
     }
 
-    /// Ends the frame's update of the drapes: the drawings of layers that no
-    /// longer drape in their stack go. An updated drape whose layers draw
+    /// Ends the frame's update of the drapes: what they kept of layers that
+    /// no longer drape in their stack goes. An updated drape whose layers draw
     /// something has a texture of its tile's side, made in the stores of
     /// `context`, which it draws again; one whose layers draw nothing lets
     /// go of its texture and draws no pass.
@@ -417,7 +420,7 @@ impl Drapes {
                 }
                 let mut draws = false;
                 for layer in &drape.layers {
-                    layer.drawing.visit_groups(&mut |group| draws |= group.draws());
+                    layer.draws.visit_groups(&mut |group| draws |= group.draws());
                 }
                 if !draws {
                     drape.texture = None;
@@ -473,7 +476,7 @@ impl Drapes {
     pub(crate) fn mark_changed(&mut self, changed: &ChangedBuckets) {
         for drape in self.drapes.iter_mut().flat_map(|drape| &mut drape.stacks) {
             for layer in &mut drape.layers {
-                layer.drawing.mark_changed(changed);
+                layer.tiles.mark_changed(changed);
             }
             if drape.drawn.as_ref().is_some_and(|drawn| drawn.holds(changed)) {
                 drape.drawn = None;
@@ -554,14 +557,14 @@ impl Drapes {
             let parameters = parameters.drape(transform, clip_masks, composite, size, tile.to_unwrapped());
             for drape in stacks.iter_mut().filter(|drape| drape.updated) {
                 let context = &mut *parameters.context;
-                for layer in &mut drape.layers {
-                    layer.drawing.upload(gpu, context);
+                for layer in &drape.layers {
+                    layer.draws.upload(gpu, context);
                 }
                 let layers = &drape.layers;
                 drape.groups = DrawGroups::of(
                     |visit| {
                         for layer in layers {
-                            layer.drawing.visit_groups(visit);
+                            layer.draws.visit_groups(visit);
                         }
                     },
                     |tiles| parameters.stencil_clear_tiles(tiles),
@@ -638,12 +641,12 @@ impl Drapes {
                     drape_parameters.pass = RenderPass::Opaque;
                     drape_parameters.current_layer = 0;
                     for layer in layers.iter_mut().rev() {
-                        layer.drawing.render(gpu, &mut drape_parameters, DrawOrder::TopDown);
+                        layer.draws.render(gpu, &mut drape_parameters, DrawOrder::TopDown, |_, _| {});
                     }
                     drape_parameters.pass = RenderPass::Translucent;
                     drape_parameters.current_layer = (groups.count as u32).wrapping_sub(1);
                     for layer in layers.iter_mut() {
-                        layer.drawing.render(gpu, &mut drape_parameters, DrawOrder::BottomUp);
+                        layer.draws.render(gpu, &mut drape_parameters, DrawOrder::BottomUp, |_, _| {});
                     }
                     // A drape whose frame doesn't reach it failed, as one
                     // whose pass did.

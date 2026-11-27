@@ -4,12 +4,14 @@
 //! queue that releases it in order (`release`), the attributes that read
 //! vertices (`vertex_attribute`), the bindings and geometry made of them
 //! (`owned`, `uniform_buffer`, `upload`), the segments that draw meshes
-//! (`segment`, `mesh`), and the GPU objects that draws draw, with the
-//! buffers that frames bind them with (`objects`).
+//! (`segment`, `mesh`), the GPU objects that draws draw, with the buffers
+//! that frames bind them with (`objects`), and the layers' draws of a
+//! frame, which the engine holds and draws (`draws`).
 
 pub(crate) mod atlas_binding;
 pub(crate) mod buffer;
 pub(crate) mod context;
+pub(crate) mod draws;
 pub(crate) mod dynamic_texture;
 pub(crate) mod dynamic_texture_atlas;
 pub(crate) mod identity;

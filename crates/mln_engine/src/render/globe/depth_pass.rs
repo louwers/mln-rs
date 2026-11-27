@@ -14,11 +14,12 @@ use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::camera::View;
 use crate::draw::context::Context;
+use crate::draw::draws::{Depth, Draw, Group};
 use crate::draw::indexes::DrawIndexes;
 use crate::draw::objects::{DrawGeometry, Mesh, Textures, raw_vertices};
 use crate::draw::segment::SegmentBase;
 use crate::draw::vertex_attribute::Uniforms;
-use crate::layer::layer_drawing::{DrawDepth, FrameDraw, LayerDraws, TileMap, tile_objects};
+use crate::layer::layer_drawing::TileMap;
 use crate::render::globe::globe_tile_mesh::{RawGlobeTileMesh, raw_globe_tile_mesh};
 use crate::render::paint_parameters::PaintParameters;
 use crate::render::tile_matrix::to_projection_ubo;
@@ -35,7 +36,7 @@ pub(crate) struct GlobeDepthPass {
     tiles: TileMap<Mesh>,
     /// The frame's draws of them, which draw into depth in the translucent
     /// pass.
-    frame: LayerDraws,
+    frame: Group,
     meshes: BTreeMap<(u8, bool, bool), RawGlobeTileMesh>,
 }
 
@@ -104,6 +105,7 @@ impl GlobeDepthPass {
                 // The far hemisphere is clockwise on screen on every backend,
                 // Vulkan included, since its shaders flip Y.
                 let mesh = Mesh::new(
+                    context,
                     shader.clone(),
                     ColorMode::disabled(),
                     CullFaceMode::back_ccw(),
@@ -115,23 +117,23 @@ impl GlobeDepthPass {
             let Some(draw) = entry.value.as_ref() else {
                 continue;
             };
-            let depth = DrawDepth::Volume { mask: DepthMaskType::ReadWrite };
+            let depth = Depth::Volume { mask: DepthMaskType::ReadWrite };
             let projection = to_projection_ubo(&state.projection_data(&tile_id.to_unwrapped()));
-            let frame_draw = FrameDraw { depth, ..FrameDraw::new(Some(*tile_id), draw.id()) };
-            self.frame.push_at(frame_draw, (), draw, &projection, ());
+            // The draws draw in the order their meshes were made.
+            let frame_draw = Draw { order: draw.seq(), depth, ..Draw::DEFAULT };
+            self.frame.push_at(draw, *tile_id, &projection, frame_draw, ());
         }
-        // The draws draw in the order their meshes were made.
-        self.frame.finish_with(gpu, context, None);
+        self.frame.finish(gpu, context, None, []);
     }
 
     /// Uploads the meshes of the frame's draws.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
-        self.frame.upload(gpu, &mut self.tiles, tile_objects, context);
+        self.frame.upload(gpu, context);
     }
 
     /// Draws the frame's draws of the pass into the open pass of `gpu`, the
     /// context's.
     pub(crate) fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        self.frame.render(&mut self.tiles, tile_objects, gpu, parameters);
+        self.frame.render(gpu, parameters);
     }
 }

@@ -22,6 +22,12 @@ impl SimpleIdentity {
             unique_id: NonZeroU64::new(NEXT_ID.fetch_add(1, Ordering::Relaxed)).unwrap_or(NonZeroU64::MIN),
         }
     }
+
+    /// The identity's number, which grows with each new identity.
+    #[must_use]
+    pub(crate) fn get(self) -> u64 {
+        self.unique_id.get()
+    }
 }
 
 /// Formats the identity as `{<id>}`.

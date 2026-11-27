@@ -56,6 +56,8 @@ keys! {
     IndexesKey => Indexes,
     /// Vertices of the context's store.
     VerticesKey => Vertices,
+    /// A mesh of the context's store.
+    MeshKey => Mesh,
 }
 
 /// A key of one of the context's stores.
@@ -64,6 +66,7 @@ pub(crate) enum StoreKey {
     Texture(TextureKey),
     Indexes(IndexesKey),
     Vertices(VerticesKey),
+    Mesh(MeshKey),
 }
 
 /// A handle of the store entry `key`, which stays in its store while a
@@ -106,6 +109,20 @@ impl<K: Key> WeakShared<K> {
     #[must_use]
     pub(crate) fn upgrade(&self) -> Option<Shared<K>> {
         self.0.upgrade().map(Shared)
+    }
+}
+
+impl<K: Key> WeakShared<K> {
+    /// Whether a [`Shared`] of the entry lasts.
+    #[must_use]
+    pub(crate) fn is_held(&self) -> bool {
+        self.0.strong_count() > 0
+    }
+}
+
+impl<K: Key> Clone for WeakShared<K> {
+    fn clone(&self) -> Self {
+        WeakShared(Weak::clone(&self.0))
     }
 }
 

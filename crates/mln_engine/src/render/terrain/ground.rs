@@ -18,7 +18,6 @@ use crate::draw::resources::GpuTexture;
 use crate::draw::store::SharedTexture;
 use crate::draw::vertex_attribute::SharedAttribute;
 use crate::draw::vertices::{SharedVertices, TypedVertices};
-use crate::layer::layer_drawing::{MeshMut, TileObjects};
 use crate::render::paint_parameters::OpenPass;
 use crate::tile::UnwrappedTileID;
 
@@ -142,17 +141,11 @@ impl StandingDraw {
         let tile_ground = ground.tile(tile);
         let heights: Vec<f32> =
             centers.iter().map(|&[x, y]| tile_ground.height(glam::Vec2::new(f32::from(x), f32::from(y)))).collect();
-        if let Some(vertices) = self.heights.write(context, ground, &heights) {
-            self.mesh.vertex_attributes_mut().set_shared(name, height_attribute(&vertices));
+        if let Some(vertices) = self.heights.write(context, ground, &heights)
+            && let Some(attrs) = self.mesh.vertex_attributes_mut(context)
+        {
+            attrs.set_shared(name, height_attribute(&vertices));
         }
-    }
-}
-
-impl TileObjects for StandingDraw {
-    type Part = ();
-
-    fn objects(&mut self, (): ()) -> Option<MeshMut<'_>> {
-        Some((&mut self.mesh).into())
     }
 }
 

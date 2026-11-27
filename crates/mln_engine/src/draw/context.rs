@@ -26,10 +26,11 @@ use mln_style::hash::HashMap;
 
 use crate::draw::buffer::{self, Buffer};
 use crate::draw::indexes::{Indexes, SharedIndexes};
+use crate::draw::objects::{DrawObjects, Mesh};
 use crate::draw::owned::{Held, Owned};
 use crate::draw::release::{Release, destroy_order};
 use crate::draw::resources::{Device, SharedGpuTexture};
-use crate::draw::store::{IndexesKey, SharedTexture, Store, StoreKey, TextureKey};
+use crate::draw::store::{IndexesKey, MeshKey, Shared, SharedTexture, Store, StoreKey, TextureKey, WeakShared};
 use crate::draw::texture2d::{Texture2D, TextureMut};
 use crate::draw::uniform_buffer::UniformBufferArray;
 use crate::draw::vertex_attribute::Uniforms;
@@ -59,6 +60,11 @@ pub(crate) struct Context {
     textures: Store<TextureKey, Texture2D>,
     /// The indexes that draws share, which they hold as [`SharedIndexes`].
     indexes: Store<IndexesKey, Indexes>,
+    /// [`quad_indexes`](Self::quad_indexes), while a draw holds them.
+    quad_indexes: WeakShared<IndexesKey>,
+    /// The meshes, which their layers and the draws of them hold as
+    /// [`Mesh`]es; `None` while one draws or uploads.
+    meshes: Store<MeshKey, Option<Box<DrawObjects>>>,
     /// The vertices that draws share, which they hold as [`SharedVertices`].
     vertices: VertexStore,
     /// What a [`destroy_released`](Self::destroy_released) takes from the
@@ -86,6 +92,8 @@ impl Context {
             default_vertex_buffers: HashMap::default(),
             textures: Store::default(),
             indexes: Store::default(),
+            quad_indexes: WeakShared::default(),
+            meshes: Store::default(),
             vertices: VertexStore::default(),
             releases: Vec::new(),
             doomed: Vec::new(),
@@ -152,7 +160,7 @@ impl Context {
     /// dropped keeps its GPU memory until then. Not while a pass is open on
     /// `gpu`.
     pub(crate) fn destroy_released(&mut self, gpu: &mut dyn Gpu) {
-        let Context { device, textures, indexes, vertices, releases, doomed, .. } = self;
+        let Context { device, textures, indexes, vertices, meshes, releases, doomed, .. } = self;
         loop {
             device.queue.take_into(releases);
             if releases.is_empty() {
@@ -164,6 +172,7 @@ impl Context {
                     Release::Entry(StoreKey::Texture(key)) => drop(textures.remove(key)),
                     Release::Entry(StoreKey::Indexes(key)) => drop(indexes.remove(key)),
                     Release::Entry(StoreKey::Vertices(key)) => drop(vertices.remove(key)),
+                    Release::Entry(StoreKey::Mesh(key)) => drop(meshes.remove(key)),
                     Release::Buffer(id, usage, allocated) => {
                         buffer::count(&mut device.stats, usage, allocated, -1);
                         doomed.push(id.into());
@@ -192,6 +201,54 @@ impl Context {
     /// returned handle lasts.
     pub(crate) fn add_indexes(&mut self, indexes: Indexes) -> SharedIndexes {
         self.indexes.add(indexes, &self.device.queue)
+    }
+
+    /// Keeps the objects that `make` makes, given the handle of their
+    /// entry, while a clone of the returned handle lasts.
+    pub(crate) fn add_mesh_with(&mut self, make: impl FnOnce(&Shared<MeshKey>) -> DrawObjects) -> Shared<MeshKey> {
+        let key = self.meshes.add(None, &self.device.queue);
+        let objects = make(&key);
+        if let Some(slot) = self.meshes.get_mut(&key) {
+            *slot = Some(Box::new(objects));
+        }
+        key
+    }
+
+    /// The objects of `mesh`.
+    #[must_use]
+    pub(crate) fn mesh(&self, mesh: &Mesh) -> Option<&DrawObjects> {
+        self.meshes.get(mesh.key())?.as_deref()
+    }
+
+    /// The objects of `mesh`, to change.
+    pub(crate) fn mesh_mut(&mut self, mesh: &Mesh) -> Option<&mut DrawObjects> {
+        self.meshes.get_mut(mesh.key())?.as_deref_mut()
+    }
+
+    /// Takes out the objects of `mesh`, to draw or upload them with the
+    /// context, until [`put_mesh`](Self::put_mesh) puts them back.
+    pub(crate) fn take_mesh(&mut self, mesh: &Mesh) -> Option<Box<DrawObjects>> {
+        self.meshes.get_mut(mesh.key())?.take()
+    }
+
+    /// Puts back the objects of `mesh` that [`take_mesh`](Self::take_mesh)
+    /// took out.
+    pub(crate) fn put_mesh(&mut self, mesh: &Mesh, objects: Box<DrawObjects>) {
+        if let Some(slot) = self.meshes.get_mut(mesh.key()) {
+            *slot = Some(objects);
+        }
+    }
+
+    /// The indexes of quads four vertices apart, two triangles each, which
+    /// the draws that draw such quads share: they stay in the store while a
+    /// draw holds them.
+    pub(crate) fn quad_indexes(&mut self) -> SharedIndexes {
+        let held = self.quad_indexes.upgrade();
+        let indexes = held.unwrap_or_else(|| {
+            self.add_indexes(Indexes::new(crate::render::static_data::RenderStaticData::fill_extrusion_wall_indices()))
+        });
+        self.quad_indexes = indexes.downgrade();
+        indexes
     }
 
     /// The indexes of `handle`.
@@ -518,6 +575,8 @@ impl Context {
     pub(crate) fn tear_down(&mut self, gpu: &mut dyn Gpu) {
         self.global_uniform_buffers = UniformBufferArray::new();
         self.default_vertex_buffers.clear();
+        // The meshes first, which hold what the other stores keep.
+        self.meshes.clear();
         self.textures.clear();
         self.indexes.clear();
         self.vertices.clear();

@@ -903,8 +903,14 @@ fn a_draw_writes_an_update_of_the_vertices_it_binds() {
             segments: vec![SegmentBase::new(0, 0)],
             instances: None,
         };
-        let mut mesh =
-            Mesh::new(shader, ColorMode::alpha_blended(), CullFaceMode::disabled(), geometry, Default::default());
+        let mesh = Mesh::new(
+            context,
+            shader,
+            ColorMode::alpha_blended(),
+            CullFaceMode::disabled(),
+            geometry,
+            Default::default(),
+        );
         mesh.upload(gpu, context);
         let uploaded = context.rendering_stats().buffer_updates;
 
@@ -946,25 +952,31 @@ fn a_draw_binds_the_vertices_it_reads_as_a_storage_buffer() {
             segments: vec![SegmentBase::new(0, 0)],
             instances: None,
         };
-        let mut mesh =
-            Mesh::new(shader, ColorMode::alpha_blended(), CullFaceMode::back_ccw(), geometry, Default::default());
-        mesh.read_as_storage(ID, Some(typed.shared().clone()));
-        assert!(mesh.storage_buffer(ID).is_none(), "bound before the upload");
+        let mesh = Mesh::new(
+            context,
+            shader,
+            ColorMode::alpha_blended(),
+            CullFaceMode::back_ccw(),
+            geometry,
+            Default::default(),
+        );
+        mesh.read_as_storage(context, ID, Some(typed.shared().clone()));
+        assert!(mesh.storage_buffer(context, ID).is_none(), "bound before the upload");
 
         mesh.upload(gpu, context);
         let buffer = context.upload_vertices(gpu, typed.shared()).expect("uploads");
-        assert!(buffer.is_some() && mesh.storage_buffer(ID) == buffer);
+        assert!(buffer.is_some() && mesh.storage_buffer(context, ID) == buffer);
         let uploaded = context.rendering_stats().buffer_updates;
 
         // An update goes to the same buffer.
         assert!(context.update_vertices(&typed, &[[2; 2], [3; 2]]));
         mesh.upload(gpu, context);
         assert_eq!(context.rendering_stats().buffer_updates, uploaded + 1);
-        assert_eq!(mesh.storage_buffer(ID), buffer);
+        assert_eq!(mesh.storage_buffer(context, ID), buffer);
 
-        mesh.read_as_storage(ID, None);
+        mesh.read_as_storage(context, ID, None);
         mesh.upload(gpu, context);
-        assert!(mesh.storage_buffer(ID).is_none());
+        assert!(mesh.storage_buffer(context, ID).is_none());
     });
 }
 

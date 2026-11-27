@@ -28,7 +28,6 @@ use crate::render::clip_masks::ClipMasks;
 use crate::render::frame::Frame;
 use crate::render::layer_composite::LayerComposite;
 use crate::render::paint_parameters::{PaintParameters, TransformParameters};
-use crate::render::static_data::RenderStaticData;
 use crate::render::tile::{FoundTile, RenderTile, overlaps};
 use crate::render::update_parameters::UpdateParameters;
 use crate::storage::{FileSource, Resource, Responder, Response};
@@ -103,21 +102,11 @@ fn a_drape_clears_its_stencil_over_its_whole_target() {
     with_context(|_, context| {
         let view = view(0.0, 0.0);
         let frame = Frame::new(&view, false);
-        let static_data = RenderStaticData::default();
         let (mut clip_masks, mut layer_composite) = (ClipMasks::default(), LayerComposite::default());
         let size = mln_gfx::Size::new(512, 512);
         let scissor = ScissorRect { x: 0, y: 0, width: size.width, height: size.height };
-        let mut parameters = PaintParameters::new(
-            context,
-            &mut clip_masks,
-            &mut layer_composite,
-            false,
-            &frame,
-            &static_data,
-            1.0,
-            size,
-            scissor,
-        );
+        let mut parameters =
+            PaintParameters::new(context, &mut clip_masks, &mut layer_composite, false, &frame, 1.0, size, scissor);
         if parameters.context.caps().clear_stencil_with_pass {
             return;
         }

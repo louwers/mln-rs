@@ -12,12 +12,11 @@ use mln_style::types::LightAnchorType;
 
 use crate::camera::View;
 use crate::draw::context::Context;
-use crate::draw::identity::SimpleIdentity;
+use crate::draw::draws::{Depth, Draw, SingleDraw};
 use crate::draw::indexes::DrawIndexes;
 use crate::draw::objects::{DrawGeometry, Mesh, Textures, raw_vertices};
 use crate::draw::segment::SegmentBase;
 use crate::draw::vertex_attribute::Uniforms;
-use crate::layer::layer_drawing::{DrawDepth, FrameDraw, SingleDraw};
 use crate::render::light::EvaluatedLight;
 use crate::render::sky::EvaluatedSky;
 use crate::render::static_data::RenderStaticData;
@@ -26,7 +25,12 @@ use crate::shaders::ubo::{AtmospherePropsUBO, SkyPropsUBO};
 
 /// A draw of `shader`, which reads the view's corners as the vertex attribute
 /// `vertex_attribute`, in the translucent pass at `depth`.
-fn fullscreen_draw(shader: ShaderKey, vertex_attribute: &'static str, depth: DrawDepth) -> SingleDraw {
+fn fullscreen_draw(
+    context: &mut Context,
+    shader: ShaderKey,
+    vertex_attribute: &'static str,
+    depth: Depth,
+) -> SingleDraw {
     let corners: [[i16; 2]; 4] = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
     let vertices = bytemuck::cast_slice(&corners).to_vec();
     let geometry = DrawGeometry {
@@ -37,8 +41,9 @@ fn fullscreen_draw(shader: ShaderKey, vertex_attribute: &'static str, depth: Dra
         segments: vec![SegmentBase::with_lengths(0, 0, 4, 6)],
         instances: None,
     };
-    let mesh = Mesh::new(shader, ColorMode::alpha_blended(), CullFaceMode::disabled(), geometry, Textures::default());
-    SingleDraw::new(mesh, FrameDraw { depth, ..FrameDraw::new(None, SimpleIdentity::new()) })
+    let mesh =
+        Mesh::new(context, shader, ColorMode::alpha_blended(), CullFaceMode::disabled(), geometry, Textures::default());
+    SingleDraw::new(mesh, Draw { depth, ..Draw::DEFAULT })
 }
 
 /// The direction of the sun in the globe's frame, where the atmosphere traces
@@ -103,8 +108,8 @@ impl SkyPass {
         if projection_transition < 1.0 {
             let sky = self.sky.get_or_insert_with(|| {
                 let shader = context.shader_key(&programs::SKY, Uniforms::default(), ProjectionVariant::Mercator);
-                let depth = DrawDepth::Layer { sub_layer: 0, mask: DepthMaskType::ReadWrite };
-                fullscreen_draw(shader, "pos", depth)
+                let depth = Depth::Layer { sub_layer: 0, mask: DepthMaskType::ReadWrite };
+                fullscreen_draw(context, shader, "pos", depth)
             });
             let horizon_distance = state.mercator_horizon() * f64::from(pixel_ratio);
             let roll = state.roll();
@@ -136,7 +141,7 @@ impl SkyPass {
 
         let atmosphere = self.atmosphere.get_or_insert_with(|| {
             let shader = context.shader_key(&programs::ATMOSPHERE, Uniforms::default(), ProjectionVariant::Globe);
-            fullscreen_draw(shader, "pos", DrawDepth::Volume { mask: DepthMaskType::ReadOnly })
+            fullscreen_draw(context, shader, "pos", Depth::Volume { mask: DepthMaskType::ReadOnly })
         });
 
         let camera = state.globe_camera_position();

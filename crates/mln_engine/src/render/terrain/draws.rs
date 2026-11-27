@@ -20,13 +20,14 @@ use super::mesh::{TerrainMesh, TerrainVertex};
 use super::{DemBindings, DrapeStacks, Drapes, Surface, TerrainCover};
 use crate::camera::View;
 use crate::draw::context::Context;
+use crate::draw::draws::{Depth, Draw, Group};
 use crate::draw::indexes::Indexes;
 use crate::draw::objects::{DrawGeometry, Mesh, Textures};
 use crate::draw::segment::SegmentBase;
 use crate::draw::store::SharedIndexes;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::SharedVertices;
-use crate::layer::layer_drawing::{DrawDepth, FrameDraw, LayerDraws, TileMap, tile_objects};
+use crate::layer::layer_drawing::TileMap;
 use crate::layers::render_hillshade_layer::lat_range;
 use crate::log_target;
 use crate::render::frame_projection::zero_to_one_clip_z;
@@ -57,7 +58,7 @@ struct StackDraws {
     /// The mesh of each tile's draw.
     tiles: TileMap<Mesh>,
     /// The frame's draws of them.
-    frame: LayerDraws,
+    frame: Group,
 }
 
 /// How the draws were made: the projection variant of their shader,
@@ -188,7 +189,7 @@ impl TerrainDraws {
                     let Some(mesh) = ground_mesh.map(|index| &meshes[index]) else {
                         continue;
                     };
-                    let mesh = || mesh_objects(&depth_shader, ColorMode::unblended(), mesh, cull_face_mode);
+                    let mesh = || mesh_objects(context, &depth_shader, ColorMode::unblended(), mesh, cull_face_mode);
                     entry.value.get_or_insert_with(mesh)
                 } else {
                     let drape = match set {
@@ -202,16 +203,17 @@ impl TerrainDraws {
                         continue;
                     };
                     let mesh = &meshes[surface_mesh];
-                    let mesh = || mesh_objects(&shader, ColorMode::alpha_blended(), mesh, cull_face_mode);
+                    let mesh = || mesh_objects(context, &shader, ColorMode::alpha_blended(), mesh, cull_face_mode);
                     let draw = entry.value.get_or_insert_with(mesh);
-                    draw.set_texture(DRAPE_SLOT, Some(&drape));
+                    draw.set_texture(context, DRAPE_SLOT, Some(&drape));
                     draw
                 };
-                draw.set_texture(GROUND_DEM_SLOT, Some(dem_texture));
-                let frame_draw = FrameDraw {
-                    priority: index as i64,
-                    depth: DrawDepth::Volume { mask: DepthMaskType::ReadWrite },
-                    ..FrameDraw::new(Some(tile.id), draw.id())
+                draw.set_texture(context, GROUND_DEM_SLOT, Some(dem_texture));
+                // Nearest the center first: one draw of each tile.
+                let frame_draw = Draw {
+                    order: index as i64,
+                    depth: Depth::Volume { mask: DepthMaskType::ReadWrite },
+                    ..Draw::DEFAULT
                 };
                 // A stack without a light, and the surface depth's draws,
                 // draw their drapes' colors.
@@ -220,16 +222,16 @@ impl TerrainDraws {
                     .and_then(|stack| lights.light(stack))
                     .map(|light| HillshadeTilePropsUBO { latrange, ..light.tile });
                 if let Set::Ground = set {
-                    draws.frame.push_at(frame_draw, (), draw, &projection, drawable);
+                    draws.frame.push_at(draw, tile.id, &projection, frame_draw, drawable);
                 } else {
-                    draws.frame.push_at(frame_draw, (), draw, &projection, (drawable, light.unwrap_or_default()));
+                    draws.frame.push_at(draw, tile.id, &projection, frame_draw, (drawable, light.unwrap_or_default()));
                 }
             }
         }
         let surface_ubo = TerrainSurfaceUBO::new(&surface.props, &fog);
         for (set, StackDraws { frame, .. }) in sets(&mut self.stacks, &mut self.depth, &mut self.ground) {
             let light = set.stack().and_then(|stack| lights.light(stack)).map(|light| light.props).unwrap_or_default();
-            frame.block(&surface_ubo).block(&light).finish_with(gpu, context, None);
+            frame.block(&surface_ubo).block(&light).finish(gpu, context, None, []);
         }
     }
 
@@ -264,16 +266,16 @@ impl TerrainDraws {
 
     /// Uploads the meshes of the frame's draws.
     pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
-        for StackDraws { tiles, frame, .. } in self.stacks.iter_mut().chain(&mut self.depth).chain(&mut self.ground) {
-            frame.upload(gpu, tiles, tile_objects, context);
+        for StackDraws { frame, .. } in self.stacks.iter().chain(&self.depth).chain(&self.ground) {
+            frame.upload(gpu, context);
         }
     }
 
     /// Draws the frame's draws of `stack` into the open pass of `gpu`, the
     /// context's.
     pub(crate) fn render(&mut self, stack: usize, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        if let Some(StackDraws { tiles, frame, .. }) = self.stacks.get_mut(stack) {
-            frame.render(tiles, tile_objects, gpu, parameters);
+        if let Some(StackDraws { frame, .. }) = self.stacks.get_mut(stack) {
+            frame.render(gpu, parameters);
         }
     }
 
@@ -286,16 +288,16 @@ impl TerrainDraws {
     /// the open pass of `gpu`, the context's: the frame's pass, before its
     /// layers.
     pub(crate) fn render_depth(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        if let Some(StackDraws { tiles, frame, .. }) = &mut self.depth {
-            frame.render(tiles, tile_objects, gpu, parameters);
+        if let Some(StackDraws { frame, .. }) = &mut self.depth {
+            frame.render(gpu, parameters);
         }
     }
 
     /// Draws the frame's draws of the ground's depth, if it made them, into
     /// the open pass of `gpu`, the context's: the ground's pass.
     pub(crate) fn render_ground(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        if let Some(StackDraws { tiles, frame, .. }) = &mut self.ground {
-            frame.render(tiles, tile_objects, gpu, parameters);
+        if let Some(StackDraws { frame, .. }) = &mut self.ground {
+            frame.render(gpu, parameters);
         }
     }
 }
@@ -367,7 +369,13 @@ fn mesh(meshes: &mut Vec<SharedMesh>, context: &mut Context, skirts: bool, poles
 
 /// The mesh of a tile's draw of the grid `mesh` with `shader`, in
 /// `color_mode`, culling as `cull_face_mode` says.
-fn mesh_objects(shader: &ShaderKey, color_mode: ColorMode, mesh: &SharedMesh, cull_face_mode: CullFaceMode) -> Mesh {
+fn mesh_objects(
+    context: &mut Context,
+    shader: &ShaderKey,
+    color_mode: ColorMode,
+    mesh: &SharedMesh,
+    cull_face_mode: CullFaceMode,
+) -> Mesh {
     let mut vertices = VertexAttributeArray::new();
     vertices.set_shared(
         "pos",
@@ -381,5 +389,5 @@ fn mesh_objects(shader: &ShaderKey, color_mode: ColorMode, mesh: &SharedMesh, cu
         segments: vec![SegmentBase::with_lengths(0, 0, mesh.vertex_count, mesh.index_count)],
         instances: None,
     };
-    Mesh::new(shader.clone(), color_mode, cull_face_mode, geometry, Textures::default())
+    Mesh::new(context, shader.clone(), color_mode, cull_face_mode, geometry, Textures::default())
 }

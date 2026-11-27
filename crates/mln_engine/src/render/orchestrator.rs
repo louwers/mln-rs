@@ -23,9 +23,10 @@ use smallvec::SmallVec;
 
 use crate::camera::View;
 use crate::draw::context::Context;
+use crate::draw::draws::{DrawOrder, Group, SingleDraw};
 use crate::exec::pool::{Pool, TaskGroup};
 use crate::image::image_store::ImageStore;
-use crate::layer::layer_drawing::{ChangedBuckets, DrawGroup, DrawOrder, SingleDraw};
+use crate::layer::layer_drawing::ChangedBuckets;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::layer::render_layer::{FrameSourceTiles, LayerUpdateParameters, OnTerrain, RenderLayer};
 use crate::layers::custom::EndedHosts;
@@ -1066,8 +1067,8 @@ impl RenderOrchestrator {
         Some(self.tile_store.source_mut(key)?.0)
     }
 
-    /// Visits the layers' draw groups of the frame, in drawing order.
-    pub(crate) fn visit_draw_groups<'a>(&'a self, mut visit: impl FnMut(DrawGroup<'a>)) {
+    /// Visits the groups of the layers' draws of the frame, in drawing order.
+    pub(crate) fn visit_draw_groups<'a>(&'a self, mut visit: impl FnMut(&'a Group)) {
         for layer in &self.layers {
             layer.visit_draw_groups(&mut visit);
         }

@@ -8,24 +8,25 @@ use mln_style::constants::EXTENT;
 use mln_style::types::TranslateAnchorType;
 
 use crate::camera::{ProjectionData, View};
+use crate::draw::draws::LayerFrame;
 use crate::geo::constants::M2PI;
 use crate::layers::cast_matrix;
-use crate::render::paint_parameters::{PaintParameters, TransformParameters};
+use crate::render::paint_parameters::TransformParameters;
 use crate::render::tile::RenderTile;
 use crate::tile::UnwrappedTileID;
 
 /// The matrix that draws geometry of the tile `tile_id` in the frame of
-/// `parameters`: translated by `translation`, anchored as `anchor` says, in
+/// `frame`: translated by `translation`, anchored as `anchor` says, in
 /// tile units or viewport pixels, from `origin` in the tile where it has
 /// one, and projected with the near-clipped or pixel-aligned projection
 /// matrix where those say so.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the tile, the paint parameters and the translation, origin, clipping and alignment options of its matrix"
+    reason = "the tile, the frame and the translation, origin, clipping and alignment options of its matrix"
 )]
 pub(crate) fn tile_matrix(
     tile_id: &UnwrappedTileID,
-    parameters: &PaintParameters<'_>,
+    frame: &LayerFrame<'_>,
     translation: [f32; 2],
     anchor: TranslateAnchorType,
     near_clipped: bool,
@@ -35,8 +36,8 @@ pub(crate) fn tile_matrix(
 ) -> DMat4 {
     tile_matrix_for(
         tile_id,
-        parameters.view,
-        parameters.transform_params,
+        frame.view,
+        frame.transform_params,
         translation,
         anchor,
         origin,
@@ -50,11 +51,11 @@ pub(crate) fn tile_matrix(
 /// tile matrix plus the per-tile projection fields.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the tile, the paint parameters and the translation, origin, clipping and alignment options of its projection"
+    reason = "the tile, the frame and the translation, origin, clipping and alignment options of its projection"
 )]
 pub(crate) fn projection_data(
     tile_id: &UnwrappedTileID,
-    parameters: &PaintParameters<'_>,
+    frame: &LayerFrame<'_>,
     translation: [f32; 2],
     anchor: TranslateAnchorType,
     near_clipped: bool,
@@ -62,12 +63,12 @@ pub(crate) fn projection_data(
     origin: Option<Point<f64>>,
     aligned: bool,
 ) -> ProjectionData {
-    let mut data = parameters.view.projection_data_for_matrix(
+    let mut data = frame.view.projection_data_for_matrix(
         tile_id,
-        &tile_matrix(tile_id, parameters, translation, anchor, near_clipped, in_viewport_pixel_units, origin, aligned),
+        &tile_matrix(tile_id, frame, translation, anchor, near_clipped, in_viewport_pixel_units, origin, aligned),
     );
     if !in_viewport_pixel_units {
-        let translate = RenderTile::tile_unit_translation(tile_id, translation, anchor, parameters.view);
+        let translate = RenderTile::tile_unit_translation(tile_id, translation, anchor, frame.view);
         data.translate = DVec2::new(f64::from(translate[0]), f64::from(translate[1]));
     }
     // A draw's depth range keeps the layers apart, so the shader's depth

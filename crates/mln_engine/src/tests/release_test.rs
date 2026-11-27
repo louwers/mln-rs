@@ -101,7 +101,8 @@ fn a_frames_bindings_of_a_mesh_go_with_the_mesh_and_with_its_buffers() {
             instances: None,
         };
         let shader = ShaderKey::new(&programs::CLIPPING_MASK, []);
-        let mesh = Mesh::new(shader, ColorMode::disabled(), CullFaceMode::disabled(), geometry, Textures::default());
+        let mesh =
+            Mesh::new(context, shader, ColorMode::disabled(), CullFaceMode::disabled(), geometry, Textures::default());
         let (mut frame, mut other) = (DrawBuffers::default(), DrawBuffers::default());
         for buffers in [&mut frame, &mut other] {
             buffers.write_pod(gpu, PROJECTION_ID, &ProjectionUBO::default(), context.device());

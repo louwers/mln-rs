@@ -15,12 +15,12 @@ use smallvec::SmallVec;
 
 use crate::camera::{ProjectionData, View, ViewportMode};
 use crate::draw::context::Context;
+use crate::draw::draws::{DrawsInto, LayerFrame};
 use crate::draw::identity::SimpleIdentity;
 use crate::render::clip_masks::ClipMasks;
 use crate::render::frame::Frame;
 use crate::render::layer_composite::LayerComposite;
 use crate::render::pass::RenderPass;
-use crate::render::static_data::RenderStaticData;
 use crate::render::terrain::FrameGround;
 use crate::tile::UnwrappedTileID;
 
@@ -191,7 +191,6 @@ pub(crate) struct PaintParameters<'a> {
     pub(crate) camera_moving: bool,
     /// The light of the frame.
     pub(crate) light: &'a crate::render::light::EvaluatedLight,
-    pub(crate) static_data: &'a RenderStaticData,
 
     pub(crate) pass: RenderPass,
 
@@ -258,7 +257,6 @@ impl<'a> PaintParameters<'a> {
         layer_composite: &'a mut LayerComposite,
         composites_with_frame_depth: bool,
         frame: &'a Frame,
-        static_data: &'a RenderStaticData,
         pixel_ratio: f32,
         renderable_size: Size,
         scissor_rect: ScissorRect,
@@ -277,7 +275,6 @@ impl<'a> PaintParameters<'a> {
             transform_params,
             view: state,
             camera_moving: frame.camera_moving,
-            static_data,
             light: &frame.light,
             pass: RenderPass::Opaque,
             pixel_ratio,
@@ -338,7 +335,6 @@ impl<'a> PaintParameters<'a> {
             view: &transform.view,
             camera_moving: self.camera_moving,
             light: self.light,
-            static_data: self.static_data,
             pass: RenderPass::Opaque,
             pixel_ratio: self.pixel_ratio,
             renderable_size: size,
@@ -360,6 +356,24 @@ impl<'a> PaintParameters<'a> {
             symbol_fade_change: 1.0,
             scissor_rect: ScissorRect { x: 0, y: 0, width: size.width, height: size.height },
             custom_layer_frame: None,
+        }
+    }
+
+    /// The frame as a layer reads it, to make its draws.
+    #[must_use]
+    pub(crate) fn frame(&self) -> LayerFrame<'a> {
+        LayerFrame {
+            view: self.view,
+            transform_params: self.transform_params,
+            camera_moving: self.camera_moving,
+            light: self.light,
+            pixel_ratio: self.pixel_ratio,
+            renderable_size: self.renderable_size,
+            pixels_to_gl_units: self.pixels_to_gl_units,
+            terrain: self.terrain,
+            composites_with_frame_depth: self.composites_with_frame_depth,
+            ground: self.ground.clone(),
+            into: if self.drape_tile.is_some() { DrawsInto::Drape { lit: self.drape_lit } } else { DrawsInto::Map },
         }
     }
 
@@ -521,11 +535,6 @@ impl<'a> PaintParameters<'a> {
             return Ok(false);
         }
         gpu.lend(f).map(|()| true)
-    }
-
-    #[must_use]
-    pub(crate) fn projection_data_for_tile(&self, tile_id: &UnwrappedTileID, aligned: bool) -> ProjectionData {
-        self.transform_params.projection_data_for_tile(tile_id, aligned)
     }
 
     /// Whether the current layer draws in the opaque pass: front to back,

@@ -2,7 +2,7 @@
 // (`TypedLayer`), whose hooks see the frame's tiles and what they hold for
 // the type (`TileInput`), and what the engine keeps of it around them
 // (`Hosted`): its base, its values of its type, its value of each tile it
-// draws and its drawing. `RenderLayer` is what the engine does with a render
+// draws and its draws. `RenderLayer` is what the engine does with a render
 // layer of any type. The orchestrator owns the render layers, in the
 // style's order.
 
@@ -20,8 +20,9 @@ use smallvec::SmallVec;
 
 use crate::camera::View;
 use crate::draw::context::Context;
+use crate::draw::draws::{DrawOrder, Draws, Group, LayerFrame};
 use crate::layer::bucket::ErasedBucket;
-use crate::layer::layer_drawing::{ChangedBuckets, DrapeDrawing, DrawGroup, DrawOrder, LayerDrawing, TileMap};
+use crate::layer::layer_drawing::{ChangedBuckets, DrapeTiles, TileMap};
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
 use crate::layer::tile_input::TileData;
 use crate::layer::tile_input::input::Find;
@@ -346,7 +347,7 @@ pub(crate) enum OnTerrain {
     Drapes,
     /// The layer stands on terrain: over terrain, its draws are of the
     /// terrain variant ([`ProjectionVariant::stands`]), and their points
-    /// stand on the frame's ground ([`PaintParameters::ground`]). One that
+    /// stand on the frame's ground ([`LayerFrame::ground`]). One that
     /// `hides_behind_ground` hides its points behind the ground in front of
     /// them, which reads the ground's depth ([`FrameGround::depth`]).
     ///
@@ -371,23 +372,49 @@ impl OnTerrain {
     }
 }
 
-/// What a layer's hooks read and change of what the engine keeps of it: its
-/// base and values, its tile values ([`TileMap`]) and its drawing.
-pub(crate) struct LayerCx<'a, L: TypedLayer> {
+/// What a layer's [`TypedLayer::prepare`] reads and changes: its base and
+/// values, its values of the tiles it draws ([`TileMap`]), the frame's or a
+/// drape's, and the frame it makes its draws for.
+pub(crate) struct PrepareCx<'a, 'f, L: TypedLayer> {
     pub(crate) base: &'a RenderLayerBase,
     pub(crate) values: &'a LayerValues<L::Type>,
-    /// The layer's values of the tiles it draws: the frame's, or a drape's.
     pub(crate) tiles: &'a mut TileMap<L::Tile>,
-    pub(crate) drawing: &'a mut L::Drawing,
+    pub(crate) gpu: &'a mut dyn Gpu,
+    pub(crate) context: &'a mut Context,
+    pub(crate) frame: &'a LayerFrame<'f>,
+}
+
+/// Where the engine runs GPU work of a layer's own
+/// ([`TypedLayer::own_gpu_work`]).
+///
+/// Temporary: heatmap's and hillshade's render targets and a custom
+/// layer's host work this way until a layer's draws can go into targets of
+/// its own and a frame can lend a layer the backend's commands.
+pub(crate) enum OwnGpuWork<'a, 'p> {
+    /// After the frame's draws upload, while the layer is renderable: what
+    /// draws into the layer's render targets uploads.
+    Upload(&'a mut Context),
+    /// Before the frame's first pass, of a layer the frame draws.
+    Prerender(&'a mut PaintParameters<'p>),
+    /// Before the frame's passes, which sample them, after the ground's
+    /// depth: the layer draws its render targets, with `group`, the draws
+    /// it pushed into its target ([`Draws::own_target`]).
+    Targets(&'a mut PaintParameters<'p>, &'a mut Group),
+    /// In each pass, at the layer's place in the layers' order and depth,
+    /// after its draws, while the layer is renderable.
+    Pass(&'a mut PaintParameters<'p>),
+    /// The frame failed: what its targets drew may hold nothing.
+    Failed,
 }
 
 /// What a layer's [`TypedLayer::tile`] reads to make a tile's value.
-pub(crate) struct TileCx<'a, 'p, L: TypedLayer> {
+pub(crate) struct TileCx<'a, 'f, L: TypedLayer> {
     pub(crate) base: &'a RenderLayerBase,
     pub(crate) values: &'a LayerValues<L::Type>,
     pub(crate) gpu: &'a mut dyn Gpu,
+    pub(crate) context: &'a mut Context,
     /// The frame's, or the drape's the value draws in.
-    pub(crate) parameters: &'a mut PaintParameters<'p>,
+    pub(crate) frame: &'a LayerFrame<'f>,
 }
 
 /// What a layer's [`TypedLayer::update`] reads, besides its tiles.
@@ -410,16 +437,13 @@ impl<L: TypedLayer> UpdateCx<'_, '_, L> {
 /// data and the frame, whose hooks the engine calls on a render layer of the
 /// type ([`Hosted`]). The engine keeps the layer's base, its values of the
 /// layer type `Type`, its value of each tile it draws, a `Tile`, and its
-/// `Drawing`, in the frame and in each drape it draws in.
+/// draws ([`Draws`]), in the frame and in each drape it draws in.
 pub(crate) trait TypedLayer: Sized + 'static {
     type Type: LayerType;
     /// What the engine keeps of each tile the layer draws for it, from when
     /// the layer makes it ([`tile`](Self::tile)) until what the tile shows
     /// the layer changes.
     type Tile: 'static;
-    /// The layer's draw groups of the frame, which find the meshes of the
-    /// tiles' draws in their values.
-    type Drawing: LayerDrawing<Self::Tile> + Default + 'static;
 
     /// The order the layer draws its source's tiles in.
     const TILE_ORDER: TileOrder = TileOrder::ById;
@@ -455,14 +479,10 @@ pub(crate) trait TypedLayer: Sized + 'static {
     }
 
     /// The light that the terrain's surface can shade the layer's drapes
-    /// with in the frame of `parameters`, whose draws then put in them what
-    /// it shades ([`PaintParameters::drape_lit`]); `None` for a layer whose
-    /// drapes hold its colors.
-    fn surface_light(
-        &mut self,
-        _values: &LayerValues<Self::Type>,
-        _parameters: &PaintParameters<'_>,
-    ) -> Option<SurfaceLight> {
+    /// with in `frame`, whose draws then put in them what it shades
+    /// ([`LayerFrame::drape_lit`]); `None` for a layer whose drapes hold its
+    /// colors.
+    fn surface_light(&mut self, _values: &LayerValues<Self::Type>, _frame: &LayerFrame<'_>) -> Option<SurfaceLight> {
         None
     }
 
@@ -497,62 +517,46 @@ pub(crate) trait TypedLayer: Sized + 'static {
         None
     }
 
-    /// Makes the layer's draws of the frame, in the frame's encode, once the
-    /// engine started them ([`LayerDrawing::begin_frame`]) and made the
-    /// values of the tiles that had none ([`tile`](Self::tile)), of a layer
-    /// that draws in a pass and has tiles to draw: from `tiles`, the frame's
-    /// tiles of the layer, in the order the update gave them, each with what
-    /// it holds for the layer; none for a type without a source, which draws
-    /// the tiles it picked. The layer keeps the draws in `cx.drawing`, with
-    /// the values of their uniforms, and copies again into the tile values
-    /// what changed of their buckets ([`TileEntry::take_changes`]).
+    /// Makes the layer's draws of the frame, the map's or a drape's, in the
+    /// frame's encode, of a layer that draws in a pass and has tiles to draw,
+    /// once the engine made the values of the tiles that had none
+    /// ([`tile`](Self::tile)): from `tiles`, the frame's tiles of the layer,
+    /// in the order the update gave them, each with what it holds for the
+    /// layer, or in a drape those that overlap the drape's tile; none for a
+    /// type without a source, which draws the tiles it picked. The layer
+    /// pushes its draws, with the values of their blocks, into `out`, which
+    /// holds no draws yet, and copies again into the tile values what
+    /// changed of their buckets ([`TileEntry::take_changes`]). The engine
+    /// then writes, uploads and draws them, and draws the masks of the
+    /// layer's tiles where a draw clips.
     ///
     /// [`TileEntry::take_changes`]: crate::layer::layer_drawing::TileEntry::take_changes
-    fn update_draws(
-        &mut self,
-        _cx: LayerCx<'_, Self>,
-        _gpu: &mut dyn Gpu,
-        _parameters: &mut PaintParameters<'_>,
-        _tiles: &[FrameTile<'_, Self::Type>],
-    ) {
-    }
+    fn prepare(&mut self, _cx: &mut PrepareCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Self::Type>], _out: &mut Draws) {}
 
-    /// Drops what the layer keeps besides its tile values and drawing, by
+    /// Drops what the layer keeps besides its tile values and draws, by
     /// its tiles' contents, which the frame's and its drapes' values share,
     /// when it stops rendering.
     fn release(&mut self) {}
 
     /// Called when the layer's style changed to another of the same id and
-    /// type, once it is the layer's and before its values transition. A
-    /// custom layer whose host the style replaced puts the old host that
-    /// drew in `ended`.
-    fn style_changed(&mut self, _cx: LayerCx<'_, Self>, _ended: &mut EndedHosts) {}
+    /// type, once it is the layer's, of the values `values`, and before its
+    /// values transition. A custom layer whose host the style replaced puts
+    /// the old host that drew in `ended`.
+    fn style_changed(&mut self, _values: &LayerValues<Self::Type>, _ended: &mut EndedHosts) {}
 
-    /// Uploads what draws into the layer's render targets, which draw before
-    /// the frame's passes, while the layer is renderable.
-    fn upload_render_targets(&mut self, _cx: LayerCx<'_, Self>, _gpu: &mut dyn Gpu, _context: &mut Context) {}
-
-    /// Draws the layer's render targets through `gpu`, the context's, ahead
-    /// of the frame's passes, which sample them, while the layer is
-    /// renderable.
-    fn render_targets(&mut self, _cx: LayerCx<'_, Self>, _gpu: &mut dyn Gpu, _parameters: &mut PaintParameters<'_>) {}
-
-    /// Prepares again, in a later frame, the kept render targets that the
-    /// last [`render_targets`](Self::render_targets) prepared: its frame's
-    /// submission failed, so they hold nothing.
-    fn prepare_again(&mut self) {}
-
-    /// Runs a custom layer's prerender through `gpu`, the context's, after
-    /// the layers' draws upload and before the frame's first pass.
-    fn prerender(&mut self, _cx: LayerCx<'_, Self>, _gpu: &mut dyn Gpu, _parameters: &mut PaintParameters<'_>) {}
+    /// Runs GPU work of the layer's own, of the layer of `base`, at `at` in
+    /// the frame's encode.
+    ///
+    /// Temporary, as [`OwnGpuWork`] says.
+    fn own_gpu_work(&mut self, _base: &RenderLayerBase, _gpu: &mut dyn Gpu, _at: OwnGpuWork<'_, '_>) {}
 
     /// Lets go of a custom layer's host as the layer leaves the renderer: a
     /// host that drew goes to `ended`, to hear that the renderer stopped.
-    fn leave(&mut self, _cx: LayerCx<'_, Self>, _ended: &mut EndedHosts) {}
+    fn leave(&mut self, _ended: &mut EndedHosts) {}
 
     /// Tells a custom layer's host that the renderer's graphics objects are
     /// lost, and lets go of it.
-    fn lose_context(&mut self, _cx: LayerCx<'_, Self>) {}
+    fn lose_context(&mut self) {}
 
     /// Whether the feature `feature` with `geometry`, with `feature_state`,
     /// intersects `region` of its tile as the layer of `values` draws it at
@@ -570,12 +574,12 @@ pub(crate) trait TypedLayer: Sized + 'static {
 }
 
 /// A render layer of a [`TypedLayer`] `L`: the layer, and what the engine
-/// keeps of it, its base, its values, its tile values and its drawing.
+/// keeps of it, its base, its values, its tile values and its draws.
 pub(crate) struct Hosted<L: TypedLayer> {
     base: RenderLayerBase,
     values: LayerValues<L::Type>,
     tiles: TileMap<L::Tile>,
-    drawing: L::Drawing,
+    draws: Draws,
     layer: L,
 }
 
@@ -584,7 +588,7 @@ impl<L: TypedLayer> Hosted<L> {
     pub(crate) fn new(style: Arc<LayerStyle<L::Type>>) -> Self {
         let (base, values) = LayerValues::new(style);
         let layer = L::new(&values);
-        Hosted { base, values, tiles: TileMap::default(), drawing: L::Drawing::default(), layer }
+        Hosted { base, values, tiles: TileMap::default(), draws: Draws::default(), layer }
     }
 
     /// [`new`](Self::new), boxed as a [`RenderLayer`].
@@ -599,12 +603,6 @@ impl<L: TypedLayer> Hosted<L> {
         (&mut self.layer, &self.values)
     }
 
-    /// The layer's parts, for its hooks.
-    fn cx(&mut self) -> (&mut L, LayerCx<'_, L>) {
-        let Hosted { base, values, tiles, drawing, layer } = self;
-        (layer, LayerCx { base, values, tiles, drawing })
-    }
-
     /// Makes `variant` the projection the layer draws in: where its draws
     /// were of another, drops them and its tile values.
     fn use_projection_variant(&mut self, variant: ProjectionVariant) {
@@ -616,14 +614,10 @@ impl<L: TypedLayer> Hosted<L> {
 
     /// Starts the frame's draws of the layer, which has something to draw,
     /// and returns whether it draws in a pass with its values of the frame.
-    /// One that doesn't drops the frame's draws, and keeps its tile values.
+    /// One that doesn't draws nothing, and keeps its tile values.
     fn begin_frame(&mut self) -> bool {
-        self.drawing.begin_frame();
-        let draws = self.values.evaluated.render_passes != RenderPass::None.underlying_type();
-        if !draws {
-            self.drawing.clear_frame();
-        }
-        draws
+        self.draws.begin();
+        self.values.evaluated.render_passes != RenderPass::None.underlying_type()
     }
 
     /// Readies the values of `tiles`, the tiles the layer draws, before the
@@ -635,7 +629,8 @@ impl<L: TypedLayer> Hosted<L> {
     fn ready_tiles(
         &mut self,
         gpu: &mut dyn Gpu,
-        parameters: &mut PaintParameters<'_>,
+        context: &mut Context,
+        frame: &LayerFrame<'_>,
         tiles: &[FrameTile<'_, L::Type>],
     ) {
         let Hosted { base, values, tiles: map, layer, .. } = self;
@@ -658,24 +653,32 @@ impl<L: TypedLayer> Hosted<L> {
             {
                 // A new value copies its bucket as it is.
                 entry.take_changes();
-                *entry.value = layer.tile(&mut TileCx { base, values, gpu, parameters }, tile, data);
+                *entry.value = layer.tile(&mut TileCx { base, values, gpu, context, frame }, tile, data);
             }
         }
     }
 
-    /// Readies the layer's tile values of `tiles` ([`ready_tiles`](Self::ready_tiles))
-    /// and runs its [`TypedLayer::update_draws`], once the frame's draws
-    /// began, if the layer draws in a pass.
+    /// Readies the layer's tile values of `tiles` ([`ready_tiles`](Self::ready_tiles)),
+    /// runs its [`TypedLayer::prepare`] and writes the buffers of the draws
+    /// it made, once the frame's draws began, if the layer draws in a pass:
+    /// with the paint parameters of `parameters`' frame where it has its own
+    /// (a drape's), and the masks of `tiles` where a draw clips.
     fn draw(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, tiles: &[FrameTile<'_, L::Type>]) {
-        if self.begin_frame() {
-            self.ready_tiles(gpu, parameters, tiles);
-            let (layer, cx) = self.cx();
-            layer.update_draws(cx, gpu, parameters, tiles);
+        if !self.begin_frame() {
+            return;
         }
+        let frame = parameters.frame();
+        self.ready_tiles(gpu, parameters.context, &frame, tiles);
+        let Hosted { base, values, tiles: map, draws, layer } = self;
+        let context = &mut *parameters.context;
+        layer.prepare(&mut PrepareCx { base, values, tiles: map, gpu, context, frame: &frame }, tiles, draws);
+        let paint_params = parameters.own_paint_params();
+        let clip_tiles = tiles.iter().map(|tile| tile.draw_id().to_unwrapped());
+        draws.finish(gpu, parameters.context, paint_params.as_ref(), clip_tiles);
     }
 
     /// [`RenderLayer::update_drape_draws`], with the drape's tile values and
-    /// drawing the layer's.
+    /// draws the layer's.
     fn update_drape(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -714,7 +717,7 @@ fn has_tiles<L: TypedLayer>() -> bool {
 
 /// What the engine does with a render layer, whatever its type: its base,
 /// its values, which this transitions without knowing their type, its tile
-/// values and its drawing, which uploads and draws its draw groups. It runs
+/// values and its draws, which it writes, uploads and draws. It runs
 /// the layer's [`TypedLayer`] hooks with what is common to every layer type
 /// around them.
 pub(crate) trait RenderLayer {
@@ -763,11 +766,11 @@ pub(crate) trait RenderLayer {
     /// for the frame's projection, standing on the frame's ground where the
     /// layer stands and the frame has one, dropping the draws and tile values
     /// when it changed; drops them of a layer that has nothing to draw, and
-    /// otherwise starts its draws of the frame
-    /// ([`LayerDrawing::begin_frame`]); drops them again for a layer that
-    /// draws in no pass, and otherwise readies the tile values and runs the
-    /// layer's [`TypedLayer::update_draws`] with the tiles of its type that
-    /// its update found in `source`, or none for a type without a source.
+    /// otherwise starts its draws of the frame; for a layer that draws in a
+    /// pass, readies the tile values and runs the layer's
+    /// [`TypedLayer::prepare`] with the tiles of its type that its update
+    /// found in `source`, or none for a type without a source, and writes
+    /// the buffers of its draws.
     fn update_draws(
         &mut self,
         gpu: &mut dyn Gpu,
@@ -795,14 +798,15 @@ pub(crate) trait RenderLayer {
     /// source.
     fn found(&self) -> Option<Range<usize>>;
 
-    /// No tile values and an empty drawing of the layer's type, which a
-    /// drape keeps of the layer.
-    fn new_drape_drawing(&self) -> Option<DrapeDrawing>;
+    /// No tile values of the layer's type, which a drape keeps of the layer
+    /// with its draws there.
+    fn new_drape_tiles(&self) -> Option<DrapeTiles>;
 
     /// The encode's update of the layer's draws into the drape of the
     /// terrain tile `drape`, with whether the frame is on the globe, with
-    /// the tile values and drawing `drawing` keeps, one of the layer's
-    /// ([`new_drape_drawing`](Self::new_drape_drawing)): as
+    /// the drape's tile values `tiles` of the layer's
+    /// ([`new_drape_tiles`](Self::new_drape_tiles)) and its draws there,
+    /// `draws`: as
     /// [`update_draws`](Self::update_draws) makes the frame's, with the
     /// drape's `parameters`, from the tiles of `source` the layer's update
     /// found that overlap the drape's tile
@@ -815,7 +819,8 @@ pub(crate) trait RenderLayer {
         parameters: &mut PaintParameters<'_>,
         source: Option<FrameSourceTiles<'_>>,
         drape: (OverscaledTileID, bool),
-        drawing: &mut DrapeDrawing,
+        tiles: &mut DrapeTiles,
+        draws: &mut Draws,
     );
 
     /// Records that the buckets in `changed` changed, for the tiles whose
@@ -839,29 +844,31 @@ pub(crate) trait RenderLayer {
     /// of their GPU objects. The tiles stay.
     fn remove_all_draws(&mut self);
 
-    /// Visits the layer's draw groups of the frame, in drawing order: none
-    /// unless the frame draws the layer. They are the groups `upload` and
-    /// `render` upload and draw.
-    fn visit_draw_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>));
+    /// Visits the groups of the layer's draws of the frame that take a place
+    /// in the layers' order and depth, in drawing order: none unless the
+    /// frame draws the layer. They are the groups `upload` and `render`
+    /// upload and draw.
+    fn visit_draw_groups<'a>(&'a self, visit: &mut dyn FnMut(&'a Group));
 
-    /// Uploads the GPU objects of the layer's draw groups, before the frame
-    /// draws them.
+    /// Uploads the meshes of the layer's draws, before the frame draws them.
     fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context);
 
-    /// Draws the pass's draws of the layer's draw groups into the open pass
-    /// of `gpu`, the context's, in `order`, each at its depth.
+    /// Draws the pass's draws of the layer's groups into the open pass of
+    /// `gpu`, the context's, in `order`, each at its depth.
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder);
 
-    /// See [`TypedLayer::upload_render_targets`].
+    /// Uploads what draws into the layer's render targets, while it is
+    /// renderable ([`OwnGpuWork::Upload`]).
     fn upload_render_targets(&mut self, gpu: &mut dyn Gpu, context: &mut Context);
 
-    /// See [`TypedLayer::render_targets`].
+    /// Draws the layer's render targets ([`OwnGpuWork::Targets`]).
     fn render_targets(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>);
 
-    /// See [`TypedLayer::prepare_again`].
-    fn prepare_again(&mut self);
+    /// Tells the layer that the frame failed ([`OwnGpuWork::Failed`]).
+    fn frame_failed(&mut self, gpu: &mut dyn Gpu);
 
-    /// See [`TypedLayer::prerender`].
+    /// Runs the layer's work before the frame's first pass
+    /// ([`OwnGpuWork::Prerender`]).
     fn prerender(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>);
 
     /// See [`TypedLayer::leave`]. The orchestrator calls it before it drops
@@ -919,7 +926,7 @@ impl<L: TypedLayer> RenderLayer for Hosted<L> {
         ended: &mut EndedHosts,
     ) {
         if L::RESTYLE_KEEPS_TILES {
-            self.drawing.clear();
+            self.draws.clear();
         } else {
             self.remove_all_draws();
         }
@@ -927,8 +934,7 @@ impl<L: TypedLayer> RenderLayer for Hosted<L> {
             self.values.style = recovered;
             self.base.style = Arc::clone(style);
         }
-        let (layer, cx) = self.cx();
-        layer.style_changed(cx, ended);
+        self.layer.style_changed(&self.values, ended);
         self.transition(parameters);
     }
 
@@ -1014,16 +1020,16 @@ impl<L: TypedLayer> RenderLayer for Hosted<L> {
     }
 
     fn surface_light(&mut self, parameters: &PaintParameters<'_>) -> Option<SurfaceLight> {
-        self.layer.surface_light(&self.values, parameters)
+        self.layer.surface_light(&self.values, &parameters.frame())
     }
 
     fn found(&self) -> Option<Range<usize>> {
         has_tiles::<L>().then(|| self.base.found.clone())
     }
 
-    fn new_drape_drawing(&self) -> Option<DrapeDrawing> {
-        // Only a layer that drapes builds the code of a drawing in a drape.
-        L::TERRAIN.drapes().then(DrapeDrawing::new::<L::Tile, L::Drawing>)
+    fn new_drape_tiles(&self) -> Option<DrapeTiles> {
+        // Only a layer that drapes builds the code of tile values in a drape.
+        L::TERRAIN.drapes().then(DrapeTiles::new::<L::Tile>)
     }
 
     fn update_drape_draws(
@@ -1032,20 +1038,20 @@ impl<L: TypedLayer> RenderLayer for Hosted<L> {
         parameters: &mut PaintParameters<'_>,
         source: Option<FrameSourceTiles<'_>>,
         drape: (OverscaledTileID, bool),
-        drawing: &mut DrapeDrawing,
+        tiles: &mut DrapeTiles,
+        draws: &mut Draws,
     ) {
-        let Some((tiles, drawing)) = drawing.downcast_mut::<L::Tile, L::Drawing>().filter(|_| L::TERRAIN.drapes())
-        else {
-            debug_assert!(false, "a drape's drawing of another layer's type");
+        let Some(tiles) = tiles.downcast_mut::<L::Tile>().filter(|_| L::TERRAIN.drapes()) else {
+            debug_assert!(false, "a drape's tile values of another layer's type");
             return;
         };
-        // The drape's tile values and drawing are the layer's while the
+        // The drape's tile values and draws are the layer's while the
         // layer's hooks make its draws.
         std::mem::swap(&mut self.tiles, tiles);
-        std::mem::swap(&mut self.drawing, drawing);
+        std::mem::swap(&mut self.draws, draws);
         self.update_drape(gpu, parameters, source, drape);
         std::mem::swap(&mut self.tiles, tiles);
-        std::mem::swap(&mut self.drawing, drawing);
+        std::mem::swap(&mut self.draws, draws);
     }
 
     fn mark_changed(&mut self, changed: &ChangedBuckets) {
@@ -1067,56 +1073,56 @@ impl<L: TypedLayer> RenderLayer for Hosted<L> {
 
     fn remove_all_draws(&mut self) {
         self.tiles.clear();
-        self.drawing.clear();
+        self.draws.clear();
     }
 
-    fn visit_draw_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
+    fn visit_draw_groups<'a>(&'a self, visit: &mut dyn FnMut(&'a Group)) {
         if self.base.is_renderable {
-            self.drawing.visit_groups(visit);
+            self.draws.visit_groups(visit);
         }
     }
 
     fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         if self.base.is_renderable {
-            self.drawing.upload(&mut self.tiles, gpu, context);
+            self.draws.upload(gpu, context);
         }
     }
 
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
-        if self.base.is_renderable {
-            self.drawing.render(&mut self.tiles, gpu, parameters, order);
+        let Hosted { base, draws, layer, .. } = self;
+        if base.is_renderable {
+            draws.render(gpu, parameters, order, |gpu, parameters| {
+                layer.own_gpu_work(base, gpu, OwnGpuWork::Pass(parameters));
+            });
         }
     }
 
     fn upload_render_targets(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
         if self.base.is_renderable {
-            let (layer, cx) = self.cx();
-            layer.upload_render_targets(cx, gpu, context);
+            self.draws.own_target().upload(gpu, context);
+            self.layer.own_gpu_work(&self.base, gpu, OwnGpuWork::Upload(context));
         }
     }
 
     fn render_targets(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        let (layer, cx) = self.cx();
-        layer.render_targets(cx, gpu, parameters);
+        let Hosted { base, draws, layer, .. } = self;
+        layer.own_gpu_work(base, gpu, OwnGpuWork::Targets(parameters, draws.own_target()));
     }
 
-    fn prepare_again(&mut self) {
-        self.layer.prepare_again();
+    fn frame_failed(&mut self, gpu: &mut dyn Gpu) {
+        self.layer.own_gpu_work(&self.base, gpu, OwnGpuWork::Failed);
     }
 
     fn prerender(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
-        let (layer, cx) = self.cx();
-        layer.prerender(cx, gpu, parameters);
+        self.layer.own_gpu_work(&self.base, gpu, OwnGpuWork::Prerender(parameters));
     }
 
     fn leave(&mut self, ended: &mut EndedHosts) {
-        let (layer, cx) = self.cx();
-        layer.leave(cx, ended);
+        self.layer.leave(ended);
     }
 
     fn lose_context(&mut self) {
-        let (layer, cx) = self.cx();
-        layer.lose_context(cx);
+        self.layer.lose_context();
     }
 
     fn query_intersects_feature(
