@@ -55,15 +55,31 @@ mod vector_tile_test;
 pub(crate) mod types;
 
 /// The registrations that the tests' maps, renderers and styles use: the
-/// specification's expression functions, the engine's layer types and the
-/// tests' source types.
+/// specification's expression functions, the engine's symbol and custom
+/// layer types, and the tests' other layer types and source types.
 pub(crate) fn registry() -> std::sync::Arc<crate::Registry> {
+    static REGISTRY: std::sync::LazyLock<std::sync::Arc<crate::Registry>> = std::sync::LazyLock::new(|| {
+        let mut builder = crate::RegistryBuilder::new();
+        mln_style::expression::functions::register_builtin_functions(builder.functions_mut())
+            .and_then(|()| builder.add_placing_layer_type::<crate::symbol::placement::SymbolPlacement>())
+            .and_then(|()| builder.add_layer_type::<crate::layers::custom::RenderCustomLayer>())
+            .and_then(|()| types::layers::register_layer_types(&mut builder))
+            .and_then(|()| types::register_source_types(&mut builder))
+            .expect("the tests' types register into an empty builder");
+        builder.build()
+    });
+    std::sync::Arc::clone(&REGISTRY)
+}
+
+/// [`registry`] with the built-in layer types instead of the tests', for
+/// the tests of the built-in types.
+pub(crate) fn builtin_registry() -> std::sync::Arc<crate::Registry> {
     static REGISTRY: std::sync::LazyLock<std::sync::Arc<crate::Registry>> = std::sync::LazyLock::new(|| {
         let mut builder = crate::RegistryBuilder::new();
         mln_style::expression::functions::register_builtin_functions(builder.functions_mut())
             .and_then(|()| crate::register_layer_types(&mut builder))
             .and_then(|()| types::register_source_types(&mut builder))
-            .expect("the tests' types register into an empty builder");
+            .expect("the built-ins register into an empty builder");
         builder.build()
     });
     std::sync::Arc::clone(&REGISTRY)

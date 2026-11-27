@@ -146,7 +146,7 @@ fn a_drape_draws_the_tiles_that_overlap_its_tile() {
     let found: Vec<FoundTile> = (0..render_tiles.len()).map(|tile| FoundTile { tile, view: None }).collect();
     let source = FrameSourceTiles::new(&render_tiles, &contents, &found);
     let drawn: Vec<UnwrappedTileID> = source
-        .overlapping::<crate::layers::render_raster_layer::RenderRasterLayer>(0..found.len(), "raster", ids[0], false)
+        .overlapping::<crate::tests::types::layers::TestRaster>(0..found.len(), "raster", ids[0], false)
         .iter()
         .map(|tile| tile.tile.id)
         .collect();
@@ -168,12 +168,7 @@ fn a_globe_drape_draws_the_tiles_over_it_of_every_world_copy() {
     let drape = tile(0, 0, 0, 0);
     let drawn = |globe: bool| -> Vec<UnwrappedTileID> {
         source
-            .overlapping::<crate::layers::render_raster_layer::RenderRasterLayer>(
-                0..found.len(),
-                "raster",
-                drape,
-                globe,
-            )
+            .overlapping::<crate::tests::types::layers::TestRaster>(0..found.len(), "raster", drape, globe)
             .iter()
             .map(|tile| tile.tile.id)
             .collect()

@@ -74,7 +74,7 @@ fn layer(mut json: serde_json::Value, sort_key_name: &str, type_: SortKeyType) -
         json["layout"][sort_key_name] = sort_key;
     }
     let mut error = ConversionError::default();
-    let layer = convert_layer(crate::tests::registry().style(), &Convertible::from(&json), &mut error)
+    let layer = convert_layer(crate::tests::builtin_registry().style(), &Convertible::from(&json), &mut error)
         .unwrap_or_else(|| panic!("{}", error.message));
     let style = layer.style();
     match json["type"].as_str().unwrap() {

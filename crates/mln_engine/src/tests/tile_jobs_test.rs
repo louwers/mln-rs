@@ -903,8 +903,8 @@ fn a_worker_lost_during_a_decode() {
 /// frees its own.
 #[test]
 fn a_tiles_upload_frees_the_data_its_world_copy_copied() {
-    use crate::buckets::circle_bucket::CircleBucket;
     use crate::layer::bucket_geometry::bucket_vertices;
+    use crate::tests::types::layers::{TestBucket, TestCircleBinders};
     use crate::tile_store::source_tiles::SourceTiles;
 
     let thread_pool = TaskGroup::new(&crate::tests::pool());
@@ -923,7 +923,7 @@ fn a_tiles_upload_frees_the_data_its_world_copy_copied() {
     let circles = |source: &SourceTiles, id: &OverscaledTileID| {
         let contents = source.tile(id)?.contents()?.geometry()?;
         let mut buckets = contents.result.layer_render_data.buckets();
-        let vertices = &buckets.find_map(|bucket| bucket.downcast_ref::<CircleBucket>())?.vertices;
+        let vertices = &buckets.find_map(|bucket| bucket.downcast_ref::<TestBucket<TestCircleBinders>>())?.vertices;
         let stored = vertices.is_moved().then(|| bucket_vertices(&contents.bucket_geometry, vertices)).flatten();
         Some((vertices.is_moved(), vertices.data().is_empty(), stored))
     };

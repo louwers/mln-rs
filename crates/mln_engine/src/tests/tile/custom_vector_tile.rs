@@ -23,7 +23,7 @@ fn set_mlt_tile_data() {
     let mut layer = Layer::new(crate::tests::registry().style(), "fill", "water", "source").unwrap();
     layer.set_source_layer("water");
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
-        Arc::new(EvaluatedLayer::<Fill>::builtin(LayerStyle::recover(layer.style()).unwrap()));
+        Arc::new(EvaluatedLayer::<Fill>::registered(LayerStyle::recover(layer.style()).unwrap()));
     tiles.set_style(&crate::tests::style(&[layer_properties]));
 
     let path = std::path::Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").unwrap())

@@ -87,9 +87,15 @@ impl<T: StyleLayerType> EvaluatedLayer<T> {
 
 #[cfg(test)]
 impl<T: StyleLayerType> EvaluatedLayer<T> {
+    /// [`new`](Self::new), of the layer type of the style half `T` that the
+    /// tests register.
+    pub(crate) fn registered(style: Arc<LayerStyle<T>>) -> Self {
+        Self::new(style, Self::type_of(&crate::tests::registry()))
+    }
+
     /// [`new`](Self::new), of the built-in layer type of the style half `T`.
     pub(crate) fn builtin(style: Arc<LayerStyle<T>>) -> Self {
-        Self::new(style, Self::builtin_type())
+        Self::new(style, Self::type_of(&crate::tests::builtin_registry()))
     }
 
     /// [`with_paint`](Self::with_paint), of the built-in layer type of the
@@ -98,11 +104,11 @@ impl<T: StyleLayerType> EvaluatedLayer<T> {
         style: Arc<LayerStyle<T>>,
         paint: <T::PaintProperties as PaintSet>::Evaluated,
     ) -> Self {
-        Self::with_paint(style, paint, Self::builtin_type())
+        Self::with_paint(style, paint, Self::type_of(&crate::tests::builtin_registry()))
     }
 
-    fn builtin_type() -> &'static dyn ErasedLayerType {
-        crate::tests::registry().layer_type(T::INFO.name).expect("a built-in layer type")
+    fn type_of(registry: &crate::Registry) -> &'static dyn ErasedLayerType {
+        registry.layer_type(T::INFO.name).expect("a layer type of the registry")
     }
 }
 
@@ -396,9 +402,8 @@ mod tests {
     use mln_style::property::evaluated::Evaluated;
 
     use super::*;
-    use crate::layers::render_background_layer::RenderBackgroundLayer;
-    use crate::layers::render_circle_layer::RenderCircleLayer;
     use crate::symbol::layer::RenderSymbolLayer;
+    use crate::tests::types::layers::{TestBackground, TestFeatures};
 
     fn background() -> Arc<dyn ErasedEvaluatedLayer> {
         let paint = BackgroundPaintProperties::PossiblyEvaluated {
@@ -408,7 +413,7 @@ mod tests {
         };
         let style = Arc::new(LayerStyle::<Background>::new("background".to_owned(), String::new()));
         let crossfade = CrossfadeParameters { from_scale: 2.0, to_scale: 1.0, t: 0.25 };
-        let layer_type = entry::<RenderBackgroundLayer>();
+        let layer_type = entry::<TestBackground>();
         Arc::new(EvaluatedLayer { style, paint, crossfade, render_passes: 0, layer_type })
     }
 
@@ -426,7 +431,7 @@ mod tests {
     #[test]
     fn a_type_reads_no_other_types_values() {
         let layer = background();
-        let circles = entry::<RenderCircleLayer>();
+        let circles = entry::<TestFeatures<Circle>>();
         assert!(!circles.needs_resources(std::slice::from_ref(&layer)));
         let symbols = entry::<RenderSymbolLayer>();
         assert!(!symbols.needs_resources(&[layer]));

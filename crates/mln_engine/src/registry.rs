@@ -229,8 +229,9 @@ mod tests {
 
     #[test]
     fn a_layer_type_registers_once() {
+        type Circles = crate::tests::types::layers::TestFeatures<mln_style::layers::Circle>;
         let mut builder = RegistryBuilder::new();
-        builder.add_layer_type::<RenderCircleLayer>().unwrap();
-        assert_eq!(builder.add_layer_type::<RenderCircleLayer>(), Err(RegisterError::Duplicate("circle".to_owned())));
+        builder.add_layer_type::<Circles>().unwrap();
+        assert_eq!(builder.add_layer_type::<Circles>(), Err(RegisterError::Duplicate("circle".to_owned())));
     }
 }

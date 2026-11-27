@@ -156,9 +156,7 @@ mod tests {
     use super::*;
     use crate::layer::layer_type::{EvaluatedLayer, entry};
     use crate::layer::render_layer::Layer as LayerType;
-    use crate::layers::render_circle_layer::RenderCircleLayer;
-    use crate::layers::render_fill_layer::RenderFillLayer;
-    use crate::layers::render_raster_layer::RenderRasterLayer;
+    use crate::tests::types::layers::{TestFeatures, TestRaster};
 
     /// A filter of its own, which shares no expression with another.
     fn filter(json: &str) -> Filter {
@@ -178,7 +176,7 @@ mod tests {
     }
 
     fn circle(id: &str, source_layer: &str, filter: Option<&Filter>) -> Arc<dyn ErasedEvaluatedLayer> {
-        layer::<RenderCircleLayer>(id, source_layer, filter)
+        layer::<TestFeatures<mln_style::layers::Circle>>(id, source_layer, filter)
     }
 
     fn ids(groups: &GroupMap) -> Vec<Vec<String>> {
@@ -210,7 +208,7 @@ mod tests {
             circle("c", "roads", Some(&motorway)),
             circle("d", "roads", None),
             circle("e", "water", Some(&motorway)),
-            layer::<RenderFillLayer>("f", "roads", Some(&motorway)),
+            layer::<TestFeatures<mln_style::layers::Fill>>("f", "roads", Some(&motorway)),
             circle("g", "roads", Some(&primary)),
             circle("h", "roads", None),
             // An equal filter that isn't shared.
@@ -240,7 +238,7 @@ mod tests {
             assert_eq!(groups, [vec!["a", "c"], vec!["b", "g"], vec!["d"], vec!["e"], vec!["f"]]);
             assert_eq!(groups, grouped_by_comparison(&layers));
         }
-        check(|id, json| layer::<RenderRasterLayer>(id, "", Some(&filter(json))));
+        check(|id, json| layer::<TestRaster>(id, "", Some(&filter(json))));
         check(|id, json| circle(id, "roads", Some(&filter(json))));
     }
 

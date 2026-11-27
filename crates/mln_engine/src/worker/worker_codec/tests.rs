@@ -51,7 +51,14 @@ fn convert(json: &str) -> Layer {
 /// A layer from its style JSON, evaluated at `z` by its render layer, as
 /// the `RenderOrchestrator` evaluates it.
 fn layer(json: &str, z: f32) -> Arc<dyn ErasedEvaluatedLayer> {
-    let mut render_layer = crate::tests::render_layer(convert(json).style());
+    layer_of(&crate::tests::registry(), json, z)
+}
+
+/// [`layer`], of the type that `registry` registers under its type's name.
+fn layer_of(registry: &crate::Registry, json: &str, z: f32) -> Arc<dyn ErasedEvaluatedLayer> {
+    let style = convert(json);
+    let layer_type = registry.layer_type(style.info().name).expect("a layer type of the registry");
+    let mut render_layer = layer_type.create_render_layer(style.style()).expect("a layer of its type");
     render_layer.evaluate(&PropertyEvaluationParameters::new(z));
     Arc::clone(&render_layer.base().evaluated_properties)
 }
@@ -183,9 +190,14 @@ struct ThroughCodec {
 
 impl ThroughCodec {
     fn new() -> Self {
+        Self::of(&crate::tests::registry())
+    }
+
+    /// The codec of `registry`'s types.
+    fn of(registry: &Arc<crate::Registry>) -> Self {
         ThroughCodec {
-            map: MapCodec::new(crate::tests::registry()),
-            worker: WorkerCodec::new(crate::tests::registry()),
+            map: MapCodec::new(Arc::clone(registry)),
+            worker: WorkerCodec::new(Arc::clone(registry)),
             cache: DataCache::new(1 << 20),
         }
     }
@@ -230,7 +242,16 @@ fn comparable(result: &LayoutResult) -> [Vec<u8>; 2] {
 /// sends its data before anything decodes it), checks that both layouts
 /// are the same, and returns the one that crossed.
 fn cross(layers: &[Arc<dyn ErasedEvaluatedLayer>], data: &TileData) -> LayoutResult {
-    let mut codec = ThroughCodec::new();
+    cross_of(&crate::tests::registry(), layers, data)
+}
+
+/// [`cross`], through the codec of `registry`'s types.
+fn cross_of(
+    registry: &Arc<crate::Registry>,
+    layers: &[Arc<dyn ErasedEvaluatedLayer>],
+    data: &TileData,
+) -> LayoutResult {
+    let mut codec = ThroughCodec::of(registry);
     let result = lay_out(layers, data, |run| codec.run(&run)).result;
     assert_eq!(result.layer_render_data.len(), layers.len());
     assert_eq!(comparable(&lay_out(layers, data, direct_result).result), comparable(&result));
@@ -384,7 +405,10 @@ fn mlt_tiles_cross() {
 /// pattern positions with them.
 #[test]
 fn pattern_layouts_cross() {
-    let result = cross(&layers(&[FILL_PATTERN, LINE_PATTERN, EXTRUSION_PATTERN]), &tile_data());
+    let registry = crate::tests::builtin_registry();
+    let layers: Vec<_> =
+        [FILL_PATTERN, LINE_PATTERN, EXTRUSION_PATTERN].iter().map(|json| layer_of(&registry, json, 0.0)).collect();
+    let result = cross_of(&registry, &layers, &tile_data());
     let extrusion = result
         .layer_render_data
         .get("extrusion-pattern")
@@ -615,7 +639,7 @@ struct Unknown(Arc<dyn mln_style::layer::ErasedLayerStyle>);
 
 impl ErasedEvaluatedLayer for Unknown {
     fn entry(&self) -> &'static dyn crate::layer::layer_type::ErasedLayerType {
-        crate::layer::layer_type::entry::<crate::layers::render_line_layer::RenderLineLayer>()
+        crate::layer::layer_type::entry::<crate::tests::types::layers::TestFeatures<mln_style::layers::Line>>()
     }
     fn style(&self) -> &dyn mln_style::layer::ErasedLayerStyle {
         &*self.0
@@ -665,7 +689,7 @@ fn a_missing_layer_type_fails_its_job() {
 
     let mut builder = crate::RegistryBuilder::new();
     mln_style::expression::functions::register_builtin_functions(builder.functions_mut()).unwrap();
-    builder.add_layer_type::<crate::layers::render_line_layer::RenderLineLayer>().unwrap();
+    builder.add_layer_type::<crate::tests::types::layers::TestFeatures<mln_style::layers::Line>>().unwrap();
     let Err(error) = WorkerCodec::new(builder.build()).decode_job(body) else {
         panic!("decoded a fill layer without its type");
     };

@@ -201,16 +201,16 @@ impl Tiled {
         let properties: Arc<dyn ErasedEvaluatedLayer> = match self {
             Tiled::Raster => {
                 let layer = Layer::new(crate::tests::registry().style(), "raster", "id", "source").unwrap();
-                Arc::new(EvaluatedLayer::<Raster>::builtin(LayerStyle::recover(layer.style()).unwrap()))
+                Arc::new(EvaluatedLayer::<Raster>::registered(LayerStyle::recover(layer.style()).unwrap()))
             }
             Tiled::RasterDEM => {
                 let layer = Layer::new(crate::tests::registry().style(), "hillshade", "id", "source").unwrap();
-                Arc::new(EvaluatedLayer::<Hillshade>::builtin(LayerStyle::recover(layer.style()).unwrap()))
+                Arc::new(EvaluatedLayer::<Hillshade>::registered(LayerStyle::recover(layer.style()).unwrap()))
             }
             Tiled::Vector => {
                 let mut layer = Layer::new(crate::tests::registry().style(), "line", "id", "source").unwrap();
                 layer.set_source_layer("water");
-                Arc::new(EvaluatedLayer::<Line>::builtin(LayerStyle::recover(layer.style()).unwrap()))
+                Arc::new(EvaluatedLayer::<Line>::registered(LayerStyle::recover(layer.style()).unwrap()))
             }
         };
         vec![properties]
@@ -797,7 +797,7 @@ fn geojson_source_tiles_after_data_reset() {
 
     let layer = Layer::new(crate::tests::registry().style(), "circle", "id", "source").unwrap();
     let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
-        Arc::new(EvaluatedLayer::<Circle>::builtin(LayerStyle::recover(layer.style()).unwrap()));
+        Arc::new(EvaluatedLayer::<Circle>::registered(LayerStyle::recover(layer.style()).unwrap()));
     let layers = vec![layer_properties];
 
     let continuous = test.tile_parameters(MapMode::Continuous);
@@ -821,7 +821,7 @@ fn geojson_source_tiles_after_data_reset() {
 /// A circle layer "id" on "source", as evaluated values.
 fn circle_layers() -> Vec<Arc<dyn ErasedEvaluatedLayer>> {
     let layer = Layer::new(crate::tests::registry().style(), "circle", "id", "source").unwrap();
-    vec![Arc::new(EvaluatedLayer::<Circle>::builtin(LayerStyle::recover(layer.style()).unwrap()))]
+    vec![Arc::new(EvaluatedLayer::<Circle>::registered(LayerStyle::recover(layer.style()).unwrap()))]
 }
 
 /// A GeoJSON source rendered with a circle layer. Its data is clustered,
