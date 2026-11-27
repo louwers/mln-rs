@@ -27,7 +27,7 @@ use crate::layer::tile_layout::{Built, Resolved};
 use crate::tile_store::contents::GeometryContents;
 
 /// The values of a layer of the style half `T` for a frame.
-pub(crate) struct EvaluatedLayer<T: StyleLayerType> {
+pub struct EvaluatedLayer<T: StyleLayerType> {
     pub(crate) style: Arc<LayerStyle<T>>,
     pub(crate) paint: <T::PaintProperties as PaintSet>::Evaluated,
     /// The default for a type without cross-faded properties.
@@ -60,6 +60,28 @@ impl<T: StyleLayerType> EvaluatedLayer<T> {
         layer_type: &'static dyn ErasedLayerType,
     ) -> Self {
         EvaluatedLayer { style, paint, crossfade: CrossfadeParameters::default(), render_passes: 0, layer_type }
+    }
+}
+
+impl<T: StyleLayerType> EvaluatedLayer<T> {
+    /// The layer's style.
+    #[must_use]
+    pub fn style(&self) -> &Arc<LayerStyle<T>> {
+        &self.style
+    }
+
+    /// The layer's paint values for the frame, of which a data-driven one
+    /// can still differ by feature.
+    #[must_use]
+    pub fn paint(&self) -> &<T::PaintProperties as PaintSet>::Evaluated {
+        &self.paint
+    }
+
+    /// The frame's cross-fade of the layer's cross-faded properties, the
+    /// default for a type without them ([`Layer::CROSSFADES`]).
+    #[must_use]
+    pub fn crossfade(&self) -> CrossfadeParameters {
+        self.crossfade
     }
 }
 

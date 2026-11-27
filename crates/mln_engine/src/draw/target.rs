@@ -27,7 +27,7 @@ use crate::render::pass::RenderPass;
 /// other draws sample: a handle of the target in the context's store, which
 /// stays while a clone of the handle does.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct Target {
+pub struct Target {
     key: Shared<TargetKey>,
     texture: SharedTexture,
 }
@@ -79,7 +79,7 @@ impl Target {
 
     /// Makes the target of `size` from now on: of another size, it then
     /// holds nothing.
-    pub(crate) fn set_size(&self, res: &mut Resources<'_>, size: Size) {
+    pub fn set_size(&self, res: &mut Resources<'_>, size: Size) {
         let context = &mut *res.context;
         let Some(objects) = context.target_mut(self).filter(|objects| objects.size != size) else {
             return;
@@ -94,7 +94,7 @@ impl Target {
     /// whose draws into it were written, until a frame fails to draw them,
     /// or the target changes size.
     #[must_use]
-    pub(crate) fn holds(&self, res: &Resources<'_>) -> bool {
+    pub fn holds(&self, res: &Resources<'_>) -> bool {
         res.context.target(self).is_some_and(|objects| objects.holds)
     }
 

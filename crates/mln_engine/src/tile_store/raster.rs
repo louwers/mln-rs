@@ -72,7 +72,7 @@ impl Masking {
 }
 
 /// A raster tile's image, and the parts of the tile it draws.
-pub(crate) struct RasterContents {
+pub struct RasterContents {
     id: SimpleIdentity,
     pub(crate) image: Arc<PremultipliedImage>,
     pub(crate) masking: Masking,

@@ -10,7 +10,7 @@ mod buckets;
 pub mod camera;
 #[cfg(feature = "gpu-conformance")]
 pub mod conformance;
-mod draw;
+pub mod draw;
 pub mod exec;
 pub mod geo;
 pub mod gestures;

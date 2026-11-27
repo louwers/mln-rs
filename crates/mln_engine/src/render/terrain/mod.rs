@@ -134,7 +134,7 @@ impl Surface {
 /// that a hillshade lit from the viewport keeps its drapes as the map
 /// turns, while its light stays where the viewport puts it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(crate) struct SurfaceLight {
+pub struct SurfaceLight {
     /// The hillshade's lights, turned by the frame's bearing.
     pub(crate) props: HillshadeEvaluatedPropsUBO,
     /// The hillshade's values of a tile, but for its latitudes, which are

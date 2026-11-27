@@ -37,7 +37,7 @@ use crate::tile::{OverscaledTileID, TileData, TileLayer};
 /// tile's bucket, on a tile worker: [`new`](Self::new) selects the tile's
 /// features, and once the glyphs and images it asked for are resolved,
 /// [`build`](Self::build) makes the bucket.
-pub(crate) trait Layout<T: StyleLayerType>: Send + Sized + 'static {
+pub trait Layout<T: StyleLayerType>: Send + Sized + 'static {
     /// The bucket the layout makes.
     type Bucket: Bucket;
 
@@ -96,7 +96,7 @@ pub(crate) struct LayoutParameters<'a> {
 }
 
 /// What a layout reads of its tile while it selects features.
-pub(crate) struct LayoutCx<'a, T: StyleLayerType> {
+pub struct LayoutCx<'a, T: StyleLayerType> {
     pub(crate) layers: &'a [Arc<EvaluatedLayer<T>>],
     pub(crate) source_layer: &'a SourceLayer,
     pub(crate) parameters: LayoutParameters<'a>,
@@ -259,7 +259,7 @@ impl Selection<'_> {
 }
 
 /// What a layout reads and writes while it builds its bucket.
-pub(crate) struct BuildCx<'a, T: StyleLayerType> {
+pub struct BuildCx<'a, T: StyleLayerType> {
     pub(crate) layers: &'a [Arc<EvaluatedLayer<T>>],
     pub(crate) parameters: &'a BucketParameters,
     pub(crate) first_load: bool,

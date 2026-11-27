@@ -171,8 +171,8 @@ pub(crate) struct RenderCustomLayer {
 }
 
 /// The hosts of custom layers that left the renderer after they drew, which
-/// [`end_hosts`] tells that it stopped.
-pub(crate) type EndedHosts = Vec<Arc<dyn CustomLayerHost>>;
+/// `end_hosts` tells that it stopped.
+pub type EndedHosts = Vec<Arc<dyn CustomLayerHost>>;
 
 /// Tells `hosts`, which left the renderer after drawing with `gpu`, that it
 /// stopped, once `gpu` finished their work, so that they free what they drew

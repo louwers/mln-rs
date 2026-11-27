@@ -252,13 +252,31 @@ impl RenderLayerBase {
 
 /// A layer's values of its style half `T`: its style, its paint values in
 /// transition, and their evaluation for the last frame.
-pub(crate) struct LayerValues<T: StyleLayerType> {
+pub struct LayerValues<T: StyleLayerType> {
     pub(crate) style: Arc<LayerStyle<T>>,
     pub(crate) unevaluated: <T::PaintProperties as PaintSet>::Unevaluated,
     pub(crate) evaluated: Arc<EvaluatedLayer<T>>,
 }
 
 impl<T: StyleLayerType> LayerValues<T> {
+    /// The layer's style.
+    #[must_use]
+    pub fn style(&self) -> &Arc<LayerStyle<T>> {
+        &self.style
+    }
+
+    /// The layer's paint values as the style sets them, in transition.
+    #[must_use]
+    pub fn unevaluated(&self) -> &<T::PaintProperties as PaintSet>::Unevaluated {
+        &self.unevaluated
+    }
+
+    /// The layer's values of the last frame that evaluated them.
+    #[must_use]
+    pub fn evaluated(&self) -> &Arc<EvaluatedLayer<T>> {
+        &self.evaluated
+    }
+
     /// The values of the layer `style` of `layer_type`, before any
     /// transition, and the base of a render layer that holds them.
     pub(crate) fn new(
@@ -300,28 +318,27 @@ impl<T: StyleLayerType> LayerValues<T> {
 
 /// What a layer's evaluation says of how it draws with its values.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub(crate) struct Evaluation {
+pub struct Evaluation {
     /// Whether the layer draws anything.
-    pub(crate) draws: bool,
+    pub draws: bool,
     /// Whether the layer may draw in the opaque pass, which the frame draws
     /// front to back before it blends the rest.
-    pub(crate) opaque: bool,
+    pub opaque: bool,
     /// The one solid color the layer is, which the frame clears to instead
     /// of drawing the layer when it is the style's bottom layer.
-    pub(crate) solid: Option<Color>,
+    pub solid: Option<Color>,
     /// Whether the layer draws a drape by the map's bearing: something of
     /// it is anchored to the viewport.
-    pub(crate) drapes_by_bearing: bool,
+    pub drapes_by_bearing: bool,
 }
 
 impl Evaluation {
     /// The layer draws nothing.
-    pub(crate) const NONE: Evaluation =
-        Evaluation { draws: false, opaque: false, solid: None, drapes_by_bearing: false };
+    pub const NONE: Evaluation = Evaluation { draws: false, opaque: false, solid: None, drapes_by_bearing: false };
     /// The layer draws, translucent.
-    pub(crate) const TRANSLUCENT: Evaluation = Evaluation { draws: true, ..Evaluation::NONE };
+    pub const TRANSLUCENT: Evaluation = Evaluation { draws: true, ..Evaluation::NONE };
     /// The layer draws, and may draw in the opaque pass.
-    pub(crate) const OPAQUE: Evaluation = Evaluation { opaque: true, ..Evaluation::TRANSLUCENT };
+    pub const OPAQUE: Evaluation = Evaluation { opaque: true, ..Evaluation::TRANSLUCENT };
 
     /// The passes a layer of this evaluation draws in.
     fn passes(self) -> RenderPass {
@@ -334,7 +351,7 @@ impl Evaluation {
 }
 
 /// What a layer's [`Layer::evaluate`] reads and completes.
-pub(crate) struct EvaluateCx<'a, L: Layer> {
+pub struct EvaluateCx<'a, L: Layer> {
     /// The layer's values before the evaluation: its style, its paint values
     /// in transition and their last evaluation.
     pub(crate) values: &'a LayerValues<L::Style>,
@@ -345,22 +362,42 @@ pub(crate) struct EvaluateCx<'a, L: Layer> {
     pub(crate) evaluated: &'a mut EvaluatedLayer<L::Style>,
 }
 
+impl<L: Layer> EvaluateCx<'_, L> {
+    /// The layer's values before the evaluation.
+    #[must_use]
+    pub fn values(&self) -> &LayerValues<L::Style> {
+        self.values
+    }
+
+    /// What the values are evaluated for: the zoom, the time and the
+    /// style's global state.
+    #[must_use]
+    pub fn parameters(&self) -> &PropertyEvaluationParameters {
+        self.parameters
+    }
+
+    /// The new evaluation, which becomes the layer's once the hook returns.
+    pub fn evaluated(&mut self) -> &mut EvaluatedLayer<L::Style> {
+        self.evaluated
+    }
+}
+
 /// How a layer type meets terrain.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum OnTerrain {
+pub enum OnTerrain {
     /// The layer draws flat, at sea level.
     Flat,
     /// The layer drapes over terrain: it draws flat into the terrain tiles'
-    /// textures ([`RenderLayer::update_drape_draws`]) rather than onto the
+    /// textures (`RenderLayer::update_drape_draws`) rather than onto the
     /// frame.
     Drapes,
     /// The layer stands on terrain: over terrain, its draws are of the
     /// terrain variant ([`ProjectionVariant::stands`]), and their points
-    /// stand on the frame's ground ([`LayerFrame::ground`]). One that
-    /// `hides_behind_ground` hides its points behind the ground in front of
-    /// them, which reads the ground's depth ([`FrameGround::depth`]).
-    ///
-    /// [`FrameGround::depth`]: crate::render::terrain::FrameGround::depth
+    /// stand on the frame's ground, whose heights a program reads where it
+    /// declares [`GROUND_HEIGHT`](crate::draw::ground::GROUND_HEIGHT). One
+    /// that `hides_behind_ground` hides its points behind the ground in
+    /// front of them, which reads the ground's depth
+    /// ([`GROUND_DEPTH`](crate::draw::ground::GROUND_DEPTH)).
     Stands { hides_behind_ground: bool },
 }
 
@@ -382,10 +419,10 @@ impl OnTerrain {
 }
 
 /// What a layer's [`Layer::prepare`] reads and changes: its base and
-/// values, its values of the tiles it draws ([`TileMap`]), which the frame
+/// values, its values of the tiles it draws (`TileMap`), which the frame
 /// and its drapes share, by the tiles' own ids ([`FrameTile::id`]), and the
 /// frame it makes its draws for, the map's or a drape's.
-pub(crate) struct PrepareCx<'a, 'f, L: Layer> {
+pub struct PrepareCx<'a, 'f, L: Layer> {
     pub(crate) base: &'a RenderLayerBase,
     pub(crate) values: &'a LayerValues<L::Style>,
     pub(crate) tiles: &'a mut TileMap<L::Tile>,
@@ -398,8 +435,39 @@ pub(crate) struct PrepareCx<'a, 'f, L: Layer> {
     pub(crate) frame: &'a LayerFrame<'f>,
 }
 
+impl<'a, L: Layer> PrepareCx<'a, '_, L> {
+    /// The layer's values of the frame.
+    #[must_use]
+    pub fn values(&self) -> &LayerValues<L::Style> {
+        self.values
+    }
+
+    /// The frame the layer makes its draws for, the map's or a drape's.
+    #[must_use]
+    pub fn frame(&self) -> &LayerFrame<'_> {
+        self.frame
+    }
+
+    /// What the layer makes its meshes and targets with.
+    pub fn res(&mut self) -> &mut Resources<'a> {
+        &mut self.res
+    }
+
+    /// The layer's value of `tile`, if the engine keeps one.
+    pub fn tile(&mut self, tile: &FrameTile<'_, L>) -> Option<&mut L::Tile> {
+        self.tiles.get_mut(&tile.id())
+    }
+
+    /// The tiles that a layer that picks its tiles ([`Layer::PICKS_TILES`])
+    /// draws in the frame, in id order; none for another layer.
+    #[must_use]
+    pub fn picked(&self) -> &[OverscaledTileID] {
+        self.picked
+    }
+}
+
 /// What a layer's [`Layer::tile`] reads to make a tile's value.
-pub(crate) struct TileCx<'a, 'f, L: Layer> {
+pub struct TileCx<'a, 'f, L: Layer> {
     pub(crate) base: &'a RenderLayerBase,
     pub(crate) values: &'a LayerValues<L::Style>,
     /// What the layer makes its meshes and targets with.
@@ -410,17 +478,42 @@ pub(crate) struct TileCx<'a, 'f, L: Layer> {
     pub(crate) frame: &'a LayerFrame<'f>,
 }
 
+impl<'a, L: Layer> TileCx<'a, '_, L> {
+    /// The layer's values of the frame.
+    #[must_use]
+    pub fn values(&self) -> &LayerValues<L::Style> {
+        self.values
+    }
+
+    /// The frame the value is made in.
+    #[must_use]
+    pub fn frame(&self) -> &LayerFrame<'_> {
+        self.frame
+    }
+
+    /// What the layer makes its meshes and targets with.
+    pub fn res(&mut self) -> &mut Resources<'a> {
+        &mut self.res
+    }
+}
+
 /// What a layer's [`Layer::update`] reads, besides its tiles.
-pub(crate) struct UpdateCx<'a, 'p, L: Layer> {
+pub struct UpdateCx<'a, 'p, L: Layer> {
     pub(crate) values: &'a LayerValues<L::Style>,
     pub(crate) parameters: &'a mut LayerUpdateParameters<'p>,
     picked: &'a mut Vec<OverscaledTileID>,
 }
 
 impl<L: Layer> UpdateCx<'_, '_, L> {
+    /// The layer's values of the frame.
+    #[must_use]
+    pub fn values(&self) -> &LayerValues<L::Style> {
+        self.values
+    }
+
     /// Makes `tiles` those that a layer that picks its tiles
     /// ([`Layer::PICKS_TILES`]) draws in the map's frame.
-    pub(crate) fn pick_tiles(&mut self, tiles: impl IntoIterator<Item = OverscaledTileID>) {
+    pub fn pick_tiles(&mut self, tiles: impl IntoIterator<Item = OverscaledTileID>) {
         debug_assert!(L::PICKS_TILES, "a layer that doesn't pick its tiles picked some");
         self.picked.clear();
         self.picked.extend(tiles);
@@ -448,11 +541,11 @@ enum DrawsFor<'d> {
 
 /// A layer type's render half: what it makes of its values, its tiles'
 /// data and the frame, whose hooks the engine calls on a render layer of the
-/// type ([`Hosted`]). The engine keeps the layer's base, its values of the
+/// type (`Hosted`). The engine keeps the layer's base, its values of the
 /// layer type `Type`, its value of each tile it draws, a `Tile`, which the
 /// map's frame and every drape the tile overlaps draw, and its draws
 /// ([`Draws`]) in the frame and in each drape it draws in.
-pub(crate) trait Layer: Sized + 'static {
+pub trait Layer: Sized + 'static {
     /// The type's style half: its name, its kind of source and its
     /// properties.
     type Style: StyleLayerType;
@@ -477,7 +570,7 @@ pub(crate) trait Layer: Sized + 'static {
     const TERRAIN: OnTerrain = OnTerrain::Flat;
 
     /// Whether the layer draws 3D geometry, whose depth it writes in the
-    /// range of [`PaintParameters::depth_mode_for_3d`]. The layers above the
+    /// range of `PaintParameters::depth_mode_for_3d`. The layers above the
     /// lowest such layer that draws draw without a depth test, and on the
     /// globe the planet's depth hides its geometry behind the horizon.
     const VOLUME: bool = false;
@@ -530,7 +623,7 @@ pub(crate) trait Layer: Sized + 'static {
     /// ([`NoTiles`](crate::layer::tile_input::NoTiles)). The layer collects
     /// here what the update needs of its tiles' data; a type that places
     /// collects what it places in its participant instead
-    /// ([`Placement::collect`](crate::placement::Placement::collect)). One
+    /// (`Placement::collect`). One
     /// without a source that picks its tiles picks them here.
     fn update(&mut self, _cx: UpdateCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Self>]) {}
 
@@ -577,11 +670,9 @@ pub(crate) trait Layer: Sized + 'static {
     /// ([`PrepareCx::picked`]). The layer pushes its draws, with the values
     /// of their blocks, into `out`, which holds no draws yet, and copies
     /// again into the tile values what changed of their buckets
-    /// ([`TileEntry::take_changes`]), which every frame that draws them
+    /// (`TileEntry::take_changes`), which every frame that draws them
     /// then draws. The engine then writes, uploads and draws them, and draws
     /// the masks of the layer's tiles where a draw clips.
-    ///
-    /// [`TileEntry::take_changes`]: crate::layer::layer_drawing::TileEntry::take_changes
     fn prepare(&mut self, _cx: &mut PrepareCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Self>], _out: &mut Draws) {}
 
     /// Called when the layer's style changed to another of the same id and

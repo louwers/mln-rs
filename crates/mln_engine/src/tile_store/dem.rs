@@ -14,7 +14,7 @@ use crate::tile_store::raster::Masking;
 /// A raster-dem tile's DEM, which the tile backfills from its neighbours,
 /// and the parts of the tile it draws. The layers and the terrain that read
 /// it make their textures and quads of it.
-pub(crate) struct DemContents {
+pub struct DemContents {
     id: SimpleIdentity,
     dem: DEMData,
     pub(crate) masking: Masking,

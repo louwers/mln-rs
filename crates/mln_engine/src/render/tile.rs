@@ -193,7 +193,7 @@ pub(crate) struct FoundTile {
 
 /// A render tile of a frame, with what it holds for a layer of the type
 /// `T` and the world copy the layer draws it in.
-pub(crate) struct FrameTile<'a, T: Layer> {
+pub struct FrameTile<'a, T: Layer> {
     pub(crate) tile: &'a RenderTile,
     /// The world copy the layer draws the tile in: its own, but in a drape
     /// one by the drape's.
@@ -255,7 +255,7 @@ impl<'a, T: Layer> FrameTile<'a, T> {
     }
 
     /// What the tile holds for the layer, if anything.
-    pub(crate) fn data(self) -> Option<TileData<'a, T>> {
+    pub fn data(self) -> Option<TileData<'a, T>> {
         self.data
     }
 
@@ -266,14 +266,14 @@ impl<'a, T: Layer> FrameTile<'a, T> {
 
     /// The tile's id.
     #[must_use]
-    pub(crate) fn id(self) -> OverscaledTileID {
+    pub fn id(self) -> OverscaledTileID {
         *self.tile.overscaled_tile_id()
     }
 
     /// The id that the layer draws the tile under: its own, but in a drape
     /// in the world copy the drape draws it in.
     #[must_use]
-    pub(crate) fn draw_id(self) -> OverscaledTileID {
+    pub fn draw_id(self) -> OverscaledTileID {
         OverscaledTileID { wrap: self.wrap, ..self.id() }
     }
 }

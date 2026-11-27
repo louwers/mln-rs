@@ -21,10 +21,10 @@ use crate::draw::target::Target;
 use crate::log_target;
 
 /// The renderer's GPU resources, as a layer's hooks make and read them: the
-/// meshes it draws ([`mesh`](Self::mesh)) and the targets its draws draw
+/// meshes it draws (`mesh`) and the targets its draws draw
 /// into ([`target`](Self::target)). What it makes stays while the layer
 /// keeps its handle.
-pub(crate) struct Resources<'a> {
+pub struct Resources<'a> {
     pub(crate) gpu: &'a mut dyn Gpu,
     pub(crate) context: &'a mut Context,
 }
@@ -52,7 +52,7 @@ impl<'a> Resources<'a> {
     /// the type the backend draws into for it. Its texture is sampled
     /// linearly and clamped to its edges.
     #[must_use]
-    pub(crate) fn target(&mut self, size: Size, type_: TextureChannelDataType) -> Target {
+    pub fn target(&mut self, size: Size, type_: TextureChannelDataType) -> Target {
         Target::new(self.context, size, type_)
     }
 }

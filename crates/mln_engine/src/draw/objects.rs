@@ -718,8 +718,8 @@ impl DrawObjects {
 }
 
 /// A handle of a mesh, the GPU objects of what a draw draws
-/// ([`DrawObjects`]), which the context's store keeps while a clone of the
-/// handle lasts ([`Context::mesh`]). A layer keeps its meshes' handles, in
+/// (`DrawObjects`), which the context's store keeps while a clone of the
+/// handle lasts (`Context::mesh`). A layer keeps its meshes' handles, in
 /// its tile values or its own state, and the draws it pushes name them
 /// ([`Group::push`]), so that the engine uploads and draws them after the
 /// layer made its draws. Clones of a handle are the same mesh. A mesh
@@ -727,7 +727,7 @@ impl DrawObjects {
 ///
 /// [`Group::push`]: crate::draw::draws::Group::push
 #[derive(Clone)]
-pub(crate) struct Mesh {
+pub struct Mesh {
     key: Shared<MeshKey>,
     id: SimpleIdentity,
     program: &'static Program,
@@ -762,7 +762,7 @@ impl Mesh {
     /// The place of the mesh among the meshes, by when they were made, as a
     /// draw's order ([`Draw::order`](crate::draw::draws::Draw::order)).
     #[must_use]
-    pub(crate) fn seq(&self) -> i64 {
+    pub fn seq(&self) -> i64 {
         self.id.get() as i64
     }
 

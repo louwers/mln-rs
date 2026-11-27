@@ -11,13 +11,13 @@ use super::{glsl, glsl_es, msl, wgsl};
 /// Over terrain, the height of the ground under a feature's anchor, in
 /// meters with the exaggeration, which the terrain variants of the programs
 /// that stand on it read.
-pub(crate) const GROUND_HEIGHT: Attribute = Attribute::new("ground_height", Float).only_in(Variants::Standing);
+pub const GROUND_HEIGHT: Attribute = Attribute::new("ground_height", Float).only_in(Variants::Standing);
 
 /// The ground's depth: each pixel's eye distance to the nearest ground drawn
 /// there, the bits of an `f32`, least significant byte first, in an RGBA8
 /// texel; 0 where none is. The terrain variants of the programs that hide
 /// behind the ground read it, in the slot their own textures leave free.
-pub(crate) const GROUND_DEPTH: ProgramTexture =
+pub const GROUND_DEPTH: ProgramTexture =
     ProgramTexture::texels("ground_depth", Stages::Vertex).only_in(Variants::Standing);
 
 /// The DEM: RGBA8 texels behind a one-texel border, which the vertex stage

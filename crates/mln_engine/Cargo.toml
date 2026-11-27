@@ -182,6 +182,11 @@ tempfile.workspace = true
 # OfflineDownload.ResourceOfflineUsageUnset renders a map after the
 # download.
 [[test]]
+name = "layer_type"
+path = "tests/layer_type.rs"
+# A layer type that another crate declares on the public layer contract.
+
+[[test]]
 name = "offline_download_map_test"
 path = "tests/offline_download_map.rs"
 # StubFileSource answers the download.

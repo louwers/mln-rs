@@ -70,7 +70,7 @@ impl RegistryBuilder {
     /// name. Fails for a name that an earlier type took. A type whose input
     /// is of another kind of source than its style half names doesn't
     /// compile.
-    pub(crate) fn add_layer_type<L: Layer>(&mut self) -> Result<(), RegisterError> {
+    pub fn add_layer_type<L: Layer>(&mut self) -> Result<(), RegisterError> {
         const {
             assert!(
                 L::Style::INFO.source as u8 == <L::Input as Find<L::Style>>::KIND as u8,

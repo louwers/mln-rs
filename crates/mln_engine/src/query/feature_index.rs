@@ -59,7 +59,7 @@ pub(crate) struct QueryGround<'a> {
 /// Where a query looks in a tile: its geometry in tile units, seen through
 /// the camera.
 #[derive(Clone, Copy)]
-pub(crate) struct QueryRegion<'a> {
+pub struct QueryRegion<'a> {
     pub(crate) geometry: &'a GeometryCoordinates,
     /// The screen points of `geometry`, from the view's top left: where the
     /// query's lines of sight start.

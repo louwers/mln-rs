@@ -26,8 +26,8 @@ pub type LayerFeatureStates = mln_style::hash::HashMap<String, FeatureStates>;
 ///
 /// The engine moves a bucket from the worker to the render thread, copies
 /// it for the tile's other world copies, and uploads it.
-pub(crate) trait Bucket: Clone + Send + Wire + 'static {
-    /// Names the bucket's [`GeometryVec`]s and [`LayerBinders`] to `up`: the
+pub trait Bucket: Clone + Send + Wire + 'static {
+    /// Names the bucket's `GeometryVec`s and `LayerBinders` to `up`: the
     /// engine moves them into the context's stores once the bucket reaches
     /// the render thread, and rewrites the binders' values where feature
     /// state changes.
@@ -41,7 +41,7 @@ pub(crate) trait Bucket: Clone + Send + Wire + 'static {
 }
 
 /// What a bucket names its data to, in its [`upload`](Bucket::upload).
-pub(crate) struct Upload<'a> {
+pub struct Upload<'a> {
     kind: Kind<'a>,
 }
 

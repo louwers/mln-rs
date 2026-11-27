@@ -208,7 +208,7 @@ enum Mesh {
 /// What an image source shows in each of its tiles: its image, and the mesh
 /// of the unit square that the image's quad puts in the tile. The raster
 /// layers that draw the source share them.
-pub(crate) struct ImageTile {
+pub struct ImageTile {
     id: SimpleIdentity,
     pub(crate) image: Arc<PremultipliedImage>,
     mesh: Mesh,

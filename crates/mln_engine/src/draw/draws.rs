@@ -58,7 +58,7 @@ pub(crate) enum DrawsInto {
 /// The frame a layer makes its draws for, as it reads it: the camera, the
 /// target's size and scale, the light and ground, and what it draws into.
 #[derive(Clone)]
-pub(crate) struct LayerFrame<'a> {
+pub struct LayerFrame<'a> {
     pub(crate) view: &'a View,
     pub(crate) transform_params: &'a TransformParameters,
     /// Whether a gesture or an animation moves the camera: draws favor speed
@@ -82,10 +82,35 @@ pub(crate) struct LayerFrame<'a> {
 }
 
 impl LayerFrame<'_> {
+    /// The frame's camera.
+    #[must_use]
+    pub fn view(&self) -> &View {
+        self.view
+    }
+
+    /// Whether a gesture or an animation moves the camera: draws favor
+    /// speed over crispness then.
+    #[must_use]
+    pub fn camera_moving(&self) -> bool {
+        self.camera_moving
+    }
+
+    /// The device pixels of the frame's target per logical pixel.
+    #[must_use]
+    pub fn pixel_ratio(&self) -> f32 {
+        self.pixel_ratio
+    }
+
+    /// The size of the frame's target, in device pixels.
+    #[must_use]
+    pub fn size(&self) -> Size {
+        self.renderable_size
+    }
+
     /// Whether the frame is a drape whose shading the terrain's surface
     /// adds: a hillshade draws its slopes there, unlit.
     #[must_use]
-    pub(crate) fn drape_lit(&self) -> bool {
+    pub fn drape_lit(&self) -> bool {
         matches!(self.into, DrawsInto::Drape { lit: true })
     }
 
@@ -109,7 +134,7 @@ impl LayerFrame<'_> {
 
 /// How a draw tests and writes depth.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Depth {
+pub enum Depth {
     /// It draws without a depth test.
     Off,
     /// It tests the depth of a sub-layer of the layer's depth, and writes it
@@ -123,28 +148,28 @@ pub(crate) enum Depth {
 /// How a draw of a mesh draws: its place among its group's draws, its pass,
 /// its depth and whether it clips.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Draw {
+pub struct Draw {
     /// Where the draw is among its group's draws: lower orders draw first,
     /// and draws of one order in the order they were pushed. A layer that
     /// draws its meshes in the order they were made gives each draw its
     /// mesh's [`seq`](Mesh::seq).
-    pub(crate) order: i64,
+    pub order: i64,
     /// Whether the draw may draw in the opaque pass, where its layer draws
     /// there, rather than in the translucent pass. It draws in one of the
     /// two.
-    pub(crate) opaque: bool,
-    pub(crate) depth: Depth,
+    pub opaque: bool,
+    pub depth: Depth,
     /// Whether the draw clips: a draw at the layer's depth to the mask of
     /// its tile ([`Group::push_at`]), a 3D one to where none of the group's
     /// 3D draws of the pass drew before it, so no pixel blends twice. A
     /// group with a draw that clips draws the masks of its layer's tiles.
-    pub(crate) clip: bool,
+    pub clip: bool,
 }
 
 impl Draw {
     /// A draw of order 0 in the translucent pass that tests, and doesn't
     /// write, the nearest depth of its layer, and doesn't clip.
-    pub(crate) const DEFAULT: Draw = Draw {
+    pub const DEFAULT: Draw = Draw {
         order: 0,
         opaque: false,
         depth: Depth::Layer { sub_layer: 0, mask: DepthMaskType::ReadOnly },
@@ -380,7 +405,7 @@ impl Pushes {
 /// A layer's draws of a frame in one place in the layers' order and depth,
 /// which the engine writes, uploads and draws in each of the frame's
 /// passes, and what they share.
-pub(crate) struct Group {
+pub struct Group {
     /// Tells the group apart in the layer composite.
     id: SimpleIdentity,
     /// The draws, in their order. A draw's index is the index of its
@@ -425,7 +450,7 @@ impl Group {
     /// `blocks`, the values of the draw's own of the blocks of each draw
     /// that the mesh's program reads, in its order. The draw's projection,
     /// where its program reads one, is zeros.
-    pub(crate) fn push<B: DrawBlocks>(&mut self, mesh: &Mesh, draw: Draw, blocks: B) -> &mut Self {
+    pub fn push<B: DrawBlocks>(&mut self, mesh: &Mesh, draw: Draw, blocks: B) -> &mut Self {
         self.add(mesh, None, None, draw, blocks)
     }
 
@@ -433,7 +458,7 @@ impl Group {
     /// [`push`](Self::push) does: the draw reads `projection` where its
     /// program reads a projection of each draw, and clips to `tile` where it
     /// clips.
-    pub(crate) fn push_at<B: DrawBlocks>(
+    pub fn push_at<B: DrawBlocks>(
         &mut self,
         mesh: &Mesh,
         tile: OverscaledTileID,
@@ -473,7 +498,7 @@ impl Group {
     /// Makes `block` the value that the next frame's draws read of their
     /// programs' uniform block of its layout, the last given. A draw whose
     /// program has none ignores it.
-    pub(crate) fn block<T: UniformBlock>(&mut self, block: &T) -> &mut Self {
+    pub fn block<T: UniformBlock>(&mut self, block: &T) -> &mut Self {
         self.pushes.block(T::BLOCK, bytemuck::bytes_of(block));
         self
     }
@@ -628,7 +653,7 @@ impl Group {
 
 /// When a frame lends a layer the backend's commands ([`Draws::lend`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum LendAt {
+pub enum LendAt {
     /// Before the frame's passes, after the layer drew into its targets
     /// ([`Draws::target`]): the frame's commands outside a pass.
     BeforePasses,
@@ -638,22 +663,22 @@ pub(crate) enum LendAt {
 }
 
 /// What a frame lends a layer
-/// ([`TypedLayer::lend`](crate::layer::render_layer::TypedLayer::lend)).
-pub(crate) struct Lent<'a> {
+/// ([`Layer::lend`](crate::layer::Layer::lend)).
+pub struct Lent<'a> {
     /// The backend's commands, as its `Gpu` lends them
     /// ([`Gpu::lend`]): before the passes `mln_vulkan::CustomLayerEncoder`,
     /// `mln_mtl::CustomLayerEncoder`, `mln_gl::CustomLayerEncoder`,
     /// `mln_webgpu::CustomLayerEncoder` or `mln_d3d12::CustomLayerEncoder`,
     /// and in a pass the same crate's `CustomLayerPass`, whose docs say what
     /// the layer may change.
-    pub(crate) raw: &'a mut dyn Any,
+    pub raw: &'a mut dyn Any,
     /// The frame.
-    pub(crate) frame: &'a LayerFrame<'a>,
+    pub frame: &'a LayerFrame<'a>,
     /// Where the frame draws the map, and the depth it writes there.
-    pub(crate) projection: &'a FrameProjection,
+    pub projection: &'a FrameProjection,
     /// The depth that the frame's 2D layers write at the layer's place in
     /// the layers' order, in a pass; `None` before the passes.
-    pub(crate) layer_depth: Option<f64>,
+    pub layer_depth: Option<f64>,
 }
 
 /// A layer's draws of a frame, the map's or a drape's, which the engine
@@ -663,7 +688,7 @@ pub(crate) struct Lent<'a> {
 /// layer's that the frame draws into ([`target`](Self::target)); and where
 /// the frame lends the layer the backend's commands ([`lend`](Self::lend)).
 #[derive(Default)]
-pub(crate) struct Draws {
+pub struct Draws {
     main: Group,
     /// The groups of the draws into the layer's targets, each with its
     /// target: the frame's, in the order the layer first pushed into them,
@@ -683,7 +708,7 @@ pub(crate) struct Draws {
 impl Draws {
     /// The layer's main group, which draws in its place in the layers' order
     /// and depth.
-    pub(crate) fn main(&mut self) -> &mut Group {
+    pub fn main(&mut self) -> &mut Group {
         &mut self.main
     }
 
@@ -694,7 +719,7 @@ impl Draws {
     /// translucent one, without depth from the frame, and without clipping
     /// to tiles. A target the frame asks for draws, cleared, even without
     /// draws. The frame's draws sample what it drew.
-    pub(crate) fn target(&mut self, target: &Target) -> &mut Group {
+    pub fn target(&mut self, target: &Target) -> &mut Group {
         let frame = self.frame_targets;
         let at = match self.targets.iter().position(|(given, _)| given == target) {
             Some(at) if at < frame => return &mut self.targets[at].1,
@@ -711,8 +736,8 @@ impl Draws {
 
     /// Makes the frame lend the layer the backend's commands `at` its time
     /// in the frame
-    /// ([`TypedLayer::lend`](crate::layer::render_layer::TypedLayer::lend)).
-    pub(crate) fn lend(&mut self, at: LendAt) -> &mut Self {
+    /// ([`Layer::lend`](crate::layer::Layer::lend)).
+    pub fn lend(&mut self, at: LendAt) -> &mut Self {
         self.lends[at as usize] = true;
         self
     }
