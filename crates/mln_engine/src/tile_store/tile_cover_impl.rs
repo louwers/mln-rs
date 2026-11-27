@@ -9,11 +9,11 @@ use std::iter::Peekable;
 
 use geo_types::{Coord, Geometry, Polygon};
 use geometry::Point;
+use mln_style::collections::VecMap;
 use mln_style::error::Error;
 use mln_style::geo::LatLng;
 use mln_style::geometry::{FeatureType, to_feature_type};
 use mln_style::math::clamp_f64;
-use mln_vec_map::VecMap;
 
 use crate::geo::projection::Projection;
 use crate::tile::UnwrappedTileID;
@@ -350,7 +350,7 @@ pub(crate) struct Impl {
 
     /// The bounds map's entries not yet moved into `active_bounds`, in key
     /// order.
-    current_bounds: Peekable<mln_vec_map::IntoIter<u32, Bounds>>,
+    current_bounds: Peekable<mln_style::collections::IntoIter<u32, Bounds>>,
     /// List of bounds that begin at or before `tileY`
     active_bounds: Bounds,
 

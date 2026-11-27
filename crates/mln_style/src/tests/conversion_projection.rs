@@ -1,9 +1,8 @@
-use feature::Value;
-
 use super::assert_near;
 use super::util::parse_json;
 use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
+use crate::feature::Value;
 use crate::projection::convert_projection;
 use crate::property::table::Kind;
 use crate::property::value::StyleValue as _;

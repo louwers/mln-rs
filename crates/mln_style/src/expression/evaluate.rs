@@ -3,15 +3,13 @@
 
 use std::fmt;
 
-use feature::{Feature, Value as MbglValue, ValueObject};
-use mln_vec_map::VecSet;
-
+use crate::collections::VecSet;
 use crate::expression::Expr;
 use crate::expression::forms::image::UnavailableImages;
 use crate::expression::type_::Type;
 use crate::expression::value::{Value, from_mbgl_value, type_of};
 use crate::feature::geojson_feature::GeoJSONFeature;
-use crate::feature::{FeatureState, GeometryTileFeature};
+use crate::feature::{Feature, FeatureState, GeometryTileFeature, Value as MbglValue, ValueObject};
 use crate::font_face::FontCoverage;
 use crate::tile_id::CanonicalTileID;
 

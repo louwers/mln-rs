@@ -38,8 +38,6 @@ name = "integration"
 path = "tests/main.rs"
 
 [dev-dependencies]
-# gtest_map's MainResourceLoader and Database file source tests.
-feature = { package = "mln-rs-feature", path = "../../vendor/feature" }
 geo-types.workspace = true
 geojson.workspace = true
 glam.workspace = true

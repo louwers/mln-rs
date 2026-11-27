@@ -26,7 +26,6 @@
 //! default; natively, wgpu renders through the same APIs as the others, so
 //! turn it on to share a wgpu device or surface with the map.
 
-pub use feature;
 pub use geo_types;
 pub use geojson;
 pub use geometry;
@@ -47,7 +46,6 @@ pub use mln_mtl;
 // root type's methods take or return.
 pub use mln_runtime::{self, *};
 pub use mln_style;
-pub use mln_vec_map;
 /// Empty on Apple platforms and in the browser build.
 #[cfg(feature = "vulkan")]
 pub use mln_vulkan;

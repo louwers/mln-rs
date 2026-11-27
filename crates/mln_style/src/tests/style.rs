@@ -1,13 +1,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use feature::Value;
-
 use super::util::{FixtureLog, new_layer, parse_json};
 use crate::bitmap::PremultipliedImage;
 use crate::color::Color;
 use crate::conversion::Convertible;
 use crate::expression::Functions;
+use crate::feature::Value;
 use crate::geo::LatLng;
 use crate::layer::LayerStyle;
 use crate::layers::Line;

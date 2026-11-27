@@ -380,7 +380,7 @@ macro_rules! properties {
 
                 fn collect_evaluated_global_state_refs(
                     evaluated: &PossiblyEvaluated,
-                    refs: &mut mln_vec_map::VecSet<String>,
+                    refs: &mut crate::collections::VecSet<String>,
                 ) {
                     evaluated.collect_global_state_refs(refs);
                 }
@@ -440,7 +440,7 @@ macro_rules! properties {
                     result
                 }
 
-                pub fn collect_global_state_refs(&self, refs: &mut mln_vec_map::VecSet<String>) {
+                pub fn collect_global_state_refs(&self, refs: &mut crate::collections::VecSet<String>) {
                     $(if let Some(property_refs) = self.$field.get_value().get_global_state_refs() {
                         refs.extend(property_refs.iter().cloned());
                     })+
@@ -524,7 +524,7 @@ macro_rules! properties {
                     result
                 }
 
-                pub fn collect_global_state_refs(&self, refs: &mut mln_vec_map::VecSet<String>) {
+                pub fn collect_global_state_refs(&self, refs: &mut crate::collections::VecSet<String>) {
                     $(if let Some(property_refs) = self.$field.get_global_state_refs() {
                         refs.extend(property_refs.iter().cloned());
                     })+
@@ -536,7 +536,7 @@ macro_rules! properties {
                     self.get_dependencies()
                 }
 
-                fn collect_global_state_refs(&self, refs: &mut mln_vec_map::VecSet<String>) {
+                fn collect_global_state_refs(&self, refs: &mut crate::collections::VecSet<String>) {
                     Unevaluated::collect_global_state_refs(self, refs);
                 }
             }
@@ -567,7 +567,7 @@ macro_rules! __possibly_evaluated_methods {
                 result
             }
 
-            pub fn collect_global_state_refs(&self, refs: &mut mln_vec_map::VecSet<String>) {
+            pub fn collect_global_state_refs(&self, refs: &mut crate::collections::VecSet<String>) {
                 $(if let Some(property_refs) = self.$field.global_state_refs() {
                     refs.extend(property_refs.iter().cloned());
                 })+

@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use ::mln_engine::map::{MapMode, MapSnapshot, TerrainOptions, TerrainSkirtLength};
 use ::mln_runtime::{Applied, EventMask, FeatureState, FeatureStateSelector, MapOptions};
-use feature::{Identifier, Value};
+use mln_style::feature::{Identifier, Value};
 use mln_style::geo::LatLngBounds;
 use mln_style::size::Size;
 

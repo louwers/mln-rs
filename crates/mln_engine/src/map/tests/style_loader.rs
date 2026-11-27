@@ -432,7 +432,7 @@ fn edits_fail_while_the_style_is_not_loaded() {
 fn global_state_property_requires_loaded_style() {
     let (mut map, _run_loop) = map_with_style_response(|_| None);
     let set = |map: &mut Map, value: bool| {
-        let value = feature::Value::Bool(value);
+        let value = mln_style::feature::Value::Bool(value);
         map.edit_loaded_style(|style| style.apply(Edit::SetGlobalState { name: "showLabels".to_owned(), value }))
     };
     assert!(set(&mut map, false).is_err());
@@ -440,9 +440,9 @@ fn global_state_property_requires_loaded_style() {
 
     map.load_style_json(r#"{"version": 8, "state": {"showLabels": {"default": true}}, "sources": {}, "layers": []}"#);
     assert!(map.style_document_loaded());
-    assert_eq!(feature::Value::Bool(true), map.style().get_global_state()["showLabels"]);
+    assert_eq!(mln_style::feature::Value::Bool(true), map.style().get_global_state()["showLabels"]);
     set(&mut map, false).unwrap();
-    assert_eq!(feature::Value::Bool(false), map.style().get_global_state()["showLabels"]);
+    assert_eq!(mln_style::feature::Value::Bool(false), map.style().get_global_state()["showLabels"]);
 }
 
 #[test]

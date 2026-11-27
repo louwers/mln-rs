@@ -31,7 +31,6 @@ d3d12 = ["mln_runtime/d3d12", "dep:mln_d3d12"]
 gl = ["mln_runtime/gl", "dep:mln_gl"]
 
 [dependencies]
-feature.workspace = true
 geo-types.workspace = true
 geojson.workspace = true
 glam.workspace = true
@@ -45,7 +44,6 @@ mln_engine.workspace = true
 mln_geojson.workspace = true
 mln_runtime.workspace = true
 mln_style.workspace = true
-mln_vec_map.workspace = true
 parking_lot.workspace = true
 # The windows that window targets name, as the runtime takes them.
 raw-window-handle.workspace = true

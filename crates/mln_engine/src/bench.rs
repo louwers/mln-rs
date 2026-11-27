@@ -11,12 +11,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use glam::{DMat4, DVec4};
 use mln_style::Style;
+use mln_style::collections::VecSet;
 use mln_style::constants::EXTENT;
 use mln_style::error::Error;
 use mln_style::property::evaluation::PropertyEvaluationParameters;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::types::VisibilityType;
-use mln_vec_map::VecSet;
 use parking_lot::Mutex;
 
 use crate::camera::View;
@@ -626,8 +626,8 @@ impl Polygon {
 mod tests {
     use std::cell::RefCell;
 
-    use feature::{Feature, Identifier, PropertyMap, Value};
     use geo_types::{Geometry, LineString, Point};
+    use mln_style::feature::{Feature, Identifier, PropertyMap, Value};
     use mln_style::geo::LatLng;
     use mln_style::size::Size;
     use mln_style::time::Instant;

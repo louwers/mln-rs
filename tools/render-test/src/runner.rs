@@ -10,13 +10,13 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::time::Duration;
 
-use feature::Value;
 use geometry::Point;
 use mln_engine::exec::pool::Pool;
 use mln_engine::exec::queue::Queue;
 use mln_engine::image::{decode_image, encode_png};
 use mln_engine::tile::feature::Feature;
 use mln_style::bitmap::PremultipliedImage;
+use mln_style::feature::Value;
 use mln_style::geo::LatLng;
 use mln_style::hash::HashMap;
 use mln_style::size::Size;
@@ -182,7 +182,7 @@ pub trait TestRunnerImpl {
         _source_id: &str,
         _source_layer: Option<&str>,
         _feature_id: &str,
-        _state: &feature::PropertyMap,
+        _state: &mln_style::feature::PropertyMap,
     ) -> Result<bool, MapError> {
         unsupported("setFeatureState operation (Renderer feature state)")
     }

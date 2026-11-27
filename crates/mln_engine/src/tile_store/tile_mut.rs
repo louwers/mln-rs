@@ -9,10 +9,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use mln_style::collections::VecSet;
 use mln_style::error::Error;
 use mln_style::hash::HashSet;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_vec_map::VecSet;
 
 use crate::layer::layer_drawing::ChangedBuckets;
 use crate::layer::tile_layout::{Dependencies, LayoutParams};

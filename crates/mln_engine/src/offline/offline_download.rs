@@ -14,6 +14,7 @@ use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
 use mln_style::Parser;
+use mln_style::collections::VecMap;
 use mln_style::hash::{HashMap, HashSet};
 use mln_style::i18n::glyph_range_is_entirely_locally_generated;
 use mln_style::layer::SourceKind;
@@ -21,7 +22,6 @@ use mln_style::range::Range;
 use mln_style::source::SourceTypeInfo;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::tileset::{Tileset, VectorEncoding};
-use mln_vec_map::VecMap;
 
 use crate::registry::Registry;
 use crate::source::OfflineResources;

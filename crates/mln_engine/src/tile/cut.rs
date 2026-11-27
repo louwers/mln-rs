@@ -8,10 +8,11 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
 use mln_style::constants::EXTENT;
-use mln_style::feature::{GeometryCollection, GeometryCoordinates, GeometryTileFeature};
+use mln_style::feature::{
+    GeometryCollection, GeometryCoordinates, GeometryTileFeature, Identifier, PropertyMap, Value,
+};
 use mln_style::geometry::FeatureType;
 use mln_style::hash::HashMap;
 use mln_style::tile_id::CanonicalTileID;
@@ -475,7 +476,7 @@ mod tests {
     #[test]
     fn the_tiles_cut_from_an_ancestor_share_its_decoded_layer() {
         let (half, quarter) = ((EXTENT / 2) as i16, (EXTENT / 4) as i16);
-        let road = feature::Feature {
+        let road = mln_style::feature::Feature {
             geometry: Some(geo_types::Geometry::LineString(geo_types::LineString::from(vec![
                 (half - 100, quarter),
                 (half + 100, quarter),

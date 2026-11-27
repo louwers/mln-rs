@@ -1,8 +1,9 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use feature::{Identifier, PropertyMap, Value};
-use mln_style::feature::{GeometryCollection, GeometryTileFeature, to_geometry_collection};
+use mln_style::feature::{
+    GeometryCollection, GeometryTileFeature, Identifier, PropertyMap, Value, to_geometry_collection,
+};
 use mln_style::geometry::{FeatureType, to_feature_type};
 use mln_wire::{Reader, Wire, Writer, payload};
 
@@ -13,7 +14,7 @@ use crate::tile::mvt::{MvtFeature, MvtLayer, MvtTile};
 
 /// A feature in tile coordinates, as GeoJSON and custom geometry sources cut
 /// them.
-pub type GeoJsonFeature = feature::Feature<i16, Arc<PropertyMap>>;
+pub type GeoJsonFeature = mln_style::feature::Feature<i16, Arc<PropertyMap>>;
 
 /// The data of a vector tile. Cloning is cheap: each kind shares what it is
 /// made from, and what has been decoded of it.

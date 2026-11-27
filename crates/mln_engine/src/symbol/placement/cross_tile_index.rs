@@ -27,10 +27,10 @@ use std::sync::Arc;
 
 use geometry::Point;
 use glam::{I64Vec2, Vec2};
+use mln_style::collections::VecMap;
 use mln_style::constants::EXTENT;
 use mln_style::hash::HashSet;
 use mln_style::tile_id::CanonicalTileID;
-use mln_vec_map::VecMap;
 
 use super::BucketPlacementData;
 use crate::camera::{TileProjector, View};

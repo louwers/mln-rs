@@ -14,7 +14,7 @@
 
 use std::ops::Range;
 
-use mln_vec_map::VecSet;
+use mln_style::collections::VecSet;
 use unicode_bidi::{BidiClass, BidiInfo};
 
 use crate::text::bidi_mirroring::BIDI_MIRRORING_GLYPH;

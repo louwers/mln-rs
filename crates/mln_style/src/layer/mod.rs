@@ -11,13 +11,12 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use feature::{Value, ValueObject};
-use mln_vec_map::VecSet;
-
+use crate::collections::VecSet;
 use crate::conversion::{Converter, Convertible, Error, convert};
 use crate::expression::{
     Dependency, EvaluationContext, Expr, Functions, GlobalStateMap, ParsingContext, Type, from_expression_value,
 };
+use crate::feature::{Value, ValueObject};
 use crate::filter::{Filter, convert_filter};
 use crate::log_target;
 use crate::property::table::{SetPropertyError, StyleProperty};

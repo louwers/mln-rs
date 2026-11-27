@@ -1,4 +1,4 @@
-use feature::{Identifier, Value};
+use mln_style::feature::{Identifier, Value};
 use mln_style::string::to_string_double;
 
 #[must_use]
@@ -30,7 +30,7 @@ pub fn feature_id_to_string(id: &Identifier) -> Option<String> {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Feature {
     pub geometry: Option<geo_types::Geometry<f64>>,
-    pub properties: feature::PropertyMap,
+    pub properties: mln_style::feature::PropertyMap,
     pub id: Identifier,
     pub source: String,
     /// The source layer a vector tile feature came from. Empty for sources
@@ -40,11 +40,11 @@ pub struct Feature {
     /// several layers render is returned once per layer. Empty for features
     /// from a source-feature query.
     pub layer: String,
-    pub state: feature::PropertyMap,
+    pub state: mln_style::feature::PropertyMap,
 }
 
-impl From<feature::Feature<f64>> for Feature {
-    fn from(f: feature::Feature<f64>) -> Self {
+impl From<mln_style::feature::Feature<f64>> for Feature {
+    fn from(f: mln_style::feature::Feature<f64>) -> Self {
         Feature { geometry: f.geometry, properties: f.properties, id: f.id, ..Default::default() }
     }
 }
@@ -52,7 +52,11 @@ impl From<feature::Feature<f64>> for Feature {
 impl Feature {
     /// The `GeoJSONFeature` base.
     #[must_use]
-    pub fn to_geojson_feature(&self) -> feature::Feature<f64> {
-        feature::Feature { geometry: self.geometry.clone(), properties: self.properties.clone(), id: self.id.clone() }
+    pub fn to_geojson_feature(&self) -> mln_style::feature::Feature<f64> {
+        mln_style::feature::Feature {
+            geometry: self.geometry.clone(),
+            properties: self.properties.clone(),
+            id: self.id.clone(),
+        }
     }
 }

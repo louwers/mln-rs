@@ -5,8 +5,8 @@
 
 use std::sync::Arc;
 
+use mln_style::collections::VecSet;
 use mln_style::wire::{SharedExpression, SharedLayer};
-use mln_vec_map::VecSet;
 use mln_wire::shared::{self, ErasedTable, Role, Table};
 use mln_wire::{Context, Reader, Request, Wire, Writer};
 

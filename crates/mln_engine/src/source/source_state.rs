@@ -5,9 +5,9 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, LazyLock};
 
+use mln_style::collections::VecMap;
 use mln_style::feature::FeatureState;
 use mln_style::hash::HashMap;
-use mln_vec_map::VecMap;
 
 use crate::layer::bucket::{FeatureStates, LayerFeatureStates};
 use crate::layer::layer_drawing::ChangedBuckets;
@@ -212,7 +212,7 @@ impl SourceFeatureState {
                 .into_iter()
                 .flat_map(|current| current.keys())
                 .filter(|key| !new_state.contains_key(*key))
-                .map(|key| (key.clone(), feature::Value::default()))
+                .map(|key| (key.clone(), mln_style::feature::Value::default()))
                 .collect()
         };
         if feature_deletions.is_empty() {
@@ -323,7 +323,7 @@ impl SourceFeatureState {
             .into_iter()
             .flat_map(|current| current.keys())
             .filter(|key| !state.contains_key(*key))
-            .map(|key| (key.clone(), feature::Value::default()))
+            .map(|key| (key.clone(), mln_style::feature::Value::default()))
             .collect();
         if !changed.is_empty() {
             self.state_changes.entry(source_layer.to_owned()).or_default().insert(feature_id.to_owned(), changed);
@@ -494,7 +494,7 @@ impl SourceFeatureState {
                     .or_default()
                     .entry(feature_id.to_owned())
                     .or_default()
-                    .insert(state_key.to_owned(), feature::Value::default());
+                    .insert(state_key.to_owned(), mln_style::feature::Value::default());
             }
             (Some(feature_id), None) => {
                 self.deleted_states
@@ -540,7 +540,7 @@ impl SourceFeatureState {
 mod tests {
     use std::cell::RefCell;
 
-    use feature::Value;
+    use mln_style::feature::Value;
 
     use super::*;
 

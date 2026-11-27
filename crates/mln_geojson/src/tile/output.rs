@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
-use feature::{Feature as TileFeature, PropertyMap, Value};
 use geo_types::{Coord, Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
+use mln_style::feature::{Feature as TileFeature, PropertyMap, Value};
 
 use super::TileId;
 use super::geometry::{Feature, Geometry as VtGeometry, Line, Parts, Ring, Vertex};

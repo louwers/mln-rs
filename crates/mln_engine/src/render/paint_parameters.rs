@@ -8,9 +8,9 @@ use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::stencil_mode::Test;
 use mln_gfx::types::{CullFaceWindingType, DepthFunctionType, StencilOpType};
 use mln_gfx::{DepthMaskType, DepthMode, ScissorRect, Size, StencilMode};
+use mln_style::collections::VecMap;
 use mln_style::constants::EXTENT;
 use mln_style::tile_id::CanonicalTileID;
-use mln_vec_map::VecMap;
 use smallvec::SmallVec;
 
 use crate::camera::{ProjectionData, View, ViewportMode};

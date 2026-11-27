@@ -7,8 +7,7 @@
 
 use std::f32::consts::{PI, TAU};
 
-use feature::Value;
-
+use crate::feature::Value;
 use crate::interpolate::interpolate as util_interpolate;
 use crate::string::to_string_double;
 

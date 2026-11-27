@@ -5,8 +5,6 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use feature::Value as MbglValue;
-
 use crate::color::Color;
 use crate::conversion::Convertible;
 use crate::expression::functions::{Eval, FunctionDef, Overload, Params, Role, decoding_overload};
@@ -14,6 +12,7 @@ use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::type_::check_subtype;
 use crate::expression::value::Value;
 use crate::expression::{EvalResult, EvaluationContext, EvaluationResult, Expr, Node, Output, type_};
+use crate::feature::Value as MbglValue;
 
 /// A call of a function with typed arguments.
 #[derive(Clone)]

@@ -1,8 +1,7 @@
 // Port-only: the images `image` expressions record as unavailable
 // (expression/forms/image.rs).
 
-use mln_vec_map::VecSet;
-
+use crate::collections::VecSet;
 use crate::conversion::Convertible;
 use crate::expression::forms::image::UnavailableImages;
 use crate::expression::parse::ParsingContext;

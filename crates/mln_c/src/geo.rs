@@ -77,7 +77,7 @@ pub(crate) fn geometry(json: &str, name: &'static str) -> Result<Geometry<f64>, 
         let GeoJson::Geometry(geometry) = geojson else {
             return Err(Error::invalid_argument(format!("{name} must contain one GeoJSON Geometry")));
         };
-        feature::geojson::geometry(geometry)
+        mln_style::feature::geojson::geometry(geometry)
             .map_err(|error| Error::invalid_argument(format!("{name} is invalid: {error}")))
     })?
 }

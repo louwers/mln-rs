@@ -127,7 +127,7 @@ fn malformed_tags_are_the_feature_error() {
     let data = TileData::Mvt(MvtTile::new(Arc::new(tile_with_tags(&[0, 0]))));
     let layer = data.layer("l").unwrap().unwrap();
     let feature = layer.feature(0).unwrap();
-    assert_eq!(feature.get_value("k"), Some(feature::Value::String("v".to_owned())));
+    assert_eq!(feature.get_value("k"), Some(mln_style::feature::Value::String("v".to_owned())));
 
     // A value index past the end of the layer's values, and a key without a
     // value: the feature can't be read, whatever reads it.
@@ -143,7 +143,7 @@ fn repeated_key_keeps_its_first_value() {
     let data = TileData::Mvt(MvtTile::new(Arc::new(tile_with_tags(&[0, 1, 0, 0]))));
     let layer = data.layer("l").unwrap().unwrap();
     let feature = layer.feature(0).unwrap();
-    let first = feature::Value::String("w".to_owned());
+    let first = mln_style::feature::Value::String("w".to_owned());
     assert_eq!(
         feature.get_properties().into_owned().into_iter().collect::<Vec<_>>(),
         [("k".to_owned(), first.clone())]

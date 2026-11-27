@@ -5,9 +5,8 @@
 
 use std::borrow::Cow;
 
-use feature::{Identifier, PropertyMap, Value};
 use mln_style::expression::image::Image;
-use mln_style::feature::{GeometryCollection, GeometryTileFeature};
+use mln_style::feature::{GeometryCollection, GeometryTileFeature, Identifier, PropertyMap, Value};
 use mln_style::geometry::FeatureType;
 
 use crate::text::TaggedString;

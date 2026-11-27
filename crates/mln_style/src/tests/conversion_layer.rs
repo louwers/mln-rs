@@ -1,11 +1,10 @@
 use std::time::Duration;
 
-use feature::Value;
-
 use super::util::{parse_json, style_of, value_to_json};
 use crate::StyleRegistry;
 use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
+use crate::feature::Value;
 use crate::filter::{Filter, convert_filter};
 use crate::layer::{Layer, convert_layer};
 use crate::layers::Background;

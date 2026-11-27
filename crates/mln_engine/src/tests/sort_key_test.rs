@@ -1,16 +1,16 @@
 use std::sync::Arc;
 
-use feature::{Feature, Identifier, PropertyMap, Value};
 use geo_types::{Geometry, LineString, Point, Polygon};
 use mln_style::bitmap::PremultipliedImage;
+use mln_style::collections::VecSet;
 use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::expression::UnavailableImages;
+use mln_style::feature::{Feature, Identifier, PropertyMap, Value};
 use mln_style::image::Impl as ImageImpl;
 use mln_style::layer::{LayerStyle, convert_layer};
 use mln_style::layers::{Circle, Fill, Line, Symbol};
 use mln_style::size::Size;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_vec_map::VecSet;
 use serde_json::json;
 
 use crate::buckets::circle_bucket::CircleBucket;

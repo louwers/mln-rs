@@ -6,13 +6,13 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use feature::Value;
 use mln_wire::shared;
 
 use super::util::{parse_json, style_of};
 use crate::StyleRegistry;
 use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
+use crate::feature::Value;
 use crate::layer::{ErasedLayerStyle, Layer, convert_layer};
 use crate::layers::FillExtrusion;
 use crate::wire::SharedLayer;

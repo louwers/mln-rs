@@ -1,8 +1,7 @@
-use feature::Value;
-
 use super::util::{StubGeometryTileFeature, parse_json, property_map};
 use crate::conversion::{Convertible, Error};
 use crate::expression::{EvaluationContext, Functions};
+use crate::feature::Value;
 use crate::property::convert::convert_property_value;
 use crate::types::{SymbolAnchorType, VariableAnchorOffsetCollection};
 

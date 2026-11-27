@@ -1,5 +1,3 @@
-use feature::Value as MbglValue;
-
 use crate::color::{Color, ColorSpace};
 use crate::conversion::Convertible;
 use crate::expression::interpolator::{CubicBezierInterpolator, ExponentialInterpolator, Interpolator};
@@ -8,6 +6,7 @@ use crate::expression::stops::{Stops, get_covering_stops};
 use crate::expression::type_::{self, Type};
 use crate::expression::value::{Value, type_of};
 use crate::expression::{EvalResult, EvaluationContext, EvaluationError, EvaluationResult, Expr, Node};
+use crate::feature::Value as MbglValue;
 use crate::padding::Padding;
 use crate::range::Range;
 use crate::types::VariableAnchorOffsetCollection;

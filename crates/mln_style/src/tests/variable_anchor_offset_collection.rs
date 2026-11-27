@@ -99,7 +99,7 @@ fn style_conversion() {
         assert!(layer.is_some(), "{}", error.message);
         let value = layer.unwrap().serialize();
         match value {
-            feature::Value::Object(object) => assert_eq!(7, object.len()),
+            crate::feature::Value::Object(object) => assert_eq!(7, object.len()),
             other => panic!("not an object: {other:?}"),
         }
     }

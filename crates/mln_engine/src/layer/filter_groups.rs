@@ -166,9 +166,9 @@ fn index(layer: &TileLayer<'_>, operand: &Expr, context: &EvaluationContext<'_>)
 mod tests {
     use std::sync::Arc;
 
-    use feature::Value;
     use mln_style::conversion::{Convertible, Error};
     use mln_style::expression::{EvaluationContext, Functions, GlobalStateMap};
+    use mln_style::feature::Value;
     use mln_style::filter::convert_filter;
     use mln_style::hash::HashMap;
     use mln_style::tile_id::CanonicalTileID;

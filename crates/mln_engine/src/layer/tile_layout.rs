@@ -6,10 +6,10 @@
 
 use std::sync::Arc;
 
+use mln_style::collections::VecSet;
 use mln_style::error::Error;
 use mln_style::expression::{GlobalStateMap, UnavailableImages};
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_vec_map::VecSet;
 use mln_wire::sorted;
 
 use crate::image::image_store::{ImageDependencies, ImageType};

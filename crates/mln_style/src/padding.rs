@@ -1,6 +1,6 @@
 // The `Interpolate` impl for `Padding` is in interpolate.rs.
 
-use feature::Value;
+use crate::feature::Value;
 
 /// A set of four numbers representing padding around a box.
 #[derive(Clone, Copy, Debug, Default, PartialEq, mln_wire::Wire)]

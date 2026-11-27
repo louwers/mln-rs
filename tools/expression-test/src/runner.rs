@@ -1,10 +1,10 @@
 use std::fmt::Write;
 
-use feature::{Value, ValueObject};
 use mln_style::expression::value::type_of;
 use mln_style::expression::{
     EvaluationContext, EvaluationResult, Expr, Value as ExpressionValue, with_geojson_feature,
 };
+use mln_style::feature::{Value, ValueObject};
 
 use crate::parser::{
     TestData, TestResult, compiled_to_value, expression_value_to_value, parse_expression, to_document, to_json,

@@ -3,7 +3,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
-use mln_vec_map::VecMap;
+use mln_style::collections::VecMap;
 use parking_lot::Mutex;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

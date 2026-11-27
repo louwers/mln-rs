@@ -30,8 +30,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 
+use mln_style::collections::VecMap;
 use mln_style::time::Instant;
-use mln_vec_map::VecMap;
 #[cfg(not(target_family = "wasm"))]
 use parking_lot::Mutex;
 

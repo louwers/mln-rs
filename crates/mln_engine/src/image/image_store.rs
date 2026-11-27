@@ -6,9 +6,9 @@
 
 use std::sync::Arc;
 
+use mln_style::collections::{VecMap, VecSet};
 use mln_style::hash::{HashMap, HashSet};
 use mln_style::image::Impl as ImageImpl;
-use mln_vec_map::{VecMap, VecSet};
 
 use crate::log_target;
 use crate::render::events::RendererEvent;

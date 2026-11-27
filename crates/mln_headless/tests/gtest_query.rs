@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use feature::{PropertyMap, Value};
 use geojson::{GeoJson, Geometry};
 use mln_engine::camera::CameraOptions;
 use mln_engine::geo::ScreenCoordinate;
@@ -13,7 +12,7 @@ use mln_style::conversion::{Convertible, Error};
 use mln_style::error::ErrorKind;
 use mln_style::expression::dsl::{eq, get_str, gt, id, literal, literal_str, ne, number};
 use mln_style::expression::{Functions, Value as ExpressionValue};
-use mln_style::feature::FeatureState;
+use mln_style::feature::{FeatureState, PropertyMap, Value};
 use mln_style::filter::{Filter, convert_filter};
 use mln_style::geo::LatLng;
 use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType};
@@ -516,7 +515,9 @@ fn query_source_features_source_layer() {
             .into_iter()
             .map(|feature| {
                 assert_eq!(feature.layer, "");
-                let feature::Identifier::Uint(id) = feature.id else { panic!("feature ID: {:?}", feature.id) };
+                let mln_style::feature::Identifier::Uint(id) = feature.id else {
+                    panic!("feature ID: {:?}", feature.id)
+                };
                 (id, feature.source_layer)
             })
             .collect();
@@ -562,7 +563,7 @@ fn query_feature_extensions(
         .expect("queryFeatureExtensions")
 }
 
-fn feature_collection(value: FeatureExtensionValue) -> Vec<feature::Feature<f64>> {
+fn feature_collection(value: FeatureExtensionValue) -> Vec<mln_style::feature::Feature<f64>> {
     match value {
         FeatureExtensionValue::FeatureCollection(features) => features,
         other @ FeatureExtensionValue::Value(_) => panic!("not a FeatureCollection: {other:?}"),
@@ -599,14 +600,14 @@ fn get_top_cluster_feature(test: &QueryTest) -> Vec<Feature> {
     test.query_rendered_features(&screen_coordinate, &query_options)
 }
 
-fn uint_property(feature: &feature::Feature<f64>, name: &str) -> Option<u64> {
+fn uint_property(feature: &mln_style::feature::Feature<f64>, name: &str) -> Option<u64> {
     match feature.properties.get(name) {
         Some(Value::Uint(value)) => Some(*value),
         _ => None,
     }
 }
 
-fn string_property<'a>(feature: &'a feature::Feature<f64>, name: &str) -> Option<&'a str> {
+fn string_property<'a>(feature: &'a mln_style::feature::Feature<f64>, name: &str) -> Option<&'a str> {
     match feature.properties.get(name) {
         Some(Value::String(value)) => Some(value),
         _ => None,
@@ -698,7 +699,7 @@ fn query_feature_extensions_supercluster_leaves() {
             args,
         ))
     };
-    let names = |features: &[feature::Feature<f64>]| -> Vec<String> {
+    let names = |features: &[mln_style::feature::Feature<f64>]| -> Vec<String> {
         features.iter().map(|f| string_property(f, "name").unwrap_or_default().to_owned()).collect()
     };
 

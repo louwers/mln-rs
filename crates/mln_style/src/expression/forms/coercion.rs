@@ -1,7 +1,5 @@
 use std::borrow::Cow;
 
-use feature::{Value as MbglValue, ValueObject};
-
 use crate::color::Color;
 use crate::conversion::Convertible;
 use crate::expression::formatted::Formatted;
@@ -10,6 +8,7 @@ use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::type_::Type;
 use crate::expression::value::{Value, stringify, to_string};
 use crate::expression::{EvalResult, EvaluationContext, EvaluationError, EvaluationResult, Expr, Node};
+use crate::feature::{Value as MbglValue, ValueObject};
 use crate::padding::Padding;
 use crate::string::to_string_double;
 use crate::types::{

@@ -4,8 +4,7 @@
 use std::cmp::Ordering;
 use std::sync::Arc;
 
-use mln_vec_map::VecMap;
-
+use crate::collections::VecMap;
 use crate::image;
 use crate::layer::LayerList;
 use crate::source::{Source, SourceList};

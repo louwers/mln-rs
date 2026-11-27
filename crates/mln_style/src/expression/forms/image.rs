@@ -1,14 +1,13 @@
 use std::cell::Cell;
 
-use feature::Value as MbglValue;
-use mln_vec_map::VecSet;
-
+use crate::collections::VecSet;
 use crate::conversion::Convertible;
 use crate::expression::image::Image;
 use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::type_::Type;
 use crate::expression::value::{Value, to_string};
 use crate::expression::{EvaluationContext, EvaluationResult, Expr, Node};
+use crate::feature::Value as MbglValue;
 
 /// Collects the images that `image` expressions find unavailable. An
 /// evaluation whose [`EvaluationContext`] carries both the available images

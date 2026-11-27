@@ -5,7 +5,6 @@ use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
 use cheap_ruler::{CheapRuler, DistanceUnit};
-use feature::Value as MbglValue;
 use geojson::GeoJson;
 use geometry::Point;
 
@@ -13,7 +12,7 @@ use super::within::BoundaryMode;
 use crate::conversion::{Convertible, Error};
 use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::{EvalResult, EvaluationContext, EvaluationError, Expr, Node};
-use crate::feature::{GeometryTileFeature, convert_geometry};
+use crate::feature::{GeometryTileFeature, Value as MbglValue, convert_geometry};
 use crate::geometry::{FeatureType, to_feature_type};
 use crate::log_target;
 use crate::tile_id::CanonicalTileID;
@@ -987,7 +986,7 @@ const NO_SUPPORTED_GEOMETRY: &str =
     "'distance' expression requires valid geojson that contains Point/LineString/Polygon geometries.";
 
 fn get_geometry(geometry: Option<&geojson::Geometry>, ctx: &mut ParsingContext) -> Option<Geometry<f64>> {
-    match geometry.map(|g| feature::geojson::geometry(g.clone())) {
+    match geometry.map(|g| crate::feature::geojson::geometry(g.clone())) {
         Some(Ok(geometry))
             if matches!(
                 to_feature_type(Some(&geometry)),
@@ -1094,13 +1093,13 @@ impl Distance {
 mod tests {
     use std::borrow::Cow;
 
-    use feature::{Identifier, Value as MbglValue};
-
     use super::*;
     use crate::expression::parse::create_expression_from_str;
     use crate::expression::value::Value;
     use crate::expression::{EvaluationResult, Functions};
-    use crate::feature::{GeometryCollection, GeometryCoordinate, convert_geometry_to_tile};
+    use crate::feature::{
+        GeometryCollection, GeometryCoordinate, Identifier, Value as MbglValue, convert_geometry_to_tile,
+    };
 
     struct Feature {
         type_: FeatureType,

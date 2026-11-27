@@ -6,7 +6,6 @@
 
 use std::sync::Arc;
 
-use feature::{Feature, PropertyMap, Value};
 use geojson::GeoJson;
 use mln_engine::exec::pool::TaskGroup;
 use mln_engine::map::MapMode;
@@ -20,6 +19,7 @@ use mln_engine::tile::TileData;
 use mln_geojson::{cluster, tile};
 use mln_style::error::Error;
 use mln_style::expression::{Expr, evaluate_accumulated, from_expression_value};
+use mln_style::feature::{Feature, PropertyMap, Value};
 use mln_style::source::SourceData;
 use mln_style::sources::GeoJsonSourceType;
 use mln_style::sources::geojson::{ClusterProperties, GeoJSONOptions, GeoJsonSourceOptions};
@@ -268,7 +268,8 @@ pub trait GeoJSONData: Send + Sync {
 /// [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind).
 pub fn create_geojson_data(geojson: GeoJson, options: &Arc<GeoJSONOptions>) -> Result<Arc<dyn GeoJSONData>, Error> {
     let collection = matches!(geojson, GeoJson::FeatureCollection(_));
-    let features = feature::geojson::features(geojson).map_err(|e| Error::invalid_argument(e.to_string()))?;
+    let features =
+        mln_style::feature::geojson::features(geojson).map_err(|e| Error::invalid_argument(e.to_string()))?;
     create(features, collection, options)
 }
 

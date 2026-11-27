@@ -8,7 +8,7 @@ use geojson::feature::Id;
 use geojson::{Error, GeoJson, GeometryValue, Position};
 use serde_json::Value as Json;
 
-use crate::{Feature, Identifier, PropertyMap, Value};
+use super::{Feature, Identifier, PropertyMap, Value};
 
 /// The features of `geojson`. A bare geometry is one feature without
 /// properties or id.

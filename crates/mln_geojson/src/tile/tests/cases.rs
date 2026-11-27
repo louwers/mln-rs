@@ -1,7 +1,7 @@
 //! Simplification, clipping and cutting, without fixtures.
 
-use feature::Value;
 use geo_types::{Coord, Geometry, LineString};
+use mln_style::feature::Value;
 
 use crate::tile::clip::{clip_line, clip_ring};
 use crate::tile::geometry::{Line, Ring, Vertex, X};
@@ -237,7 +237,7 @@ fn clip_vertex_on_tile_border() {
             ]
         }
     }"#; // The second node is exactly on the (13, 2344, 3134) tile border.
-    let geojson = feature::geojson::features(data.parse().unwrap()).unwrap();
+    let geojson = mln_style::feature::geojson::features(data.parse().unwrap()).unwrap();
     let mut options = Options::default();
     options.tile.line_metrics = true;
     options.tile.buffer = 2048;
@@ -280,7 +280,8 @@ fn polygon_rings_are_closed_and_rewound() {
             [[[-40, 0], [-40, 40], [-80, 40], [-80, 0]], [[-50, 10], [-70, 10], [-70, 30], [-50, 30], [-50, 10]]]
         ]
     }"#;
-    let index = TileIndex::new(&feature::geojson::features(data.parse().unwrap()).unwrap(), Options::default());
+    let index =
+        TileIndex::new(&mln_style::feature::geojson::features(data.parse().unwrap()).unwrap(), Options::default());
     let tile = index.tile(0, 0, 0).unwrap();
     let Some(Geometry::MultiPolygon(polygons)) = &tile[0].geometry else { panic!("{tile:?}") };
     assert_eq!(polygons.0.len(), 2);
@@ -294,7 +295,8 @@ fn polygon_rings_are_closed_and_rewound() {
 
 #[test]
 fn a_tile_past_the_max_zoom_or_the_last_row_is_an_error() {
-    let geojson = feature::geojson::features(r#"{"type": "Point", "coordinates": [0, 0]}"#.parse().unwrap()).unwrap();
+    let geojson =
+        mln_style::feature::geojson::features(r#"{"type": "Point", "coordinates": [0, 0]}"#.parse().unwrap()).unwrap();
     let index = TileIndex::new(&geojson, Options { max_zoom: 4, ..Options::default() });
     assert_eq!(index.tile(5, 0, 0), Err(Error::ZoomPastMax(5)));
     assert_eq!(index.tile(2, 0, 4), Err(Error::RowPastEnd { z: 2, y: 4 }));

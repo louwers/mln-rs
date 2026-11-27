@@ -155,7 +155,7 @@ mod versions {
         Arc::new(image::Impl::new(id.to_owned(), pixels, 1.0, false, Vec::new(), Vec::new(), None, None, None).unwrap())
     }
 
-    fn keys<V>(map: &mln_vec_map::VecMap<String, V>) -> Vec<&str> {
+    fn keys<V>(map: &crate::collections::VecMap<String, V>) -> Vec<&str> {
         map.keys().map(String::as_str).collect()
     }
 
@@ -245,7 +245,9 @@ mod versions {
             Edit::SetLayerProperty { layer: "dots".to_owned(), name: "visibility".to_owned(), value: visibility };
         stateful.apply(edit).unwrap();
         let mut shown = stateful.clone();
-        shown.apply(Edit::SetGlobalState { name: "show".to_owned(), value: feature::Value::Bool(true) }).unwrap();
+        shown
+            .apply(Edit::SetGlobalState { name: "show".to_owned(), value: crate::feature::Value::Bool(true) })
+            .unwrap();
         let diff = StyleDiff::between(Some(&stateful), &shown);
         let layers: Vec<_> = diff.layers.iter().map(|(id, change)| (id.to_string(), change)).collect();
         assert_eq!(layers, [("dots".to_owned(), LayerChange::Relaid)]);

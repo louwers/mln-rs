@@ -5,7 +5,6 @@
 
 use std::f64::consts::PI;
 
-use feature::Value as MbglValue;
 use geo_types::{Coord, Geometry, Polygon};
 use geojson::GeoJson;
 use geometry::Point;
@@ -14,7 +13,7 @@ use crate::constants::{DEGREES_MAX, EXTENT, LONGITUDE_MAX};
 use crate::conversion::{Convertible, Error};
 use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::{EvaluationContext, Expr, Node};
-use crate::feature::{GeometryCoordinates, GeometryTileFeature};
+use crate::feature::{GeometryCoordinates, GeometryTileFeature, Value as MbglValue};
 use crate::geometry::{FeatureType, to_feature_type};
 use crate::log_target;
 use crate::tile_id::CanonicalTileID;
@@ -338,7 +337,7 @@ fn parse_value(value: &Convertible<'_>, ctx: &mut ParsingContext) -> Option<GeoJ
 }
 
 fn get_polygon_info(geometry: Option<&geojson::Geometry>, ctx: &mut ParsingContext) -> Option<Geometry<f64>> {
-    match geometry.map(|g| feature::geojson::geometry(g.clone())) {
+    match geometry.map(|g| crate::feature::geojson::geometry(g.clone())) {
         Some(Ok(geometry)) if to_feature_type(Some(&geometry)) == FeatureType::Polygon => return Some(geometry),
         Some(Err(e)) => {
             ctx.error(e.to_string());

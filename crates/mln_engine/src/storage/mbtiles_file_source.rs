@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use mln_vec_map::VecMap;
+use mln_style::collections::VecMap;
 use parking_lot::Mutex;
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags};

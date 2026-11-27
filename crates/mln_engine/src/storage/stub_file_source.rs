@@ -5,8 +5,8 @@
 
 use std::sync::{Arc, Weak};
 
+use mln_style::collections::VecMap;
 use mln_style::hash::HashMap;
-use mln_vec_map::VecMap;
 use parking_lot::Mutex;
 
 use crate::exec::queue::Queue;

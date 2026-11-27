@@ -2,8 +2,6 @@
 
 use std::borrow::Cow;
 
-use feature::{Identifier as FeatureIdentifier, Value as MbglValue};
-
 use super::{Eval, Functions, OverloadSpec, Params, RegisterError, Role};
 use crate::color::Color;
 use crate::expression::forms::coercion::rgba;
@@ -13,7 +11,7 @@ use crate::expression::value::{ObjectType, Value, from_mbgl_value_owned, to_stri
 use crate::expression::{
     Dependency, EvalResult, EvaluationContext, EvaluationError, EvaluationResult, Expr, mbgl_to_expression_value,
 };
-use crate::feature::GeometryTileFeature;
+use crate::feature::{GeometryTileFeature, Identifier as FeatureIdentifier, Value as MbglValue};
 use crate::geometry::FeatureType;
 use crate::i18n;
 use crate::math::{fmax, fmin};

@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use mln_style::collections::VecSet;
 use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::layer::{Layer, convert_layer};
 use mln_style::layers::Fill;
@@ -10,7 +11,6 @@ use mln_style::property::evaluation::PropertyEvaluationParameters;
 use mln_style::property::transition::{TransitionOptions, TransitionParameters};
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
-use mln_vec_map::VecSet;
 
 use super::map_side::MapCodec;
 use super::worker_side::WorkerCodec;
@@ -407,10 +407,10 @@ fn pattern_layouts_cross() {
 /// job run directly makes.
 #[test]
 fn geojson_tiles_cross() {
-    use feature::{Feature, Identifier, PropertyMap};
     use geo_types::{
         Coord, Geometry, GeometryCollection, LineString, MultiLineString, MultiPoint, MultiPolygon, Polygon,
     };
+    use mln_style::feature::{Feature, Identifier, PropertyMap};
 
     let p = |x: i16, y: i16| Coord { x, y };
     let line = |coords: Vec<Coord<i16>>| LineString(coords);
@@ -419,9 +419,15 @@ fn geojson_tiles_cross() {
     let feature = |geometry, id, class: &str| Feature {
         geometry,
         properties: Arc::new(PropertyMap::from([
-            ("class".to_owned(), feature::Value::String(class.to_owned())),
-            ("admin_level".to_owned(), feature::Value::Uint(2)),
-            ("nested".to_owned(), feature::Value::Array(vec![feature::Value::Double(0.5), feature::Value::Null])),
+            ("class".to_owned(), mln_style::feature::Value::String(class.to_owned())),
+            ("admin_level".to_owned(), mln_style::feature::Value::Uint(2)),
+            (
+                "nested".to_owned(),
+                mln_style::feature::Value::Array(vec![
+                    mln_style::feature::Value::Double(0.5),
+                    mln_style::feature::Value::Null,
+                ]),
+            ),
         ])),
         id,
     };
@@ -591,7 +597,7 @@ fn answers_cross_without_pixels() {
     let dependencies = Dependencies {
         glyphs: crate::text::glyph::GlyphDependencies {
             glyphs: [(vec!["Open Sans Regular".to_owned()], ids)].into_iter().collect(),
-            shapes: mln_vec_map::VecMap::default(),
+            shapes: mln_style::collections::VecMap::default(),
         },
         images: [("interstate_1".to_owned(), ImageType::Icon)].into_iter().collect(),
         unavailable_images: VecSet::new(),

@@ -105,7 +105,7 @@ fn is_supported_script_accepts_scripts_that_font_faces_cover() {
         let mut ctx = ParsingContext::new(&Functions::with_builtins());
         let parsed = ctx.parse_expression(&Convertible::from(&document), None).expect("parsed");
         let state: GlobalStateMap =
-            [("text".to_owned(), feature::Value::String(text.to_owned()))].into_iter().collect();
+            [("text".to_owned(), crate::feature::Value::String(text.to_owned()))].into_iter().collect();
         let context = EvaluationContext::default().with_font_faces(font_faces).with_global_state(Some(&state));
         parsed.evaluate(&context) == Ok(Value::Bool(true))
     };
@@ -129,11 +129,11 @@ fn evaluate_feature_with_context_uses_every_input() {
         let mut ctx = ParsingContext::new(&Functions::with_builtins());
         ctx.parse_expression(&Convertible::from(&document), None).expect("parsed")
     };
-    let mut feature = feature::Feature::new(geo_types::Point::new(2.0, 2.0));
-    feature.properties.insert("name".to_owned(), feature::Value::String("a".to_owned()));
-    let feature_state: FeatureState = [("hover".to_owned(), feature::Value::Bool(true))].into_iter().collect();
+    let mut feature = crate::feature::Feature::new(geo_types::Point::new(2.0, 2.0));
+    feature.properties.insert("name".to_owned(), crate::feature::Value::String("a".to_owned()));
+    let feature_state: FeatureState = [("hover".to_owned(), crate::feature::Value::Bool(true))].into_iter().collect();
     let global_state: GlobalStateMap =
-        [("mode".to_owned(), feature::Value::String("dark".to_owned()))].into_iter().collect();
+        [("mode".to_owned(), crate::feature::Value::String("dark".to_owned()))].into_iter().collect();
     let canonical = CanonicalTileID::new(0, 0, 0);
     let params = EvaluationContext::new(3.0)
         .with_feature_state(Some(&feature_state))

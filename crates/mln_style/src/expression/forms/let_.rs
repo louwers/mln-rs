@@ -2,11 +2,10 @@
 
 use std::sync::Arc;
 
-use feature::Value as MbglValue;
-
 use crate::conversion::{Convertible, get_json_type};
 use crate::expression::parse::{Bindings, ParseResult, ParsingContext};
 use crate::expression::{Expr, Node, SharedExpr};
+use crate::feature::Value as MbglValue;
 
 /// `["let", name, value, ..., result]`.
 #[derive(Clone, PartialEq, mln_wire::Wire)]

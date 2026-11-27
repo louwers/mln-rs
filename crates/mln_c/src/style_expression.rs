@@ -6,13 +6,13 @@
 use core::ffi::c_char;
 use std::sync::Arc;
 
-use feature::{Feature, Value as JsonValue, ValueObject};
+use mln_style::collections::VecSet;
 use mln_style::conversion::Convertible;
 use mln_style::expression::{
     Dependency, EvaluationContext, Expr, Functions, ParsingContext, Type, TypeAnnotationOption,
 };
+use mln_style::feature::{Feature, Value as JsonValue, ValueObject};
 use mln_style::tile_id::CanonicalTileID;
-use mln_vec_map::VecSet;
 
 use crate::abi::{self, Fields};
 use crate::error::Error;

@@ -7,12 +7,11 @@
 
 use std::sync::Arc;
 
-use feature::Value;
 use mln_engine::camera::CameraOptions;
 use mln_engine::map::MapMode;
 use mln_style::Edit;
 use mln_style::bitmap::PremultipliedImage;
-use mln_style::feature::FeatureState;
+use mln_style::feature::{FeatureState, Value};
 use mln_style::geo::LatLngBounds;
 use mln_style::image::Impl as StyleImage;
 use mln_style::size::Size;

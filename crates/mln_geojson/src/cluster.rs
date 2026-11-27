@@ -10,9 +10,9 @@
 
 use std::sync::Arc;
 
-use feature::{Feature, Identifier, PropertyMap, Value};
 use geo_index::kdtree::{KDTree, KDTreeBuilder, KDTreeIndex};
 use geo_types::{Coord, Geometry, Point};
+use mln_style::feature::{Feature, Identifier, PropertyMap, Value};
 
 use crate::{TileFeatures, mercator};
 

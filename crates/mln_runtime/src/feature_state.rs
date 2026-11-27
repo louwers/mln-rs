@@ -1,7 +1,7 @@
 //! The feature state that a map keeps for its sources' features.
 
-use feature::{Identifier, ValueObject};
 use mln_style::error::Error;
+use mln_style::feature::{Identifier, ValueObject};
 
 /// The state of one feature: keys and their values.
 pub type FeatureState = ValueObject;

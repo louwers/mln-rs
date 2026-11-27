@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
-use mln_vec_map::VecSet;
-
+use crate::collections::VecSet;
 use crate::color::Color;
 use crate::conversion::to_value::make_color_ramp_style_property;
 use crate::conversion::{Convertible, Error};

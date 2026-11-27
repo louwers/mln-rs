@@ -5,9 +5,8 @@
 // as the JSON front end reads the JSON that the value stringifies to, except
 // that a non-finite number stays a number (JSON has no form for it).
 
-use feature::Value;
-
 use super::convertible::{ConversionTraits, Convertible, Error};
+use crate::feature::Value;
 
 /// What a missing member reads as, as in the JSON front end.
 static NULL: Value = Value::Null;

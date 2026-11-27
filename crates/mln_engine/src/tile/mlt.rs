@@ -11,9 +11,8 @@
 use std::ops::Range;
 use std::sync::{Arc, OnceLock};
 
-use feature::{Identifier, PropertyMap, Value};
 use mln_style::constants::EXTENT;
-use mln_style::feature::{GeometryCollection, GeometryCoordinate, GeometryCoordinates};
+use mln_style::feature::{GeometryCollection, GeometryCoordinate, GeometryCoordinates, Identifier, PropertyMap, Value};
 use mln_style::geometry::FeatureType;
 use mln_style::hash::HashMap;
 use mlt_core::wire::{Analyze as _, LogicalEncoding, PhysicalEncoding};
@@ -613,8 +612,8 @@ fn rebase_triangles(
 mod tests {
     use std::path::Path;
 
-    use feature::Value;
     use geometry::Point;
+    use mln_style::feature::Value;
     use mlt_core::encoder::{EncoderConfig, Network, Profile};
     use mlt_core::geo_types::Coord;
     use mlt_core::{LayerWriter, PropKind};

@@ -3,7 +3,7 @@ use std::num::NonZeroU16;
 use std::sync::Arc;
 
 use mln_style::bitmap::AlphaImage;
-use mln_vec_map::VecMap;
+use mln_style::collections::VecMap;
 use parking_lot::Mutex;
 
 use crate::text::atlas::RectU16;

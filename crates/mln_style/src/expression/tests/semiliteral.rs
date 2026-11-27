@@ -1,10 +1,9 @@
-use feature::Feature;
-
 use crate::conversion::Convertible;
 use crate::expression::parse::{ParseResult, ParsingContext, ParsingError};
 use crate::expression::type_::Type;
 use crate::expression::value::Value;
 use crate::expression::{EvaluationContext, Functions, evaluate_feature};
+use crate::feature::Feature;
 
 fn parse_semiliteral(json: &str, ctx: &mut ParsingContext, property: bool) -> ParseResult {
     let document: serde_json::Value = serde_json::from_str(json).unwrap();

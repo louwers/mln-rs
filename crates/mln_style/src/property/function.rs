@@ -4,10 +4,9 @@
 
 use std::sync::Arc;
 
-use feature::{Value, ValueObject};
-
 use crate::conversion::{Convertible, Error};
 use crate::expression::{Expr, Functions, ParsingContext, Type};
+use crate::feature::{Value, ValueObject};
 
 /// The parser's errors for an expression a conversion wrote, without their
 /// positions: those are in that expression, not in the style.

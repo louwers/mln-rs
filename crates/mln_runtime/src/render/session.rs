@@ -1595,7 +1595,7 @@ impl RenderSession {
         &self,
         source_id: impl Into<String>,
         cluster_id: u32,
-    ) -> Result<Completion<Vec<feature::Feature<f64>>>, Error> {
+    ) -> Result<Completion<Vec<mln_style::feature::Feature<f64>>>, Error> {
         let source_id = source_id_of(source_id)?;
         self.operation(move |worker, _| worker.cluster(&source_id, cluster_id, |_, children| Ok(children)))
     }
@@ -1609,7 +1609,7 @@ impl RenderSession {
         cluster_id: u32,
         limit: u32,
         offset: u32,
-    ) -> Result<Completion<Vec<feature::Feature<f64>>>, Error> {
+    ) -> Result<Completion<Vec<mln_style::feature::Feature<f64>>>, Error> {
         let source_id = source_id_of(source_id)?;
         self.operation(move |worker, _| {
             worker.cluster(&source_id, cluster_id, |index, _| index.get_leaves(cluster_id, limit, offset))

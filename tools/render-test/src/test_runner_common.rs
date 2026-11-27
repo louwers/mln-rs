@@ -3,7 +3,7 @@
 // tools/expression-test, which depends on the style crates; this runner core
 // must not.
 
-use feature::Value;
+use mln_style::feature::Value;
 
 fn numeric_value(value: &Value) -> Option<f64> {
     match value {

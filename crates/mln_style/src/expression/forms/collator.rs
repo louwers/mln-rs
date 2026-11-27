@@ -1,13 +1,12 @@
 use std::sync::OnceLock;
 
-use feature::{Value as MbglValue, ValueObject};
-
 use crate::conversion::Convertible;
 use crate::expression::locale::collator::Collator;
 use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::type_::Type;
 use crate::expression::value::Value;
 use crate::expression::{EvaluationContext, EvaluationError, EvaluationResult, Expr, Node};
+use crate::feature::{Value as MbglValue, ValueObject};
 
 /// `["collator", options]`. Collators count as feature-dependent, so the
 /// parser never folds one into a literal; one whose options are literals is

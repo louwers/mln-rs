@@ -4,14 +4,15 @@
 
 use std::f64::consts::PI;
 
-use feature::Feature;
 use geometry::Point;
 use i_overlay::core::fill_rule::FillRule;
 use i_overlay::core::overlay::{Overlay, ShapeType};
 use i_overlay::core::overlay_rule::OverlayRule;
 use i_overlay::i_float::int::point::IntPoint;
 use mln_style::constants::EXTENT;
-use mln_style::feature::{GeometryCollection, GeometryCoordinates, GeometryTileFeature, convert_geometry, signed_area};
+use mln_style::feature::{
+    Feature, GeometryCollection, GeometryCoordinates, GeometryTileFeature, convert_geometry, signed_area,
+};
 use mln_style::tile_id::CanonicalTileID;
 
 use crate::tile::TileError;

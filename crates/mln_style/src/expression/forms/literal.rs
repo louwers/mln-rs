@@ -1,10 +1,9 @@
-use feature::Value as MbglValue;
-
 use crate::conversion::Convertible;
 use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::type_::{self, Type};
 use crate::expression::value::{ObjectType, Value, from_mbgl_value, to_mbgl_value, type_of};
 use crate::expression::{Expr, Node};
+use crate::feature::Value as MbglValue;
 
 /// A constant value, typed as the value is, or as the array type it was
 /// parsed as.

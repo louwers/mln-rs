@@ -16,7 +16,6 @@ name = "mln_builtins"
 doctest = false
 
 [dependencies]
-feature.workspace = true
 geojson.workspace = true
 log.workspace = true
 mln_engine.workspace = true

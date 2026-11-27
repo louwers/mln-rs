@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use feature::Feature;
 use geo_types::Point;
 use mln_style::Source;
 use mln_style::error::Error;
+use mln_style::feature::Feature;
 use mln_style::layer::{Layer, LayerStyle};
 use mln_style::layers::Circle;
 use mln_style::property::evaluation::PropertyEvaluationParameters;

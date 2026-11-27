@@ -8,7 +8,7 @@ pub mod tile;
 
 use std::sync::Arc;
 
-use feature::{Feature, PropertyMap};
+use mln_style::feature::{Feature, PropertyMap};
 
 /// A tile's features, in tile coordinates. Features that come from one
 /// source feature share its property map.

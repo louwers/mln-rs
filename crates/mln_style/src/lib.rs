@@ -48,6 +48,7 @@
 #[cfg(target_os = "android")]
 pub mod android;
 pub mod bitmap;
+pub mod collections;
 pub mod color;
 pub mod constants;
 pub mod conversion;

@@ -1,9 +1,8 @@
 use std::borrow::Cow;
 
-use feature::{Feature, Identifier, PropertyMap, Value};
-
 use super::{GeometryCollection, GeometryTileFeature, convert_geometry_to_tile};
 use crate::error::Error;
+use crate::feature::{Feature, Identifier, PropertyMap, Value};
 use crate::geometry::{FeatureType, to_feature_type};
 use crate::tile_id::CanonicalTileID;
 

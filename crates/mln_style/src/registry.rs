@@ -3,8 +3,7 @@
 
 use std::sync::Arc;
 
-use mln_vec_map::VecMap;
-
+use crate::collections::VecMap;
 use crate::conversion::{Convertible, Error};
 use crate::expression::Functions;
 use crate::layer::{ErasedStyleLayerType, Layer, SourceKind};

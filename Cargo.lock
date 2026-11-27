@@ -2477,7 +2477,6 @@ dependencies = [
  "mln-rs-builtins",
  "mln-rs-d3d12",
  "mln-rs-engine",
- "mln-rs-feature",
  "mln-rs-geojson",
  "mln-rs-geometry",
  "mln-rs-gfx",
@@ -2486,7 +2485,6 @@ dependencies = [
  "mln-rs-polylabel",
  "mln-rs-runtime",
  "mln-rs-style",
- "mln-rs-vec-map",
  "mln-rs-vulkan",
  "mln-rs-web-host",
  "mln-rs-webgpu",
@@ -2501,7 +2499,6 @@ dependencies = [
  "mln-rs-builtins",
  "mln-rs-d3d12",
  "mln-rs-engine",
- "mln-rs-feature",
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-headless",
@@ -2550,7 +2547,6 @@ dependencies = [
  "geojson",
  "log",
  "mln-rs-engine",
- "mln-rs-feature",
  "mln-rs-geojson",
  "mln-rs-style",
  "parking_lot",
@@ -2570,14 +2566,12 @@ dependencies = [
  "mln-rs-builtins",
  "mln-rs-d3d12",
  "mln-rs-engine",
- "mln-rs-feature",
  "mln-rs-geojson",
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-mtl",
  "mln-rs-runtime",
  "mln-rs-style",
- "mln-rs-vec-map",
  "mln-rs-vulkan",
  "mln-rs-web-host",
  "objc2 0.6.5",
@@ -2686,7 +2680,6 @@ dependencies = [
  "log",
  "memmap2",
  "mln-rs-builtins",
- "mln-rs-feature",
  "mln-rs-geojson",
  "mln-rs-geometry",
  "mln-rs-gfx",
@@ -2694,7 +2687,6 @@ dependencies = [
  "mln-rs-pixelmatch",
  "mln-rs-polylabel",
  "mln-rs-style",
- "mln-rs-vec-map",
  "mln-rs-webgpu",
  "mln-rs-wire",
  "mlt-core",
@@ -2734,20 +2726,7 @@ version = "0.0.18"
 dependencies = [
  "geo-types",
  "geojson",
- "mln-rs-feature",
  "mln-rs-style",
- "mln-rs-vec-map",
- "serde_json",
-]
-
-[[package]]
-name = "mln-rs-feature"
-version = "0.0.18"
-dependencies = [
- "geo-types",
- "geojson",
- "mln-rs-vec-map",
- "mln-rs-wire",
  "serde_json",
 ]
 
@@ -2759,7 +2738,7 @@ dependencies = [
  "geo-index",
  "geo-types",
  "geojson",
- "mln-rs-feature",
+ "mln-rs-style",
  "parking_lot",
  "serde_json",
  "smallvec",
@@ -2829,7 +2808,6 @@ dependencies = [
  "mln-rs-builtins",
  "mln-rs-d3d12",
  "mln-rs-engine",
- "mln-rs-feature",
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-mtl",
@@ -2895,7 +2873,6 @@ dependencies = [
  "log",
  "mln-rs-builtins",
  "mln-rs-engine",
- "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-gfx",
  "mln-rs-headless",
@@ -2925,7 +2902,6 @@ dependencies = [
  "mln-rs-builtins",
  "mln-rs-d3d12",
  "mln-rs-engine",
- "mln-rs-feature",
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-mtl",
@@ -2967,9 +2943,7 @@ dependencies = [
  "js-sys",
  "libc",
  "log",
- "mln-rs-feature",
  "mln-rs-geometry",
- "mln-rs-vec-map",
  "mln-rs-wire",
  "objc2 0.6.5",
  "objc2-foundation 0.3.2",
@@ -2990,7 +2964,6 @@ name = "mln-rs-style-codegen"
 version = "0.0.18"
 dependencies = [
  "mln-rs-style",
- "mln-rs-vec-map",
  "serde_json",
 ]
 
@@ -2999,13 +2972,6 @@ name = "mln-rs-unicode-tables"
 version = "0.0.18"
 dependencies = [
  "unicode-bidi",
-]
-
-[[package]]
-name = "mln-rs-vec-map"
-version = "0.0.18"
-dependencies = [
- "mln-rs-wire",
 ]
 
 [[package]]

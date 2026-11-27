@@ -1,6 +1,5 @@
-use feature::Value;
-
 use super::Convertible;
+use crate::feature::Value;
 
 #[must_use]
 pub fn get_json_type(value: &Convertible<'_>) -> String {

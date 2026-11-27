@@ -47,7 +47,6 @@ categories = ["graphics", "science::geo"]
 
 [workspace.dependencies]
 # In-repo libraries. The exact version keeps a release's packages together.
-feature = { package = "mln-rs-feature", path = "vendor/feature", version = "=0.0.18" }
 geometry = { package = "mln-rs-geometry", path = "vendor/geometry", version = "=0.0.18" }
 mln_builtins = { package = "mln-rs-builtins", path = "crates/mln_builtins", version = "=0.0.18" }
 mln_d3d12 = { package = "mln-rs-d3d12", path = "crates/mln_d3d12", version = "=0.0.18" }
@@ -67,7 +66,6 @@ mln_mtl = { package = "mln-rs-mtl", path = "crates/mln_mtl", version = "=0.0.18"
 # them, so that a browser build of mln_c carries one.
 mln_runtime = { package = "mln-rs-runtime", path = "crates/mln_runtime", version = "=0.0.18", default-features = false }
 mln_style = { package = "mln-rs-style", path = "crates/mln_style", version = "=0.0.18" }
-mln_vec_map = { package = "mln-rs-vec-map", path = "crates/mln_vec_map", version = "=0.0.18" }
 mln_vulkan = { package = "mln-rs-vulkan", path = "crates/mln_vulkan", version = "=0.0.18" }
 mln_wire = { package = "mln-rs-wire", path = "crates/mln_wire", version = "=0.0.18" }
 mln_wire_derive = { package = "mln-rs-wire-derive", path = "crates/mln_wire_derive", version = "=0.0.18" }
@@ -137,7 +135,7 @@ glam = { version = "0.34.3", default-features = false, features = [
   "f64",
   "i64",
 ] }
-# The GeoJSON and feature geometry (mln-rs-feature's `Feature`, the GeoJSON
+# The GeoJSON and feature geometry (mln_style's `feature::Feature`, the GeoJSON
 # sources, queries, the `within` and `distance` expressions), in place of a
 # port of the C++ core's vendored geometry.hpp variant. Tile geometry stays
 # the port's (mln-rs-geometry's `Point`). mlt-core already depends on it.
@@ -528,7 +526,6 @@ d3d12 = ["mln_runtime/d3d12", "dep:mln_d3d12"]
 gl = ["mln_runtime/gl", "dep:mln_gl"]
 
 [dependencies]
-feature.workspace = true
 geo-types.workspace = true
 geojson.workspace = true
 geometry.workspace = true
@@ -548,7 +545,6 @@ mln_engine = { workspace = true, features = [
 ] }
 mln_runtime.workspace = true
 mln_style.workspace = true
-mln_vec_map.workspace = true
 mln_vulkan = { workspace = true, optional = true }
 mln_web_host.workspace = true
 mln_webgpu = { workspace = true, optional = true }

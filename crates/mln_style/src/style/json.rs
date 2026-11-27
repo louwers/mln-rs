@@ -5,13 +5,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use feature::Value;
-
 use crate::constants::DEFAULT_TRANSITION_DURATION;
 use crate::conversion::borrowed::{Json, borrowed_json_to_value, member, members};
 use crate::conversion::{Converter, Convertible, value_to_json};
 use crate::error::Error;
 use crate::expression::GlobalStateMap;
+use crate::feature::Value;
 use crate::layer::{Layer, SourceKind, convert_layer};
 use crate::light::{Light, convert_light};
 use crate::projection::{Projection, convert_projection};

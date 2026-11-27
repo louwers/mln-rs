@@ -238,7 +238,7 @@ pub(crate) fn decode_offline_region_definition(region: &[u8]) -> Result<OfflineR
             None | Some(Json::Null) => Geometry::GeometryCollection(geo_types::GeometryCollection(Vec::new())),
             Some(json) => serde_json::from_value::<geojson::Geometry>(json.clone())
                 .map_err(geojson::Error::from)
-                .and_then(feature::geojson::geometry)
+                .and_then(mln_style::feature::geojson::geometry)
                 .map_err(|e| Error::native(e.to_string()))?,
         };
         Ok(OfflineGeometryRegionDefinition::new(

@@ -4,11 +4,10 @@
 
 use std::sync::Arc;
 
-use feature::Value as MbglValue;
-
 use crate::color::Color;
 use crate::expression::value::Value;
 use crate::expression::{EvalResult, EvaluationContext, Expr, GlobalStateMap, Node, Output, SharedExpr};
+use crate::feature::Value as MbglValue;
 
 /// The value a property takes where no section overrides it.
 #[derive(Clone, PartialEq, mln_wire::Wire)]

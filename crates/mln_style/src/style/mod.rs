@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
-use feature::Value;
-
 use crate::conversion::Convertible;
 use crate::error::Error;
 use crate::expression::GlobalStateMap;
+use crate::feature::Value;
 use crate::filter::Filter;
 use crate::font_face::FontFaces;
 use crate::geo::LatLng;

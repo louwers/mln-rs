@@ -6,8 +6,8 @@ use std::borrow::Borrow;
 use std::collections::BTreeMap;
 use std::f64::consts::PI;
 
-use feature::{Feature, Identifier, PropertyMap, Value};
 use geo_types::{Coord, Geometry, LineString, MultiLineString, Point, Polygon};
+use mln_style::feature::{Feature, Identifier, PropertyMap, Value};
 use serde_json::Value as Json;
 
 use crate::TileFeatures;
@@ -163,7 +163,7 @@ fn parse_json_tiles(data: &str) -> BTreeMap<String, Vec<Feature<i16>>> {
 
 /// The features of GeoJSON text.
 fn read(data: &str) -> Result<Vec<Feature<f64>>, geojson::Error> {
-    feature::geojson::features(data.parse()?)
+    mln_style::feature::geojson::features(data.parse()?)
 }
 
 #[test]

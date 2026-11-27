@@ -1,11 +1,11 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
 use mln_style::PropertyEvaluationParameters;
+use mln_style::collections::VecMap;
 use mln_style::conversion::{Convertible, Error as ConversionError};
-use mln_style::feature::{GeometryCollection, GeometryTileFeature};
+use mln_style::feature::{GeometryCollection, GeometryTileFeature, Identifier, PropertyMap, Value};
 use mln_style::geometry::FeatureType;
 use mln_style::layer::{LayerStyle, convert_layer};
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionLayoutProperties;
@@ -17,7 +17,6 @@ use mln_style::property::evaluated::Evaluated;
 use mln_style::property::value::PropertyValue;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
-use mln_vec_map::VecMap;
 
 use super::with_context;
 use crate::buckets::circle_bucket::CircleBucket;

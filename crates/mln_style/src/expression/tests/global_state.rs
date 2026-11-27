@@ -1,6 +1,4 @@
-use feature::Value as MbglValue;
-use mln_vec_map::VecSet;
-
+use crate::collections::VecSet;
 use crate::conversion::Convertible;
 use crate::expression::parse::ParsingContext;
 use crate::expression::type_::Type;
@@ -9,6 +7,7 @@ use crate::expression::{
     Dependency, EvaluationContext, Expr, Functions, GlobalStateMap, collect_global_state_refs,
     global_state_refs_intersect,
 };
+use crate::feature::Value as MbglValue;
 
 fn parse_expression(json: &str, expected: Option<Type>) -> Option<Expr> {
     let document: serde_json::Value = serde_json::from_str(json).unwrap();

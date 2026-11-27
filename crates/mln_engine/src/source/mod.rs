@@ -248,7 +248,7 @@ pub trait SourceType: Send + Sync + 'static {
         _feature: &crate::tile::feature::Feature,
         _extension: &str,
         _field: &str,
-        _args: Option<&feature::PropertyMap>,
+        _args: Option<&mln_style::feature::PropertyMap>,
     ) -> Result<FeatureExtensionValue, Error> {
         Ok(FeatureExtensionValue::default())
     }

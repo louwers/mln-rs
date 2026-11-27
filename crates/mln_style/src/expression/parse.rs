@@ -2,8 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_vec_map::VecMap;
-
+use crate::collections::VecMap;
 use crate::conversion::{Convertible, get_json_type};
 use crate::expression::forms::assertion::Assertion;
 use crate::expression::forms::at::At;

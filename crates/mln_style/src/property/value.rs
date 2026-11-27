@@ -1,8 +1,7 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use mln_vec_map::VecSet;
-
+use crate::collections::VecSet;
 use crate::conversion::to_value::{ValueFactory, make_style_property};
 use crate::conversion::{Converter, Convertible, Error};
 use crate::expression::{Dependency, Functions, Type, ValueConverter, global_state_refs_intersect};

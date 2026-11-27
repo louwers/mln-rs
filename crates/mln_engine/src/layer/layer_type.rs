@@ -11,11 +11,11 @@ use std::any::Any;
 use std::sync::Arc;
 
 use mln_style::CrossfadeParameters;
+use mln_style::collections::VecSet;
 use mln_style::error::Error;
 use mln_style::expression::Dependency;
 use mln_style::layer::{ErasedLayerStyle, ErasedStyleLayerType, LayerStyle, LayerTypeEntry, PaintSet, StyleLayerType};
 use mln_style::wire::SharedLayer;
-use mln_vec_map::VecSet;
 use mln_wire::{Reader, Wire, Writer, shared};
 use smallvec::SmallVec;
 

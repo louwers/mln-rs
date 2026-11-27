@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
-use feature::{Identifier, PropertyMap};
 use geo_types::Coord;
+use mln_style::feature::{Identifier, PropertyMap};
 use smallvec::SmallVec;
 
 /// The x axis, for the functions generic over an axis.

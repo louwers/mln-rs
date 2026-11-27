@@ -3,12 +3,12 @@
 
 use std::path::{Path, PathBuf};
 
-use feature::{Feature, Identifier, Value, ValueObject};
+use mln_style::collections::VecSet;
 use mln_style::conversion::Convertible;
 use mln_style::expression::type_::{self, Type};
 use mln_style::expression::{Dependency, Expr, Functions, ParsingContext};
+use mln_style::feature::{Feature, Identifier, Value, ValueObject};
 use mln_style::tile_id::CanonicalTileID;
-use mln_vec_map::VecSet;
 
 pub(crate) struct Input {
     pub(crate) zoom: Option<f32>,
@@ -242,7 +242,7 @@ fn parse_inputs(inputs_value: &serde_json::Value, data: &mut TestData) -> Result
                 json => Some(
                     serde_json::from_value::<geojson::Geometry>(json.clone())
                         .map_err(geojson::Error::from)
-                        .and_then(feature::geojson::geometry)
+                        .and_then(mln_style::feature::geojson::geometry)
                         .map_err(|e| e.to_string())?,
                 ),
             };

@@ -140,7 +140,7 @@ impl std::fmt::Debug for TileIndex {
 impl TileIndex {
     /// Indexes `features` (in longitude and latitude) for tiles.
     #[must_use]
-    pub fn new(features: &[feature::Feature<f64>], options: Options) -> Self {
+    pub fn new(features: &[mln_style::feature::Feature<f64>], options: Options) -> Self {
         let options = Options { max_zoom: options.max_zoom.min(MAX_ZOOM), ..options };
         let tile = &options.tile;
         let tolerance = tile.tolerance / f64::from(tile.extent) / 2f64.powi(i32::from(options.max_zoom));
@@ -257,7 +257,7 @@ impl TileIndex {
 /// antimeridian, and `clip` cuts away what lies past its buffer.
 #[must_use]
 pub fn cut_tile(
-    features: &[feature::Feature<f64>],
+    features: &[mln_style::feature::Feature<f64>],
     z: u8,
     x: u32,
     y: u32,

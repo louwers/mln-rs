@@ -5,8 +5,7 @@
 
 use std::sync::Arc;
 
-use mln_vec_map::VecSet;
-
+use crate::collections::VecSet;
 use crate::constants::DEFAULT_TRANSITION_DURATION;
 use crate::conversion::borrowed::{Json, JsonObject, borrowed_json_to_value, member, members};
 use crate::conversion::{Convertible, Error, convert};

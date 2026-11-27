@@ -2,14 +2,13 @@
 
 use std::borrow::Cow;
 
-use feature::Value as MbglValue;
-use mln_vec_map::VecMap;
-
+use crate::collections::VecMap;
 use crate::conversion::Convertible;
 use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::type_::{Type, check_subtype};
 use crate::expression::value::Value;
 use crate::expression::{EvalResult, EvaluationContext, Expr, Node, Output};
+use crate::feature::Value as MbglValue;
 
 /// A match label type: `int64_t` or `std::string`.
 pub trait MatchLabel: Ord + Clone + Send + Sync + 'static {

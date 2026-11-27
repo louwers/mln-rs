@@ -11,11 +11,11 @@
 // `isExpression` reads `["in"]`'s second member) gets an error or a
 // default, not a panic.
 
-use feature::Value;
 use geojson::GeoJson;
 use serde::Deserialize;
 
 use super::convertible::{ConversionTraits, Convertible, Error};
+use crate::feature::Value;
 
 static NULL: serde_json::Value = serde_json::Value::Null;
 

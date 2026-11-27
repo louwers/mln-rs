@@ -1,5 +1,4 @@
-use feature::Value;
-
+use crate::feature::Value;
 use crate::interpolate::{Interpolate, interpolate};
 
 /// The names the style's `projection.type` accepts.

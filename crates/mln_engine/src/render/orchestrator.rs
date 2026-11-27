@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use mln_gfx::gpu::Gpu;
+use mln_style::collections::VecSet;
 use mln_style::constants::DEFAULT_TRANSITION_DURATION;
 use mln_style::diff::{ItemChanges, LayerChange, LayerChanges, StyleDiff, sources_by_id};
 use mln_style::error::Error;
@@ -18,7 +19,6 @@ use mln_style::{
     GlobalStateChange, Layer, LayerList, PropertyEvaluationParameters, Source, Style, TransitionOptions,
     TransitionParameters, layer,
 };
-use mln_vec_map::VecSet;
 use smallvec::SmallVec;
 
 use crate::camera::View;
@@ -1496,7 +1496,7 @@ impl RenderOrchestrator {
         feature: &crate::tile::feature::Feature,
         extension: &str,
         extension_field: &str,
-        args: Option<&feature::PropertyMap>,
+        args: Option<&mln_style::feature::PropertyMap>,
     ) -> Result<crate::query::FeatureExtensionValue, Error> {
         match self.render_sources.get(source_id) {
             Some(source) => source.query_feature_extensions(feature, extension, extension_field, args),

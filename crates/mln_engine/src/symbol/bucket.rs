@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use glam::Vec2;
+use mln_style::collections::VecMap;
 use mln_style::color::Color;
 use mln_style::expression::EvaluationContext;
 use mln_style::feature::{GeometryCoordinate, GeometryCoordinates, GeometryTileFeature};
@@ -17,7 +18,6 @@ use mln_style::property::expression::PropertyExpression;
 use mln_style::property::value::PropertyValue;
 use mln_style::range::Range;
 use mln_style::types::TextWritingModeType;
-use mln_vec_map::VecMap;
 use mln_wire::payload::pod;
 
 use crate::draw::segment::SegmentBase;

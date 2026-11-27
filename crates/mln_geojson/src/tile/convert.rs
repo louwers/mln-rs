@@ -3,8 +3,8 @@
 
 use std::sync::Arc;
 
-use feature::{Identifier, PropertyMap};
 use geo_types::{Coord, Geometry as GeoGeometry};
+use mln_style::feature::{Identifier, PropertyMap};
 use smallvec::smallvec;
 
 use super::geometry::{Feature, Geometry, Line, Ring, Vertex};
@@ -16,7 +16,11 @@ use crate::mercator;
 /// collection becomes a feature for each of its geometries, and, with
 /// `line_metrics`, a multi line string one for each line, so that each line
 /// has its own metrics.
-pub(super) fn convert(features: &[feature::Feature<f64>], tolerance: f64, line_metrics: bool) -> Vec<Feature> {
+pub(super) fn convert(
+    features: &[mln_style::feature::Feature<f64>],
+    tolerance: f64,
+    line_metrics: bool,
+) -> Vec<Feature> {
     let mut converted = Vec::with_capacity(features.len());
     for f in features {
         if let Some(geometry) = &f.geometry {

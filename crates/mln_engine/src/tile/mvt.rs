@@ -13,10 +13,9 @@ use std::ops::Range;
 use std::sync::{Arc, OnceLock};
 
 use fast_mvt::{MvtLazyFeature, MvtLazyLayer, MvtLazyReader, MvtResult, MvtValueRef};
-use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
 use mln_style::constants::EXTENT;
-use mln_style::feature::GeometryCollection;
+use mln_style::feature::{GeometryCollection, Identifier, PropertyMap, Value};
 use mln_style::geometry::FeatureType;
 use mln_style::hash::HashMap;
 

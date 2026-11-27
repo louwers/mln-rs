@@ -7,7 +7,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use feature::Value;
 use geojson::GeoJson;
 use mln_engine::RenderMode;
 use mln_engine::camera::CameraOptions;
@@ -17,7 +16,7 @@ use mln_engine::storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_headless::HeadlessFrontend;
 use mln_style::Edit;
 use mln_style::bitmap::PremultipliedImage;
-use mln_style::feature::FeatureState;
+use mln_style::feature::{FeatureState, Value};
 use mln_style::size::Size;
 use serde_json::json;
 

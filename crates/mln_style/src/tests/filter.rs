@@ -1,8 +1,7 @@
-use feature::{Identifier, Value};
-
 use super::util::{StubGeometryTileFeature, parse_json, property_map};
 use crate::conversion::{Convertible, Error};
 use crate::expression::{EvaluationContext, Functions};
+use crate::feature::{Identifier, Value};
 use crate::filter::{Filter, convert_filter};
 use crate::geometry::FeatureType;
 

@@ -2,8 +2,8 @@
 //! expectations are GL JS's supercluster's (8.0.1), whose cluster IDs are
 //! these plus the number of points.
 
-use feature::{Feature, Identifier, PropertyMap, Value};
 use geo_types::Point;
+use mln_style::feature::{Feature, Identifier, PropertyMap, Value};
 use serde_json::Value as Json;
 
 use super::{Aggregate, Clusters, Error, MAX_ZOOM, Options, abbreviate};

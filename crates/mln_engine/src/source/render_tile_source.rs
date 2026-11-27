@@ -187,7 +187,7 @@ impl RenderSource for RenderTileSource {
         feature: &crate::tile::feature::Feature,
         extension: &str,
         extension_field: &str,
-        args: Option<&feature::PropertyMap>,
+        args: Option<&mln_style::feature::PropertyMap>,
     ) -> Result<FeatureExtensionValue, Error> {
         self.source_type.query_feature_extension(&self.base.style_source, feature, extension, extension_field, args)
     }

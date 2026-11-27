@@ -1,11 +1,10 @@
-use feature::Value as MbglValue;
-
 use crate::conversion::Convertible;
 use crate::expression::forms::literal::Literal;
 use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::type_::{self, Type};
 use crate::expression::value::Value;
 use crate::expression::{EvaluationContext, EvaluationResult, Expr, Node};
+use crate::feature::Value as MbglValue;
 
 /// `["semiliteral", [...]]`: an array whose elements are expressions.
 #[derive(Clone, PartialEq, mln_wire::Wire)]

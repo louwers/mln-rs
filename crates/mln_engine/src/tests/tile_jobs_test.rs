@@ -9,10 +9,10 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use feature::{Feature, PropertyMap};
 use geo_types::{Geometry, Point};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::conversion::{Convertible, Error as ConversionError};
+use mln_style::feature::{Feature, PropertyMap};
 use mln_style::hash::HashSet;
 use mln_style::image::Impl as ImageImpl;
 use mln_style::layer::{SourceKind, convert_layer};
@@ -137,7 +137,7 @@ pub(super) fn points() -> TileData {
     let point = Feature {
         geometry: Some(Geometry::Point(Point::new(2048i16, 2048))),
         properties: Arc::new(PropertyMap::new()),
-        id: feature::Identifier::Null,
+        id: mln_style::feature::Identifier::Null,
     };
     TileData::Features(Arc::new(vec![point]))
 }
@@ -554,7 +554,7 @@ impl ErasedEvaluatedLayer for Mistyped {
     fn evaluated_dependencies(&self) -> mln_style::expression::Dependency {
         mln_style::expression::Dependency::NONE
     }
-    fn collect_evaluated_global_state_refs(&self, _refs: &mut mln_vec_map::VecSet<String>) {}
+    fn collect_evaluated_global_state_refs(&self, _refs: &mut mln_style::collections::VecSet<String>) {}
     fn write(&self, w: &mut mln_wire::Writer) {
         w.fail("no wire form".to_owned());
     }

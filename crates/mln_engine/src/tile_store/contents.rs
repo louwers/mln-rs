@@ -9,11 +9,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use glam::DMat4;
+use mln_style::collections::{VecMap, VecSet};
 use mln_style::error::Error;
 use mln_style::expression::GlobalStateMap;
 use mln_style::hash::HashMap;
 use mln_style::layer::ErasedLayerStyle;
-use mln_vec_map::{VecMap, VecSet};
 
 use crate::draw::context::Context;
 use crate::draw::dynamic_texture_atlas::{AtlasLease, BinUse, DynamicTextureAtlas};

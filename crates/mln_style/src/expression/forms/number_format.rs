@@ -1,11 +1,10 @@
-use feature::{Value as MbglValue, ValueObject};
-
 use crate::conversion::Convertible;
 use crate::expression::locale::{self, FractionDigits, Style, Unit, currency_code};
 use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::type_::{self, Type};
 use crate::expression::value::to_string;
 use crate::expression::{EvalResult, EvaluationContext, EvaluationError, Expr, Node};
+use crate::feature::{Value as MbglValue, ValueObject};
 
 const LOCALE_KEY: &str = "locale";
 const CURRENCY_KEY: &str = "currency";

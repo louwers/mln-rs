@@ -72,7 +72,11 @@ pub(crate) fn set_layer_filter(
 
 /// Sets the global state property `name`. Its error (style not loaded) is
 /// a [`MapError::Exception`], as the C++ runner doesn't catch it.
-pub(crate) fn set_global_state_property(map: &mut Map, name: &str, value: &feature::Value) -> Result<(), MapError> {
+pub(crate) fn set_global_state_property(
+    map: &mut Map,
+    name: &str,
+    value: &mln_style::feature::Value,
+) -> Result<(), MapError> {
     let edit = Edit::SetGlobalState { name: name.to_owned(), value: value.clone() };
     map.edit_loaded_style(|style| style.apply(edit)).map_err(|e| MapError::Exception(e.to_string()))
 }

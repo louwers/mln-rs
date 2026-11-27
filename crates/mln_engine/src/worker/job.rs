@@ -15,13 +15,13 @@ use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use mln_style::bitmap::PremultipliedImage;
+use mln_style::collections::VecSet;
 use mln_style::error::Error;
 use mln_style::expression::GlobalStateMap;
 use mln_style::hash::HashMap;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::tileset::RasterEncoding;
 use mln_style::time::Instant;
-use mln_vec_map::VecSet;
 use mln_wire::payload::shared_bytes;
 use mln_wire::shared;
 use parking_lot::Mutex;

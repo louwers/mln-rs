@@ -356,7 +356,7 @@ fn cluster_properties_json(options: &GeoJSONOptions) -> Option<String> {
         .cluster_properties
         .iter()
         .map(|(key, (map, reduce))| {
-            let pair = feature::Value::Array(vec![reduce.serialize(), map.serialize()]);
+            let pair = mln_style::feature::Value::Array(vec![reduce.serialize(), map.serialize()]);
             (key.clone(), mln_style::conversion::value_to_json(&pair))
         })
         .collect::<serde_json::Map<_, _>>();

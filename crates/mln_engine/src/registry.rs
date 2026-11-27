@@ -8,13 +8,13 @@
 
 use std::sync::Arc;
 
+use mln_style::collections::VecMap;
 use mln_style::expression::Functions;
 use mln_style::expression::functions::RegisterError;
 use mln_style::layer::{ErasedStyleLayerType, StyleLayerType};
 use mln_style::layers::{Background, Circle, ColorRelief, Fill, FillExtrusion, Heatmap, Hillshade, Line, Raster};
 use mln_style::source::StyleSourceType;
 use mln_style::{Source, StyleRegistry};
-use mln_vec_map::VecMap;
 
 use crate::layer::layer_type::{ErasedLayerType, LayerType, entry};
 use crate::layer::tile_input::input::Find;

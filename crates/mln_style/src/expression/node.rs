@@ -13,8 +13,6 @@ use std::hash::{Hash, Hasher};
 use std::mem::discriminant;
 use std::sync::Arc;
 
-use feature::Value as MbglValue;
-
 use crate::color::Color;
 use crate::expression::forms::assertion::Assertion;
 use crate::expression::forms::at::At;
@@ -42,6 +40,7 @@ use crate::expression::forms::within::Within;
 use crate::expression::type_::Type;
 use crate::expression::value::{Value, hash_value, type_of};
 use crate::expression::{Dependency, EvalResult, EvaluationContext, EvaluationError, EvaluationResult};
+use crate::feature::Value as MbglValue;
 
 /// The kinds of expression node. Each holds its own operands.
 #[derive(Clone, PartialEq, mln_wire::Wire)]

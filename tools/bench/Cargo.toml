@@ -23,7 +23,6 @@ layout-probe = []
 # the libraries by path, and other crates by requirements loose enough that
 # any base's Cargo.lock satisfies them as it stands.
 [dependencies]
-feature = { package = "mln-rs-feature", path = "../../vendor/feature" }
 # The fixture snapshot and the camera paths, which the desktop example's
 # benchmark mode shares.
 mln_bench_workload = { package = "mln-rs-bench-workload", path = "workload" }

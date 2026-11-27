@@ -1,12 +1,11 @@
 use std::hash::Hasher;
 use std::sync::{Arc, OnceLock};
 
-use feature::Value;
-
 use crate::conversion::{Convertible, Error};
 use crate::expression::{
     EvaluationContext, Expr, Functions, ParsingContext, Type, Value as ExpressionValue, feature_property_keys,
 };
+use crate::feature::Value;
 use crate::property::function::{conversion_errors, get, literal, matchable, number, op, owned};
 use crate::wire::optional_expression;
 

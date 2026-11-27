@@ -6,6 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use mln_style::collections::VecMap;
 use mln_style::geo::WrapMode;
 use mln_style::hash::HashSet;
 use mln_style::layer::SourceKind;
@@ -13,7 +14,6 @@ use mln_style::property::value::PropertyValue;
 use mln_style::range::Range;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::{Source, constants};
-use mln_vec_map::VecMap;
 use smallvec::SmallVec;
 
 use crate::camera::VerticalPerspectiveProjection;

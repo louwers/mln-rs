@@ -10,11 +10,10 @@
 
 use std::sync::Arc;
 
-use feature::{Value, ValueObject};
-
 use crate::conversion::to_value::make_transition_style_property;
 use crate::conversion::{Converter, Convertible, Error};
 use crate::expression::Functions;
+use crate::feature::{Value, ValueObject};
 use crate::layer::PropertyScope;
 use crate::property::set::Transitionable;
 use crate::property::transition::TransitionOptions;

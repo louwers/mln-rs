@@ -1,6 +1,5 @@
 use std::hash::{Hash, Hasher};
 
-use feature::{Value as MbglValue, ValueObject};
 use serde::Serialize;
 
 use crate::color::Color;
@@ -10,6 +9,7 @@ use crate::expression::image::Image;
 use crate::expression::locale::collator::Collator;
 use crate::expression::type_::Type;
 use crate::expression::{EvaluationContext, Expr};
+use crate::feature::{Value as MbglValue, ValueObject};
 use crate::padding::Padding;
 use crate::string::to_string_double;
 use crate::types::{
@@ -23,7 +23,7 @@ use crate::types::{
 /// The object alternative of `expression::Value`.
 // C++ uses std::unordered_map, whose iteration order is libstdc++-hash
 // dependent; a VecMap iterates in key order.
-pub type ObjectType = mln_vec_map::VecMap<String, Value>;
+pub type ObjectType = crate::collections::VecMap<String, Value>;
 
 /// An expression value, with the variants in the C++ variant's order.
 #[derive(Clone, Debug, Default, PartialEq, mln_wire::Wire)]

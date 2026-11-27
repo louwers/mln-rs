@@ -62,7 +62,7 @@ pub(crate) trait ErasedSourceType: Send + Sync + 'static {
         feature: &crate::tile::feature::Feature,
         extension: &str,
         field: &str,
-        args: Option<&feature::PropertyMap>,
+        args: Option<&mln_style::feature::PropertyMap>,
     ) -> Result<FeatureExtensionValue, Error>;
 }
 
@@ -156,7 +156,7 @@ impl<T: SourceType> ErasedSourceType for Entry<T> {
         feature: &crate::tile::feature::Feature,
         extension: &str,
         field: &str,
-        args: Option<&feature::PropertyMap>,
+        args: Option<&mln_style::feature::PropertyMap>,
     ) -> Result<FeatureExtensionValue, Error> {
         T::query_feature_extension(source, feature, extension, field, args)
     }

@@ -4,7 +4,7 @@
 
 use geo_types::{CoordNum, Geometry};
 
-use crate::value::ValueObject;
+use super::value::ValueObject;
 
 /// `mapbox::feature::identifier`:
 /// `variant<null, uint64_t, int64_t, double, string>`.

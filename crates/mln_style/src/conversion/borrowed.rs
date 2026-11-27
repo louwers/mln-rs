@@ -7,11 +7,11 @@
 // map read it: each key once, at its first member's position, with its last
 // member's value.
 
-use feature::Value;
 use geojson::GeoJson;
 pub(crate) use serde_json_borrow::{Map as JsonObject, Value as Json};
 
 use super::convertible::{ConversionTraits, Convertible, Error};
+use crate::feature::Value;
 
 /// foldhash's hasher, with a fixed seed in the benchmarks' builds, as
 /// `crate::hash`'s.

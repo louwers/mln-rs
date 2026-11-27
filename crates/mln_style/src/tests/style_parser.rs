@@ -1,9 +1,8 @@
 use std::path::PathBuf;
 
-use feature::Value;
-use mln_vec_map::VecSet;
-
 use super::util::FixtureLog;
+use crate::collections::VecSet;
+use crate::feature::Value;
 use crate::layer::FontStack;
 use crate::property::table::Kind;
 use crate::style::parse::Parser;

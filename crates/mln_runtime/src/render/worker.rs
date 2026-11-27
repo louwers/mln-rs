@@ -1600,7 +1600,7 @@ impl Worker {
         &mut self,
         source_id: &str,
         cluster_id: u32,
-        read: impl FnOnce(&dyn GeoJSONData, Vec<feature::Feature<f64>>) -> Result<T, Error>,
+        read: impl FnOnce(&dyn GeoJSONData, Vec<mln_style::feature::Feature<f64>>) -> Result<T, Error>,
     ) -> Result<T, Error> {
         // A cluster's ID holds its zoom plus one in its low five bits, so an
         // ID without them names no cluster, though it would find the points

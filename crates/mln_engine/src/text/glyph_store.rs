@@ -47,10 +47,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use mln_style::collections::{VecMap, VecSet};
 use mln_style::error::Error;
 use mln_style::hash::HashMap;
 use mln_style::i18n;
-use mln_vec_map::{VecMap, VecSet};
 use parking_lot::Mutex;
 
 use crate::exec::pool::TaskGroup;

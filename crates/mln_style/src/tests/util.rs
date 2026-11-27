@@ -115,17 +115,17 @@ pub(crate) fn parse_json(json: &str) -> serde_json::Value {
 pub(super) use crate::conversion::value_to_json;
 
 pub(crate) struct StubGeometryTileFeature {
-    pub(crate) properties: feature::PropertyMap,
-    pub(crate) id: feature::Identifier,
+    pub(crate) properties: crate::feature::PropertyMap,
+    pub(crate) id: crate::feature::Identifier,
     pub(crate) type_: crate::geometry::FeatureType,
     pub(crate) geometry: crate::feature::GeometryCollection,
 }
 
 impl StubGeometryTileFeature {
-    pub(crate) fn new(properties: feature::PropertyMap) -> Self {
+    pub(crate) fn new(properties: crate::feature::PropertyMap) -> Self {
         StubGeometryTileFeature {
             properties,
-            id: feature::Identifier::Null,
+            id: crate::feature::Identifier::Null,
             type_: crate::geometry::FeatureType::Point,
             geometry: crate::feature::GeometryCollection::default(),
         }
@@ -136,8 +136,8 @@ impl StubGeometryTileFeature {
         geometry: crate::feature::GeometryCollection,
     ) -> Self {
         StubGeometryTileFeature {
-            properties: feature::PropertyMap::default(),
-            id: feature::Identifier::Null,
+            properties: crate::feature::PropertyMap::default(),
+            id: crate::feature::Identifier::Null,
             type_,
             geometry,
         }
@@ -145,9 +145,9 @@ impl StubGeometryTileFeature {
 
     /// A feature with an id, a type and properties, and no geometry.
     pub(crate) fn with_id_type(
-        id: feature::Identifier,
+        id: crate::feature::Identifier,
         type_: crate::geometry::FeatureType,
-        properties: feature::PropertyMap,
+        properties: crate::feature::PropertyMap,
     ) -> Self {
         StubGeometryTileFeature { properties, id, type_, geometry: crate::feature::GeometryCollection::default() }
     }
@@ -158,15 +158,15 @@ impl crate::feature::GeometryTileFeature for StubGeometryTileFeature {
         self.type_
     }
 
-    fn get_value(&self, key: &str) -> Option<feature::Value> {
+    fn get_value(&self, key: &str) -> Option<crate::feature::Value> {
         self.properties.get(key).cloned()
     }
 
-    fn get_properties(&self) -> Cow<'_, feature::PropertyMap> {
+    fn get_properties(&self) -> Cow<'_, crate::feature::PropertyMap> {
         Cow::Borrowed(&self.properties)
     }
 
-    fn get_id(&self) -> feature::Identifier {
+    fn get_id(&self) -> crate::feature::Identifier {
         self.id.clone()
     }
 
@@ -175,7 +175,7 @@ impl crate::feature::GeometryTileFeature for StubGeometryTileFeature {
     }
 }
 
-pub(crate) fn property_map(entries: &[(&str, feature::Value)]) -> feature::PropertyMap {
+pub(crate) fn property_map(entries: &[(&str, crate::feature::Value)]) -> crate::feature::PropertyMap {
     entries.iter().map(|(k, v)| ((*k).to_owned(), v.clone())).collect()
 }
 

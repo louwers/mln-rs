@@ -3,8 +3,7 @@
 
 use std::fmt;
 
-use mln_vec_map::VecSet;
-
+use crate::collections::VecSet;
 use crate::expression::functions::Role;
 use crate::expression::value::Value;
 use crate::expression::{Expr, Node};

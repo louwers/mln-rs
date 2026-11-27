@@ -10,6 +10,7 @@ use std::sync::{Arc, OnceLock};
 
 use geo_index::rtree::sort::HilbertSort;
 use geo_index::rtree::{RTree, RTreeBuilder, RTreeIndex};
+use mln_style::collections::VecMap;
 use mln_style::constants;
 use mln_style::error::Error;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
@@ -18,7 +19,6 @@ use mln_style::feature::{
 };
 use mln_style::hash::{HashMap, HashSet};
 use mln_style::types::TranslateAnchorType;
-use mln_vec_map::VecMap;
 
 use crate::camera::{TileProjector, VerticalPerspectiveProjection, View};
 use crate::geo::ScreenCoordinate;

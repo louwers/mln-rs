@@ -77,7 +77,7 @@ pub(crate) fn tile_features(geojson: GeoJson, tile_id: &CanonicalTileID, options
     if !matches!(&geojson, GeoJson::FeatureCollection(c) if !c.features.is_empty()) {
         return TileFeatures::new();
     }
-    let features = match feature::geojson::features(geojson) {
+    let features = match mln_style::feature::geojson::features(geojson) {
         Ok(features) => features,
         Err(e) => {
             log::error!(target: log_target::GENERAL, "Invalid custom geometry tile data: {e}");

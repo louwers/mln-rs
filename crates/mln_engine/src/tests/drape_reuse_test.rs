@@ -491,7 +491,7 @@ fn a_feature_state_change_draws_its_drapes_again() {
         return;
     };
     let mut hover = FeatureState::new();
-    hover.insert("hover".into(), feature::Value::Bool(true));
+    hover.insert("hover".into(), mln_style::feature::Value::Bool(true));
     map.renderer.set_feature_state("shapes", None, "1", &hover);
     assert_eq!(BTreeSet::from([(north_west(), 0)]), map.frame().1);
     assert!(map.frame().1.is_empty());

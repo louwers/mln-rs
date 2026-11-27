@@ -13,10 +13,10 @@ use std::thread::ThreadId;
 use std::time::{Duration, Instant};
 
 use mln_style::bitmap::AlphaImage;
+use mln_style::collections::{VecMap, VecSet};
 use mln_style::error::Error;
 use mln_style::i18n;
 use mln_style::size::Size;
-use mln_vec_map::{VecMap, VecSet};
 use parking_lot::Mutex;
 
 use super::glyph_store_bitmaps::{SDF_BITMAP, STUB_BITMAP};

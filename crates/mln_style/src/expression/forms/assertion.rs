@@ -1,7 +1,5 @@
 use std::borrow::Cow;
 
-use feature::Value as MbglValue;
-
 use crate::conversion::Convertible;
 use crate::expression::functions::Role;
 use crate::expression::functions::builtin::{feature_unavailable, identifier_to_mbgl};
@@ -9,6 +7,7 @@ use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::type_::{self, Type, check_subtype};
 use crate::expression::value::{Value, type_of};
 use crate::expression::{EvalResult, EvaluationContext, EvaluationError, EvaluationResult, Expr, Node, Output};
+use crate::feature::Value as MbglValue;
 
 /// `["number", ...]` and the other type assertions: the first input whose
 /// value has the type, or an error.

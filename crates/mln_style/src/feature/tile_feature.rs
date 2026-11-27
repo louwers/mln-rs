@@ -2,10 +2,10 @@ use std::borrow::Cow;
 use std::ops::{Deref, DerefMut, Range};
 use std::sync::Arc;
 
-use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
 
 use crate::error::Error;
+use crate::feature::{Identifier, PropertyMap, Value};
 use crate::geometry::FeatureType;
 
 /// Normalized vector tile coordinates. Each geometry coordinate represents a

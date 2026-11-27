@@ -5,8 +5,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use feature::Identifier;
-use mln_style::feature::GeometryTileFeature;
+use mln_style::feature::{GeometryTileFeature, Identifier};
 use mln_style::geometry::FeatureType;
 
 use crate::tile::{MltTile, MvtTile, TileData, TileError};

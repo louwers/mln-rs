@@ -5,10 +5,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use feature::{Value, ValueObject};
 use mln_style::color::Color;
 use mln_style::conversion::{Convertible, Error};
 use mln_style::expression::Functions;
+use mln_style::feature::{Value, ValueObject};
 use mln_style::property::table::Kind;
 use mln_style::property::transition::TransitionOptions;
 use mln_style::property::value::PropertyValue;

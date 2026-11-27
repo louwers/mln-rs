@@ -4,8 +4,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use mln_vec_map::VecSet;
-
+use crate::collections::VecSet;
 use crate::expression::GlobalStateMap;
 use crate::time::Instant;
 

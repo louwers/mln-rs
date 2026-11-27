@@ -411,7 +411,7 @@ impl Renderer {
         feature: &crate::tile::feature::Feature,
         extension: &str,
         extension_field: &str,
-        args: Option<&feature::PropertyMap>,
+        args: Option<&mln_style::feature::PropertyMap>,
     ) -> Result<crate::query::FeatureExtensionValue, Error> {
         self.orchestrator.query_feature_extensions(source_id, feature, extension, extension_field, args)
     }

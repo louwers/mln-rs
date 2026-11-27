@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
-use mln_vec_map::VecMap;
-
+use crate::collections::VecMap;
 use crate::layer::Layer;
 
 /// A style's layers in drawing order, bottom first, found by id. Ids are

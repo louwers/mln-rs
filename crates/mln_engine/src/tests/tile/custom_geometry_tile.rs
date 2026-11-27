@@ -4,8 +4,8 @@
 
 use std::sync::Arc;
 
-use feature::Feature;
 use geo_types::Point;
+use mln_style::feature::Feature;
 use mln_style::layer::{Layer, LayerStyle, SourceKind};
 use mln_style::layers::Circle;
 

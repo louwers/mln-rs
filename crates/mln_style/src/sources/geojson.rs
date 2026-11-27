@@ -4,8 +4,8 @@
 use std::sync::{Arc, OnceLock};
 
 use geojson::GeoJson;
-use mln_vec_map::VecMap;
 
+use crate::collections::VecMap;
 use crate::conversion::{Convertible, Error as ConversionError};
 use crate::expression::{Expr, Functions};
 use crate::layer::SourceKind;

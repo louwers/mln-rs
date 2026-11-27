@@ -4,9 +4,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use feature::Value;
 use mln_style::error::ErrorKind;
-use mln_style::feature::FeatureState;
+use mln_style::feature::{FeatureState, Value};
 use mln_style::size::Size;
 use mln_style::source::SourceData;
 use mln_style::sources::GeoJsonSourceType;

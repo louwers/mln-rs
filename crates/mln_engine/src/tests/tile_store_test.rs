@@ -6,9 +6,9 @@
 
 use std::sync::Arc;
 
-use feature::{Feature, PropertyMap};
 use geo_types::{Geometry, Point};
 use mln_style::Source;
+use mln_style::feature::{Feature, PropertyMap};
 use mln_style::layer::SourceKind;
 use mln_style::source::SourceData;
 use mln_style::sources::tileset::{TilesetSourceOptions, TilesetSourceType, VectorKind, VectorSourceType};
@@ -140,7 +140,7 @@ fn features(ids: &[u64]) -> TileData {
         .map(|id| Feature {
             geometry: Some(Geometry::Point(Point::new(2048i16, 2048))),
             properties: Arc::new(PropertyMap::new()),
-            id: feature::Identifier::Uint(*id),
+            id: mln_style::feature::Identifier::Uint(*id),
         })
         .collect();
     TileData::Features(Arc::new(features))
@@ -507,7 +507,7 @@ fn eviction_and_revival_while_a_job_is_in_flight() {
     let Some(TileData::Features(shown)) = contents.result.feature_index.data() else {
         panic!("features");
     };
-    assert_eq!(shown[0].id, feature::Identifier::Uint(2));
+    assert_eq!(shown[0].id, mln_style::feature::Identifier::Uint(2));
 }
 
 /// A tile that waits for its images leaves the cover, its style changes,
@@ -564,16 +564,16 @@ fn queries_and_feature_state_read_the_shown_contents() {
     tile.update();
     assert_eq!(manual.submitted(), 2, "the new data lays out");
     let key = tile.key;
-    let query = |tile: &OneTile| -> Vec<feature::Identifier> {
+    let query = |tile: &OneTile| -> Vec<mln_style::feature::Identifier> {
         let source = tile.store.source(key).expect("the source");
         let options = SourceQueryOptions { source_layers: Some(vec![String::new()]), filter: None };
         source.query_source_features(&options, None).unwrap().into_iter().map(|feature| feature.id).collect()
     };
-    assert_eq!(query(&tile), [feature::Identifier::Uint(1)], "the shown contents' data");
+    assert_eq!(query(&tile), [mln_style::feature::Identifier::Uint(1)], "the shown contents' data");
 
     // A feature state edit reaches the shown contents, over their data.
     let mut state = mln_style::feature::FeatureState::new();
-    state.insert("hover".to_owned(), feature::Value::Bool(true));
+    state.insert("hover".to_owned(), mln_style::feature::Value::Bool(true));
     let (source, _) = tile.store.source_mut(key).expect("the source");
     source.info.feature_state.update_state(None, "1", &state);
     source.coalesce_feature_state(&mut ChangedBuckets::default());
@@ -589,7 +589,7 @@ fn queries_and_feature_state_read_the_shown_contents() {
 
     manual.run();
     tile.update();
-    assert_eq!(query(&tile), [feature::Identifier::Uint(2)]);
+    assert_eq!(query(&tile), [mln_style::feature::Identifier::Uint(2)]);
     assert_eq!(shown_version(&tile), version, "the new layout got the state as it installed");
 }
 
@@ -626,7 +626,7 @@ fn source_data_racing_eviction() {
     let TileData::Features(features) = data else {
         panic!("features");
     };
-    assert_eq!(features[0].id, feature::Identifier::Uint(2));
+    assert_eq!(features[0].id, mln_style::feature::Identifier::Uint(2));
 }
 
 /// A source removed while its tiles load and lay out, and one of the same

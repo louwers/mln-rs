@@ -3,10 +3,9 @@
 
 use std::sync::Arc;
 
-use feature::Value;
-
 use crate::error::Error;
 use crate::expression::GlobalStateMap;
+use crate::feature::Value;
 use crate::filter::Filter;
 use crate::image;
 use crate::layer::Layer;

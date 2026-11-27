@@ -104,7 +104,7 @@ pub(crate) trait RenderSource {
         _feature: &crate::tile::feature::Feature,
         _extension: &str,
         _extension_field: &str,
-        _args: Option<&feature::PropertyMap>,
+        _args: Option<&mln_style::feature::PropertyMap>,
     ) -> Result<crate::query::FeatureExtensionValue, Error> {
         Ok(crate::query::FeatureExtensionValue::default())
     }

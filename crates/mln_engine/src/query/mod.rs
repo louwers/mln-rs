@@ -38,13 +38,13 @@ impl SourceQueryOptions {
 /// collection.
 #[derive(Clone, Debug, PartialEq)]
 pub enum FeatureExtensionValue {
-    Value(feature::Value),
-    FeatureCollection(Vec<feature::Feature<f64>>),
+    Value(mln_style::feature::Value),
+    FeatureCollection(Vec<mln_style::feature::Feature<f64>>),
 }
 
 impl Default for FeatureExtensionValue {
     /// A null value, as a default-constructed C++ variant.
     fn default() -> Self {
-        FeatureExtensionValue::Value(feature::Value::Null)
+        FeatureExtensionValue::Value(mln_style::feature::Value::Null)
     }
 }

@@ -1636,14 +1636,14 @@ fn cluster_queries_read_a_clustered_source() {
     let cluster_id = clusters
         .iter()
         .find_map(|feature| match feature.properties.get("cluster_id") {
-            Some(feature::Value::Uint(id)) => Some(*id as u32),
-            Some(feature::Value::Int(id)) => Some(*id as u32),
-            Some(feature::Value::Double(id)) => Some(*id as u32),
+            Some(mln_style::feature::Value::Uint(id)) => Some(*id as u32),
+            Some(mln_style::feature::Value::Int(id)) => Some(*id as u32),
+            Some(mln_style::feature::Value::Double(id)) => Some(*id as u32),
             _ => None,
         })
         .unwrap_or_else(|| panic!("no cluster in {clusters:?}"));
 
-    assert_ne!(wait(session.cluster_children("clustered", cluster_id)), Vec::<feature::Feature>::new());
+    assert_ne!(wait(session.cluster_children("clustered", cluster_id)), Vec::<mln_style::feature::Feature>::new());
     assert_eq!(3, wait(session.cluster_leaves("clustered", cluster_id, 10, 0)).len());
     assert_eq!(1, wait(session.cluster_leaves("clustered", cluster_id, 1, 2)).len());
     // As in C++ supercluster, an offset at or past the last leaf, or a limit
@@ -1651,7 +1651,7 @@ fn cluster_queries_read_a_clustered_source() {
     for (limit, offset) in [(10, 3), (10, 10), (0, 0)] {
         assert_eq!(
             wait(session.cluster_leaves("clustered", cluster_id, limit, offset)),
-            Vec::<feature::Feature>::new()
+            Vec::<mln_style::feature::Feature>::new()
         );
     }
     assert!(wait(session.cluster_expansion_zoom("clustered", cluster_id)) > 0);

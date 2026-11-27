@@ -8,7 +8,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicUsize, Ordering};
 use std::time::Duration;
 
-use feature::Value;
 use geo_types::{LineString, Point};
 use geojson::{GeoJson, Geometry};
 use mln_engine::camera::{
@@ -34,6 +33,7 @@ use mln_style::bitmap::PremultipliedImage;
 use mln_style::color::Color;
 use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::expression::{Formatted, FormattedSection, Functions, Image};
+use mln_style::feature::Value;
 use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
 use mln_style::hash::HashSet;
 use mln_style::layer::{Layer, LayerStyle, convert_layer};

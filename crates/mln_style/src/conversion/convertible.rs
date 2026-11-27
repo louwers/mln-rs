@@ -5,7 +5,7 @@
 // `Convertible` borrows a `dyn ConversionTraits`: a front end's members are
 // views into their parent, as serde_json's are.
 
-use feature::Value;
+use crate::feature::Value;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, thiserror::Error)]
 #[error("{message}")]

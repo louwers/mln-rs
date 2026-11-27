@@ -1,7 +1,7 @@
 //! Style conversion: `Error`, the type-erased `Convertible` view of a
 //! JSON-like value, its front ends over `serde_json` values, over
 //! `serde_json_borrow` values (the style parser's) and over
-//! `feature::Value`, `get_json_type`, and the converters of value types.
+//! `crate::feature::Value`, `get_json_type`, and the converters of value types.
 //!
 //! `Converter` is a trait for the converters of constants, which take no
 //! arguments besides the value and the error. A structure that can hold an

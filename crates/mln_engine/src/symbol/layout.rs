@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use geometry::Point;
 use glam::Vec2;
+use mln_style::collections::VecMap;
 use mln_style::constants::{EXTENT, TILE_SIZE_D};
 use mln_style::error::Error;
 use mln_style::expression::formatted::K_FORMATTED_SECTION_TEXT_COLOR;
@@ -28,7 +29,6 @@ use mln_style::types::{
     VariableAnchorOffsetCollection,
 };
 use mln_style::{PropertyEvaluationParameters, StyleValue as _, i18n};
-use mln_vec_map::VecMap;
 
 use crate::draw::mesh::Indexed;
 use crate::image::image_store::ImageType;

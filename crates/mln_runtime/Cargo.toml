@@ -47,7 +47,6 @@ bench = [
 ]
 
 [dependencies]
-feature.workspace = true
 geo-types.workspace = true
 geojson.workspace = true
 log.workspace = true

@@ -96,9 +96,8 @@ pub(crate) fn merge_lines(features: &mut [SymbolFeature]) {
 
 #[cfg(test)]
 mod tests {
-    use feature::Value;
     use geometry::Point;
-    use mln_style::feature::{GeometryCollection, GeometryCoordinates, GeometryTileFeature};
+    use mln_style::feature::{GeometryCollection, GeometryCoordinates, GeometryTileFeature, Value};
     use mln_style::geometry::FeatureType;
 
     use super::*;

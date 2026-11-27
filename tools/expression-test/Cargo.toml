@@ -19,11 +19,9 @@ name = "expression-test"
 path = "src/main.rs"
 
 [dependencies]
-feature.workspace = true
 geo-types.workspace = true
 geojson.workspace = true
 mln_style.workspace = true
-mln_vec_map.workspace = true
 serde_json.workspace = true
 
 # The whole expression corpus; fails only on tests that fail but are not

@@ -1,7 +1,5 @@
 use std::cmp::Ordering;
 
-use feature::Value as MbglValue;
-
 use crate::conversion::Convertible;
 use crate::expression::forms::assertion::Assertion;
 use crate::expression::locale::collator::Collator;
@@ -9,6 +7,7 @@ use crate::expression::parse::{ParseResult, ParsingContext};
 use crate::expression::type_::{self, Type};
 use crate::expression::value::{Value, type_of};
 use crate::expression::{EvalResult, EvaluationContext, EvaluationError, Expr, Node};
+use crate::feature::Value as MbglValue;
 
 fn is_comparable_type(op: &str, t: &Type) -> bool {
     if op == "==" || op == "!=" {

@@ -12,7 +12,7 @@ use std::fmt::Write as _;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use mln_vec_map::VecMap;
+use mln_style::collections::VecMap;
 use parking_lot::Mutex;
 use pmtiles::{Compression, DirEntry, Directory, Header, PmtError, TileCoord, TileId, TileType};
 use serde_json::{Value as Json, json};

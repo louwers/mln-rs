@@ -105,7 +105,8 @@ fn identity_function_default_for_unconvertible_values() {
     use crate::expression::EvaluationContext;
     use crate::types::{LineJoinType, VariableAnchorOffsetCollection};
 
-    let feature = StubGeometryTileFeature::new(property_map(&[("p", feature::Value::String("bogus".to_owned()))]));
+    let feature =
+        StubGeometryTileFeature::new(property_map(&[("p", crate::feature::Value::String("bogus".to_owned()))]));
     let context = EvaluationContext::from_feature(Some(&feature));
     let mut error = Error::default();
 
@@ -138,9 +139,10 @@ fn function_color_space() {
         let json = format!(r#"{{"stops": [[0, "red"], [1, "blue"]], "colorSpace": "{color_space}"}}"#);
         let mut error = Error::default();
         let function = convert_json::<crate::color::Color>(&json, &mut error, false).expect("color function");
-        let feature::Value::Array(serialized) = function.as_expression().unwrap().get_expression().serialize() else {
+        let crate::feature::Value::Array(serialized) = function.as_expression().unwrap().get_expression().serialize()
+        else {
             panic!("{color_space}: not an expression array");
         };
-        assert_eq!(serialized[0], feature::Value::String(operator.to_owned()), "{color_space}");
+        assert_eq!(serialized[0], crate::feature::Value::String(operator.to_owned()), "{color_space}");
     }
 }

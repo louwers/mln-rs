@@ -1,6 +1,5 @@
-use feature::{Value as MbglValue, ValueObject};
-
 use crate::conversion::{Convertible, Error};
+use crate::feature::{Value as MbglValue, ValueObject};
 
 /// An image ID plus whether it is available.
 #[derive(Clone, Debug, Default, PartialEq, Eq, mln_wire::Wire)]

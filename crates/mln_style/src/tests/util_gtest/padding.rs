@@ -4,12 +4,10 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use feature::{PropertyMap, Value as MbglValue};
-
 use crate::conversion::{Convertible, Error};
 use crate::expression::dsl::{interpolate, linear, literal, zoom};
 use crate::expression::{EvaluationContext, Functions, create_expression_from_str};
-use crate::feature::GeometryTileFeature;
+use crate::feature::{GeometryTileFeature, PropertyMap, Value as MbglValue};
 use crate::geometry::FeatureType;
 use crate::padding::Padding;
 use crate::property::convert::convert_property_value;

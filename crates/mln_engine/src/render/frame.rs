@@ -1,8 +1,8 @@
 //! What a frame's update hands its encode.
 
+use mln_style::collections::VecMap;
 use mln_style::color::Color;
 use mln_style::time::Instant;
-use mln_vec_map::VecMap;
 
 use crate::camera::View;
 use crate::render::light::EvaluatedLight;

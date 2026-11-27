@@ -244,7 +244,7 @@ impl TestRunnerImpl for Impl {
         self.map.edit_style(|style| style_ops::set_layer_filter(style, layer, filter))
     }
 
-    fn set_global_state_property(&mut self, name: &str, value: &feature::Value) -> Result<(), MapError> {
+    fn set_global_state_property(&mut self, name: &str, value: &mln_style::feature::Value) -> Result<(), MapError> {
         style_ops::set_global_state_property(&mut self.map, name, value)
     }
 
@@ -253,7 +253,7 @@ impl TestRunnerImpl for Impl {
         source_id: &str,
         source_layer: Option<&str>,
         feature_id: &str,
-        state: &feature::PropertyMap,
+        state: &mln_style::feature::PropertyMap,
     ) -> Result<bool, MapError> {
         if self.frontend.render(&mut self.map).is_err() {
             return Ok(false);

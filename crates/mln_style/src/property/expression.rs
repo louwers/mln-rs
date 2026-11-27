@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use mln_vec_map::VecSet;
 use mln_wire::shared;
 
+use crate::collections::VecSet;
 use crate::expression::value::from_expression_values;
 use crate::expression::{
     Dependency, EvaluationContext, Expr, GlobalStateMap, Value, ValueConverter, ZoomCurvePtr,

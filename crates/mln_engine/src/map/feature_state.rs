@@ -190,7 +190,7 @@ impl FeatureStateStore {
 
 #[cfg(test)]
 mod tests {
-    use feature::Value;
+    use mln_style::feature::Value;
 
     use super::*;
 

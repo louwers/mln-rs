@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description.workspace = true
-license.workspace = true
+license = "BSD-2-Clause AND ISC"
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
@@ -22,13 +22,11 @@ dsl = []
 
 [dependencies]
 cheap-ruler.workspace = true
-feature.workspace = true
 foldhash.workspace = true
 geojson.workspace = true
 geo-types.workspace = true
 geometry.workspace = true
 log.workspace = true
-mln_vec_map.workspace = true
 parking_lot.workspace = true
 mln_wire.workspace = true
 serde.workspace = true

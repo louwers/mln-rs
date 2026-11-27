@@ -5,9 +5,9 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use mln_style::collections::VecSet;
 use mln_style::layer::SourceKind;
 use mln_style::tileset::RasterEncoding;
-use mln_vec_map::VecSet;
 
 use crate::image::image_store::ImageWait;
 use crate::layer::tile_layout::{Dependencies, LayoutParams};
