@@ -1254,13 +1254,11 @@ impl RenderOrchestrator {
                 layer.set_route(route);
             }
         }
-        // A routed layer draws flat into its target.
-        let layers = || {
-            let layers = frame.layers.keys().map(|&index| &*self.layers[index as usize]);
-            layers.filter(move |layer| !routes || layer.base().route.is_none())
-        };
-        let mut stands = frame.terrain && layers().any(|layer| layer.terrain().stands());
-        let mut hides = layers().any(|layer| layer.terrain().hides_behind_ground());
+        // A layer stands on the ground in its shared target as on the map,
+        // since a target is of the frame's size and projection.
+        let layers = || frame.layers.keys().map(|&index| &*self.layers[index as usize]);
+        let stands = frame.terrain && layers().any(|layer| layer.terrain().stands());
+        let hides = layers().any(|layer| layer.terrain().hides_behind_ground());
         paint_parameters.ground = self.terrain.update_ground(paint_parameters, stands, hides);
         // Whether a 3D layer draws before the terrain's first surface, which
         // writes the depth of the ground and of the planet.
@@ -1286,23 +1284,12 @@ impl RenderOrchestrator {
             render_layer.update_draws(gpu, paint_parameters, layer_source, &mut self.shared);
             if routes && !self.shared.end_layer(render_layer.id()) {
                 // The layer draws on the map as it would unrouted: over
-                // terrain, in the drapes, or standing on the ground.
+                // terrain, one that drapes draws in the drapes.
                 render_layer.set_route(None);
                 if drapes {
                     render_layer.remove_frame_draws();
                     surface = true;
                     continue;
-                }
-                // Its draws were made flat, for a ground that left it out:
-                // the frame's ground takes it in, and its draws are made
-                // again.
-                let on = render_layer.terrain();
-                if frame.terrain && on.stands() {
-                    if !stands || (on.hides_behind_ground() && !hides) {
-                        (stands, hides) = (true, hides || on.hides_behind_ground());
-                        paint_parameters.ground = self.terrain.update_ground(paint_parameters, stands, hides);
-                    }
-                    render_layer.update_draws(gpu, paint_parameters, layer_source, &mut self.shared);
                 }
             }
             needs_depth = needs_depth || (render_layer.volume() && !surface);

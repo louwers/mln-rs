@@ -249,9 +249,10 @@ impl Fixture {
         Fixture::with_file_source(style, pixel_ratio, None)
     }
 
-    /// A map of `style` whose tiles are DEM tiles of sea level everywhere.
-    fn over_dem(style: &str) -> Fixture {
-        Fixture::with_file_source(style, 1.0, Some(Arc::new(SeaLevel::new())))
+    /// A map of `style` whose tiles are DEM tiles of `height` metres
+    /// everywhere, a multiple of 0.1 from −10000.
+    fn over_dem(style: &str, height: f64) -> Fixture {
+        Fixture::with_file_source(style, 1.0, Some(Arc::new(Dem::new(height))))
     }
 
     fn with_file_source(style: &str, pixel_ratio: f32, file_source: Option<Arc<dyn FileSource>>) -> Fixture {
@@ -288,23 +289,24 @@ impl Fixture {
     }
 }
 
-/// A file source whose every resource is a DEM tile of sea level
+/// A file source whose every resource is a DEM tile of one height
 /// everywhere.
-struct SeaLevel(Arc<Vec<u8>>);
+struct Dem(Arc<Vec<u8>>);
 
-impl SeaLevel {
-    fn new() -> SeaLevel {
-        // In the Mapbox encoding, (1 · 65536 + 134 · 256 + 160) · 0.1 −
-        // 10000 = 0 m.
+impl Dem {
+    fn new(height: f64) -> Dem {
+        // In the Mapbox encoding, a height is (R · 65536 + G · 256 + B) ·
+        // 0.1 − 10000 metres.
+        let [_, r, g, b] = (((height + 10000.0) * 10.0).round() as u32).to_be_bytes();
         let mut dem = PremultipliedImage::new(Size::new(8, 8));
         for texel in dem.data.as_chunks_mut::<4>().0 {
-            *texel = [1, 134, 160, 255];
+            *texel = [r, g, b, 255];
         }
-        SeaLevel(Arc::new(mln_engine::image::encode_png(&dem)))
+        Dem(Arc::new(mln_engine::image::encode_png(&dem)))
     }
 }
 
-impl FileSource for SeaLevel {
+impl FileSource for Dem {
     fn load(&self, _resource: &Resource, responder: Responder) {
         let mut response = Response::new();
         response.data = Some(Arc::clone(&self.0));
@@ -550,9 +552,15 @@ fn a_reader_of_an_undeclared_target_draws_nothing() {
 /// A style of `layers` over the shapes and a terrain of the DEM tiles'
 /// source, which declares the target `t`.
 fn terrain_style(layers: &[String]) -> String {
+    terrain_style_at(r#""zoom":0.5"#, layers)
+}
+
+/// [`terrain_style`] with the camera `camera`, the members of a style's
+/// camera.
+fn terrain_style_at(camera: &str, layers: &[String]) -> String {
     let dem = r#""dem":{"type":"raster-dem","tiles":["dem/{z}/{x}/{y}.png"],"tileSize":256,"maxzoom":10}"#;
     format!(
-        r#"{{"version":8,"zoom":0.5,"test:targets":["t"],"terrain":{{"source":"dem"}},"sources":{{{SHAPES},{dem}}},"layers":[{}]}}"#,
+        r#"{{"version":8,{camera},"test:targets":["t"],"terrain":{{"source":"dem"}},"sources":{{{SHAPES},{dem}}},"layers":[{}]}}"#,
         layers.join(",")
     )
 }
@@ -563,7 +571,7 @@ fn a_layer_reads_no_target_in_a_drape() {
         let probe = format!(r#"{{"id":"{id}","type":"test.drape-probe","test:source":"t"}}"#);
         vec![BACKGROUND.to_owned(), layer(FILL, Some("t"), ""), probe]
     };
-    Fixture::over_dem(&terrain_style(&layers("draped"))).render();
+    Fixture::over_dem(&terrain_style(&layers("draped")), 0.0).render();
     let draped = seen("draped");
     assert!(!draped.is_empty(), "the probe made no draws in a drape");
     assert!(draped.iter().all(|seen| !seen.read), "a drape read a target: {draped:?}");
@@ -577,8 +585,28 @@ fn a_standing_layer_whose_route_is_refused_for_a_cycle_stands_on_the_ground() {
     // The probe would draw `t` from `t`, and is the frame's only layer that
     // stands.
     let probe = layer(r#"{"id":"standing","type":"test.stand-probe","test:source":"t"}"#, Some("t"), "");
-    Fixture::over_dem(&terrain_style(&[BACKGROUND.to_owned(), probe])).render();
+    Fixture::over_dem(&terrain_style(&[BACKGROUND.to_owned(), probe]), 0.0).render();
     assert_warned("standing", "draws on the map");
     let last = seen("standing").last().copied().expect("the probe made its draws");
     assert_eq!(Seen { read: true, stands: true, ground_depth: true }, last);
+}
+
+#[test]
+fn a_standing_layer_drawn_into_a_target_and_read_back_stands_on_the_ground_as_on_the_map() {
+    // Pitched over the point, 3 km up, where its height moves it by tens of
+    // pixels.
+    let camera = r#""center":[15,-15],"zoom":10,"pitch":60"#;
+    let over_dem = |layers: &[String]| Fixture::over_dem(&terrain_style_at(camera, layers), 3000.0).render();
+    let expected = over_dem(&on_map(&[CIRCLE]));
+    let flat = render(&format!(r#"{{"version":8,{camera},"sources":{{{SHAPES}}},"layers":[{BACKGROUND},{CIRCLE}]}}"#));
+    assert!(distance(&expected, &flat) > 2, "the ground's height doesn't move the circle");
+    let layers = [BACKGROUND.to_owned(), layer(CIRCLE, Some("t"), ""), copy("copy", "t", None)];
+    assert_draws_as(&over_dem(&layers), &expected);
+
+    // A routed layer that hides behind the ground stands on it and reads its
+    // depth in its target.
+    let probe = layer(r#"{"id":"routed","type":"test.stand-probe"}"#, Some("t"), "");
+    over_dem(&[BACKGROUND.to_owned(), probe, copy("copy", "t", None)]);
+    let last = seen("routed").last().copied().expect("the probe made its draws");
+    assert_eq!(Seen { read: false, stands: true, ground_depth: true }, last);
 }

@@ -16,9 +16,10 @@
 //! A route that doesn't fit is refused, with a warning, and the layer draws
 //! on the map: a route into a target the frame doesn't have, of a layer
 //! whose type doesn't route ([`Layer::ROUTES`]) or whose blend reads what is
-//! behind it, or one that would make a target read what it draws. A routed
-//! layer draws flat into its target: over terrain, it neither drapes nor
-//! stands on the ground.
+//! behind it, or one that would make a target read what it draws. Over
+//! terrain, a routed layer that drapes draws flat into its target instead,
+//! since a drape draws into the terrain tiles' textures, and one that stands
+//! on the ground stands on it in its target as on the map.
 //!
 //! [`Layer::ROUTES`]: crate::layer::Layer::ROUTES
 

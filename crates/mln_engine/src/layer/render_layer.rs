@@ -1231,8 +1231,7 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         source: Option<FrameSourceTiles<'_>>,
         targets: &mut SharedTargets,
     ) {
-        // A layer routed into a shared target draws flat into it.
-        let stands = L::TERRAIN.stands() && parameters.ground.is_some() && self.base.route.is_none();
+        let stands = L::TERRAIN.stands() && parameters.ground.is_some();
         self.use_projection_variant(ProjectionVariant::new(parameters.view.is_globe(), stands));
         if !has_tiles::<L>() {
             // A layer that picks tiles draws those its update picked.
