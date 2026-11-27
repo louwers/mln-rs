@@ -50,6 +50,15 @@ enum Border {
     Share(f32),
 }
 
+impl Border {
+    /// Whether the border has any width.
+    fn is_positive(self) -> bool {
+        match self {
+            Border::Pixels(width) | Border::Share(width) => width > 0.0,
+        }
+    }
+}
+
 /// One of the shapes a layer draws.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Part {
@@ -147,7 +156,7 @@ pub(crate) fn parts(paint: &paint::PossiblyEvaluated) -> impl Iterator<Item = Pa
     [Some(accuracy), heading[0], Some(shadow), heading[1], Some(puck)]
         .into_iter()
         .flatten()
-        .filter(|part| part.fill.a > 0.0 || part.border.a > 0.0)
+        .filter(|part| part.fill.a > 0.0 || (part.border.a > 0.0 && part.border_width.is_positive()))
         .filter(|part| match part.radius {
             Radius::Pixels(radius) | Radius::Meters(radius) => radius > 0.0,
         })
@@ -268,6 +277,14 @@ mod tests {
         paint.puck_bearing_accuracy = Evaluated::Constant(20.0);
         let expected = [Shape::Disc, Shape::Sector, Shape::Shadow, Shape::Arrow, Shape::Disc];
         assert_eq!(expected.to_vec(), shapes(&paint).into_iter().map(|(shape, _)| shape).collect::<Vec<_>>());
+
+        // A transparent puck shows only with a border that has a width.
+        paint.puck_color = Evaluated::Constant(Color::new(0.0, 0.0, 0.0, 0.0));
+        paint.puck_border_color = Evaluated::Constant(Color::black());
+        paint.puck_border_width = Evaluated::Constant(0.0);
+        assert_eq!(Some(&(Shape::Arrow, true)), shapes(&paint).last());
+        paint.puck_border_width = Evaluated::Constant(2.0);
+        assert_eq!(Some(&(Shape::Disc, true)), shapes(&paint).last());
 
         paint.puck_radius = Evaluated::Constant(0.0);
         assert_eq!(Some(&(Shape::Arrow, true)), shapes(&paint).last());
