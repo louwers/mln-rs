@@ -24,7 +24,9 @@ pub(crate) struct Anchor {
     pub(crate) point: [f64; 2],
     /// The height of the ground under the position, in meters.
     pub(crate) height: f64,
-    /// The tile units that a logical pixel spans at the view's zoom.
+    /// The tile units that a logical pixel spans at the position: at the
+    /// view's zoom and, on the globe, at the center's latitude, as the
+    /// globe scales tile units away from it.
     pub(crate) pixels_to_tile_units: f64,
     /// The tile units that a meter on the ground spans at the position.
     pub(crate) tile_units_per_meter: f64,
@@ -71,13 +73,15 @@ pub(crate) fn anchors(view: &View, at: LatLng, height: impl Fn(UnwrappedTileID, 
             let tile = UnwrappedTileID::with_wrap(wrap, canonical);
             let point = [(x - f64::from(canonical.x)) * extent, (y - f64::from(canonical.y)) * extent];
             let height = height(tile, point);
-            let drawn = TileProjector::new(view, &tile).project_as_drawn(&Point::new(point[0], point[1]), height);
+            let projector = TileProjector::new(view, &tile);
+            let drawn = projector.project_as_drawn(&Point::new(point[0], point[1]), height);
             let distance = drawn.signed_distance_from_camera;
             (distance > 0.0 && !drawn.occluded).then_some(Anchor {
                 tile,
                 point,
                 height,
-                pixels_to_tile_units,
+                pixels_to_tile_units: pixels_to_tile_units
+                    * projector.pitched_text_correction(&Point::new(point[0], point[1])),
                 tile_units_per_meter,
                 distance,
             })
@@ -212,5 +216,24 @@ mod tests {
             to_screen(view, anchors[0].tile, anchors[0].point, 0.0).unwrap(),
         );
         assert_eq!(flat(view, LatLng::new(0.0, 180.0).unwrap()), []);
+    }
+
+    #[test]
+    fn on_the_globe_a_logical_pixel_at_an_anchor_spans_one_on_the_screen_at_any_latitude() {
+        let state = camera(0.0, 0.0, 3.0, true);
+        let view = state.view();
+        for latitude in [0.0, 30.0, 50.0] {
+            let anchors = flat(view, LatLng::new(latitude, 0.0).unwrap());
+            assert_eq!(1, anchors.len(), "{latitude}");
+            let anchor = anchors[0];
+            // East, across the line of sight, the screen shrinks a pixel by
+            // how much farther it is than the center.
+            let pixels = 10.0 * anchor.distance / view.camera_to_center_distance();
+            let east = [anchor.point[0] + pixels * anchor.pixels_to_tile_units, anchor.point[1]];
+            let from = to_screen(view, anchor.tile, anchor.point, 0.0).unwrap();
+            let to = to_screen(view, anchor.tile, east, 0.0).unwrap();
+            let length = (to.x - from.x).hypot(to.y - from.y);
+            assert!((length - 10.0).abs() < 0.1, "{latitude}: {length}");
+        }
     }
 }
