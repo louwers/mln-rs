@@ -21,11 +21,11 @@ use crate::draw::segment::SegmentBase;
 use crate::draw::vertex_attribute::Uniforms;
 use crate::layer::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, TileDraws, TileObjects};
 use crate::layer::layer_type::LayerType;
-use crate::layer::layout::NoLayout;
 use crate::layer::render_layer::{
     EvaluateCx, Evaluation, LayerUpdateParameters, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer,
     RenderLayerBase, TypedLayer,
 };
+use crate::layer::tile_input::NoTiles;
 use crate::layers::background::pattern_atlas::PatternAtlas;
 use crate::layers::background::programs;
 use crate::layers::background::ubo::{
@@ -36,7 +36,7 @@ use crate::render::globe::globe_tile_mesh::raw_globe_tile_mesh;
 use crate::render::paint_parameters::PaintParameters;
 use crate::render::pass::RenderPass;
 use crate::render::static_data::RenderStaticData;
-use crate::render::tile::NoTileBucket;
+use crate::render::tile::FrameTile;
 use crate::render::tile_matrix::{projection_data, to_projection_ubo};
 use crate::tile::OverscaledTileID;
 use crate::tile_store::tile_cover::{TileCoverParameters, tile_cover};
@@ -46,8 +46,7 @@ const DRAWABLE_ID: usize = programs::BACKGROUND.buffer_id("drawableVector");
 const PROPS_ID: usize = programs::BACKGROUND.buffer_id("props");
 
 impl LayerType for Background {
-    type Layout = NoLayout;
-    type TileBucket<'a> = NoTileBucket;
+    type Input = NoTiles;
     const CROSSFADES: bool = true;
 
     fn render_layer(style: Arc<LayerStyle<Background>>) -> Box<dyn RenderLayer> {
@@ -180,7 +179,12 @@ impl TypedLayer for RenderBackgroundLayer {
     /// tiles that cover the view, or a drape's tile. It builds the draw of a
     /// tile it keeps none of or whose draw was built for other passes or
     /// patterns, and writes the layer's buffers the draws read.
-    fn update_draws_without_source(&mut self, gpu: &mut dyn Gpu, paint_parameters: &mut PaintParameters<'_>) {
+    fn update_draws(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        paint_parameters: &mut PaintParameters<'_>,
+        _tiles: &[FrameTile<'_, Background>],
+    ) {
         let RenderBackgroundLayer { base, values, drawing, draw_list, patterns } = self;
         let layer = &*values.evaluated;
         let evaluated = &layer.paint;
@@ -297,7 +301,7 @@ impl TypedLayer for RenderBackgroundLayer {
     /// Picks the tiles that cover the view, which the layer draws, having no
     /// source, and packs its patterns, again those whose images the style
     /// replaced.
-    fn update_without_source(&mut self, parameters: &mut LayerUpdateParameters<'_>) {
+    fn update(&mut self, parameters: &mut LayerUpdateParameters<'_>, _tiles: &[FrameTile<'_, Background>]) {
         let (state, update_parameters) = (parameters.view, parameters.update_parameters);
         let zoom = state.integer_zoom();
         let tiles = tile_cover(
