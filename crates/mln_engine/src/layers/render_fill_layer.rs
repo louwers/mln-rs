@@ -1,5 +1,4 @@
 use std::mem::offset_of;
-use std::sync::Arc;
 
 use mln_gfx::gpu::{Caps, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
@@ -8,7 +7,6 @@ use mln_gfx::shaders::program::Program;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_style::color::Color;
 use mln_style::constants::TILE_SIZE_D;
-use mln_style::layer::LayerStyle;
 use mln_style::layers::Fill;
 use mln_style::layers::fill_layer_properties::FillPaintProperties;
 use mln_style::types::{AlignmentType, TranslateAnchorType};
@@ -24,11 +22,9 @@ use crate::draw::segment::SegmentBase;
 use crate::draw::texture2d::Texture2D;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::layer::bucket_geometry::{bucket_indexes, bucket_vertices, copied_vertices, paint_vertices};
-use crate::layer::layer_type::{EvaluatedLayer, LayerType};
+use crate::layer::layer_type::EvaluatedLayer;
 use crate::layer::paint_property_binder::PaintBinders as _;
-use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, Hosted, LayerValues, OnTerrain, PrepareCx, RenderLayer, TileCx, TypedLayer,
-};
+use crate::layer::render_layer::{EvaluateCx, Evaluation, Layer, LayerValues, OnTerrain, PrepareCx, TileCx};
 use crate::layer::tile_input::{Features, TileData};
 use crate::layers::fill::programs;
 use crate::layers::fill::ubo::{
@@ -248,7 +244,7 @@ impl TileBuilder<'_> {
     fn build(
         &mut self,
         context: &mut Context,
-        tile_bucket: TileData<'_, Fill>,
+        tile_bucket: TileData<'_, RenderFillLayer>,
         binders: &FillBinders,
         evaluated: &FillPaintProperties::PossiblyEvaluated,
     ) -> Option<FillTile> {
@@ -400,20 +396,6 @@ impl TileBuilder<'_> {
     }
 }
 
-impl LayerType for Fill {
-    type Input = Features<PatternLayout<FillLayoutSpec>>;
-    const CROSSFADES: bool = true;
-
-    fn query_radius(_data: TileData<'_, Fill>, layer: &EvaluatedLayer<Fill>) -> f32 {
-        let translate = layer.paint.fill_translate.uniform();
-        (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
-    }
-
-    fn render_layer(style: Arc<LayerStyle<Fill>>) -> Box<dyn RenderLayer> {
-        Hosted::<RenderFillLayer>::boxed(style)
-    }
-}
-
 pub(crate) struct RenderFillLayer {
     /// The instanced outlines' quad (`RenderStaticData::fill_outline_vertices`),
     /// from the first tile the layer builds them for.
@@ -442,8 +424,8 @@ impl RenderFillLayer {
     fn uniforms(
         layer_id: &str,
         layer: &EvaluatedLayer<Fill>,
-        tile: FrameTile<'_, Fill>,
-        tile_bucket: TileData<'_, Fill>,
+        tile: FrameTile<'_, RenderFillLayer>,
+        tile_bucket: TileData<'_, RenderFillLayer>,
         binders: &FillBinders,
         pattern: bool,
         draw: &FillDraw,
@@ -553,8 +535,15 @@ impl RenderFillLayer {
     }
 }
 
-impl TypedLayer for RenderFillLayer {
-    type Type = Fill;
+impl Layer for RenderFillLayer {
+    type Style = Fill;
+    type Input = Features<PatternLayout<FillLayoutSpec>>;
+    const CROSSFADES: bool = true;
+
+    fn query_radius(_data: TileData<'_, RenderFillLayer>, layer: &EvaluatedLayer<Fill>) -> f32 {
+        let translate = layer.paint.fill_translate.uniform();
+        (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
+    }
     type Tile = FillTile;
     const TERRAIN: OnTerrain = OnTerrain::Drapes;
 
@@ -591,8 +580,8 @@ impl TypedLayer for RenderFillLayer {
     fn tile(
         &mut self,
         cx: &mut TileCx<'_, '_, Self>,
-        tile: FrameTile<'_, Fill>,
-        _data: TileData<'_, Fill>,
+        tile: FrameTile<'_, RenderFillLayer>,
+        _data: TileData<'_, RenderFillLayer>,
         _previous: Option<FillTile>,
     ) -> Option<FillTile> {
         let render_data = tile.data_for_pass(RENDER_PASS)?;
@@ -632,7 +621,12 @@ impl TypedLayer for RenderFillLayer {
     }
 
     /// Pushes the frame's draws of the layer, those of each of its tiles.
-    fn prepare(&mut self, cx: &mut PrepareCx<'_, '_, Self>, render_tiles: &[FrameTile<'_, Fill>], out: &mut Draws) {
+    fn prepare(
+        &mut self,
+        cx: &mut PrepareCx<'_, '_, Self>,
+        render_tiles: &[FrameTile<'_, RenderFillLayer>],
+        out: &mut Draws,
+    ) {
         let layer_id = cx.base.style.base().id.as_str();
         let layer = &*cx.values.evaluated;
         for &tile in render_tiles {
@@ -733,7 +727,7 @@ impl TypedLayer for RenderFillLayer {
     }
 
     // query
-    fn query_intersects_feature(
+    fn hit(
         &self,
         values: &LayerValues<Fill>,
         region: &QueryRegion<'_>,
