@@ -2,9 +2,10 @@
 //! frame.
 //!
 //! Each layer type keeps the GPU objects of its draws in types of its own,
-//! those of a tile in a [`TileMap`], which also says which bucket the
-//! tile's draws were built from and what of that bucket's vertex data
-//! changed since. Its draw update makes the frame's draws, values
+//! those of a tile in its tile value, which the engine keeps in a
+//! [`TileMap`] that also says what the tile's value was made from and what
+//! of that bucket's vertex data changed since. Its draw update makes the
+//! frame's draws, values
 //! ([`FrameDraw`]) in a [`DrawList`] with their uniform values and the part
 //! of the layer's GPU objects each binds, which it writes to the buffers of
 //! their [`LayerDraws`]. The layer type then uploads and draws them in
@@ -12,8 +13,8 @@
 //! [`DrawPass::draw`] draws one draw's objects. A layer type that draws one
 //! group of its tiles' draws keeps them in a [`TileDraws`], whose tiles name
 //! the objects of their draws by a part of their own type
-//! ([`TileObjects`]). A layer that drapes over terrain keeps a drawing of
-//! its type in each drape too ([`DrapeDrawing`]).
+//! ([`TileObjects`]). A layer that drapes over terrain has tile values and a
+//! drawing of its type in each drape too ([`DrapeDrawing`]).
 
 use std::any::Any;
 use std::ops::BitOrAssign;
@@ -99,12 +100,17 @@ impl ChangedBuckets {
     }
 }
 
-/// What a layer keeps of a tile it draws, whatever the layer's type.
+/// What the tile showed a layer that its value was made from: the
+/// identity of its bucket, or of its raster or raster-dem contents, with the
+/// generations of their mask or mesh and of their DEM's border.
+pub(crate) type MadeFrom = (SimpleIdentity, [u64; 2]);
+
+/// What the engine keeps of a tile a layer draws, whatever the layer's type.
 #[derive(Default)]
 struct TileState {
-    /// The bucket the tile's draws were built from, `None` until a layer's
-    /// update sets it.
-    bucket: Option<SimpleIdentity>,
+    /// What the tile's value was made from, `None` until the engine first
+    /// sees the tile show the layer something.
+    made_from: Option<MadeFrom>,
     /// What of the bucket's vertex data changed since the draws copied it.
     changes: BucketChanges,
 }
@@ -238,7 +244,7 @@ impl TileSet {
 
     fn mark_changed(&mut self, changed: &ChangedBuckets) {
         for state in &mut self.states {
-            if let Some(changes) = state.bucket.and_then(|bucket| changed.get(bucket)) {
+            if let Some(changes) = state.made_from.and_then(|(bucket, _)| changed.get(bucket)) {
                 state.changes |= changes;
             }
         }
@@ -260,9 +266,12 @@ fn kept_tiles<'a>(
     })
 }
 
-/// What a layer keeps of each of the frame's tiles it draws, by tile id: the
-/// bucket the tile's draws were built from and what of it changed since,
-/// and the layer's own `T` of the tile, from when the layer builds one.
+/// A layer's values of the frame's tiles, which the engine keeps, by tile id:
+/// what each tile's value was made from and what of its bucket changed
+/// since, and the value, a `T` of the layer's type, from when the layer
+/// makes one ([`TypedLayer::tile`]).
+///
+/// [`TypedLayer::tile`]: crate::layer::render_layer::TypedLayer::tile
 pub(crate) struct TileMap<T> {
     set: TileSet,
     /// Each tile's `T`, at the tile's index in the set.
@@ -307,13 +316,13 @@ impl<T> TileMap<T> {
         }
     }
 
-    /// Adds `changed` to the changes of the tiles whose draws were built from
+    /// Adds `changed` to the changes of the tiles whose values were made from
     /// a bucket in it.
     pub(crate) fn mark_changed(&mut self, changed: &ChangedBuckets) {
         self.set.mark_changed(changed);
     }
 
-    /// Drops what the layer keeps of the tiles. The tiles' entries stay.
+    /// Drops the tiles' values. The tiles' entries stay.
     pub(crate) fn clear(&mut self) {
         self.values.fill_with(|| None);
     }
@@ -344,15 +353,6 @@ impl<T> TileMap<T> {
         self.values.get_mut(self.set.index_of(tile_id)?)?.as_mut()
     }
 
-    /// Makes `value` what the layer keeps of `tile_id`, and returns it;
-    /// gives `value` back where the tile isn't one of the frame's.
-    pub(crate) fn insert(&mut self, tile_id: &OverscaledTileID, value: T) -> Result<&mut T, T> {
-        match self.entry(tile_id) {
-            Some(entry) => Ok(entry.value.insert(value)),
-            None => Err(value),
-        }
-    }
-
     /// Drops what the layer keeps of `tile_id`.
     pub(crate) fn drop_value(&mut self, tile_id: &OverscaledTileID) {
         if let Some(value) = self.set.index_of(tile_id).and_then(|index| self.values.get_mut(index)) {
@@ -381,31 +381,34 @@ pub(crate) struct TileEntry<'a, T> {
 }
 
 impl<T> TileEntry<'_, T> {
-    /// The bucket the tile's draws were built from, if they were.
+    /// What the tile's value was made from, if the engine saw it show the
+    /// layer something.
     #[cfg(test)]
     #[must_use]
-    pub(crate) fn bucket(&self) -> Option<SimpleIdentity> {
-        self.state.bucket
+    pub(crate) fn made_from(&self) -> Option<MadeFrom> {
+        self.state.made_from
     }
 
-    /// Records that the tile's draws are built from `bucket`. Where they
-    /// were built from another bucket, this drops what the layer keeps of
-    /// the tile. Returns whether the bucket changed, which drops the changes
-    /// of the one before.
-    pub(crate) fn set_bucket(&mut self, bucket: SimpleIdentity) -> bool {
-        if self.state.bucket == Some(bucket) {
-            return false;
+    /// Records what the tile shows the layer: `made_from`, or `None` for
+    /// nothing. The tile's value drops for nothing, and where it was made
+    /// from something else, which drops the changes of what it was made
+    /// from too.
+    pub(crate) fn show(&mut self, made_from: Option<MadeFrom>) {
+        match made_from {
+            None => *self.value = None,
+            Some(made_from) if self.state.made_from != Some(made_from) => {
+                if self.state.made_from.is_some() {
+                    *self.value = None;
+                }
+                self.state.made_from = Some(made_from);
+                self.state.changes = BucketChanges::default();
+            }
+            Some(_) => {}
         }
-        if self.state.bucket.is_some() {
-            *self.value = None;
-        }
-        self.state.bucket = Some(bucket);
-        self.state.changes = BucketChanges::default();
-        true
     }
 
-    /// What of the tile's bucket changed since its draws last copied it,
-    /// which they are about to copy again.
+    /// What of the tile's bucket changed since its value last copied it,
+    /// which the layer is about to copy again.
     pub(crate) fn take_changes(&mut self) -> BucketChanges {
         std::mem::take(&mut self.state.changes)
     }
@@ -1159,9 +1162,8 @@ impl DrawOrder {
 }
 
 /// The drawing of a layer that draws one group of draws, each of a part of
-/// the tile it draws, and keeps a `T` of each tile.
+/// the value of the tile it draws, a `T`.
 pub(crate) struct TileDraws<T: TileObjects> {
-    tiles: TileMap<T>,
     /// The frame's draws, from the layer's first update with something to
     /// draw.
     frame: Option<LayerDraws<T::Part>>,
@@ -1169,16 +1171,11 @@ pub(crate) struct TileDraws<T: TileObjects> {
 
 impl<T: TileObjects> Default for TileDraws<T> {
     fn default() -> Self {
-        TileDraws { tiles: TileMap::default(), frame: None }
+        TileDraws { frame: None }
     }
 }
 
 impl<T: TileObjects> TileDraws<T> {
-    /// What the layer keeps of the frame's tiles.
-    pub(crate) fn tiles_mut(&mut self) -> &mut TileMap<T> {
-        &mut self.tiles
-    }
-
     /// The frame's draws, which the layer has from the first call on: their
     /// group then takes a place in the layers' order and depth.
     pub(crate) fn frame_mut(&mut self) -> &mut LayerDraws<T::Part> {
@@ -1186,36 +1183,24 @@ impl<T: TileObjects> TileDraws<T> {
     }
 
     /// Makes the draws of `list` the frame's, as [`DrawList::finish`] does,
-    /// and drops the bindings of the tiles' draws where that replaced a
+    /// and drops the bindings of the draws of `tiles` where that replaced a
     /// buffer they bind.
     pub(crate) fn finish<U>(
         &mut self,
         list: &mut DrawList<U, T::Part>,
+        tiles: &mut TileMap<T>,
         gpu: &mut dyn Gpu,
         context: &mut Context,
         write: impl FnOnce(&mut UniformWriter<'_, U>),
     ) {
-        finish_tiles(list, self.frame.get_or_insert_default(), &mut self.tiles, gpu, context, write);
+        finish_tiles(list, self.frame.get_or_insert_default(), tiles, gpu, context, write);
     }
 }
 
-impl<T: TileObjects> LayerDrawing for TileDraws<T> {
-    type Tile = T;
-
-    fn tiles(&mut self) -> Option<&mut TileMap<T>> {
-        Some(&mut self.tiles)
-    }
-
+impl<T: TileObjects> LayerDrawing<T> for TileDraws<T> {
     fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
         if let Some(frame) = &self.frame {
             visit(DrawGroup::Draws(&frame.frame));
-        }
-    }
-
-    fn clear(&mut self) {
-        self.tiles.clear();
-        if let Some(frame) = &mut self.frame {
-            frame.clear();
         }
     }
 
@@ -1229,15 +1214,21 @@ impl<T: TileObjects> LayerDrawing for TileDraws<T> {
         }
     }
 
-    fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+    fn upload(&mut self, tiles: &mut TileMap<T>, gpu: &mut dyn Gpu, context: &mut Context) {
         if let Some(frame) = &self.frame {
-            frame.upload(gpu, &mut self.tiles, tile_objects, context);
+            frame.upload(gpu, tiles, tile_objects, context);
         }
     }
 
-    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
+    fn render(
+        &mut self,
+        tiles: &mut TileMap<T>,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+        order: DrawOrder,
+    ) {
         if let Some(frame) = &self.frame {
-            frame.render(&mut self.tiles, tile_objects, gpu, parameters);
+            frame.render(tiles, tile_objects, gpu, parameters);
             order.step(parameters);
         }
     }
@@ -1247,44 +1238,48 @@ impl<T: TileObjects> LayerDrawing for TileDraws<T> {
     }
 }
 
-/// What a layer type keeps of its drawing: the GPU objects of its draws, in
-/// types of its own, those of its tiles in a [`TileMap`], and its draw
-/// groups of the frame, whose draws it uploads and draws in loops of its
-/// own.
-pub(crate) trait LayerDrawing {
-    /// What the layer keeps of a tile.
-    type Tile;
-
-    /// What the layer keeps of the frame's tiles; `None` for a layer type
-    /// that draws no tiles.
-    fn tiles(&mut self) -> Option<&mut TileMap<Self::Tile>>;
-
+/// What a layer type keeps of its drawing besides its tile values, which
+/// the engine keeps ([`TileMap`]) of the tile type `T`: its draw groups of
+/// the frame, whose draws it uploads and draws in loops of its own, finding
+/// the GPU objects of the tiles' draws in their values, and any GPU objects
+/// of draws of its own.
+pub(crate) trait LayerDrawing<T> {
     /// Visits the layer's draw groups of the frame, in drawing order: from
     /// its first update with something to draw, a group of its draws, and
     /// any of draws over them. While the layer is renderable, a group takes
     /// a place in the layers' order and depth, even when it has no draws.
     fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>));
 
-    /// Drops the frame's draws, and the GPU objects of the tiles' draws and
-    /// of the others. The tiles' entries stay.
-    fn clear(&mut self);
+    /// Drops the frame's draws and the GPU objects of the drawing's own
+    /// draws, as the engine drops the tiles' values.
+    fn clear(&mut self) {
+        self.clear_frame();
+    }
 
     /// Starts the layer's draws of a frame it has something to draw in, in
     /// the encode, before the layer makes them: empty, keeping the GPU
-    /// objects of the tiles' draws. A drawing whose draw group takes its
-    /// place from the layer's first such frame starts the group here.
+    /// objects of the drawing's own draws. A drawing whose draw group takes
+    /// its place from the layer's first such frame starts the group here.
     fn begin_frame(&mut self);
 
-    /// Drops the frame's draws, keeping the GPU objects of the tiles' draws,
-    /// for a frame the layer draws nothing in.
+    /// Drops the frame's draws, keeping the GPU objects of the drawing's
+    /// own draws, for a frame the layer draws nothing in.
     fn clear_frame(&mut self);
 
-    /// Uploads the GPU objects of the draw groups' draws.
-    fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context);
+    /// Uploads the GPU objects of the draw groups' draws, those of the
+    /// tiles' draws in `tiles`.
+    fn upload(&mut self, tiles: &mut TileMap<T>, gpu: &mut dyn Gpu, context: &mut Context);
 
-    /// Draws the draw groups' draws of the pass into the open pass of `gpu`,
-    /// the context's, in `order`, each at its depth.
-    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder);
+    /// Draws the draw groups' draws of the pass, those of the tiles' draws
+    /// with their objects in `tiles`, into the open pass of `gpu`, the
+    /// context's, in `order`, each at its depth.
+    fn render(
+        &mut self,
+        tiles: &mut TileMap<T>,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+        order: DrawOrder,
+    );
 
     /// The buffers that the draws of the drawing's one draw group share,
     /// once it has the group; `None` for a drawing of other groups.
@@ -1293,7 +1288,9 @@ pub(crate) trait LayerDrawing {
     }
 }
 
-/// What a drawing does, whatever the layer type's, for a [`DrapeDrawing`].
+/// What a drape keeps of a layer, whatever the layer's type, for a
+/// [`DrapeDrawing`]: the layer's tile values in the drape and its drawing
+/// there.
 trait AnyDrawing {
     fn as_any_mut(&mut self) -> &mut dyn Any;
     fn mark_changed(&mut self, changed: &ChangedBuckets);
@@ -1303,52 +1300,55 @@ trait AnyDrawing {
     fn frame_buffers(&mut self) -> Option<&mut UniformBufferArray>;
 }
 
-impl<D: LayerDrawing + 'static> AnyDrawing for D {
+impl<T: 'static, D: LayerDrawing<T> + 'static> AnyDrawing for (TileMap<T>, D) {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
 
     fn mark_changed(&mut self, changed: &ChangedBuckets) {
-        if let Some(tiles) = self.tiles() {
-            tiles.mark_changed(changed);
-        }
+        self.0.mark_changed(changed);
     }
 
     fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
-        LayerDrawing::visit_groups(self, visit);
+        self.1.visit_groups(visit);
     }
 
     fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
-        LayerDrawing::upload(self, gpu, context);
+        let (tiles, drawing) = self;
+        drawing.upload(tiles, gpu, context);
     }
 
     fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
-        LayerDrawing::render(self, gpu, parameters, order);
+        let (tiles, drawing) = self;
+        drawing.render(tiles, gpu, parameters, order);
     }
 
     fn frame_buffers(&mut self) -> Option<&mut UniformBufferArray> {
-        LayerDrawing::frame_buffers(self)
+        self.1.frame_buffers()
     }
 }
 
-/// A layer's drawing of its type that a drape keeps, which only the layer
-/// updates ([`LayerParts::update_drape_draws`]) and the drape uploads and
-/// draws.
+/// What a drape keeps of a layer of its stack: the layer's values of the
+/// tiles it draws in the drape, which the engine keeps as it keeps those of
+/// the frame, and the layer's drawing of its type there. Only the layer
+/// updates them ([`RenderLayer::update_drape_draws`]), and the drape uploads
+/// and draws them.
 ///
-/// [`LayerParts::update_drape_draws`]: crate::layer::render_layer::LayerParts::update_drape_draws
+/// [`RenderLayer::update_drape_draws`]: crate::layer::render_layer::RenderLayer::update_drape_draws
 pub(crate) struct DrapeDrawing(Box<dyn AnyDrawing>);
 
 impl DrapeDrawing {
-    pub(crate) fn new<D: LayerDrawing + 'static>(drawing: D) -> DrapeDrawing {
-        DrapeDrawing(Box::new(drawing))
+    /// No tile values and an empty `D`.
+    pub(crate) fn new<T: 'static, D: LayerDrawing<T> + Default + 'static>() -> DrapeDrawing {
+        DrapeDrawing(Box::new((TileMap::<T>::default(), D::default())))
     }
 
-    /// The drawing, if it is a `D`.
-    pub(crate) fn downcast_mut<D: 'static>(&mut self) -> Option<&mut D> {
+    /// The tile values and the drawing, if they are a `T`'s and a `D`.
+    pub(crate) fn downcast_mut<T: 'static, D: 'static>(&mut self) -> Option<&mut (TileMap<T>, D)> {
         self.0.as_any_mut().downcast_mut()
     }
 
-    /// See [`LayerParts::mark_changed`](crate::layer::render_layer::LayerParts::mark_changed).
+    /// See [`RenderLayer::mark_changed`](crate::layer::render_layer::RenderLayer::mark_changed).
     pub(crate) fn mark_changed(&mut self, changed: &ChangedBuckets) {
         self.0.mark_changed(changed);
     }
@@ -1398,9 +1398,15 @@ mod tests {
         tiles.entry(tile_id).map(|entry| *entry.value = Some(value)).is_some()
     }
 
-    /// The bucket of `tile_id` in `tiles`.
+    /// The bucket that the value of `tile_id` in `tiles` was made from.
     fn bucket_of<T>(tiles: &mut TileMap<T>, tile_id: &OverscaledTileID) -> Option<SimpleIdentity> {
-        tiles.entry(tile_id)?.bucket()
+        Some(tiles.entry(tile_id)?.made_from()?.0)
+    }
+
+    /// Records that `tile_id` shows `bucket` in `tiles`; returns whether the
+    /// tile is one of the map's.
+    fn show<T>(tiles: &mut TileMap<T>, tile_id: &OverscaledTileID, bucket: SimpleIdentity) -> bool {
+        tiles.entry(tile_id).map(|mut entry| entry.show(Some((bucket, [0, 0])))).is_some()
     }
 
     /// A tile's changes are those of the bucket its draws were built from,
@@ -1412,9 +1418,9 @@ mod tests {
         let (bucket, other_bucket) = (SimpleIdentity::new(), SimpleIdentity::new());
         let mut tiles = TileMap::<()>::default();
         tiles.set_tiles([tile, other]);
-        assert!(tiles.entry(&tile).is_some_and(|mut entry| entry.set_bucket(bucket)));
-        assert!(tiles.entry(&tile).is_some_and(|mut entry| !entry.set_bucket(bucket)));
-        assert!(tiles.entry(&other).is_some_and(|mut entry| entry.set_bucket(other_bucket)));
+        assert!(show(&mut tiles, &tile, bucket));
+        assert!(show(&mut tiles, &tile, bucket));
+        assert!(show(&mut tiles, &other, other_bucket));
 
         let mut changed = ChangedBuckets::default();
         changed.mark(bucket, BucketChanges { paint: true, ..BucketChanges::default() });
@@ -1433,8 +1439,9 @@ mod tests {
         assert_eq!(Some(other_bucket), bucket_of(&mut tiles, &other.unwrap_to(1)));
     }
 
-    /// A tile whose draws are built from another bucket drops what the layer
-    /// kept of it, and the changes of the bucket before.
+    /// A tile that shows another bucket, or bucket of another generation,
+    /// drops its value and the changes of the bucket before; one that shows
+    /// nothing drops its value.
     #[test]
     fn another_bucket_drops_the_value() {
         let tile = OverscaledTileID::with_zxy(1, 0, 1, 1, 0);
@@ -1442,14 +1449,21 @@ mod tests {
         let mut tiles = TileMap::<u32>::default();
         tiles.set_tiles([tile]);
         assert!(set(&mut tiles, &tile, 1));
-        assert!(tiles.entry(&tile).is_some_and(|mut entry| entry.set_bucket(bucket)));
+        assert!(show(&mut tiles, &tile, bucket));
         assert_eq!(Some(&1), tiles.get(&tile));
         let mut changed = ChangedBuckets::default();
         changed.mark(bucket, BucketChanges { paint: true, ..BucketChanges::default() });
         tiles.mark_changed(&changed);
-        assert!(tiles.entry(&tile).is_some_and(|mut entry| entry.set_bucket(other_bucket)));
+        assert!(show(&mut tiles, &tile, other_bucket));
         assert!(tiles.get(&tile).is_none());
         assert_eq!(Some(BucketChanges::default()), tiles.entry(&tile).map(|mut entry| entry.take_changes()));
+
+        assert!(set(&mut tiles, &tile, 2));
+        tiles.entry(&tile).unwrap().show(Some((other_bucket, [1, 0])));
+        assert!(tiles.get(&tile).is_none());
+        assert!(set(&mut tiles, &tile, 3));
+        tiles.entry(&tile).unwrap().show(None);
+        assert!(tiles.get(&tile).is_none());
     }
 
     /// Each tile keeps its value and bucket as tiles before and after it
@@ -1463,7 +1477,7 @@ mod tests {
             assert!(set(&mut tiles, &ids[i], i as u32));
         }
         let bucket = SimpleIdentity::new();
-        assert!(tiles.entry(&ids[2]).is_some_and(|mut entry| entry.set_bucket(bucket)));
+        assert!(show(&mut tiles, &ids[2], bucket));
         tiles.set_tiles([ids[5], ids[2], ids[0], ids[4], ids[3]]);
         let values: Vec<Option<u32>> = ids.iter().map(|id| tiles.get(id).copied()).collect();
         assert_eq!(vec![None, None, Some(2), None, Some(4), None], values);
@@ -1488,9 +1502,7 @@ mod tests {
                 tiles.clear_tiles();
                 tiles.set_tiles(subsets(from));
                 for (i, id) in ids.iter().enumerate() {
-                    if let Some(mut entry) = tiles.entry(id) {
-                        entry.set_bucket(buckets[i]);
-                    }
+                    show(&mut tiles, id, buckets[i]);
                     set(&mut tiles, id, i);
                 }
                 tiles.set_tiles(subsets(to).rev());

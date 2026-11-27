@@ -10,9 +10,9 @@
 //! drape draws the tiles over its own tile: on Mercator those of its world
 //! copy; on the globe, which has no copies, those of any, in its own, so
 //! that near the antimeridian it holds the tiles that the cover puts in the
-//! next copy. Each draped layer keeps a drawing of its own in each drape of
-//! its stack, made by the layer's own draw update
-//! ([`LayerParts::update_drape_draws`]), with the drape's uniforms, clip
+//! next copy. Each draped layer has tile values and a drawing of its own in
+//! each drape of its stack, made by the layer's own draw update
+//! ([`RenderLayer::update_drape_draws`]), with the drape's uniforms, clip
 //! masks and stencil.
 //!
 //! A drape draws again only when what its layers would draw it from differs
@@ -40,7 +40,7 @@
 //! into the composite's frame texture, which is copied into the drape before
 //! its mips, so a blend's backdrop is the drape's own texels.
 //!
-//! [`LayerParts::update_drape_draws`]: crate::layer::render_layer::LayerParts::update_drape_draws
+//! [`RenderLayer::update_drape_draws`]: crate::layer::render_layer::RenderLayer::update_drape_draws
 //! [`TerrainOptions::drape_memory_limit`]: crate::map::TerrainOptions::drape_memory_limit
 
 use std::sync::Arc;
@@ -306,13 +306,17 @@ impl Drapes {
         lit: bool,
     ) {
         let base = layer.base();
-        let by_bearing = !lit && layer.base().evaluation.drapes_by_bearing;
+        let by_bearing = !lit && base.evaluation.drapes_by_bearing;
+        let found = source.zip(layer.found());
         for drape in &mut self.drapes {
             let Some(StackDrape { key, .. }) = drape.stacks.get_mut(stack) else {
                 continue;
             };
             let start = key.tiles.len();
-            layer.drape_stamps(source, (drape.tile, self.globe), &mut key.tiles);
+            // What the layer draws of each tile it draws the drape from.
+            if let Some((source, found)) = &found {
+                key.tiles.extend(source.stamps(found.clone(), drape.tile.to_unwrapped(), self.globe));
+            }
             if by_bearing {
                 key.bearing = Some(drape.transform.view.angle());
             }

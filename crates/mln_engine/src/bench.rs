@@ -26,7 +26,7 @@ use crate::draw::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::image::image_store::{ImageMap, ImageType};
 use crate::layer::bucket::LayerFeatureStates;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
-use crate::layer::render_layer::{LayerParts, RenderLayer};
+use crate::layer::render_layer::{Hosted, RenderLayer};
 use crate::layer::tile_layout::{Dependencies, LayoutParams, Resolved};
 use crate::map::MapMode;
 use crate::placement::{Placement, PlacementInputs};
@@ -206,7 +206,7 @@ pub struct SymbolView {
     update: Arc<UpdateParameters>,
     /// The style's symbol layers that lead a bucket of the tiles, in the
     /// style's order.
-    layers: Vec<RenderSymbolLayer>,
+    layers: Vec<Hosted<RenderSymbolLayer>>,
 }
 
 impl SymbolView {
@@ -239,17 +239,18 @@ impl SymbolView {
             }
             let style = mln_style::layer::LayerStyle::<mln_style::layers::Symbol>::recover(layer.style())
                 .ok_or_else(|| Error::invalid_argument(format!("no render layer for {}", layer.get_id())))?;
-            let mut render_layer = RenderSymbolLayer::new(style);
+            let mut render_layer = Hosted::<RenderSymbolLayer>::new(style);
             render_layer.evaluate(&parameters);
             // As the layer's update adds its tiles' buckets.
-            let translates = render_layer.symbol_translates();
+            let (symbol_layer, values) = render_layer.layer_mut();
+            let translates = RenderSymbolLayer::symbol_translates(values);
             for (tile_index, laid_out) in tiles.iter().enumerate() {
                 let Some(render_data) = laid_out.result.layer_render_data.get(layer.get_id()) else { continue };
                 let Some(bucket) = crate::layer::bucket::recover(&render_data.bucket) else { continue };
                 let feature_index = || Some(Arc::clone(&laid_out.result.feature_index));
-                render_layer.add_placement_data(&render_tiles, tile_index, bucket, feature_index, translates);
+                symbol_layer.add_placement_data(values, &render_tiles, tile_index, bucket, feature_index, translates);
             }
-            if render_layer.has_placement_data() {
+            if symbol_layer.has_placement_data() {
                 layers.push(render_layer);
             }
         }

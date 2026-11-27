@@ -71,8 +71,6 @@ impl<T: LayerType> TileInput<T> for DemTiles {
 /// what the layout's contents hold for the tile's draws.
 pub(crate) struct LayerBucket<'a, T: LayerType, B> {
     pub(crate) bucket: &'a B,
-    /// The bucket's identity, which tells apart what layers made of it.
-    pub(crate) id: SimpleIdentity,
     /// The index of the bucket among the layout's buckets.
     pub(crate) bucket_index: usize,
     /// The values of the layer that the bucket was laid out with.
@@ -96,7 +94,6 @@ impl<'a, T: LayerType, B: Bucket> LayerBucket<'a, T, B> {
         let layer: &dyn std::any::Any = laid.layer;
         Some(LayerBucket {
             bucket: laid.bucket.downcast_ref::<B>()?,
-            id: laid.bucket.id(),
             bucket_index: laid.bucket_index,
             layer: layer.downcast_ref()?,
             contents,
@@ -158,16 +155,6 @@ impl<'a> RasterTile<'a> {
         match self {
             RasterTile::Tile(raster) => &raster.image,
             RasterTile::Image(image) => &image.image,
-        }
-    }
-
-    /// The number of times the parts of the tile it draws changed: its
-    /// mask's changes, or its mesh's.
-    #[must_use]
-    pub(crate) fn generation(self) -> u64 {
-        match self {
-            RasterTile::Tile(raster) => raster.masking.generation(),
-            RasterTile::Image(image) => image.generation(),
         }
     }
 

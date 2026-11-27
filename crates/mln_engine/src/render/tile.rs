@@ -13,6 +13,7 @@ use mln_style::types::TranslateAnchorType;
 
 use crate::camera::{ProjectionData, View};
 use crate::draw::identity::SimpleIdentity;
+use crate::layer::layer_drawing::MadeFrom;
 use crate::layer::layer_type::LayerType;
 use crate::layer::tile_input::TileData;
 use crate::layer::tile_input::input::Find;
@@ -198,6 +199,10 @@ pub(crate) struct FrameTile<'a, T: LayerType> {
     /// one by the drape's.
     wrap: i16,
     data: Option<TileData<'a, T>>,
+    /// What `data` is made of, which the layer's value of the tile is made
+    /// from ([`TileContent::stamp`]); `None` in the frame's update, which
+    /// makes no values ([`find`](Self::find)).
+    made_from: Option<MadeFrom>,
 }
 
 impl<T: LayerType> Clone for FrameTile<'_, T> {
@@ -218,7 +223,7 @@ impl<'a, T: LayerType> FrameTile<'a, T> {
         layer_id: &str,
     ) -> (Self, Option<ViewPlace>) {
         let found = content.and_then(|content| T::Input::find(content, layer_id));
-        let frame_tile = FrameTile { tile, wrap: tile.id.wrap, data: found.map(|(data, _)| data) };
+        let frame_tile = FrameTile { tile, wrap: tile.id.wrap, data: found.map(|(data, _)| data), made_from: None };
         (frame_tile, found.map(|(_, place)| place))
     }
 
@@ -235,13 +240,21 @@ impl<'a, T: LayerType> FrameTile<'a, T> {
         let data = content.zip(view).and_then(|(content, place)| T::Input::at(content, place));
         debug_assert_eq!(data.is_some(), view.is_some(), "a tile's contents changed since the frame's update");
         debug_assert!(data.is_none_or(|data| T::Input::is_for(data, layer_id)), "a layer found at another's place");
-        FrameTile { tile, wrap: tile.id.wrap, data }
+        let made_from = content.zip(view).and_then(|(content, place)| content.stamp(place));
+        FrameTile { tile, wrap: tile.id.wrap, data, made_from }
     }
 
     /// The tile, drawn in the world copy `wrap`.
     #[must_use]
     pub(crate) fn in_copy(self, wrap: i16) -> Self {
         FrameTile { wrap, ..self }
+    }
+
+    /// What the layer's value of the tile is made from, if the tile holds
+    /// anything for the layer, for a tile of the encode
+    /// ([`at`](Self::at)).
+    pub(crate) fn made_from(self) -> Option<MadeFrom> {
+        self.made_from.filter(|_| self.data.is_some())
     }
 
     /// What the tile holds for the layer, if anything.
