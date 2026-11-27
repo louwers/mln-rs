@@ -1,18 +1,18 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use geojson::{Feature, Geometry};
 use mln_engine::Registry;
 use mln_engine::camera::CameraOptions;
 use mln_engine::exec::pool::Pool;
 use mln_engine::map::{Map, MapMode, MapOptions, TileSettings};
-use mln_engine::storage::ResourceOptions;
+use mln_engine::storage::stub_file_source::{ResponseType, StubFileSource};
+use mln_engine::storage::{Kind, Response};
 use mln_headless::HeadlessFrontend;
 use mln_style::Edit;
 use mln_style::conversion::Convertible;
-use mln_style::geo::LatLngBounds;
 use mln_style::layer::Layer;
-use mln_style::sources::custom_geometry_source::{self, Options as CustomGeometrySourceOptions};
+use mln_style::sources::vector_source;
+use mln_style::tileset::PartialTileset;
 
 use crate::support::*;
 
@@ -23,7 +23,9 @@ fn set_tile(map: &mut Map, change: impl FnOnce(&mut TileSettings)) {
     map.set_tile_settings(&tile);
 }
 
-/// A map whose transparent circles count the tiles it loads. C++'s tests
+/// A map whose transparent circles count the tiles it loads: the tile
+/// requests of a vector source of zooms 0 to 18, as C++ counts a custom
+/// geometry source's fetches. C++'s tests
 /// also compare images of the tile borders, a debug overlay that mln-rs
 /// doesn't draw, so these check the counts.
 struct TileLODTest {
@@ -39,12 +41,18 @@ impl TileLODTest {
         let pool = Pool::new(4);
         let mut frontend =
             HeadlessFrontend::with_pixel_ratio(1.0, run_loop.queue(), &pool).expect("a headless frontend");
-        let mut map = Map::with_resource_options(
+        let file_source = StubFileSource::on_queue(run_loop.queue(), ResponseType::Asynchronous);
+        let tile_count = Arc::new(AtomicU32::new(0));
+        let counted = Arc::clone(&tile_count);
+        file_source.set_response(Kind::Tile, move |_| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            let mut response = Response::new();
+            response.no_content = true;
+            Some(response)
+        });
+        let mut map = Map::with_file_source(
+            file_source,
             MapOptions { map_mode: MapMode::Static, size: frontend.size(), ..Default::default() },
-            &ResourceOptions {
-                asset_path: cpp_root().join("test/fixtures/api/assets").to_str().unwrap().to_owned(),
-                ..ResourceOptions::default()
-            },
             &pool,
         )
         .unwrap();
@@ -53,17 +61,12 @@ impl TileLODTest {
 
         map.load_style_json(&read_file("test/fixtures/api/empty.json"));
 
-        let tile_count = Arc::new(AtomicU32::new(0));
-        let counted = Arc::clone(&tile_count);
-        let options = CustomGeometrySourceOptions {
-            fetch_tile_function: Some(answer_with(move |tile_id| {
-                let center = LatLngBounds::from_canonical_tile(tile_id.z, tile_id.x, tile_id.y).center();
-                counted.fetch_add(1, Ordering::SeqCst);
-                vec![Feature::from(Geometry::new_point([center.longitude(), center.latitude()]))]
-            })),
-            ..Default::default()
+        let tileset = PartialTileset {
+            tiles: Some(vec!["custom/{z}/{x}/{y}".to_owned()]),
+            max_zoom: Some(18),
+            ..PartialTileset::default()
         };
-        let source = custom_geometry_source::create("custom", options).unwrap();
+        let source = vector_source("custom", None, tileset);
         map.add_source(source).unwrap();
 
         let mut layer = Layer::new(Registry::with_builtins().style(), "circle", "circles", "custom").unwrap();

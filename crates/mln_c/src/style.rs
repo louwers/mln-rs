@@ -5,22 +5,27 @@ use core::ffi::c_void;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ::mln_runtime::{Applied, CustomSourceCallbacks, GeoJsonSourceOptions, LayerInfo, SourceInfo, SourceKind};
+use ::mln_runtime::{Applied, Completion, GeoJsonSourceOptions, HeldSourceError, LayerInfo, SourceInfo};
+use geojson::GeoJson;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::expression::Functions;
 use mln_style::geo::{LatLng, LatLngBounds};
 use mln_style::image::{ImageContent, Impl as StyleImage, TextFit};
 use mln_style::range::Range;
 use mln_style::size::Size;
-use mln_style::sources::TileDataFormat;
-use mln_style::sources::custom_geometry_source::TileOptions;
+use mln_style::source::{SourceData, StyleSourceType};
+use mln_style::sources::{GeoJsonSourceType, ImageSourceType, RasterDemSourceType, RasterSourceType, VectorSourceType};
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::tileset::{RasterEncoding, Scheme, VectorEncoding};
-use mln_style::{TransitionOptions, constants};
+use mln_style::{Source, TransitionOptions, constants};
 
 use crate::buffer::LentText;
 use crate::callback::{Registration, UserData};
 use crate::completion::{self, CompletionValue, PendingCompletion};
+use crate::custom_source::{
+    CustomGeometrySourceOptions, CustomGeometrySourceType, CustomSourceHandle, CustomVectorSourceOptions,
+    CustomVectorSourceType, CustomVectorTileData, TileDataFormat, TileFunction, TileFunctions, TileOptions,
+};
 use crate::error::Error;
 use crate::generated::types::{
     MLN_CUSTOM_GEOMETRY_SOURCE_OPTION_BUFFER, MLN_CUSTOM_GEOMETRY_SOURCE_OPTION_CLIP,
@@ -450,16 +455,19 @@ impl<T: Send + 'static> CompletionValue for Plain<T> {
     }
 }
 
-const fn source_type(kind: SourceKind) -> mln_style_source_type {
-    match kind {
-        SourceKind::Vector => MLN_STYLE_SOURCE_TYPE_VECTOR,
-        SourceKind::Raster => MLN_STYLE_SOURCE_TYPE_RASTER,
-        SourceKind::RasterDem => MLN_STYLE_SOURCE_TYPE_RASTER_DEM,
-        SourceKind::GeoJson => MLN_STYLE_SOURCE_TYPE_GEO_JSON,
-        SourceKind::Image => MLN_STYLE_SOURCE_TYPE_IMAGE,
-        SourceKind::CustomGeometry => MLN_STYLE_SOURCE_TYPE_CUSTOM_GEOMETRY,
-        SourceKind::CustomVector => MLN_STYLE_SOURCE_TYPE_CUSTOM_VECTOR,
-    }
+/// The header's type of sources of the type `name`, if it has one.
+fn source_type(name: &str) -> Option<mln_style_source_type> {
+    [
+        (VectorSourceType::INFO, MLN_STYLE_SOURCE_TYPE_VECTOR),
+        (RasterSourceType::INFO, MLN_STYLE_SOURCE_TYPE_RASTER),
+        (RasterDemSourceType::INFO, MLN_STYLE_SOURCE_TYPE_RASTER_DEM),
+        (GeoJsonSourceType::INFO, MLN_STYLE_SOURCE_TYPE_GEO_JSON),
+        (ImageSourceType::INFO, MLN_STYLE_SOURCE_TYPE_IMAGE),
+        (CustomGeometrySourceType::INFO, MLN_STYLE_SOURCE_TYPE_CUSTOM_GEOMETRY),
+        (CustomVectorSourceType::INFO, MLN_STYLE_SOURCE_TYPE_CUSTOM_VECTOR),
+    ]
+    .into_iter()
+    .find_map(|(info, type_)| (info.name == name).then_some(type_))
 }
 
 const fn vector_encoding(encoding: VectorEncoding) -> mln_style_vector_tile_encoding {
@@ -501,6 +509,7 @@ fn from_geojson_options(
 /// A source and the text its `mln_style_source_info` lends.
 struct LentSource {
     info: SourceInfo,
+    type_: mln_style_source_type,
     id: LentText,
     attribution: LentText,
     url: LentText,
@@ -509,8 +518,10 @@ struct LentSource {
 }
 
 impl LentSource {
-    fn new(info: SourceInfo) -> Self {
-        Self {
+    /// `None` for a source of a type that the header doesn't name.
+    fn new(info: SourceInfo) -> Option<Self> {
+        Some(Self {
+            type_: source_type(info.source_type)?,
             id: LentText::new(&info.id),
             attribution: LentText::new(info.attribution.as_deref().unwrap_or_default()),
             url: LentText::new(info.url.as_deref().unwrap_or_default()),
@@ -519,7 +530,7 @@ impl LentSource {
                 info.geojson.as_ref().and_then(|geojson| geojson.cluster_properties.as_deref()).unwrap_or_default(),
             ),
             info,
-        }
+        })
     }
 
     /// The C view, valid while `self` and `tile_urls`, the views of its
@@ -585,7 +596,7 @@ impl LentSource {
         };
         mln_style_source_info {
             id: self.id.view(),
-            type_: source_type(info.kind),
+            type_: self.type_,
             fields,
             is_volatile: info.is_volatile,
             attribution: self.attribution.view(),
@@ -846,7 +857,7 @@ pub(crate) unsafe extern "C" fn mln_map_get_style_source(
                 map,
                 completion,
                 |map| map.style_source(id),
-                |info| LentSources(info.into_iter().map(LentSource::new).collect()),
+                |info| LentSources(info.into_iter().filter_map(LentSource::new).collect()),
             )
         }
     })
@@ -888,7 +899,7 @@ pub(crate) unsafe extern "C" fn mln_map_list_style_sources(
         // SAFETY: the caller's contract.
         unsafe {
             query(map, completion, ::mln_runtime::Map::style_sources, |sources| {
-                LentSources(sources.into_iter().map(LentSource::new).collect())
+                LentSources(sources.into_iter().filter_map(LentSource::new).collect())
             })
         }
     })
@@ -1024,38 +1035,138 @@ impl TileCallbacks {
             unsafe { callback(user_data.get(), map, source_id.view(), tile) };
         });
     }
+}
 
-    /// The runtime's callbacks over `callbacks`, which hold it until the map
-    /// drops them.
-    fn into_runtime(callbacks: &Arc<Self>) -> CustomSourceCallbacks {
-        let fetch = Arc::clone(callbacks);
-        let cancel = callbacks.cancel_tile.map(|cancel_tile| -> Box<dyn Fn(CanonicalTileID) + Send + Sync> {
-            let callbacks = Arc::clone(callbacks);
-            Box::new(move |tile| callbacks.call(cancel_tile, tile))
+/// What the map holds for a custom source whose tiles take `D`: the host's
+/// callbacks, which the source's tile functions reach only weakly, so that
+/// they drop as the map lets go of the source rather than as the source's
+/// providers do, and the handles that answer the source's tiles.
+struct HeldCallbacks<D> {
+    _callbacks: Arc<TileCallbacks>,
+    handles: Arc<SourceHandles<D>>,
+}
+
+/// The source's tile functions over `callbacks`, which they hold weakly. A
+/// fetch keeps the handle it gets in `handles`.
+fn tile_functions<D: Clone + 'static>(
+    callbacks: &Arc<TileCallbacks>,
+    handles: &Arc<SourceHandles<D>>,
+) -> TileFunctions<D> {
+    let (fetch, handles) = (Arc::downgrade(callbacks), Arc::clone(handles));
+    let fetch_tile: TileFunction<D> = Arc::new(move |tile: &CanonicalTileID, handle: &CustomSourceHandle<D>| {
+        if let Some(callbacks) = fetch.upgrade() {
+            handles.keep(handle);
+            callbacks.call(callbacks.fetch_tile, *tile);
+        }
+    });
+    let cancel_tile = callbacks.cancel_tile.is_some().then(|| {
+        let cancel = Arc::downgrade(callbacks);
+        let cancel: TileFunction<D> = Arc::new(move |tile: &CanonicalTileID, _: &CustomSourceHandle<D>| {
+            if let Some(callbacks) = cancel.upgrade()
+                && let Some(cancel_tile) = callbacks.cancel_tile
+            {
+                callbacks.call(cancel_tile, *tile);
+            }
         });
-        CustomSourceCallbacks {
-            fetch_tile: Box::new(move |tile| fetch.call(fetch.fetch_tile, tile)),
-            cancel_tile: cancel,
+        cancel
+    });
+    TileFunctions { fetch_tile: Some(fetch_tile), cancel_tile }
+}
+
+/// The handles that a custom source's providers asked the host through,
+/// which the source's commands answer through: the renderer's, and a former
+/// renderer's while its provider lives, so that an answer reaches whichever
+/// asked.
+struct SourceHandles<D>(parking_lot::Mutex<Vec<CustomSourceHandle<D>>>);
+
+impl<D> Default for SourceHandles<D> {
+    fn default() -> Self {
+        SourceHandles(parking_lot::Mutex::new(Vec::new()))
+    }
+}
+
+impl<D: Clone> SourceHandles<D> {
+    /// Keeps `handle`, and lets go of those whose provider is gone.
+    fn keep(&self, handle: &CustomSourceHandle<D>) {
+        let mut handles = self.0.lock();
+        handles.retain(|kept| !kept.is_closed());
+        if !handles.iter().any(|kept| kept.ptr_eq(handle)) {
+            handles.push(handle.clone());
+        }
+    }
+
+    /// Hands `value` to `act` with each handle.
+    fn each<V: Clone>(&self, value: V, act: impl Fn(&CustomSourceHandle<D>, V)) {
+        let handles = self.0.lock();
+        if let Some((last, rest)) = handles.split_last() {
+            for handle in rest {
+                act(handle, value.clone());
+            }
+            act(last, value);
         }
     }
 }
 
-/// Sends the command that adds a custom source with `callbacks`. The user
-/// data belongs to the library from the moment the command could run, and
-/// returns to the caller when it can't be sent.
-fn add_callback_source(
+/// Sends the command that adds the custom source that `source` makes from
+/// its tile functions over `callbacks`, which the map holds for as long as
+/// the style holds the source. The user data belongs to the library from
+/// the moment the command could run, and returns to the caller when it
+/// can't be sent.
+fn add_callback_source<D: Clone + Send + 'static>(
     callbacks: TileCallbacks,
-    send: impl FnOnce(CustomSourceCallbacks) -> Result<(), Error>,
+    source: impl FnOnce(TileFunctions<D>) -> Source,
+    send: impl FnOnce(Source, Box<dyn std::any::Any + Send>) -> Result<(), Error>,
 ) -> Result<(), Error> {
     let callbacks = Arc::new(callbacks);
     callbacks.registration.accept();
-    let sent = send(TileCallbacks::into_runtime(&callbacks));
+    let handles = Arc::default();
+    let source = source(tile_functions(&callbacks, &handles));
+    let sent = send(source, Box::new(HeldCallbacks { _callbacks: Arc::clone(&callbacks), handles }));
     if sent.is_err() {
         // This handle outlives the copies that the failed call dropped, so
         // the registration drops unaccepted.
         callbacks.registration.revoke();
     }
     sent
+}
+
+/// Sends the command that answers the custom source `id` whose tiles take
+/// `D`, sources that `kind` names, as in `a custom geometry source`: it
+/// makes the answer's value, then hands it to `act` with each of the
+/// source's handles.
+fn answer<D: Clone + Send + 'static, V: Clone + Send + 'static>(
+    map: &::mln_runtime::Map,
+    id: String,
+    kind: &'static str,
+    value: impl FnOnce() -> Result<V, mln_style::error::Error> + Send + 'static,
+    act: impl Fn(&CustomSourceHandle<D>, V) + Send + 'static,
+) -> Result<Completion<Applied>, mln_style::error::Error> {
+    map.with_held_source::<HeldCallbacks<D>>(id.clone(), move |held| {
+        let value = value()?;
+        let held = held.map_err(|error| match error {
+            HeldSourceError::NotHeld => {
+                mln_style::error::Error::invalid_argument(format!("source \"{id}\" is not {kind}"))
+            }
+            error @ HeldSourceError::NoSource => error.into_error(&id),
+        })?;
+        held.handles.each(value, act);
+        Ok(())
+    })
+}
+
+/// Parses GeoJSON text, on the runtime's thread, as the features a custom
+/// geometry tile draws: its tiles draw only a feature collection, so a lone
+/// feature or geometry becomes one.
+fn tile_geojson(json: &str) -> Result<GeoJson, mln_style::error::Error> {
+    let geojson: GeoJson = serde_json::from_str(json).map_err(|error| {
+        let what = if error.is_data() { "invalid" } else { "not valid JSON" };
+        mln_style::error::Error::invalid_argument(format!("GeoJSON data is {what}: {error}"))
+    })?;
+    Ok(match geojson {
+        GeoJson::FeatureCollection(_) => geojson,
+        GeoJson::Feature(feature) => GeoJson::from(vec![feature]),
+        GeoJson::Geometry(geometry) => GeoJson::from(vec![geojson::Feature::from(geometry)]),
+    })
 }
 
 /// `mln_map_add_custom_geometry_source()`.
@@ -1132,11 +1243,17 @@ pub(crate) unsafe extern "C" fn mln_map_add_custom_geometry_source(
             map,
             source_id: Arc::new(LentText::new(&id)),
         };
-        add_callback_source(callbacks, |callbacks| {
+        let source = |tile_functions| {
+            let options = CustomGeometrySourceOptions {
+                tile_options: Arc::new(tile_options),
+                zoom_range: zooms,
+                tile_functions: Arc::new(tile_functions),
+            };
+            Source::new(&id, SourceData::<CustomGeometrySourceType>::new(options))
+        };
+        add_callback_source(callbacks, source, |source, held| {
             // SAFETY: the caller's contract.
-            unsafe {
-                command(map, completion, |map| map.add_custom_geometry_source(id, callbacks, zooms, tile_options))
-            }
+            unsafe { command(map, completion, |map| map.add_source_holding(source, held)) }
         })
     })
 }
@@ -1161,7 +1278,10 @@ pub(crate) unsafe extern "C" fn mln_map_set_custom_geometry_source_tile_data(
         // SAFETY: the caller's contract.
         unsafe {
             command_with(map, completion, self::tile_id(tile_id), |map, tile| {
-                map.set_custom_geometry_source_tile_data(id, tile, json)
+                let geojson = move || tile_geojson(&json);
+                answer(map, id, "a custom geometry source", geojson, move |handle, geojson| {
+                    handle.set_tile_data(tile, geojson);
+                })
             })
         }
     })
@@ -1188,7 +1308,10 @@ pub(crate) unsafe extern "C" fn mln_map_set_custom_geometry_source_tile_error(
         // SAFETY: the caller's contract.
         unsafe {
             command_with(map, completion, self::tile_id(tile_id), |map, tile| {
-                map.set_custom_geometry_source_tile_error(id, tile, message)
+                let error = move || Ok(mln_style::error::Error::native(message));
+                answer::<GeoJson, _>(map, id, "a custom geometry source", error, move |handle, error| {
+                    handle.set_tile_error(tile, error);
+                })
             })
         }
     })
@@ -1213,7 +1336,13 @@ pub(crate) unsafe extern "C" fn mln_map_invalidate_custom_geometry_source_tile(
         // SAFETY: the caller's contract.
         unsafe {
             command_with(map, completion, self::tile_id(tile_id), |map, tile| {
-                map.invalidate_custom_geometry_source_tile(id, tile)
+                answer::<GeoJson, _>(
+                    map,
+                    id,
+                    "a custom geometry source",
+                    || Ok(()),
+                    move |handle, ()| handle.invalidate_tile(tile),
+                )
             })
         }
     })
@@ -1238,7 +1367,8 @@ pub(crate) unsafe extern "C" fn mln_map_invalidate_custom_geometry_source_region
         // SAFETY: the caller's contract.
         unsafe {
             command_with(map, completion, self::bounds(bounds), |map, bounds| {
-                map.invalidate_custom_geometry_source_region(id, bounds)
+                let region = move || Ok(bounds);
+                answer::<GeoJson, _>(map, id, "a custom geometry source", region, CustomSourceHandle::invalidate_region)
             })
         }
     })
@@ -1284,9 +1414,13 @@ pub(crate) unsafe extern "C" fn mln_map_add_custom_vector_source(
             map,
             source_id: Arc::new(LentText::new(&id)),
         };
-        add_callback_source(callbacks, |callbacks| {
+        let source = |tile_functions| {
+            let options = CustomVectorSourceOptions { zoom_range: zooms, tile_functions: Arc::new(tile_functions) };
+            Source::new(&id, SourceData::<CustomVectorSourceType>::new(options))
+        };
+        add_callback_source(callbacks, source, |source, held| {
             // SAFETY: the caller's contract.
-            unsafe { command(map, completion, |map| map.add_custom_vector_source(id, callbacks, zooms)) }
+            unsafe { command(map, completion, |map| map.add_source_holding(source, held)) }
         })
     })
 }
@@ -1320,7 +1454,10 @@ pub(crate) unsafe extern "C" fn mln_map_set_custom_vector_source_tile_data(
         // SAFETY: the caller's contract.
         unsafe {
             command_with(map, completion, self::tile_id(tile_id), |map, tile| {
-                map.set_custom_vector_source_tile_data(id, tile, data, format)
+                let data = move || Ok((data.map(Arc::new), format));
+                answer::<CustomVectorTileData, _>(map, id, "a custom vector source", data, move |handle, data| {
+                    handle.set_tile_data(tile, data);
+                })
             })
         }
     })
@@ -1347,7 +1484,10 @@ pub(crate) unsafe extern "C" fn mln_map_set_custom_vector_source_tile_error(
         // SAFETY: the caller's contract.
         unsafe {
             command_with(map, completion, self::tile_id(tile_id), |map, tile| {
-                map.set_custom_vector_source_tile_error(id, tile, message)
+                let error = move || Ok(mln_style::error::Error::native(message));
+                answer::<CustomVectorTileData, _>(map, id, "a custom vector source", error, move |handle, error| {
+                    handle.set_tile_error(tile, error);
+                })
             })
         }
     })
@@ -1372,7 +1512,13 @@ pub(crate) unsafe extern "C" fn mln_map_invalidate_custom_vector_source_tile(
         // SAFETY: the caller's contract.
         unsafe {
             command_with(map, completion, self::tile_id(tile_id), |map, tile| {
-                map.invalidate_custom_vector_source_tile(id, tile)
+                answer::<CustomVectorTileData, _>(
+                    map,
+                    id,
+                    "a custom vector source",
+                    || Ok(()),
+                    move |handle, ()| handle.invalidate_tile(tile),
+                )
             })
         }
     })
@@ -1397,7 +1543,14 @@ pub(crate) unsafe extern "C" fn mln_map_invalidate_custom_vector_source_region(
         // SAFETY: the caller's contract.
         unsafe {
             command_with(map, completion, self::bounds(bounds), |map, bounds| {
-                map.invalidate_custom_vector_source_region(id, bounds)
+                let region = move || Ok(bounds);
+                answer::<CustomVectorTileData, _>(
+                    map,
+                    id,
+                    "a custom vector source",
+                    region,
+                    CustomSourceHandle::invalidate_region,
+                )
             })
         }
     })

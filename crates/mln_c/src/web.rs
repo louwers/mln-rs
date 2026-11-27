@@ -139,11 +139,11 @@ mod tile_worker {
     use wasm_bindgen::prelude::*;
 
     /// Runs tile workers for the map side at the other end of `port`, with
-    /// the built-in registrations, which the library's runtimes have.
+    /// the registrations that the library's runtimes have.
     #[expect(unreachable_pub, reason = "wasm-bindgen exports only `pub` functions")]
     #[wasm_bindgen(js_name = mlnWebServeTileWorker)]
     pub fn serve(port: &web_sys::MessagePort) {
-        mln_web_host::tile_worker::serve(port, ::mln_runtime::registry::Registry::with_builtins());
+        mln_web_host::tile_worker::serve(port, crate::custom_source::registry());
     }
 }
 

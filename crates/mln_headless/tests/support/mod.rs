@@ -35,10 +35,7 @@ use mln_engine::{FontStack, GlyphRange, TileOperation, UpdateReader};
 use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::Error;
-use mln_style::sources::custom::TileFunction;
-use mln_style::sources::custom_geometry_source::CustomGeometrySourceHandle;
 use mln_style::sprite::Sprite;
-use mln_style::tile_id::CanonicalTileID;
 use parking_lot::{Mutex, MutexGuard};
 
 // MARK: - Fixtures
@@ -153,19 +150,6 @@ pub(crate) fn check_image(base: &str, actual: &PremultipliedImage, image_thresho
 pub(crate) fn center_pixel(image: &PremultipliedImage) -> [u8; 4] {
     let offset = (image.size.height as usize / 2) * image.stride() + (image.size.width as usize / 2) * 4;
     [image.data[offset], image.data[offset + 1], image.data[offset + 2], image.data[offset + 3]]
-}
-
-// MARK: - Custom geometry sources
-
-/// A custom geometry source's fetch function that answers with `features`
-/// through the handle it gets, as the C++ tests answer through
-/// `getSource("custom")`.
-pub(crate) fn answer_with(
-    features: impl Fn(&CanonicalTileID) -> Vec<geojson::Feature> + Send + Sync + 'static,
-) -> TileFunction<geojson::GeoJson> {
-    Arc::new(move |tile_id: &CanonicalTileID, handle: &CustomGeometrySourceHandle| {
-        handle.set_tile_data(*tile_id, geojson::GeoJson::from(features(tile_id)));
-    })
 }
 
 // MARK: - ASSERT_DOUBLE_EQ

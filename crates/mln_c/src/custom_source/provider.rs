@@ -5,21 +5,21 @@
 
 use std::sync::{Arc, Weak};
 
+use mln_engine::exec::pool::{Pool, TaskGroup};
+use mln_engine::tile::OverscaledTileID;
+use mln_engine::tile::tile_range::TileRange;
 use mln_style::error::Error;
 use mln_style::geo::LatLngBounds;
 use mln_style::hash::HashMap;
-use mln_style::sources::custom::{
-    CustomGeometrySourceOptions, CustomSourceHandle, CustomTileResponder, CustomVectorSourceOptions,
-    CustomVectorTileData, TileFunction, TileFunctions,
-};
-use mln_style::sources::custom_geometry_source::tile_features;
 use mln_style::sources::geojson::TileFeatures;
 use mln_style::tile_id::CanonicalTileID;
 use parking_lot::Mutex;
 
-use crate::exec::pool::{Pool, TaskGroup};
-use crate::tile::OverscaledTileID;
-use crate::tile::tile_range::TileRange;
+use super::geometry::tile_features;
+use super::{
+    CustomGeometrySourceOptions, CustomSourceHandle, CustomTileResponder, CustomVectorSourceOptions,
+    CustomVectorTileData, TileFunction, TileFunctions,
+};
 
 /// One of the host's tile functions, as the provider calls it: with the
 /// canonical ID of a tile that the map needs, or no longer needs. It runs on
@@ -470,6 +470,203 @@ mod tests {
     use std::thread::ThreadId;
 
     use super::*;
+
+    /// What the host was asked, in order.
+    type Calls = Arc<Mutex<Vec<HostCall>>>;
+
+    /// A provider whose host records its calls, which run on `pool`; it
+    /// cancels only if `cancels`.
+    fn recorded(pool: &Pool, cancels: bool) -> (Arc<CustomProvider<u32>>, Calls) {
+        let calls = Calls::default();
+        let (fetches, cancelled) = (Arc::clone(&calls), Arc::clone(&calls));
+        let provider = CustomProvider::new(pool, |_| {
+            let fetch: HostFunction = Box::new(move |tile_id| fetches.lock().push(HostCall::Fetch(*tile_id)));
+            let cancel: HostFunction = Box::new(move |tile_id| cancelled.lock().push(HostCall::Cancel(*tile_id)));
+            (Some(fetch), cancels.then_some(cancel))
+        });
+        (provider, calls)
+    }
+
+    /// What a tile got from its provider.
+    #[derive(Clone, Debug, PartialEq)]
+    enum Got {
+        Data(u32),
+        Error(String),
+        Invalidated,
+    }
+
+    /// A tile that records what it gets.
+    struct Tile(Arc<Mutex<Vec<Got>>>);
+
+    impl CustomTileSubscriber<u32> for Tile {
+        fn set_tile_data(&self, data: u32) {
+            self.0.lock().push(Got::Data(data));
+        }
+        fn set_tile_error(&self, error: Error) {
+            self.0.lock().push(Got::Error(error.to_string()));
+        }
+        fn invalidate_tile_data(&self) {
+            self.0.lock().push(Got::Invalidated);
+        }
+    }
+
+    fn tile() -> (Arc<Mutex<Vec<Got>>>, Box<Tile>) {
+        let got = Arc::default();
+        (Arc::clone(&got), Box::new(Tile(got)))
+    }
+
+    fn root() -> OverscaledTileID {
+        OverscaledTileID::from_zxy(0, 0, 0)
+    }
+
+    fn fetch(id: OverscaledTileID) -> HostCall {
+        HostCall::Fetch(id.canonical)
+    }
+
+    fn cancel(id: OverscaledTileID) -> HostCall {
+        HostCall::Cancel(id.canonical)
+    }
+
+    // gtest: CustomGeometryTile.InvokeFetchTile, InvokeCancelTile and
+    // FetchCancelledTileAgain
+    #[test]
+    fn a_tile_fetches_cancels_and_fetches_again() {
+        let pool = Pool::local();
+        let (provider, calls) = recorded(&pool, true);
+        provider.fetch_tile(root(), 0, tile().1);
+        provider.cancel_tile(root(), 0);
+        provider.fetch_tile(root(), 0, tile().1);
+        pool.run_all();
+        assert_eq!(*calls.lock(), [fetch(root()), cancel(root()), fetch(root())]);
+    }
+
+    // gtest: CustomGeometryTile.InvalidateFailedTile and
+    // CustomVectorTile.InvalidateFailedTile
+    #[test]
+    fn an_invalidated_failed_tile_is_fetched_again() {
+        let pool = Pool::local();
+        let (provider, calls) = recorded(&pool, false);
+        let (got, subscriber) = tile();
+        provider.fetch_tile(root(), 0, subscriber);
+        provider.set_tile_error(root().canonical, Error::native("failed"));
+        provider.invalidate_tile(root().canonical);
+        pool.run_all();
+        assert_eq!(*got.lock(), [Got::Error("failed".to_owned()), Got::Invalidated]);
+
+        // The tile subscribes again as the map needs it again.
+        provider.fetch_tile(root(), 1, tile().1);
+        pool.run_all();
+        assert_eq!(*calls.lock(), [fetch(root()), fetch(root())]);
+    }
+
+    // gtest: CustomVectorTile.FetchFailedTileAgain
+    // A tile that still shows older data doesn't cancel when it leaves the
+    // view, so the next request for it asks the host again.
+    #[test]
+    fn a_failed_tile_is_fetched_again() {
+        let pool = Pool::local();
+        let (provider, calls) = recorded(&pool, false);
+        provider.fetch_tile(root(), 0, tile().1);
+        provider.set_tile_error(root().canonical, Error::native("failed"));
+        provider.fetch_tile(root(), 0, tile().1);
+        pool.run_all();
+        assert_eq!(*calls.lock(), [fetch(root()), fetch(root())]);
+    }
+
+    // gtest: CustomGeometryTile.CancelOneCopy and CustomVectorTile.CancelOneCopy
+    // Tiles of one canonical tile, such as its copies in two worlds, share
+    // one fetch, which is cancelled only once none of them needs it, and
+    // the copy still needed is still invalidated.
+    #[test]
+    fn a_shared_fetch_is_cancelled_once_no_tile_needs_it() {
+        let pool = Pool::local();
+        let (provider, calls) = recorded(&pool, true);
+        let copy = OverscaledTileID::new(0, 1, root().canonical);
+        let (got, subscriber) = tile();
+        provider.fetch_tile(root(), 0, tile().1);
+        provider.fetch_tile(copy, 1, subscriber);
+        provider.cancel_tile(root(), 0);
+        pool.run_all();
+        assert_eq!(*calls.lock(), [fetch(root())], "the other copy still needs the data");
+
+        provider.invalidate_tile(root().canonical);
+        pool.run_all();
+        assert_eq!(*got.lock(), [Got::Invalidated]);
+        provider.cancel_tile(copy, 1);
+        pool.run_all();
+        assert_eq!(*calls.lock(), [fetch(root()), cancel(root())]);
+    }
+
+    // gtest: CustomGeometryTile.CancelledTileDropsCachedData
+    // Data that arrives as its tile leaves goes with the last tile that
+    // wanted it: the next tile asks the host again.
+    #[test]
+    fn a_removed_tile_takes_its_data_with_it() {
+        let pool = Pool::local();
+        let (provider, calls) = recorded(&pool, false);
+        provider.fetch_tile(root(), 0, tile().1);
+        provider.set_tile_data(root().canonical, 7);
+        provider.cancel_tile(root(), 0);
+        provider.remove_tile(root(), 0);
+        provider.fetch_tile(root(), 1, tile().1);
+        pool.run_all();
+        assert_eq!(*calls.lock(), [fetch(root()), fetch(root())]);
+    }
+
+    // gtest: CustomGeometryTile.CancellationDiscardsQueuedInvalidation and
+    // CancellationDiscardsLateInvalidation
+    #[test]
+    fn a_removed_tile_hears_no_invalidation() {
+        let pool = Pool::local();
+        let (provider, _) = recorded(&pool, false);
+        let (got, subscriber) = tile();
+        provider.fetch_tile(root(), 0, subscriber);
+        provider.remove_tile(root(), 0);
+        provider.invalidate_tile(root().canonical);
+        pool.run_all();
+        assert_eq!(*got.lock(), []);
+    }
+
+    // gtest: CustomVectorTile.InvalidateRegion
+    #[test]
+    fn a_region_invalidates_the_tiles_it_intersects() {
+        let pool = Pool::local();
+        let (provider, calls) = recorded(&pool, true);
+        // The root tile, every tile at zoom 1, and two tiles at zoom 2.
+        let mut ids = vec![root(), OverscaledTileID::from_zxy(2, 2, 1), OverscaledTileID::from_zxy(2, 1, 1)];
+        ids.extend((0..4).map(|i| OverscaledTileID::from_zxy(1, i % 2, i / 2)));
+        for (key, id) in ids.iter().enumerate() {
+            provider.fetch_tile(*id, key as SubscriberKey, tile().1);
+            // Cached data would otherwise answer the fetch that follows.
+            provider.set_tile_data(id.canonical, 0);
+        }
+        pool.run_all();
+        calls.lock().clear();
+
+        // Northeast of the origin, so it intersects the root tile, 1/1/0, and 2/2/1.
+        let bounds = LatLngBounds::hull(
+            mln_style::geo::LatLng::new(10.0, 10.0).unwrap(),
+            mln_style::geo::LatLng::new(20.0, 20.0).unwrap(),
+        );
+        provider.invalidate_region(bounds);
+        for (key, id) in ids.iter().enumerate() {
+            provider.fetch_tile(*id, key as SubscriberKey + 100, tile().1);
+        }
+        pool.run_all();
+        let intersecting = [root(), OverscaledTileID::from_zxy(1, 1, 0), OverscaledTileID::from_zxy(2, 2, 1)];
+        let mut expected: Vec<_> = intersecting.iter().map(|id| cancel(*id)).collect();
+        expected.extend(intersecting.iter().map(|id| fetch(*id)));
+        let mut calls = calls.lock().clone();
+        calls.sort_by_key(|call| match call {
+            HostCall::Cancel(id) => (0, *id),
+            HostCall::Fetch(id) => (1, *id),
+        });
+        expected.sort_by_key(|call| match call {
+            HostCall::Cancel(id) => (0, *id),
+            HostCall::Fetch(id) => (1, *id),
+        });
+        assert_eq!(calls, expected);
+    }
 
     /// A tile that records the data it receives.
     struct Recorder(Arc<Mutex<Vec<u32>>>);

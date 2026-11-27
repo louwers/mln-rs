@@ -11,13 +11,8 @@ use mln_style::layer::{Layer, LayerStyle};
 use mln_style::layers::{Circle, Hillshade, Line, Raster};
 use mln_style::size::Size;
 use mln_style::source::{Fetch, Load, SourceData};
-use mln_style::sources::custom_geometry_source::{self, Options as CustomGeometrySourceOptions};
-use mln_style::sources::custom_vector_source::{self, Options as CustomVectorSourceOptions, TileDataFormat};
 use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, create_geojson_data, geojson_source};
-use mln_style::sources::{
-    CustomGeometrySourceHandle, CustomVectorSourceHandle, VectorSourceType, raster_dem_source, raster_source,
-    vector_source,
-};
+use mln_style::sources::{VectorSourceType, raster_dem_source, raster_source, vector_source};
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
 use mln_style::tileset::{PartialTileset, Tileset};
@@ -727,111 +722,6 @@ fn raster_tile_attribution() {
 fn raster_dem_tile_attribution() {
     let mapbox = "<a href='https://www.mapbox.com/about/maps/' target='_blank'>&copy; Mapbox</a> ";
     tile_attribution(Tiled::RasterDEM, mapbox);
-}
-
-/// A loaded custom geometry source "source" whose host answers each fetch
-/// with `answer`, a line layer for it, and its render source after one
-/// update of `store`.
-fn custom_geometry_case(
-    test: &SourceTest,
-    store: &mut TileStore,
-    answer: impl Fn(&CanonicalTileID, &CustomGeometrySourceHandle) + Send + Sync + 'static,
-) -> (Source, Box<dyn RenderSource>) {
-    let options = CustomGeometrySourceOptions { fetch_tile_function: Some(Arc::new(answer)), ..Default::default() };
-    let source = custom_geometry_source::create("source", options).unwrap();
-
-    let mut layer = Layer::new(Registry::with_builtins().style(), "line", "id", "source").unwrap();
-    layer.set_source_layer("water");
-    let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
-        Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(layer.style()).unwrap()));
-    let layers = vec![layer_properties];
-
-    let mut render_source = crate::tests::create_render_source(&source, store);
-    render_source.update(store, source.clone(), &layers, true, true, &test.tile_parameters(MapMode::Continuous));
-    (source, render_source)
-}
-
-// gtest: Source.CustomGeometrySourceSetTileData
-#[test]
-fn custom_geometry_source_set_tile_data() {
-    let test = SourceTest::new();
-    let observer = Rc::new(StubStoreObserver::default());
-    {
-        let end = test.end_handle();
-        *observer.tile_changed.borrow_mut() = Some(Box::new(end));
-    }
-    *observer.tile_error.borrow_mut() = Some(Box::new(|_, _, _| panic!("Should never be called")));
-
-    let mut store = test.store();
-    let _case = custom_geometry_case(&test, &mut store, |tile_id, handle| {
-        assert_eq!(CanonicalTileID::new(0, 0, 0), *tile_id);
-        handle.set_tile_data(*tile_id, GeoJson::from(Vec::<geojson::Feature>::new()));
-    });
-
-    test.run_observed(&mut store, &observer);
-}
-
-// gtest: Source.CustomGeometrySourceSetTileError
-#[test]
-fn custom_geometry_source_set_tile_error() {
-    let test = SourceTest::new();
-    let observer = Rc::new(StubStoreObserver::default());
-    {
-        let end = test.end_handle();
-        *observer.tile_error.borrow_mut() = Some(Box::new(move |source_id, tile_id, error| {
-            assert_eq!("source", source_id);
-            assert_eq!(OverscaledTileID::from_zxy(0, 0, 0), *tile_id);
-            assert_eq!("failed", error.to_string());
-            end();
-        }));
-    }
-
-    let mut store = test.store();
-    let _case = custom_geometry_case(&test, &mut store, |tile_id, handle| {
-        handle.set_tile_error(*tile_id, Error::native("failed"));
-    });
-
-    test.run_observed(&mut store, &observer);
-}
-
-// Port-only: Source.CustomGeometrySourceSetTileData for a custom vector
-// source.
-#[test]
-fn custom_vector_source_set_tile_data() {
-    let test = SourceTest::new();
-    let observer = Rc::new(StubStoreObserver::default());
-    {
-        let end = test.end_handle();
-        *observer.tile_changed.borrow_mut() = Some(Box::new(end));
-    }
-    *observer.tile_error.borrow_mut() = Some(Box::new(|_, _, _| panic!("Should never be called")));
-
-    let options = CustomVectorSourceOptions {
-        fetch_tile_function: Some(Arc::new(|tile_id: &CanonicalTileID, handle: &CustomVectorSourceHandle| {
-            assert_eq!(CanonicalTileID::new(0, 0, 0), *tile_id);
-            handle.set_tile_data(*tile_id, (None, TileDataFormat::Mvt));
-        })),
-        ..Default::default()
-    };
-    let source = custom_vector_source::create("source", options);
-
-    let mut layer = Layer::new(Registry::with_builtins().style(), "line", "id", "source").unwrap();
-    layer.set_source_layer("water");
-    let layer_properties: Arc<dyn ErasedEvaluatedLayer> =
-        Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(layer.style()).unwrap()));
-
-    let mut store = test.store();
-    let mut render_source = crate::tests::create_render_source(&source, &mut store);
-    render_source.update(
-        &mut store,
-        source.clone(),
-        &[layer_properties],
-        true,
-        true,
-        &test.tile_parameters(MapMode::Continuous),
-    );
-
-    test.run_observed(&mut store, &observer);
 }
 
 // gtest: Source.EmptyTileset

@@ -1,22 +1,19 @@
 // The map handle's style commands. They follow the C ABI suite
 // (tools/c-abi-test/testdata/tests/native/abi/style/{sources,custom_sources,
-// geojson,layers}.c) where it tests the same rules.
+// geojson,layers}.c) where it tests the same rules: the C API's custom
+// sources keep their callbacks as values held for their sources.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_engine::storage::response::Reason;
 use mln_engine::storage::{ResourceError, Response};
-use mln_runtime::{
-    CustomSourceCallbacks, ErrorKind, GeoJsonSourceOptions, Map, ResourceRequest, SourceKind, ViewportOptions,
-};
+use mln_runtime::{ErrorKind, GeoJsonSourceOptions, HeldSourceError, Map, ResourceRequest, ViewportOptions};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::expression::Functions;
 use mln_style::geo::LatLng;
-use mln_style::range::Range;
 use mln_style::size::Size;
-use mln_style::sources::TileDataFormat;
-use mln_style::sources::custom_geometry_source::TileOptions;
+use mln_style::sources::{GeoJSONOptions, geojson_source};
 use mln_style::types::{ProjectionDefinition, ProjectionType};
 
 use crate::support::{EMPTY_STYLE, TestRuntime, map, runtime, wait, wait_err};
@@ -52,7 +49,7 @@ fn a_source_reports_its_url_attribution_and_tiles() {
     wait(map.set_geojson_source_url("geojson", "fixture://second.geojson"));
 
     let remote = wait(map.style_source("remote")).unwrap();
-    assert_eq!((remote.kind, remote.url.as_deref()), (SourceKind::Raster, Some("fixture://tiles.json")));
+    assert_eq!((remote.source_type, remote.url.as_deref()), ("raster", Some("fixture://tiles.json")));
     assert!(remote.tiles.is_none() && remote.attribution.is_none());
     assert_eq!(remote.tile_size, Some(512));
 
@@ -75,8 +72,8 @@ fn sources_list_in_style_order() {
     wait(map.add_style_source_json("third", r#"{"type":"vector","tiles":["fixture://tiles/{z}/{x}/{y}"]}"#));
     wait(map.remove_style_source("first"));
     let sources = wait(map.style_sources());
-    let listed: Vec<_> = sources.iter().map(|source| (source.id.as_str(), source.kind)).collect();
-    assert_eq!(listed, [("second", SourceKind::GeoJson), ("third", SourceKind::Vector)]);
+    let listed: Vec<_> = sources.iter().map(|source| (source.id.as_str(), source.source_type)).collect();
+    assert_eq!(listed, [("second", "geojson"), ("third", "vector")]);
 }
 
 #[test]
@@ -240,7 +237,7 @@ fn corners(offset: f64) -> [LatLng; 4] {
 fn image_sources_take_corners_images_and_urls() {
     let (_runtime, map) = styled_map();
     wait(map.add_image_source("inline-image", corners(0.0), image(2, 2)));
-    assert_eq!(wait(map.style_source("inline-image")).unwrap().kind, SourceKind::Image);
+    assert_eq!(wait(map.style_source("inline-image")).unwrap().source_type, "image");
     assert_eq!(wait(map.image_source_coordinates("inline-image")), corners(0.0));
     wait(map.set_image_source_coordinates("inline-image", corners(4.0)));
     assert_eq!(wait(map.image_source_coordinates("inline-image")), corners(4.0));
@@ -257,85 +254,80 @@ fn image_sources_take_corners_images_and_urls() {
     assert_eq!(wait_err(map.image_source_coordinates("missing")).kind, ErrorKind::NotFound);
 }
 
-/// Counts a custom source's calls and its callbacks' drop.
-#[derive(Clone, Default)]
-struct Probe {
-    fetches: Arc<AtomicUsize>,
-    drops: Arc<AtomicUsize>,
-}
+/// A value held for a source, which counts its drops.
+struct Held(Arc<AtomicUsize>);
 
-struct DropCounter(Arc<AtomicUsize>);
-
-impl Drop for DropCounter {
+impl Drop for Held {
     fn drop(&mut self) {
         self.0.fetch_add(1, Ordering::SeqCst);
     }
 }
 
-impl Probe {
-    fn callbacks(&self) -> CustomSourceCallbacks {
-        let (fetches, counter) = (Arc::clone(&self.fetches), DropCounter(Arc::clone(&self.drops)));
-        CustomSourceCallbacks {
-            fetch_tile: Box::new(move |_| {
-                let _ = &counter;
-                fetches.fetch_add(1, Ordering::SeqCst);
-            }),
-            cancel_tile: None,
-        }
-    }
-
-    fn drops(&self) -> usize {
-        self.drops.load(Ordering::SeqCst)
-    }
+/// Adds a GeoJSON source `id` that holds a value whose drops `drops` counts.
+fn add_holding(map: &Map, id: &str, drops: &Arc<AtomicUsize>) -> Result<mln_runtime::Applied, mln_runtime::Error> {
+    let source = geojson_source(id, Arc::new(GeoJSONOptions::default()));
+    map.add_source_holding(source, Box::new(Held(Arc::clone(drops)))).unwrap().wait()
 }
 
-fn add_geometry(map: &Map, id: &str, probe: &Probe) -> Result<mln_runtime::Applied, mln_runtime::Error> {
-    map.add_custom_geometry_source(id, probe.callbacks(), Range::new(0, 18), TileOptions::default()).unwrap().wait()
+fn drops(count: &AtomicUsize) -> usize {
+    count.load(Ordering::SeqCst)
 }
 
 #[test]
-fn a_custom_source_drops_its_callbacks_once_it_leaves_the_style() {
+fn a_held_value_drops_once_its_source_leaves_the_style() {
     let (runtime, map) = styled_map();
-    let removed = Probe::default();
-    add_geometry(&map, "removed", &removed).unwrap();
-    assert_eq!(wait(map.style_source("removed")).unwrap().kind, SourceKind::CustomGeometry);
-    assert_eq!(removed.drops(), 0);
+    let removed = Arc::default();
+    add_holding(&map, "removed", &removed).unwrap();
+    assert_eq!(wait(map.style_source("removed")).unwrap().source_type, "geojson");
+    assert_eq!(drops(&removed), 0);
     wait(map.remove_style_source("removed"));
-    assert_eq!(removed.drops(), 1);
+    assert_eq!(drops(&removed), 1);
 
-    // A failed add drops the callbacks it carried before it completes.
-    let duplicate = Probe::default();
-    add_geometry(&map, "kept", &Probe::default()).unwrap();
-    assert_eq!(add_geometry(&map, "kept", &duplicate).unwrap_err().kind, ErrorKind::AlreadyExists);
-    assert_eq!(duplicate.drops(), 1);
+    // A failed add drops the value it carried before it completes.
+    let duplicate = Arc::default();
+    add_holding(&map, "kept", &Arc::default()).unwrap();
+    assert_eq!(add_holding(&map, "kept", &duplicate).unwrap_err().kind, ErrorKind::AlreadyExists);
+    assert_eq!(drops(&duplicate), 1);
 
-    let replaced = Probe::default();
-    let vector = Probe::default();
-    add_geometry(&map, "replaced", &replaced).unwrap();
-    wait(map.add_custom_vector_source("vector", vector.callbacks(), Range::new(0, 18)));
-    assert_eq!(wait(map.style_source("vector")).unwrap().kind, SourceKind::CustomVector);
+    let replaced = Arc::default();
+    add_holding(&map, "replaced", &replaced).unwrap();
     wait(map.set_style_json(r#"{"version":8,"name":"next","sources":{},"layers":[]}"#));
-    assert_eq!((replaced.drops(), vector.drops()), (1, 1));
+    assert_eq!(drops(&replaced), 1);
 
-    let released = Probe::default();
-    add_geometry(&map, "released", &released).unwrap();
+    let released = Arc::default();
+    add_holding(&map, "released", &released).unwrap();
     wait(map.release());
-    assert_eq!(released.drops(), 1);
+    assert_eq!(drops(&released), 1);
     drop(runtime);
 }
 
 #[test]
-fn tile_commands_check_the_kind_of_their_source() {
+fn a_held_value_is_reached_by_its_source_and_type() {
     let (_runtime, map) = styled_map();
-    add_geometry(&map, "geometry", &Probe::default()).unwrap();
-    let tile = mln_style::tile_id::CanonicalTileID::new(0, 0, 0);
-    wait(map.set_custom_geometry_source_tile_data("geometry", tile, r#"{"type":"Point","coordinates":[0,0]}"#));
-    wait(map.invalidate_custom_geometry_source_tile("geometry", tile));
-    let wrong = wait_err(map.set_custom_vector_source_tile_data("geometry", tile, None, TileDataFormat::default()));
-    assert_eq!(wrong.message, "source \"geometry\" is not a custom vector source");
-    let invalid = wait_err(map.set_custom_geometry_source_tile_data("geometry", tile, "{"));
-    assert_eq!(invalid.kind, ErrorKind::InvalidArgument);
-    assert_eq!(wait_err(map.invalidate_custom_vector_source_tile("missing", tile)).kind, ErrorKind::NotFound);
+    let count = Arc::default();
+    add_holding(&map, "held", &count).unwrap();
+    let reached = |id: &str| {
+        map.with_held_source::<Held>(id, |held| held.map(|_| ()).map_err(|error| error.into_error("held")))
+            .unwrap()
+            .wait()
+    };
+    reached("held").unwrap();
+    let other_type = map.with_held_source::<u32>("held", |held| {
+        assert_eq!(held.err(), Some(HeldSourceError::NotHeld));
+        Ok(())
+    });
+    other_type.unwrap().wait().unwrap();
+    assert_eq!(reached("missing").unwrap_err().kind, ErrorKind::NotFound);
+
+    // A source that replaced the holding one under its ID holds nothing.
+    wait(map.remove_style_source("held"));
+    wait(map.add_style_source_json("held", EMPTY_GEOJSON_SOURCE));
+    let error = reached("held").unwrap_err();
+    assert_eq!(
+        (error.kind, error.message.as_str()),
+        (ErrorKind::InvalidArgument, "source \"held\" holds no such value")
+    );
+    assert_eq!(drops(&count), 1);
 }
 
 #[test]

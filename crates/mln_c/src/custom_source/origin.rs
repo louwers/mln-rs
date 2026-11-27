@@ -6,22 +6,21 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use mln_engine::exec::pool::Pool;
+use mln_engine::source::{
+    Cover, DataOrigin, GeometryTiles, LoadContext, OriginUpdate, Replier, SourceType, Supply, TileNecessity, WorldCopy,
+};
+use mln_engine::tile::{MltTile, MvtTile, OverscaledTileID, TileData};
 use mln_style::error::Error;
 use mln_style::range::Range;
 use mln_style::source::{SourceData, StyleSourceType};
-use mln_style::sources::custom::{CustomVectorTileData, TileDataFormat};
 use mln_style::sources::geojson::TileFeatures;
-use mln_style::sources::{CustomGeometrySourceType, CustomVectorSourceType};
 use mln_style::{Source, constants};
 
-use crate::exec::pool::Pool;
-use crate::source::{
-    Cover, DataOrigin, GeometryTiles, LoadContext, OriginUpdate, Replier, SourceType, Supply, TileNecessity, WorldCopy,
-};
-use crate::tile::{OverscaledTileID, TileData};
-use crate::tile_store::custom_tile_loader::{
+use super::provider::{
     CustomGeometryProvider, CustomProvider, CustomTileSubscriber, CustomVectorProvider, SubscriberKey,
 };
+use super::{CustomGeometrySourceType, CustomVectorSourceType, CustomVectorTileData, TileDataFormat};
 
 impl SourceType for CustomGeometrySourceType {
     type Data = GeometryTiles;
@@ -54,7 +53,7 @@ trait CustomSource: StyleSourceType {
 
 impl CustomSource for CustomGeometrySourceType {
     fn differs(a: &SourceData<Self>, b: &SourceData<Self>) -> bool {
-        a.differs(b)
+        a.options.differs(&b.options)
     }
 
     fn provider(data: &SourceData<Self>, pool: &Pool) -> Arc<dyn CustomLoader> {
@@ -68,7 +67,7 @@ impl CustomSource for CustomGeometrySourceType {
 
 impl CustomSource for CustomVectorSourceType {
     fn differs(a: &SourceData<Self>, b: &SourceData<Self>) -> bool {
-        a.differs(b)
+        a.options.differs(&b.options)
     }
 
     fn provider(data: &SourceData<Self>, pool: &Pool) -> Arc<dyn CustomLoader> {
@@ -140,7 +139,7 @@ impl Drop for CustomTile {
 }
 
 /// What a custom source's provider gives a tile.
-pub(crate) enum CustomReply {
+enum CustomReply {
     /// The tile's data; `None` for a tile without any.
     Data(Option<TileData>),
     /// The host couldn't give the tile's data.
@@ -225,7 +224,7 @@ impl<T: CustomSource> DataOrigin for CustomOrigin<T> {
 }
 
 /// A custom source's provider, whatever data it hands its tiles.
-pub(crate) trait CustomLoader {
+trait CustomLoader {
     /// Asks for tile `id`'s data, which goes to `replier`, as subscription
     /// `key`.
     fn fetch(&self, id: OverscaledTileID, key: SubscriberKey, replier: Replier<CustomReply>, fast_pfor_enabled: bool);
@@ -234,7 +233,7 @@ pub(crate) trait CustomLoader {
 }
 
 /// What a custom source's host gives a tile.
-pub(crate) trait CustomTileData: Clone + Send + 'static {
+trait CustomTileData: Clone + Send + 'static {
     fn into_tile_data(self, fast_pfor_enabled: bool) -> Option<TileData>;
 }
 
@@ -248,8 +247,8 @@ impl CustomTileData for CustomVectorTileData {
     fn into_tile_data(self, fast_pfor_enabled: bool) -> Option<TileData> {
         let (data, format) = self;
         data.map(|data| match format {
-            TileDataFormat::Mvt => TileData::Mvt(crate::tile::MvtTile::new(data)),
-            TileDataFormat::Mlt => TileData::Mlt(crate::tile::MltTile::new(data, fast_pfor_enabled)),
+            TileDataFormat::Mvt => TileData::Mvt(MvtTile::new(data)),
+            TileDataFormat::Mlt => TileData::Mlt(MltTile::new(data, fast_pfor_enabled)),
         })
     }
 }

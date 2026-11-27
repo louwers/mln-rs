@@ -10,9 +10,8 @@ use mln_engine::storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_headless::HeadlessFrontend;
 use mln_style::Edit;
 use mln_style::conversion::Convertible;
-use mln_style::geo::{LatLng, LatLngBounds};
+use mln_style::geo::LatLng;
 use mln_style::layer::Layer;
-use mln_style::sources::custom_geometry_source::{self, Options as CustomGeometrySourceOptions};
 use mln_style::sources::geojson::GeoJSONOptions;
 use serde_json::json;
 
@@ -61,31 +60,23 @@ fn grid() {
         ..Default::default()
     });
 
-    let options = CustomGeometrySourceOptions {
-        fetch_tile_function: Some(answer_with(|tile_id| {
-            let grid_spacing = 0.1;
-            let mut features = Vec::new();
-            let bounds = LatLngBounds::from_canonical_tile(tile_id.z, tile_id.x, tile_id.y);
-            let mut y = (bounds.north() / grid_spacing).ceil() * grid_spacing;
-            while y >= (bounds.south() / grid_spacing).floor() * grid_spacing {
-                let grid_line = Geometry::new_line_string([[bounds.west(), y], [bounds.east(), y]]);
-                features.push(Feature::from(grid_line));
-                y -= grid_spacing;
-            }
-
-            let mut x = (bounds.west() / grid_spacing).floor() * grid_spacing;
-            while x <= (bounds.east() / grid_spacing).ceil() * grid_spacing {
-                let grid_line = Geometry::new_line_string([[x, bounds.south()], [x, bounds.north()]]);
-                features.push(Feature::from(grid_line));
-                x += grid_spacing;
-            }
-            features
-        })),
-        ..Default::default()
-    };
-
-    let source = custom_geometry_source::create("custom", options).unwrap();
-    map.add_source(source).unwrap();
+    // C++ answers a custom geometry source with each tile's grid lines; a
+    // GeoJSON source of the lines around the view draws them alike.
+    let grid_spacing = 0.1;
+    let (west, east, south, north) = (-123.5, -121.5, 37.0, 38.6);
+    let mut features = Vec::new();
+    let mut y = south;
+    while y <= north {
+        features.push(Feature::from(Geometry::new_line_string([[west, y], [east, y]])));
+        y += grid_spacing;
+    }
+    let mut x = west;
+    while x <= east {
+        features.push(Feature::from(Geometry::new_line_string([[x, south], [x, north]])));
+        x += grid_spacing;
+    }
+    let data = serde_json::to_value(GeoJson::from(features)).unwrap();
+    map.add_source_json("custom", &json!({ "type": "geojson", "data": data }).to_string()).unwrap();
 
     let mut fill_layer = Layer::new(Registry::with_builtins().style(), "fill", "landcover", "mapbox").unwrap();
     fill_layer.set_source_layer("landcover");

@@ -15,7 +15,6 @@ pub(crate) mod borrowed;
 pub(crate) mod constant;
 mod convertible;
 pub(crate) mod coordinate;
-pub(crate) mod custom_geometry_source_options;
 pub(crate) mod geojson;
 pub(crate) mod geojson_options;
 mod get_json_type;

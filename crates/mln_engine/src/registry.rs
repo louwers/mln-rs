@@ -15,10 +15,7 @@ use mln_style::layers::{
     Background, Circle, ColorRelief, Fill, FillExtrusion, Heatmap, Hillshade, Line, Raster, Symbol,
 };
 use mln_style::source::ErasedStyleSourceType;
-use mln_style::sources::{
-    CustomGeometrySourceType, CustomVectorSourceType, GeoJsonSourceType, ImageSourceType, RasterDemSourceType,
-    RasterSourceType, VectorSourceType,
-};
+use mln_style::sources::{GeoJsonSourceType, ImageSourceType, RasterDemSourceType, RasterSourceType, VectorSourceType};
 use mln_vec_map::VecMap;
 
 use crate::layer::layer_type::{ErasedLayerType, LayerType, entry};
@@ -97,8 +94,8 @@ fn style_source_half(source_type: &'static dyn ErasedSourceType) -> &'static dyn
 }
 
 /// Adds the style specification's expression functions, layer types and
-/// source types, the custom layer type and the custom source types. Fails for a name that an
-/// earlier call took, or a role that an earlier function has.
+/// source types and the custom layer type. Fails for a name that an earlier
+/// call took, or a role that an earlier function has.
 pub fn register_builtins(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
     register_builtin_functions(builder.functions_mut())?;
     register_builtin_types(builder)
@@ -128,9 +125,7 @@ fn register_builtin_source_types(builder: &mut RegistryBuilder) -> Result<(), Re
     builder.add_source_type::<RasterSourceType>()?;
     builder.add_source_type::<RasterDemSourceType>()?;
     builder.add_source_type::<GeoJsonSourceType>()?;
-    builder.add_source_type::<ImageSourceType>()?;
-    builder.add_source_type::<CustomGeometrySourceType>()?;
-    builder.add_source_type::<CustomVectorSourceType>()
+    builder.add_source_type::<ImageSourceType>()
 }
 
 /// The expression functions, layer types and source types that a style
@@ -227,7 +222,7 @@ mod tests {
         register_builtins(&mut builder).unwrap();
         let registry = builder.build();
         let names: Vec<_> = registry.style().source_types().map(|source_type| source_type.info().name).collect();
-        assert_eq!(names, ["custom-geometry", "custom-vector", "geojson", "image", "raster", "raster-dem", "vector"]);
+        assert_eq!(names, ["geojson", "image", "raster", "raster-dem", "vector"]);
     }
 
     #[test]

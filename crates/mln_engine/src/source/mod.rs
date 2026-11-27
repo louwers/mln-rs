@@ -131,7 +131,6 @@ pub use crate::tile_store::tile::{TileNecessity, TileOperation};
 use crate::tile_store::tile_mut::{CopyAnswer, TileMut};
 use crate::worker::job::TileKey;
 
-mod custom;
 pub(crate) mod erased;
 mod geojson;
 mod image;

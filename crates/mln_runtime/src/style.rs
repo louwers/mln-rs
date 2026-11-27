@@ -1,8 +1,10 @@
-//! The map handle's style commands: sources and their data, custom sources,
-//! images, layers, the light, the global state and transitions.
+//! The map handle's style commands: sources and their data, values held
+//! for sources, images, layers, the light, the global state and
+//! transitions.
 
+use std::any::Any;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Weak};
 
 use geojson::{GeoJson, GeometryValue};
 use mln_style::bitmap::PremultipliedImage;
@@ -12,36 +14,16 @@ use mln_style::geo::{LatLng, LatLngBounds};
 use mln_style::hash::HashMap;
 use mln_style::image::Impl as StyleImage;
 use mln_style::range::Range;
-use mln_style::source::{SourceData, StyleSourceType};
-use mln_style::sources::custom::{CustomVectorTileData, TileFunction};
-use mln_style::sources::custom_geometry_source::{self, TileOptions};
+use mln_style::source::SourceData;
 use mln_style::sources::geojson::{GeoJSONData, GeoJSONDataBuilder};
 use mln_style::sources::image::ImageSourceOptions;
-use mln_style::sources::{
-    CustomGeometrySourceType, CustomSourceHandle, CustomVectorSourceType, GeoJSONOptions, GeoJsonSourceType,
-    ImageSourceType, RasterDemSourceType, RasterSourceType, TileDataFormat, VectorSourceType, custom_vector_source,
-    geojson_source,
-};
-use mln_style::tile_id::CanonicalTileID;
+use mln_style::sources::{GeoJSONOptions, GeoJsonSourceType, ImageSourceType, geojson_source};
 use mln_style::tileset::{RasterEncoding, Scheme, VectorEncoding};
 use mln_style::{Edit, Source, SourceInstance, TransitionOptions};
-use parking_lot::Mutex;
 
 use crate::completion::{Completion, Resolver};
 use crate::map::{Applied, Map, MapEntry, MapId, apply_command, flush, missing_map, style_not_loaded};
 use crate::runtime::{Background, Outbox, RuntimeCore, post};
-
-/// The kind of a style source.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SourceKind {
-    Vector,
-    Raster,
-    RasterDem,
-    GeoJson,
-    Image,
-    CustomGeometry,
-    CustomVector,
-}
 
 /// The tiles that a source lists in the style itself, rather than at a URL.
 #[derive(Clone, Debug, PartialEq)]
@@ -193,7 +175,9 @@ fn parse_cluster_properties(
 #[derive(Clone, Debug)]
 pub struct SourceInfo {
     pub id: String,
-    pub kind: SourceKind,
+    /// The source's type, such as `geojson`: a type of the style
+    /// specification's, or one that the runtime's registry adds.
+    pub source_type: &'static str,
     pub is_volatile: bool,
     /// The source's attribution. A tile source with a URL has none until its
     /// TileJSON loads.
@@ -224,115 +208,38 @@ pub struct LayerInfo {
     pub visible: bool,
 }
 
-/// The callbacks of a custom source, which run on a library thread. A map
-/// asks for a tile with `fetch_tile`, and answers come back through the
-/// source's commands, such as
-/// [`Map::set_custom_geometry_source_tile_data`]. `cancel_tile` reports that
-/// the map no longer needs a tile.
-///
-/// The callbacks drop once the source has left the style and no call is
-/// running, so the source's last call happens before then.
-pub struct CustomSourceCallbacks {
-    pub fetch_tile: Box<dyn Fn(CanonicalTileID) + Send + Sync>,
-    pub cancel_tile: Option<Box<dyn Fn(CanonicalTileID) + Send + Sync>>,
-}
-
-impl std::fmt::Debug for CustomSourceCallbacks {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CustomSourceCallbacks")
-            .field("cancel_tile", &self.cancel_tile.is_some())
-            .finish_non_exhaustive()
-    }
-}
-
-/// The core's tile functions over `callbacks`, which the map holds weakly,
-/// so that they drop when the map lets go of the source rather than when
-/// the source's provider does. A fetch keeps the handle it gets in
-/// `handles`.
-fn tile_functions<D: Clone + 'static>(
-    callbacks: &Arc<CustomSourceCallbacks>,
-    handles: &Arc<SourceHandles<D>>,
-) -> (Option<TileFunction<D>>, Option<TileFunction<D>>) {
-    let (fetch, handles): (Weak<CustomSourceCallbacks>, _) = (Arc::downgrade(callbacks), Arc::clone(handles));
-    let fetch: TileFunction<D> = Arc::new(move |tile: &CanonicalTileID, handle: &CustomSourceHandle<D>| {
-        if let Some(callbacks) = fetch.upgrade() {
-            handles.keep(handle);
-            (callbacks.fetch_tile)(*tile);
-        }
-    });
-    let cancel = callbacks.cancel_tile.as_ref().map(|_| {
-        let cancel = Arc::downgrade(callbacks);
-        let cancel: TileFunction<D> = Arc::new(move |tile: &CanonicalTileID, _: &CustomSourceHandle<D>| {
-            if let Some(callback) = cancel.upgrade().as_ref().and_then(|callbacks| callbacks.cancel_tile.as_ref()) {
-                callback(*tile);
-            }
-        });
-        cancel
-    });
-    (Some(fetch), cancel)
-}
-
-/// The handles that a custom source's providers asked the host through,
-/// which the source's commands answer through: the renderer's, and a former
-/// renderer's while its provider lives, so that an answer reaches whichever
-/// asked.
-struct SourceHandles<D>(Mutex<Vec<CustomSourceHandle<D>>>);
-
-impl<D> Default for SourceHandles<D> {
-    fn default() -> Self {
-        SourceHandles(Mutex::new(Vec::new()))
-    }
-}
-
-impl<D: Clone> SourceHandles<D> {
-    /// Keeps `handle`, and lets go of those whose provider is gone.
-    fn keep(&self, handle: &CustomSourceHandle<D>) {
-        let mut handles = self.0.lock();
-        handles.retain(|kept| !kept.is_closed());
-        if !handles.iter().any(|kept| kept.ptr_eq(handle)) {
-            handles.push(handle.clone());
-        }
-    }
-
-    /// Hands `value` to `act` with each handle.
-    fn each<V: Clone>(&self, value: V, act: impl Fn(&CustomSourceHandle<D>, V)) {
-        let handles = self.0.lock();
-        if let Some((last, rest)) = handles.split_last() {
-            for handle in rest {
-                act(handle, value.clone());
-            }
-            act(last, value);
-        }
-    }
-}
-
-/// The handles of a custom source of either kind.
-enum CustomHandles {
-    Geometry(Arc<SourceHandles<GeoJson>>),
-    Vector(Arc<SourceHandles<CustomVectorTileData>>),
-}
-
-/// A custom source that a command added, and the callbacks that the map
-/// holds for it.
-struct CallbackSource {
+/// A value that the map holds for a source that
+/// [`Map::add_source_holding`] added, while that source is in the style.
+struct HeldSource {
     id: String,
     instance: SourceInstance,
-    /// Held only to be dropped: the core's tile functions hold the
-    /// callbacks weakly.
-    _callbacks: Arc<CustomSourceCallbacks>,
-    handles: CustomHandles,
+    held: Box<dyn Any + Send>,
 }
 
-/// The custom sources of a map, whose callbacks it lets go of once their
+/// The values that a map holds for its sources, which it drops once their
 /// source leaves the style.
 #[derive(Default)]
-pub(crate) struct CallbackSources(Vec<CallbackSource>);
+pub(crate) struct HeldSources(Vec<HeldSource>);
 
-impl CallbackSources {
-    /// The handles of the source `source`, `id`, if a command added it.
-    fn handles(&self, id: &str, source: &Source) -> Option<&CustomHandles> {
-        let instance = source.instance();
-        self.0.iter().find(|held| held.id == id && held.instance == instance).map(|held| &held.handles)
+/// Why [`Map::with_held_source`] found no held value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HeldSourceError {
+    /// The style has no source with the ID.
+    NoSource,
+    /// The source holds no value of the type asked for.
+    NotHeld,
+}
+
+impl HeldSourceError {
+    /// The error for the source `id`: `NotFound` for
+    /// [`NoSource`](Self::NoSource) and `InvalidArgument` for
+    /// [`NotHeld`](Self::NotHeld).
+    #[must_use]
+    pub fn into_error(self, id: &str) -> Error {
+        match self {
+            HeldSourceError::NoSource => source_not_found(id),
+            HeldSourceError::NotHeld => Error::invalid_argument(format!("source {} holds no such value", quote(id))),
+        }
     }
 }
 
@@ -353,16 +260,16 @@ struct GeoJsonUpdate {
 #[derive(Default)]
 pub(crate) struct GeoJsonUpdates(HashMap<String, GeoJsonUpdate>);
 
-/// Lets go of the callbacks of the sources that left the style, and cancels
-/// the GeoJSON data that waits for sources that left. The callbacks drop
-/// from the outbox, so before the completions that follow, and with the
-/// runtime's state unborrowed.
+/// Lets go of the values held for the sources that left the style, and
+/// cancels the GeoJSON data that waits for sources that left. The values
+/// drop from the outbox, so before the completions that follow, and with
+/// the runtime's state unborrowed.
 pub(crate) fn reconcile(entry: &mut MapEntry, outbox: &mut Outbox) {
     let map = &entry.core;
     let present = |id: &str, instance: SourceInstance| map.source(id).is_some_and(|found| found.instance() == instance);
     let (kept, gone): (Vec<_>, Vec<_>) =
-        std::mem::take(&mut entry.callback_sources.0).into_iter().partition(|held| present(&held.id, held.instance));
-    entry.callback_sources.0 = kept;
+        std::mem::take(&mut entry.held_sources.0).into_iter().partition(|held| present(&held.id, held.instance));
+    entry.held_sources.0 = kept;
     if !gone.is_empty() {
         outbox.push(move || drop(gone));
     }
@@ -384,7 +291,7 @@ pub(crate) fn reconcile(entry: &mut MapEntry, outbox: &mut Outbox) {
 /// Lets go of everything a released map's sources hold, before its release
 /// completes.
 pub(crate) fn release(entry: &mut MapEntry, outbox: &mut Outbox) {
-    let held = std::mem::take(&mut entry.callback_sources.0);
+    let held = std::mem::take(&mut entry.held_sources.0);
     if !held.is_empty() {
         outbox.push(move || drop(held));
     }
@@ -439,25 +346,6 @@ fn require_new_source(map: &mln_engine::map::Map, id: &str) -> Result<(), Error>
     Ok(())
 }
 
-impl SourceKind {
-    /// The kind of `source`, from its type, the one place that maps source
-    /// types to kinds. `None` for a type the runtime doesn't name.
-    fn of(source: &Source) -> Option<SourceKind> {
-        let name = source.info().name;
-        [
-            (VectorSourceType::INFO, SourceKind::Vector),
-            (RasterSourceType::INFO, SourceKind::Raster),
-            (RasterDemSourceType::INFO, SourceKind::RasterDem),
-            (GeoJsonSourceType::INFO, SourceKind::GeoJson),
-            (ImageSourceType::INFO, SourceKind::Image),
-            (CustomGeometrySourceType::INFO, SourceKind::CustomGeometry),
-            (CustomVectorSourceType::INFO, SourceKind::CustomVector),
-        ]
-        .into_iter()
-        .find_map(|(info, kind)| (info.name == name).then_some(kind))
-    }
-}
-
 /// The `clusterProperties` of `options` as a JSON object.
 fn cluster_properties_json(options: &GeoJSONOptions) -> Option<String> {
     if options.cluster_properties.is_empty() {
@@ -474,14 +362,12 @@ fn cluster_properties_json(options: &GeoJSONOptions) -> Option<String> {
     Some(serde_json::Value::Object(members).to_string())
 }
 
-/// What the API reports about `source`; `None` for a source of a type the
-/// runtime doesn't name.
-fn source_info(source: &Source) -> Option<SourceInfo> {
-    let kind = SourceKind::of(source)?;
+/// What the API reports about `source`.
+fn source_info(source: &Source) -> SourceInfo {
     let summary = source.data().summary();
-    Some(SourceInfo {
+    SourceInfo {
         id: source.id().to_owned(),
-        kind,
+        source_type: source.info().name,
         is_volatile: source.common().volatile,
         attribution: source.data().attribution().filter(|attribution| !attribution.is_empty()),
         url: summary.url,
@@ -496,7 +382,7 @@ fn source_info(source: &Source) -> Option<SourceInfo> {
         tile_size: summary.tile_size,
         vector_encoding: summary.vector_encoding,
         geojson: summary.geojson.map(|options| GeoJsonSourceOptions::from_core(&options)),
-    })
+    }
 }
 
 fn layer_info(layer: &mln_style::Layer) -> LayerInfo {
@@ -542,16 +428,6 @@ fn check_clusterable(geojson: &GeoJson) -> Result<(), Error> {
     }
 }
 
-/// The features a custom geometry tile draws: its core draws only a feature
-/// collection, so a lone feature or geometry becomes one.
-fn feature_collection(geojson: GeoJson) -> GeoJson {
-    match geojson {
-        GeoJson::FeatureCollection(_) => geojson,
-        GeoJson::Feature(feature) => GeoJson::from(vec![feature]),
-        GeoJson::Geometry(geometry) => GeoJson::from(vec![geojson::Feature::from(geometry)]),
-    }
-}
-
 impl Map {
     // MARK: - Global state
 
@@ -576,12 +452,12 @@ impl Map {
     /// A source of the style, or `None` when the style has no such source.
     pub fn style_source(&self, source_id: impl Into<String>) -> Result<Completion<Option<SourceInfo>>, Error> {
         let source_id = source_id.into();
-        self.query(move |map| Ok(map.source(&source_id).and_then(source_info)))
+        self.query(move |map| Ok(map.source(&source_id).map(source_info)))
     }
 
     /// The style's sources, in style order.
     pub fn style_sources(&self) -> Result<Completion<Vec<SourceInfo>>, Error> {
-        self.query(|map| Ok(map.sources().filter_map(source_info).collect()))
+        self.query(|map| Ok(map.sources().map(source_info).collect()))
     }
 
     /// Sets whether a source keeps its tiles out of the persistent cache.
@@ -710,207 +586,66 @@ impl Map {
         })
     }
 
-    // MARK: - Custom sources
+    // MARK: - Held values
 
-    /// A command that answers for a custom source: it reads the map's
-    /// entry, where the handles of the custom sources that commands added
-    /// are.
-    fn custom_command(
-        &self,
-        apply: impl FnOnce(&MapEntry) -> Result<(), Error> + Send + 'static,
-    ) -> Result<Completion<Applied>, Error> {
-        self.send(move |entry, _| apply(entry), |(), entry| entry.applied())
-    }
-
-    /// Adds a source whose GeoJSON tiles come from `callbacks`. The map
-    /// holds the callbacks until the source leaves the style, by its
-    /// removal, a style load or the map's release, and drops them before
-    /// the command that removed it completes. A command that fails drops
-    /// them before it completes.
-    pub fn add_custom_geometry_source(
-        &self,
-        source_id: impl Into<String>,
-        callbacks: CustomSourceCallbacks,
-        zoom_range: Range<u8>,
-        tile_options: TileOptions,
-    ) -> Result<Completion<Applied>, Error> {
-        let (source_id, callbacks) = (source_id.into(), Arc::new(callbacks));
+    /// Adds `source` to the style, with `held`, a value that the map holds
+    /// for that source while it is in the style, which
+    /// [`with_held_source`](Self::with_held_source) reaches. The map drops
+    /// it once the source leaves the style, by its removal, a style load or
+    /// the map's release, before the command that removed it completes. A
+    /// command that fails drops it before it completes.
+    ///
+    /// Completes with [`ErrorKind::AlreadyExists`](mln_style::error::ErrorKind)
+    /// when the style has a source with the ID, and as
+    /// [`add_style_source_json`](Self::add_style_source_json) otherwise.
+    pub fn add_source_holding(&self, source: Source, held: Box<dyn Any + Send>) -> Result<Completion<Applied>, Error> {
         self.send(
             move |entry, outbox| {
-                add_callback_source(entry, outbox, source_id, callbacks, |id, callbacks| {
-                    let handles = Arc::default();
-                    let (fetch_tile_function, cancel_tile_function) = tile_functions(callbacks, &handles);
-                    let options = custom_geometry_source::Options {
-                        fetch_tile_function,
-                        cancel_tile_function,
-                        zoom_range,
-                        tile_options,
-                    };
-                    let source = custom_geometry_source::create(&id, options)
-                        .map_err(|error| Error::invalid_argument(error.to_string()))?;
-                    Ok((source, CustomHandles::Geometry(handles)))
-                })
+                let map = &mut entry.core;
+                let (id, instance) = (source.id().to_owned(), source.instance());
+                match require_new_source(map, &id).and_then(|()| map.add_source(source)) {
+                    Ok(()) => {
+                        entry.held_sources.0.push(HeldSource { id, instance, held });
+                        Ok(())
+                    }
+                    Err(error) => {
+                        outbox.push(move || drop(held));
+                        Err(error)
+                    }
+                }
             },
             |(), entry| entry.applied(),
         )
     }
 
-    /// Adds a source whose vector tiles come from `callbacks`, which the map
-    /// holds as [`add_custom_geometry_source`](Self::add_custom_geometry_source)
-    /// says.
-    pub fn add_custom_vector_source(
+    /// A command that runs `apply` on the runtime's thread with the value of
+    /// type `T` that the map holds for the source `source_id`, or why it
+    /// holds none, and completes with what `apply` returns.
+    pub fn with_held_source<T: Any + Send>(
         &self,
         source_id: impl Into<String>,
-        callbacks: CustomSourceCallbacks,
-        zoom_range: Range<u8>,
+        apply: impl FnOnce(Result<&mut T, HeldSourceError>) -> Result<(), Error> + Send + 'static,
     ) -> Result<Completion<Applied>, Error> {
-        let (source_id, callbacks) = (source_id.into(), Arc::new(callbacks));
+        let source_id = source_id.into();
         self.send(
-            move |entry, outbox| {
-                add_callback_source(entry, outbox, source_id, callbacks, |id, callbacks| {
-                    let handles = Arc::default();
-                    let (fetch_tile_function, cancel_tile_function) = tile_functions(callbacks, &handles);
-                    let options =
-                        custom_vector_source::Options { fetch_tile_function, cancel_tile_function, zoom_range };
-                    Ok((custom_vector_source::create(&id, options), CustomHandles::Vector(handles)))
-                })
+            move |entry, _| {
+                let held = match entry.core.source(&source_id) {
+                    None => Err(HeldSourceError::NoSource),
+                    Some(source) => {
+                        let instance = source.instance();
+                        entry
+                            .held_sources
+                            .0
+                            .iter_mut()
+                            .find(|held| held.id == source_id && held.instance == instance)
+                            .and_then(|held| held.held.downcast_mut::<T>())
+                            .ok_or(HeldSourceError::NotHeld)
+                    }
+                };
+                apply(held)
             },
             |(), entry| entry.applied(),
         )
-    }
-
-    /// Sets the data of a tile of a custom geometry source from GeoJSON text:
-    /// a feature collection, feature or geometry. The source ignores data
-    /// for a tile it hasn't asked for, or has since cancelled.
-    pub fn set_custom_geometry_source_tile_data(
-        &self,
-        source_id: impl Into<String>,
-        tile_id: CanonicalTileID,
-        json: impl Into<String>,
-    ) -> Result<Completion<Applied>, Error> {
-        let (source_id, json) = (source_id.into(), json.into());
-        self.custom_command(move |entry| {
-            let geojson = feature_collection(parse_geojson(&json)?);
-            if let Some(handles) = geometry_handles(entry, &source_id)? {
-                handles.each(geojson, |handle, geojson| handle.set_tile_data(tile_id, geojson));
-            }
-            Ok(())
-        })
-    }
-
-    /// Reports that a tile of a custom geometry source failed to load.
-    pub fn set_custom_geometry_source_tile_error(
-        &self,
-        source_id: impl Into<String>,
-        tile_id: CanonicalTileID,
-        message: impl Into<String>,
-    ) -> Result<Completion<Applied>, Error> {
-        let (source_id, message) = (source_id.into(), message.into());
-        self.custom_command(move |entry| {
-            if let Some(handles) = geometry_handles(entry, &source_id)? {
-                handles.each(Error::native(message), |handle, error| handle.set_tile_error(tile_id, error));
-            }
-            Ok(())
-        })
-    }
-
-    /// Makes a custom geometry source ask for a tile again when the map needs
-    /// it.
-    pub fn invalidate_custom_geometry_source_tile(
-        &self,
-        source_id: impl Into<String>,
-        tile_id: CanonicalTileID,
-    ) -> Result<Completion<Applied>, Error> {
-        let source_id = source_id.into();
-        self.custom_command(move |entry| {
-            if let Some(handles) = geometry_handles(entry, &source_id)? {
-                handles.each((), |handle, ()| handle.invalidate_tile(tile_id));
-            }
-            Ok(())
-        })
-    }
-
-    /// Makes a custom geometry source ask again for the tiles in `bounds`
-    /// that the map still needs.
-    pub fn invalidate_custom_geometry_source_region(
-        &self,
-        source_id: impl Into<String>,
-        bounds: LatLngBounds,
-    ) -> Result<Completion<Applied>, Error> {
-        let source_id = source_id.into();
-        self.custom_command(move |entry| {
-            if let Some(handles) = geometry_handles(entry, &source_id)? {
-                handles.each(bounds, CustomSourceHandle::invalidate_region);
-            }
-            Ok(())
-        })
-    }
-
-    /// Sets the data of a tile of a custom vector source: its bytes in
-    /// `format`, or `None` for a tile without data. The source ignores data
-    /// for a tile it hasn't asked for, or has since cancelled.
-    pub fn set_custom_vector_source_tile_data(
-        &self,
-        source_id: impl Into<String>,
-        tile_id: CanonicalTileID,
-        data: Option<Vec<u8>>,
-        format: TileDataFormat,
-    ) -> Result<Completion<Applied>, Error> {
-        let source_id = source_id.into();
-        self.custom_command(move |entry| {
-            if let Some(handles) = vector_handles(entry, &source_id)? {
-                handles.each((data.map(Arc::new), format), |handle, data| handle.set_tile_data(tile_id, data));
-            }
-            Ok(())
-        })
-    }
-
-    /// Reports that a tile of a custom vector source failed to load.
-    pub fn set_custom_vector_source_tile_error(
-        &self,
-        source_id: impl Into<String>,
-        tile_id: CanonicalTileID,
-        message: impl Into<String>,
-    ) -> Result<Completion<Applied>, Error> {
-        let (source_id, message) = (source_id.into(), message.into());
-        self.custom_command(move |entry| {
-            if let Some(handles) = vector_handles(entry, &source_id)? {
-                handles.each(Error::native(message), |handle, error| handle.set_tile_error(tile_id, error));
-            }
-            Ok(())
-        })
-    }
-
-    /// Makes a custom vector source ask for a tile again when the map needs
-    /// it.
-    pub fn invalidate_custom_vector_source_tile(
-        &self,
-        source_id: impl Into<String>,
-        tile_id: CanonicalTileID,
-    ) -> Result<Completion<Applied>, Error> {
-        let source_id = source_id.into();
-        self.custom_command(move |entry| {
-            if let Some(handles) = vector_handles(entry, &source_id)? {
-                handles.each((), |handle, ()| handle.invalidate_tile(tile_id));
-            }
-            Ok(())
-        })
-    }
-
-    /// Makes a custom vector source ask again for the tiles in `bounds` that
-    /// the map still needs.
-    pub fn invalidate_custom_vector_source_region(
-        &self,
-        source_id: impl Into<String>,
-        bounds: LatLngBounds,
-    ) -> Result<Completion<Applied>, Error> {
-        let source_id = source_id.into();
-        self.custom_command(move |entry| {
-            if let Some(handles) = vector_handles(entry, &source_id)? {
-                handles.each(bounds, CustomSourceHandle::invalidate_region);
-            }
-            Ok(())
-        })
     }
 
     // MARK: - Images
@@ -1041,57 +776,6 @@ impl Map {
     pub fn style_transition_options(&self) -> Result<Completion<TransitionOptions>, Error> {
         self.query(|map| Ok(map.style().get_transition_options()))
     }
-}
-
-/// Adds the custom source that `make` makes over `callbacks`, and holds the
-/// callbacks for as long as the style holds the source. When the add fails,
-/// the callbacks drop from the outbox, with the runtime's state unborrowed.
-fn add_callback_source(
-    entry: &mut MapEntry,
-    outbox: &mut Outbox,
-    id: String,
-    callbacks: Arc<CustomSourceCallbacks>,
-    make: impl FnOnce(String, &Arc<CustomSourceCallbacks>) -> Result<(Source, CustomHandles), Error>,
-) -> Result<(), Error> {
-    let map = &mut entry.core;
-    let added = require_new_source(map, &id).and_then(|()| {
-        let (source, handles) = make(id.clone(), &callbacks)?;
-        let instance = source.instance();
-        map.add_source(source)?;
-        Ok((instance, handles))
-    });
-    match added {
-        Ok((instance, handles)) => {
-            entry.callback_sources.0.push(CallbackSource { id, instance, _callbacks: callbacks, handles });
-            Ok(())
-        }
-        Err(error) => {
-            outbox.push(move || drop(callbacks));
-            Err(error)
-        }
-    }
-}
-
-/// The handles of the custom geometry source `id`, or `None` if no command
-/// added it.
-fn geometry_handles(entry: &MapEntry, id: &str) -> Result<Option<Arc<SourceHandles<GeoJson>>>, Error> {
-    let source = find_source(&entry.core, id)?;
-    SourceData::<CustomGeometrySourceType>::recover(source).ok_or_else(|| not_a(id, "a custom geometry source"))?;
-    Ok(match entry.callback_sources.handles(id, source) {
-        Some(CustomHandles::Geometry(handles)) => Some(Arc::clone(handles)),
-        Some(CustomHandles::Vector(_)) | None => None,
-    })
-}
-
-/// The handles of the custom vector source `id`, or `None` if no command
-/// added it.
-fn vector_handles(entry: &MapEntry, id: &str) -> Result<Option<Arc<SourceHandles<CustomVectorTileData>>>, Error> {
-    let source = find_source(&entry.core, id)?;
-    SourceData::<CustomVectorSourceType>::recover(source).ok_or_else(|| not_a(id, "a custom vector source"))?;
-    Ok(match entry.callback_sources.handles(id, source) {
-        Some(CustomHandles::Vector(handles)) => Some(Arc::clone(handles)),
-        Some(CustomHandles::Geometry(_)) | None => None,
-    })
 }
 
 /// Takes new data for the GeoJSON source `source_id`: builds it now with

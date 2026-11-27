@@ -49,8 +49,7 @@ impl StyleRegistry {
         };
         use crate::source::style_source_entry;
         use crate::sources::{
-            CustomGeometrySourceType, CustomVectorSourceType, GeoJsonSourceType, ImageSourceType, RasterDemSourceType,
-            RasterSourceType, VectorSourceType,
+            GeoJsonSourceType, ImageSourceType, RasterDemSourceType, RasterSourceType, VectorSourceType,
         };
         let layer_types = [
             style_entry::<Fill>(),
@@ -70,8 +69,6 @@ impl StyleRegistry {
             style_source_entry::<RasterDemSourceType>(),
             style_source_entry::<GeoJsonSourceType>(),
             style_source_entry::<ImageSourceType>(),
-            style_source_entry::<CustomGeometrySourceType>(),
-            style_source_entry::<CustomVectorSourceType>(),
         ];
         Arc::new(StyleRegistry::new(Functions::with_builtins(), layer_types, source_types))
     }

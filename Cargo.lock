@@ -2554,6 +2554,7 @@ dependencies = [
  "mln-rs-d3d12",
  "mln-rs-engine",
  "mln-rs-feature",
+ "mln-rs-geojson",
  "mln-rs-gfx",
  "mln-rs-gl",
  "mln-rs-mtl",

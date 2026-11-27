@@ -45,6 +45,7 @@ mod callback;
 mod camera;
 mod completion;
 mod custom_layer;
+mod custom_source;
 #[cfg(all(test, backend_d3d12))]
 mod d3d12_tests;
 mod delivery;

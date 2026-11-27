@@ -42,10 +42,6 @@ use mln_style::projection::Projection;
 use mln_style::property::table::Kind as StylePropertyKind;
 use mln_style::size::Size;
 use mln_style::source::SourceData;
-use mln_style::sources::custom::TileFunction;
-use mln_style::sources::custom_geometry_source::{
-    self, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions,
-};
 use mln_style::sources::geojson::GeoJSONOptions;
 use mln_style::sources::image::ImageSourceOptions;
 use mln_style::sources::{ImageSourceType, image_source};
@@ -2058,17 +2054,9 @@ fn prefetch_delta_override() {
     let vector = with_common(&vector_source("vector", "a/{z}/{x}/{y}"), |common| common.prefetch_zoom_delta = Some(0));
     test.map().add_source(vector).unwrap();
 
+    // A second source, which C++ makes a custom geometry source.
     let requested_tiles = Arc::new(AtomicI32::new(0));
-    {
-        let requested_tiles = Arc::clone(&requested_tiles);
-        test.file_source.set_response(Kind::Tile, move |_| {
-            requested_tiles.fetch_add(1, Ordering::SeqCst);
-            Some(no_content())
-        });
-    }
-
-    // Custom source
-    test.map().add_source(counted_custom_source(&requested_tiles, Some(0))).unwrap();
+    test.map().add_source(counted_source(&test, "b/{z}/{x}/{y}", &requested_tiles, Some(0))).unwrap();
 
     test.map().jump_to(&CameraOptions { zoom: Some(16.0), ..Default::default() });
     {
@@ -2096,26 +2084,23 @@ fn prefetch_delta_override() {
     assert_eq!(requested_tiles.load(Ordering::SeqCst), 8);
 }
 
-/// A custom geometry source "custom" that counts its fetches in
-/// `requested_tiles` and answers each with empty data.
-fn counted_custom_source(requested_tiles: &Arc<AtomicI32>, prefetch_zoom_delta: Option<u8>) -> Source {
-    let fetch: TileFunction<GeoJson> = {
-        let requested_tiles = Arc::clone(requested_tiles);
-        Arc::new(move |tile_id: &CanonicalTileID, handle: &CustomGeometrySourceHandle| {
-            requested_tiles.fetch_add(1, Ordering::SeqCst);
-            handle.set_tile_data(*tile_id, GeoJson::from(Vec::<geojson::Feature>::new()));
-        })
-    };
-    let options = CustomGeometrySourceOptions {
-        fetch_tile_function: Some(fetch),
-        cancel_tile_function: Some(Arc::new(|_: &CanonicalTileID, _: &CustomGeometrySourceHandle| {})),
-        ..Default::default()
-    };
-    let custom = custom_geometry_source::create("custom", options).unwrap();
-    if prefetch_zoom_delta.is_some() {
-        return with_common(&custom, |common| common.prefetch_zoom_delta = prefetch_zoom_delta);
-    }
-    custom
+/// A vector source "custom" of the tiles at `tiles` that `test`'s file
+/// source serves, whose tile requests it counts in `requested_tiles`, with
+/// the prefetch zoom delta `prefetch_zoom_delta`. C++ counts a custom
+/// geometry source's fetches, which load tiles as a vector source's
+/// requests do.
+fn counted_source(
+    test: &MapTest,
+    tiles: &str,
+    requested_tiles: &Arc<AtomicI32>,
+    prefetch_zoom_delta: Option<u8>,
+) -> Source {
+    let requested_tiles = Arc::clone(requested_tiles);
+    test.file_source.set_response(Kind::Tile, move |_| {
+        requested_tiles.fetch_add(1, Ordering::SeqCst);
+        Some(no_content())
+    });
+    with_common(&vector_source("custom", tiles), |common| common.prefetch_zoom_delta = prefetch_zoom_delta)
 }
 
 /// Stops the run loop at the next full frame.
@@ -2255,7 +2240,7 @@ fn prefetch_delta_override_custom_source() {
 
     let requested_tiles = Arc::new(AtomicI32::new(0));
 
-    test.map().add_source(counted_custom_source(&requested_tiles, Some(0))).unwrap();
+    test.map().add_source(counted_source(&test, "b/{z}/{x}/{y}", &requested_tiles, Some(0))).unwrap();
 
     test.map().jump_to(&CameraOptions { zoom: Some(16.0), ..Default::default() });
     {
@@ -2274,7 +2259,8 @@ fn prefetch_delta_override_custom_source() {
         map.edit_style(|style| style.apply(Edit::RemoveLayer("custom".to_owned()))).unwrap();
         map.remove_source("custom");
         map.edit_style(|style| style.apply(Edit::AddLayer { layer, before: None })).unwrap();
-        map.add_source(counted_custom_source(&requested_tiles, None)).unwrap();
+        // Tiles of another URL, which the source can't keep.
+        map.add_source(counted_source(&test, "c/{z}/{x}/{y}", &requested_tiles, None)).unwrap();
     }
     test.run_loop.run();
 
@@ -2904,41 +2890,6 @@ fn continuous_map_finishes_loading_when_its_tile_requests_fail() {
         });
     }
     run_with_timeout(&test.run_loop, 60);
-}
-
-// gtest: Map.StencilOverflow
-#[test]
-fn stencil_overflow() {
-    let test = MapTest::new();
-
-    test.load_json("{}");
-
-    // Create a tile source with small tiles that produces enough tiles to
-    // exceed the stencil ID limit and causes a clearing of the stencil buffer.
-    let fetch: TileFunction<GeoJson> = Arc::new(|tile_id: &CanonicalTileID, handle: &CustomGeometrySourceHandle| {
-        handle.set_tile_data(*tile_id, GeoJson::from(Vec::<geojson::Feature>::new()));
-    });
-    let mut options = CustomGeometrySourceOptions { fetch_tile_function: Some(fetch), ..Default::default() };
-    options.tile_options.tile_size = mln_style::constants::TILE_SIZE_I / 32;
-    let custom = custom_geometry_source::create("custom", options).unwrap();
-
-    test.map().add_source(custom).unwrap();
-    test.map()
-        .edit_style(|style| {
-            style.apply(Edit::AddLayer {
-                layer: Layer::new(Registry::with_builtins().style(), "fill", "fill", "custom").unwrap(),
-                before: None,
-            })
-        })
-        .unwrap();
-
-    test.map().jump_to(&CameraOptions { zoom: Some(5.0), ..Default::default() });
-    let result = test.render();
-
-    // No drawables are built because no bucket/tiledata is available.
-    assert!(0 <= result.stats.stencil_updates);
-
-    // TODO: confirm that the stencil masking actually worked
 }
 
 // gtest: Map.InvalidUTF8InTile

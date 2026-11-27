@@ -243,16 +243,6 @@ impl OneTile {
         self.with_at(id, |tile| tile.set_necessity(necessity));
     }
 
-    /// Moves tile `from` to id `to`, as a wrap jump does.
-    pub(crate) fn rekey(&mut self, from: &crate::tile::OverscaledTileID, to: crate::tile::OverscaledTileID) {
-        let (source, ctx) = self.store.source_mut(self.key).expect("the source");
-        assert!(source.tile(from).is_some(), "the tile");
-        source.rekey(from, to, ctx);
-        if self.id == *from {
-            self.id = to;
-        }
-    }
-
     /// How many changes the store reported since the last call, after it
     /// took in what arrived.
     pub(crate) fn changes(&mut self) -> usize {
@@ -262,13 +252,6 @@ impl OneTile {
             .into_iter()
             .filter(|event| matches!(event, crate::tile_store::store::StoreEvent::Changed))
             .count()
-    }
-
-    /// Adds another tile, `id`, to the source, which its origin starts.
-    pub(crate) fn start(&mut self, id: crate::tile::OverscaledTileID) {
-        let params = self.params();
-        let (source, ctx) = self.store.source_mut(self.key).expect("the source");
-        source.add_tile(id, params, false, ctx).expect("a tile");
     }
 
     /// Adds another tile, `id`, to the source, which loads nothing itself.
