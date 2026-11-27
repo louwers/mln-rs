@@ -17,7 +17,7 @@ use mln_style::types::{AlignmentType, CirclePitchScaleType};
 use super::{cast_matrix, refresh_paint_attributes};
 use crate::buckets::circle_bucket::{CircleBinders, CircleLayoutVertex};
 use crate::camera::{TileCoordinate, TileProjector};
-use crate::draw::objects::{DrawGeometry, DrawObjects, Textures};
+use crate::draw::objects::{DrawGeometry, Mesh, Textures};
 use crate::draw::segment::SegmentBase;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::layer::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
@@ -268,7 +268,7 @@ impl TypedLayer for RenderCircleLayer {
             ),
         );
         let vertex_count = if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() };
-        let objects = DrawObjects::new(
+        let mesh = Mesh::new(
             context.shader_key(&programs::CIRCLE, uniforms, cx.base.projection_variant),
             ColorMode::alpha_blended(),
             CullFaceMode::disabled(),
@@ -282,7 +282,7 @@ impl TypedLayer for RenderCircleLayer {
             },
             Textures::default(),
         );
-        Some(StandingDraw::new(objects))
+        Some(StandingDraw::new(mesh))
     }
 
     /// Makes the frame's draws of the layer, one of each of its tiles, and
@@ -321,7 +321,7 @@ impl TypedLayer for RenderCircleLayer {
                 continue;
             };
             let context = &mut *paint_parameters.context;
-            refresh_paint_attributes(&mut draw.objects, changes, |attrs| {
+            refresh_paint_attributes(&mut draw.mesh, changes, |attrs| {
                 let geometry = render_data.geometry();
                 let buffer = &binders.interleaved_vertex_buffer;
                 let paint = paint_vertices(context, geometry, buffer, binders.depends_on_feature_state());
@@ -329,12 +329,12 @@ impl TypedLayer for RenderCircleLayer {
             });
             let ground = ground.as_deref();
             draw.stand(context, ground, tile_id.to_unwrapped(), "ground_height", &bucket.centers);
-            draw.objects.set_texture(GROUND_DEPTH_SLOT, ground.and_then(FrameGround::depth));
+            draw.mesh.set_texture(GROUND_DEPTH_SLOT, ground.and_then(FrameGround::depth));
             let draw = FrameDraw::new(Some(tile_id), order);
             self.draw_list.push(draw, Self::uniforms(layer, &tile_id, binders, paint_parameters));
         }
 
-        cx.drawing.finish(&mut self.draw_list, cx.tiles, gpu, paint_parameters.context, |writer| {
+        cx.drawing.finish(&mut self.draw_list, gpu, paint_parameters.context, |writer| {
             Self::write_uniforms(layer, writer);
         });
     }
