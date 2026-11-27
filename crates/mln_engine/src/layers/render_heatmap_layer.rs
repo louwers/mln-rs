@@ -157,7 +157,7 @@ impl TypedLayer for RenderHeatmapLayer {
         }
         let (vertices, indexes) =
             (bucket_vertices(geometry, &bucket.vertices)?, bucket_indexes(geometry, &bucket.triangles)?);
-        let context = &mut *cx.context;
+        let context = &mut *cx.res.context;
         let paint =
             paint_vertices(context, geometry, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state());
         let mut uniforms = Uniforms::default();
@@ -181,8 +181,7 @@ impl TypedLayer for RenderHeatmapLayer {
             segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
             instances: None,
         };
-        let mesh =
-            Mesh::new(context, shader, ColorMode::additive(), CullFaceMode::disabled(), geometry, Textures::default());
+        let mesh = cx.res.mesh(shader, ColorMode::additive(), CullFaceMode::disabled(), geometry, Textures::default());
         Some(StandingDraw::new(mesh))
     }
 
@@ -192,9 +191,8 @@ impl TypedLayer for RenderHeatmapLayer {
     fn prepare(&mut self, cx: &mut PrepareCx<'_, '_, Self>, render_tiles: &[FrameTile<'_, Heatmap>], out: &mut Draws) {
         let viewport_size = cx.frame.view.size();
         let size = mln_gfx::Size::new(viewport_size.width / 2, viewport_size.height / 2);
-        let target =
-            self.target.get_or_insert_with(|| Target::new(cx.context, size, TextureChannelDataType::HalfFloat));
-        target.set_size(cx.context, size);
+        let target = self.target.get_or_insert_with(|| cx.res.target(size, TextureChannelDataType::HalfFloat));
+        target.set_size(&mut cx.res, size);
         Self::draw_tiles(cx, render_tiles, out.target(target));
         self.draw_texture(cx, out);
     }
@@ -204,7 +202,7 @@ impl RenderHeatmapLayer {
     /// Pushes the tiles' draws into `target`, the group of the layer's
     /// target, with their meshes in the tiles' values.
     fn draw_tiles(cx: &mut PrepareCx<'_, '_, Self>, render_tiles: &[FrameTile<'_, Heatmap>], target: &mut Group) {
-        let PrepareCx { base, values, tiles, context, frame, .. } = cx;
+        let PrepareCx { base, values, tiles, res, frame, .. } = cx;
 
         let evaluated = &values.evaluated.paint;
         for tile in render_tiles {
@@ -226,7 +224,7 @@ impl RenderHeatmapLayer {
             let Some(draw) = entry.value.as_mut() else {
                 continue;
             };
-            let context = &mut **context;
+            let context = &mut *res.context;
             refresh_paint_attributes(&draw.mesh, context, changes, |context, attrs| {
                 let geometry = render_data.geometry();
                 let buffer = &binders.interleaved_vertex_buffer;
@@ -299,7 +297,7 @@ impl RenderHeatmapLayer {
         let Some(target) = target.as_ref() else {
             return;
         };
-        let context = &mut *cx.context;
+        let context = &mut *cx.res.context;
         let heatmap_texture_shader =
             context.shader_key(&programs::HEATMAP_TEXTURE, Uniforms::default(), ProjectionVariant::Mercator);
         if !color_ramp_texture.as_ref().is_some_and(|(image, _)| Rc::ptr_eq(image, color_ramp)) {
@@ -342,8 +340,7 @@ impl RenderHeatmapLayer {
             let mut textures = Textures::default();
             textures[IMAGE_SLOT] = Some(target.texture().clone());
             textures[COLOR_RAMP_SLOT] = color_ramp.cloned();
-            let mesh = Mesh::new(
-                context,
+            let mesh = cx.res.mesh(
                 heatmap_texture_shader,
                 ColorMode::alpha_blended(),
                 CullFaceMode::disabled(),
