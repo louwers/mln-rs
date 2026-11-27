@@ -15,7 +15,7 @@ use mln_style::layers::fill_layer_properties::FillPaintProperties;
 use mln_style::types::{AlignmentType, TranslateAnchorType};
 
 use super::{cast_matrix, refresh_paint_attributes};
-use crate::buckets::fill_bucket::{FillBinders, FillBucket, FillLayoutVertex};
+use crate::buckets::fill_bucket::{FillBinders, FillLayoutVertex};
 use crate::draw::atlas_binding::AtlasBinding;
 use crate::draw::context::Context;
 use crate::draw::identity::SimpleIdentity;
@@ -31,9 +31,9 @@ use crate::layer::layer_drawing::{
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, LayerBucket, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer, RenderLayerBase,
-    TypedLayer,
+    EvaluateCx, Evaluation, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
 };
+use crate::layer::tile_input::{Features, TileData};
 use crate::layers::fill::programs;
 use crate::layers::fill::ubo::{
     FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO,
@@ -268,7 +268,7 @@ impl TileBuilder<'_> {
     fn build(
         &mut self,
         context: &mut Context,
-        tile_bucket: LayerBucket<'_, Fill>,
+        tile_bucket: TileData<'_, Fill>,
         binders: &FillBinders,
         evaluated: &FillPaintProperties::PossiblyEvaluated,
     ) -> Option<FillTile> {
@@ -418,11 +418,10 @@ impl TileBuilder<'_> {
 }
 
 impl LayerType for Fill {
-    type Layout = PatternLayout<FillLayoutSpec>;
-    type TileBucket<'a> = LayerBucket<'a, Fill>;
+    type Input = Features<PatternLayout<FillLayoutSpec>>;
     const CROSSFADES: bool = true;
 
-    fn query_radius(_bucket: &FillBucket, layer: &EvaluatedLayer<Fill>) -> f32 {
+    fn query_radius(_data: TileData<'_, Fill>, layer: &EvaluatedLayer<Fill>) -> f32 {
         let translate = layer.paint.fill_translate.uniform();
         (translate[0] * translate[0] + translate[1] * translate[1]).sqrt()
     }
@@ -474,7 +473,7 @@ impl RenderFillLayer {
         layer_id: &str,
         layer: &EvaluatedLayer<Fill>,
         tile: FrameTile<'_, Fill>,
-        tile_bucket: LayerBucket<'_, Fill>,
+        tile_bucket: TileData<'_, Fill>,
         binders: &FillBinders,
         pattern: bool,
         draw: &FillDraw,
@@ -485,7 +484,7 @@ impl RenderFillLayer {
         const NEAR_CLIPPED: bool = false;
         let evaluated = &layer.paint;
         let zoom = parameters.view.zoom() as f32;
-        let tile_id = tile.draw_id(parameters).to_unwrapped();
+        let tile_id = tile.draw_id().to_unwrapped();
 
         let projection = projection_data(
             &tile_id,
@@ -672,12 +671,12 @@ impl TypedLayer for RenderFillLayer {
         let layer_id = self.base.style.base().id.as_str();
         let layer = &*self.values.evaluated;
         for &tile in render_tiles {
-            let tile_id = tile.draw_id(paint_parameters);
+            let tile_id = tile.draw_id();
             let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
                 continue;
             };
 
-            let render_data = tile.bucket_for_pass(RENDER_PASS);
+            let render_data = tile.data_for_pass(RENDER_PASS);
             let Some(render_data) = render_data else {
                 *entry.value = None;
                 continue;
@@ -769,7 +768,7 @@ impl TypedLayer for RenderFillLayer {
             *layer.paint.fill_layer_opacity.uniform(),
             *layer.paint.fill_layer_blend.uniform(),
         ));
-        frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.draw_id(paint_parameters).to_unwrapped()));
+        frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.draw_id().to_unwrapped()));
         self.drawing.finish(&mut self.draw_list, gpu, paint_parameters.context, |writer| {
             Self::write_uniforms(layer, writer);
         });
