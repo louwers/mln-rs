@@ -6,13 +6,7 @@ use crate::property::table::{PropertyTable, PropertyVisitor};
 pub struct ColorRelief;
 
 impl StyleLayerType for ColorRelief {
-    const INFO: LayerTypeInfo = LayerTypeInfo {
-        name: "color-relief",
-        source: SourceKind::RasterDem,
-        fading_tiles: false,
-        cross_tile_index: false,
-        from_json: true,
-    };
+    const INFO: LayerTypeInfo = LayerTypeInfo { name: "color-relief", source: SourceKind::RasterDem, from_json: true };
     const PROPERTIES: &'static PropertyTable = &color_relief_layer_properties::PROPERTIES;
 
     type LayoutProperties = NoProperties;

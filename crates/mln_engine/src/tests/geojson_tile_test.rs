@@ -103,7 +103,7 @@ fn point_data() -> Arc<dyn GeoJSONData> {
 
 fn circle_layer_properties() -> Arc<dyn ErasedEvaluatedLayer> {
     let layer = Layer::new(crate::tests::registry().style(), "circle", "circle", "source").unwrap();
-    Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(layer.style()).unwrap()))
+    Arc::new(EvaluatedLayer::<Circle>::builtin(LayerStyle::recover(layer.style()).unwrap()))
 }
 
 fn root() -> OverscaledTileID {

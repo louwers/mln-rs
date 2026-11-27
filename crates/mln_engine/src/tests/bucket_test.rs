@@ -321,7 +321,7 @@ fn data_driven_fill_bucket(fill_color: &serde_json::Value) -> FillBucket {
         ..FillPaintProperties::PossiblyEvaluated::default()
     };
     let properties =
-        Arc::new(EvaluatedLayer::<Fill>::with_paint(LayerStyle::recover(layer.style()).unwrap(), evaluated));
+        Arc::new(EvaluatedLayer::<Fill>::builtin_with_paint(LayerStyle::recover(layer.style()).unwrap(), evaluated));
     let binders = LayerBinders::new(&[properties], 5.0);
     let mut bucket = FillBucket::new(binders, SubdivisionGranularitySetting::none());
 

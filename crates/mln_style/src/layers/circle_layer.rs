@@ -6,13 +6,7 @@ use crate::property::table::{PropertyTable, PropertyVisitor};
 pub struct Circle;
 
 impl StyleLayerType for Circle {
-    const INFO: LayerTypeInfo = LayerTypeInfo {
-        name: "circle",
-        source: SourceKind::Geometry,
-        fading_tiles: false,
-        cross_tile_index: false,
-        from_json: true,
-    };
+    const INFO: LayerTypeInfo = LayerTypeInfo { name: "circle", source: SourceKind::Geometry, from_json: true };
     const PROPERTIES: &'static PropertyTable = &circle_layer_properties::PROPERTIES;
 
     type LayoutProperties = CircleLayoutProperties::Unevaluated;

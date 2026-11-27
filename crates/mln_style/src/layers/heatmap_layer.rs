@@ -6,13 +6,7 @@ use crate::property::table::{PropertyTable, PropertyVisitor};
 pub struct Heatmap;
 
 impl StyleLayerType for Heatmap {
-    const INFO: LayerTypeInfo = LayerTypeInfo {
-        name: "heatmap",
-        source: SourceKind::Geometry,
-        fading_tiles: false,
-        cross_tile_index: false,
-        from_json: true,
-    };
+    const INFO: LayerTypeInfo = LayerTypeInfo { name: "heatmap", source: SourceKind::Geometry, from_json: true };
     const PROPERTIES: &'static PropertyTable = &heatmap_layer_properties::PROPERTIES;
 
     type LayoutProperties = NoProperties;

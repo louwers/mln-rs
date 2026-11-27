@@ -12,13 +12,22 @@ use mln_style::collections::VecMap;
 use mln_style::expression::Functions;
 use mln_style::expression::functions::RegisterError;
 use mln_style::layer::{ErasedStyleLayerType, StyleLayerType};
-use mln_style::layers::{Background, Circle, ColorRelief, Fill, FillExtrusion, Heatmap, Hillshade, Line, Raster};
 use mln_style::source::StyleSourceType;
 use mln_style::{Source, StyleRegistry};
 
-use crate::layer::layer_type::{ErasedLayerType, LayerType, entry};
+use crate::layer::layer_type::{ErasedLayerType, entry};
+use crate::layer::render_layer::Layer;
 use crate::layer::tile_input::input::Find;
-use crate::layers::custom::Custom;
+use crate::layers::custom::RenderCustomLayer;
+use crate::layers::render_background_layer::RenderBackgroundLayer;
+use crate::layers::render_circle_layer::RenderCircleLayer;
+use crate::layers::render_color_relief_layer::RenderColorReliefLayer;
+use crate::layers::render_fill_extrusion_layer::RenderFillExtrusionLayer;
+use crate::layers::render_fill_layer::RenderFillLayer;
+use crate::layers::render_heatmap_layer::RenderHeatmapLayer;
+use crate::layers::render_hillshade_layer::RenderHillshadeLayer;
+use crate::layers::render_line_layer::RenderLineLayer;
+use crate::layers::render_raster_layer::RenderRasterLayer;
 use crate::placement::{ErasedPlacement, Placement, participant};
 use crate::source::erased::{self, ErasedSourceType};
 use crate::source::{SourceSummary, SourceType, kind};
@@ -57,21 +66,22 @@ impl RegistryBuilder {
         &mut self.functions
     }
 
-    /// Adds the layer type `T`. Fails for a name that an earlier type took.
-    /// A type whose input is of another kind of source than its style half
-    /// names doesn't compile.
-    pub(crate) fn add_layer_type<T: LayerType>(&mut self) -> Result<(), RegisterError> {
+    /// Adds the layer type `L`, both its halves, under its style half's
+    /// name. Fails for a name that an earlier type took. A type whose input
+    /// is of another kind of source than its style half names doesn't
+    /// compile.
+    pub(crate) fn add_layer_type<L: Layer>(&mut self) -> Result<(), RegisterError> {
         const {
             assert!(
-                T::INFO.source as u8 == <T::Input as Find<T>>::KIND as u8,
+                L::Style::INFO.source as u8 == <L::Input as Find<L::Style>>::KIND as u8,
                 "a layer type draws from the kind of source its style half names"
             );
         }
-        let name = T::INFO.name;
+        let name = L::Style::INFO.name;
         if self.layer_types.contains_key(name) {
             return Err(RegisterError::Duplicate(name.to_owned()));
         }
-        self.layer_types.insert(name, entry::<T>());
+        self.layer_types.insert(name, entry::<L>());
         Ok(())
     }
 
@@ -79,8 +89,9 @@ impl RegistryBuilder {
     /// place with `P` ([`Placement`]). Fails for a name that an earlier type
     /// took.
     pub(crate) fn add_placing_layer_type<P: Placement>(&mut self) -> Result<(), RegisterError> {
+        const { assert!(<P::Layer as Layer>::PLACES, "a placing layer type says that it places") }
         self.add_layer_type::<P::Layer>()?;
-        self.placing_types.insert(P::Layer::INFO.name, participant::<P>);
+        self.placing_types.insert(<P::Layer as Layer>::Style::INFO.name, participant::<P>);
         Ok(())
     }
 
@@ -109,24 +120,24 @@ impl RegistryBuilder {
 }
 
 fn style_half(layer_type: &'static dyn ErasedLayerType) -> &'static dyn ErasedStyleLayerType {
-    layer_type
+    layer_type.style()
 }
 
 /// Adds the built-in layer types and the custom layer type, which the engine
 /// holds: `mln_builtins`'s `register_builtins` calls it. Fails for a name
 /// that an earlier call took.
 pub fn register_layer_types(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
-    builder.add_layer_type::<Fill>()?;
-    builder.add_layer_type::<Line>()?;
-    builder.add_layer_type::<Circle>()?;
+    builder.add_layer_type::<RenderFillLayer>()?;
+    builder.add_layer_type::<RenderLineLayer>()?;
+    builder.add_layer_type::<RenderCircleLayer>()?;
     builder.add_placing_layer_type::<SymbolPlacement>()?;
-    builder.add_layer_type::<Raster>()?;
-    builder.add_layer_type::<Background>()?;
-    builder.add_layer_type::<Hillshade>()?;
-    builder.add_layer_type::<ColorRelief>()?;
-    builder.add_layer_type::<FillExtrusion>()?;
-    builder.add_layer_type::<Heatmap>()?;
-    builder.add_layer_type::<Custom>()
+    builder.add_layer_type::<RenderRasterLayer>()?;
+    builder.add_layer_type::<RenderBackgroundLayer>()?;
+    builder.add_layer_type::<RenderHillshadeLayer>()?;
+    builder.add_layer_type::<RenderColorReliefLayer>()?;
+    builder.add_layer_type::<RenderFillExtrusionLayer>()?;
+    builder.add_layer_type::<RenderHeatmapLayer>()?;
+    builder.add_layer_type::<RenderCustomLayer>()
 }
 
 /// The expression functions, layer types and source types that a style
@@ -219,7 +230,7 @@ mod tests {
     #[test]
     fn a_layer_type_registers_once() {
         let mut builder = RegistryBuilder::new();
-        builder.add_layer_type::<Circle>().unwrap();
-        assert_eq!(builder.add_layer_type::<Circle>(), Err(RegisterError::Duplicate("circle".to_owned())));
+        builder.add_layer_type::<RenderCircleLayer>().unwrap();
+        assert_eq!(builder.add_layer_type::<RenderCircleLayer>(), Err(RegisterError::Duplicate("circle".to_owned())));
     }
 }

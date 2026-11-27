@@ -615,7 +615,7 @@ struct Unknown(Arc<dyn mln_style::layer::ErasedLayerStyle>);
 
 impl ErasedEvaluatedLayer for Unknown {
     fn entry(&self) -> &'static dyn crate::layer::layer_type::ErasedLayerType {
-        crate::layer::layer_type::entry::<mln_style::layers::Line>()
+        crate::layer::layer_type::entry::<crate::layers::render_line_layer::RenderLineLayer>()
     }
     fn style(&self) -> &dyn mln_style::layer::ErasedLayerStyle {
         &*self.0
@@ -665,7 +665,7 @@ fn a_missing_layer_type_fails_its_job() {
 
     let mut builder = crate::RegistryBuilder::new();
     mln_style::expression::functions::register_builtin_functions(builder.functions_mut()).unwrap();
-    builder.add_layer_type::<mln_style::layers::Line>().unwrap();
+    builder.add_layer_type::<crate::layers::render_line_layer::RenderLineLayer>().unwrap();
     let Err(error) = WorkerCodec::new(builder.build()).decode_job(body) else {
         panic!("decoded a fill layer without its type");
     };

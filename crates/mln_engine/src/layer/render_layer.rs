@@ -1,5 +1,5 @@
 // A render layer is the renderer's side of a style layer: its type's layer
-// (`TypedLayer`), whose hooks see the frame's tiles and what they hold for
+// (`Layer`), whose hooks see the frame's tiles and what they hold for
 // the type (`TileInput`), and what the engine keeps of it around them
 // (`Hosted`): its base, its values of its type, its value of each tile it
 // draws and its draws. `RenderLayer` is what the engine does with a render
@@ -24,9 +24,9 @@ use crate::draw::draws::{DrawOrder, Draws, Group, LayerFrame, LendAt, Lent};
 use crate::draw::resources::Resources;
 use crate::layer::bucket::ErasedBucket;
 use crate::layer::layer_drawing::{ChangedBuckets, TileMap};
-use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, LayerType};
-use crate::layer::tile_input::TileData;
+use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, entry};
 use crate::layer::tile_input::input::Find;
+use crate::layer::tile_input::{TileData, TileInput};
 use crate::layers::custom::EndedHosts;
 use crate::query::feature_index::QueryRegion;
 use crate::render::paint_parameters::PaintParameters;
@@ -60,9 +60,9 @@ pub(crate) struct FrameSourceTiles<'a> {
     found: &'a [FoundTile],
 }
 
-/// The tiles of a layer of the type `T` in a frame, each with what it shows
+/// The tiles of a layer of the type `L` in a frame, each with what it shows
 /// the layer, which keeps up to 64 of them on the stack.
-pub(crate) type FrameTiles<'a, T> = SmallVec<[FrameTile<'a, T>; 64]>;
+pub(crate) type FrameTiles<'a, L> = SmallVec<[FrameTile<'a, L>; 64]>;
 
 impl<'a> FrameSourceTiles<'a> {
     /// The render tiles `tiles`, which show `contents`, at their indexes,
@@ -84,7 +84,7 @@ impl<'a> FrameSourceTiles<'a> {
     /// The tiles at the indexes of `order`, in that order, as the layer
     /// `layer_id` of the type `T` sees them, each with what it shows the
     /// layer, found by the layer's id. `found` keeps where.
-    fn find<T: LayerType>(self, order: &[usize], layer_id: &str, found: &mut Vec<FoundTile>) -> FrameTiles<'a, T> {
+    fn find<L: Layer>(self, order: &[usize], layer_id: &str, found: &mut Vec<FoundTile>) -> FrameTiles<'a, L> {
         let mut tiles = FrameTiles::new();
         for &index in order {
             let Some(tile) = self.tiles.get(index) else { continue };
@@ -102,11 +102,11 @@ impl<'a> FrameSourceTiles<'a> {
 
     /// The tiles of `found`, as [`find`](Self::find) found them for the
     /// layer `layer_id` of the type `T` in the same frame.
-    pub(crate) fn at<'f, T: LayerType>(
+    pub(crate) fn at<'f, L: Layer>(
         self,
         found: impl IntoIterator<Item = &'f FoundTile>,
         layer_id: &str,
-    ) -> FrameTiles<'a, T> {
+    ) -> FrameTiles<'a, L> {
         found
             .into_iter()
             .filter_map(|&FoundTile { tile, view }| {
@@ -123,13 +123,13 @@ impl<'a> FrameSourceTiles<'a> {
     /// copy; on the `globe`, which has no copies, whatever their copy, one by
     /// `tile`'s. A drape of `tile` draws each in that copy
     /// ([`FrameTile::draw_id`]).
-    pub(crate) fn overlapping<T: LayerType>(
+    pub(crate) fn overlapping<L: Layer>(
         self,
         found: Range<usize>,
         layer_id: &str,
         tile: UnwrappedTileID,
         globe: bool,
-    ) -> FrameTiles<'a, T> {
+    ) -> FrameTiles<'a, L> {
         let found = self.found(found);
         self.overlaps(found, tile, globe)
             .map(|(&FoundTile { tile: index, view }, render_tile, wrap)| {
@@ -250,20 +250,23 @@ impl RenderLayerBase {
     }
 }
 
-/// A layer's values of its type `T`: its style, its paint values in
+/// A layer's values of its style half `T`: its style, its paint values in
 /// transition, and their evaluation for the last frame.
-pub(crate) struct LayerValues<T: LayerType> {
+pub(crate) struct LayerValues<T: StyleLayerType> {
     pub(crate) style: Arc<LayerStyle<T>>,
     pub(crate) unevaluated: <T::PaintProperties as PaintSet>::Unevaluated,
     pub(crate) evaluated: Arc<EvaluatedLayer<T>>,
 }
 
-impl<T: LayerType> LayerValues<T> {
-    /// The values of the layer `style`, before any transition, and the base
-    /// of a render layer that holds them.
-    pub(crate) fn new(style: Arc<LayerStyle<T>>) -> (RenderLayerBase, Self) {
+impl<T: StyleLayerType> LayerValues<T> {
+    /// The values of the layer `style` of `layer_type`, before any
+    /// transition, and the base of a render layer that holds them.
+    pub(crate) fn new(
+        style: Arc<LayerStyle<T>>,
+        layer_type: &'static dyn crate::layer::layer_type::ErasedLayerType,
+    ) -> (RenderLayerBase, Self) {
         let unevaluated = style.paint.untransitioned();
-        let evaluated = Arc::new(EvaluatedLayer::new(Arc::clone(&style)));
+        let evaluated = Arc::new(EvaluatedLayer::new(Arc::clone(&style), layer_type));
         let mut base = RenderLayerBase::new(Arc::<EvaluatedLayer<T>>::clone(&evaluated));
         base.style_dependencies = T::PaintProperties::dependencies(&unevaluated);
         (base, LayerValues { style, unevaluated, evaluated })
@@ -271,12 +274,17 @@ impl<T: LayerType> LayerValues<T> {
 
     /// The paint values evaluated for a frame, copying from the last
     /// evaluation each value that can't have changed, with the frame's
-    /// cross-fade for a type that has one, and no render passes yet.
-    pub(crate) fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) -> EvaluatedLayer<T> {
+    /// cross-fade where the type `crossfades`, and no render passes yet.
+    pub(crate) fn evaluate(
+        &mut self,
+        parameters: &PropertyEvaluationParameters,
+        crossfades: bool,
+    ) -> EvaluatedLayer<T> {
         let paint =
             T::PaintProperties::evaluate_with_previous(&mut self.unevaluated, parameters, &self.evaluated.paint);
-        let mut evaluated = EvaluatedLayer::with_paint(Arc::clone(&self.style), paint);
-        if T::CROSSFADES {
+        let layer_type = self.evaluated.layer_type;
+        let mut evaluated = EvaluatedLayer::with_paint(Arc::clone(&self.style), paint, layer_type);
+        if crossfades {
             evaluated.crossfade = parameters.get_crossfade_parameters();
         }
         evaluated
@@ -325,16 +333,16 @@ impl Evaluation {
     }
 }
 
-/// What a layer's [`TypedLayer::evaluate`] reads and completes.
-pub(crate) struct EvaluateCx<'a, L: TypedLayer> {
+/// What a layer's [`Layer::evaluate`] reads and completes.
+pub(crate) struct EvaluateCx<'a, L: Layer> {
     /// The layer's values before the evaluation: its style, its paint values
     /// in transition and their last evaluation.
-    pub(crate) values: &'a LayerValues<L::Type>,
+    pub(crate) values: &'a LayerValues<L::Style>,
     /// What the values were evaluated for.
     pub(crate) parameters: &'a PropertyEvaluationParameters,
     /// The new evaluation of the values, which becomes the layer's once the
     /// hook returns.
-    pub(crate) evaluated: &'a mut EvaluatedLayer<L::Type>,
+    pub(crate) evaluated: &'a mut EvaluatedLayer<L::Style>,
 }
 
 /// How a layer type meets terrain.
@@ -373,15 +381,15 @@ impl OnTerrain {
     }
 }
 
-/// What a layer's [`TypedLayer::prepare`] reads and changes: its base and
+/// What a layer's [`Layer::prepare`] reads and changes: its base and
 /// values, its values of the tiles it draws ([`TileMap`]), which the frame
 /// and its drapes share, by the tiles' own ids ([`FrameTile::id`]), and the
 /// frame it makes its draws for, the map's or a drape's.
-pub(crate) struct PrepareCx<'a, 'f, L: TypedLayer> {
+pub(crate) struct PrepareCx<'a, 'f, L: Layer> {
     pub(crate) base: &'a RenderLayerBase,
-    pub(crate) values: &'a LayerValues<L::Type>,
+    pub(crate) values: &'a LayerValues<L::Style>,
     pub(crate) tiles: &'a mut TileMap<L::Tile>,
-    /// For a layer that picks its tiles ([`TypedLayer::PICKS_TILES`]),
+    /// For a layer that picks its tiles ([`Layer::PICKS_TILES`]),
     /// those the frame draws, in id order: those it picked, or a drape's
     /// tile. Empty for another layer.
     pub(crate) picked: &'a [OverscaledTileID],
@@ -390,10 +398,10 @@ pub(crate) struct PrepareCx<'a, 'f, L: TypedLayer> {
     pub(crate) frame: &'a LayerFrame<'f>,
 }
 
-/// What a layer's [`TypedLayer::tile`] reads to make a tile's value.
-pub(crate) struct TileCx<'a, 'f, L: TypedLayer> {
+/// What a layer's [`Layer::tile`] reads to make a tile's value.
+pub(crate) struct TileCx<'a, 'f, L: Layer> {
     pub(crate) base: &'a RenderLayerBase,
-    pub(crate) values: &'a LayerValues<L::Type>,
+    pub(crate) values: &'a LayerValues<L::Style>,
     /// What the layer makes its meshes and targets with.
     pub(crate) res: Resources<'a>,
     /// The frame the value is made in: the map's, or for a layer that
@@ -402,16 +410,16 @@ pub(crate) struct TileCx<'a, 'f, L: TypedLayer> {
     pub(crate) frame: &'a LayerFrame<'f>,
 }
 
-/// What a layer's [`TypedLayer::update`] reads, besides its tiles.
-pub(crate) struct UpdateCx<'a, 'p, L: TypedLayer> {
-    pub(crate) values: &'a LayerValues<L::Type>,
+/// What a layer's [`Layer::update`] reads, besides its tiles.
+pub(crate) struct UpdateCx<'a, 'p, L: Layer> {
+    pub(crate) values: &'a LayerValues<L::Style>,
     pub(crate) parameters: &'a mut LayerUpdateParameters<'p>,
     picked: &'a mut Vec<OverscaledTileID>,
 }
 
-impl<L: TypedLayer> UpdateCx<'_, '_, L> {
+impl<L: Layer> UpdateCx<'_, '_, L> {
     /// Makes `tiles` those that a layer that picks its tiles
-    /// ([`TypedLayer::PICKS_TILES`]) draws in the map's frame.
+    /// ([`Layer::PICKS_TILES`]) draws in the map's frame.
     pub(crate) fn pick_tiles(&mut self, tiles: impl IntoIterator<Item = OverscaledTileID>) {
         debug_assert!(L::PICKS_TILES, "a layer that doesn't pick its tiles picked some");
         self.picked.clear();
@@ -444,8 +452,19 @@ enum DrawsFor<'d> {
 /// layer type `Type`, its value of each tile it draws, a `Tile`, which the
 /// map's frame and every drape the tile overlaps draw, and its draws
 /// ([`Draws`]) in the frame and in each drape it draws in.
-pub(crate) trait TypedLayer: Sized + 'static {
-    type Type: LayerType;
+pub(crate) trait Layer: Sized + 'static {
+    /// The type's style half: its name, its kind of source and its
+    /// properties.
+    type Style: StyleLayerType;
+
+    /// What the type's layers draw from: the features of a geometry
+    /// source's tiles, which a layout lays out into a bucket per tile
+    /// ([`Features`](crate::layer::tile_input::Features)), a raster or
+    /// raster-dem source's tiles, or none, for a type without a source
+    /// ([`NoTiles`](crate::layer::tile_input::NoTiles)). Of another kind of
+    /// source than the style half names, the registration doesn't compile.
+    type Input: TileInput<Self::Style>;
+
     /// What the engine keeps of each tile the layer draws for it, from when
     /// the layer makes it ([`tile`](Self::tile)) until what the tile shows
     /// the layer changes.
@@ -473,8 +492,21 @@ pub(crate) trait TypedLayer: Sized + 'static {
     /// so that they stay through a restyle.
     const RESTYLE_KEEPS_TILES: bool = false;
 
+    /// Whether the type has cross-faded properties, whose evaluation takes
+    /// the frame's cross-fade.
+    const CROSSFADES: bool = false;
+
+    /// Whether the type's layers draw on the tiles that are fading out
+    /// while a placement fades their marks out.
+    const FADES_TILES: bool = false;
+
+    /// Whether the type's layers place their marks, with a participant in
+    /// placement that registers with the type.
+    #[doc(hidden)]
+    const PLACES: bool = false;
+
     /// The layer of the values `values`, before they transition.
-    fn new(values: &LayerValues<Self::Type>) -> Self;
+    fn new(values: &LayerValues<Self::Style>) -> Self;
 
     /// Called once the layer's paint values are evaluated for a frame,
     /// before they become the layer's: the layer derives the values of
@@ -488,7 +520,7 @@ pub(crate) trait TypedLayer: Sized + 'static {
     /// with in `frame`, whose draws then put in them what it shades
     /// ([`LayerFrame::drape_lit`]); `None` for a layer whose drapes hold its
     /// colors.
-    fn surface_light(&mut self, _values: &LayerValues<Self::Type>, _frame: &LayerFrame<'_>) -> Option<SurfaceLight> {
+    fn surface_light(&mut self, _values: &LayerValues<Self::Style>, _frame: &LayerFrame<'_>) -> Option<SurfaceLight> {
         None
     }
 
@@ -500,12 +532,12 @@ pub(crate) trait TypedLayer: Sized + 'static {
     /// collects what it places in its participant instead
     /// ([`Placement::collect`](crate::placement::Placement::collect)). One
     /// without a source that picks its tiles picks them here.
-    fn update(&mut self, _cx: UpdateCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Self::Type>]) {}
+    fn update(&mut self, _cx: UpdateCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Self>]) {}
 
     /// Whether `tile`, a tile's value the layer made, still draws the tile
     /// with the layer's `values` of the frame. The engine retires a value
     /// the layer doesn't keep before the layer makes the frame's draws.
-    fn keeps(&self, _values: &LayerValues<Self::Type>, _tile: &Self::Tile) -> bool {
+    fn keeps(&self, _values: &LayerValues<Self::Style>, _tile: &Self::Tile) -> bool {
         true
     }
 
@@ -527,8 +559,8 @@ pub(crate) trait TypedLayer: Sized + 'static {
     fn tile(
         &mut self,
         _cx: &mut TileCx<'_, '_, Self>,
-        _tile: FrameTile<'_, Self::Type>,
-        _data: TileData<'_, Self::Type>,
+        _tile: FrameTile<'_, Self>,
+        _data: TileData<'_, Self>,
         _previous: Option<Self::Tile>,
     ) -> Option<Self::Tile> {
         None
@@ -550,13 +582,13 @@ pub(crate) trait TypedLayer: Sized + 'static {
     /// the masks of the layer's tiles where a draw clips.
     ///
     /// [`TileEntry::take_changes`]: crate::layer::layer_drawing::TileEntry::take_changes
-    fn prepare(&mut self, _cx: &mut PrepareCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Self::Type>], _out: &mut Draws) {}
+    fn prepare(&mut self, _cx: &mut PrepareCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Self>], _out: &mut Draws) {}
 
     /// Called when the layer's style changed to another of the same id and
     /// type, once it is the layer's, of the values `values`, and before its
     /// values transition. A custom layer whose host the style replaced puts
     /// the old host that drew in `ended`.
-    fn style_changed(&mut self, _values: &LayerValues<Self::Type>, _ended: &mut EndedHosts) {}
+    fn style_changed(&mut self, _values: &LayerValues<Self::Style>, _ended: &mut EndedHosts) {}
 
     /// Draws with the backend's commands that the frame lends the layer
     /// `at` its time in the frame, where its draws asked for them
@@ -573,12 +605,21 @@ pub(crate) trait TypedLayer: Sized + 'static {
     /// lost, and lets go of it.
     fn lose_context(&mut self) {}
 
-    /// Whether the feature `feature` with `geometry`, with `feature_state`,
-    /// intersects `region` of its tile as the layer of `values` draws it at
-    /// the view's zoom; false unless a layer type overrides it.
-    fn query_intersects_feature(
+    /// How far outside a feature of `data`, a tile's bucket of the layer, a
+    /// query still hits it, from `layer`'s current values and the bucket's
+    /// statistics of them. The engine asks only a type whose input lays
+    /// out.
+    fn query_radius(_data: TileData<'_, Self>, _layer: &EvaluatedLayer<Self::Style>) -> f32 {
+        0.0
+    }
+
+    /// Whether a query hits the feature `feature` with `geometry`, with
+    /// `feature_state`: whether it intersects `region` of its tile as the
+    /// layer of `values` draws it at the view's zoom; false unless a layer
+    /// type overrides it.
+    fn hit(
         &self,
-        _values: &LayerValues<Self::Type>,
+        _values: &LayerValues<Self::Style>,
         _region: &QueryRegion<'_>,
         _feature: &dyn mln_style::feature::GeometryTileFeature,
         _geometry: &mln_style::feature::GeometryCollection,
@@ -588,12 +629,12 @@ pub(crate) trait TypedLayer: Sized + 'static {
     }
 }
 
-/// A render layer of a [`TypedLayer`] `L`: the layer, and what the engine
+/// A render layer of a [`Layer`] `L`: the layer, and what the engine
 /// keeps of it, its base, its values, its tile values and its draws of the
 /// map's frame.
-pub(crate) struct Hosted<L: TypedLayer> {
+pub(crate) struct Hosted<L: Layer> {
     base: RenderLayerBase,
-    values: LayerValues<L::Type>,
+    values: LayerValues<L::Style>,
     tiles: TileMap<L::Tile>,
     /// The tiles that a layer that picks its tiles picked in its update,
     /// in id order, which it draws in the map's frame.
@@ -602,23 +643,23 @@ pub(crate) struct Hosted<L: TypedLayer> {
     layer: L,
 }
 
-impl<L: TypedLayer> Hosted<L> {
+impl<L: Layer> Hosted<L> {
     /// The render layer of the layer `style`, before its values transition.
-    pub(crate) fn new(style: Arc<LayerStyle<L::Type>>) -> Self {
-        let (base, values) = LayerValues::new(style);
+    pub(crate) fn new(style: Arc<LayerStyle<L::Style>>) -> Self {
+        let (base, values) = LayerValues::new(style, entry::<L>());
         let layer = L::new(&values);
         Hosted { base, values, tiles: TileMap::default(), picked: Vec::new(), draws: Draws::default(), layer }
     }
 
     /// [`new`](Self::new), boxed as a [`RenderLayer`].
-    pub(crate) fn boxed(style: Arc<LayerStyle<L::Type>>) -> Box<dyn RenderLayer> {
+    pub(crate) fn boxed(style: Arc<LayerStyle<L::Style>>) -> Box<dyn RenderLayer> {
         Box::new(Self::new(style))
     }
 
     /// The layer and its values, which benchmarks fill as the layer's
     /// update would.
     #[cfg(feature = "bench")]
-    pub(crate) fn layer_mut(&mut self) -> (&mut L, &LayerValues<L::Type>) {
+    pub(crate) fn layer_mut(&mut self) -> (&mut L, &LayerValues<L::Style>) {
         (&mut self.layer, &self.values)
     }
 
@@ -643,8 +684,8 @@ impl<L: TypedLayer> Hosted<L> {
     /// Readies the values of `tiles`, the tiles the layer draws, before the
     /// layer makes its draws of them: retires each that was made from
     /// something else than what its tile shows the layer, or that the layer
-    /// doesn't keep ([`TypedLayer::keeps`]), and makes those the layer has
-    /// none of ([`TypedLayer::tile`]), from their previous values. For a
+    /// doesn't keep ([`Layer::keeps`]), and makes those the layer has
+    /// none of ([`Layer::tile`]), from their previous values. For a
     /// layer that picks its tiles, retires those of its picked tiles that it
     /// doesn't keep.
     fn ready_tiles(
@@ -652,7 +693,7 @@ impl<L: TypedLayer> Hosted<L> {
         gpu: &mut dyn Gpu,
         context: &mut Context,
         frame: &LayerFrame<'_>,
-        tiles: &[FrameTile<'_, L::Type>],
+        tiles: &[FrameTile<'_, L>],
     ) {
         let Hosted { base, values, tiles: map, layer, .. } = self;
         if !has_tiles::<L>() {
@@ -684,7 +725,7 @@ impl<L: TypedLayer> Hosted<L> {
     /// Makes the layer's draws of `into`'s frame, the map's or a drape's,
     /// if it draws in a pass: starts them, readies its tile values of
     /// `tiles` ([`ready_tiles`](Self::ready_tiles)), runs its
-    /// [`TypedLayer::prepare`] and writes the buffers of the draws it made,
+    /// [`Layer::prepare`] and writes the buffers of the draws it made,
     /// with the paint parameters of `parameters`' frame where it has its own
     /// (a drape's), and the masks of `tiles` where a draw clips. One that
     /// draws in no pass with its values of the frame draws nothing, and
@@ -693,7 +734,7 @@ impl<L: TypedLayer> Hosted<L> {
         &mut self,
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
-        tiles: &[FrameTile<'_, L::Type>],
+        tiles: &[FrameTile<'_, L>],
         into: DrawsFor<'_>,
     ) {
         if self.values.evaluated.render_passes == RenderPass::None.underlying_type() {
@@ -722,7 +763,7 @@ impl<L: TypedLayer> Hosted<L> {
 /// Lends `layer` the backend's commands of `gpu` `at` its time in the frame
 /// of `parameters`, where the frame has them to lend: in a pass, the open
 /// one. A lend that fails fails the frame.
-fn lend<L: TypedLayer>(layer: &mut L, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, at: LendAt) {
+fn lend<L: Layer>(layer: &mut L, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, at: LendAt) {
     let Some(projection) = parameters.lent_projection else { return };
     let frame = parameters.frame();
     let layer_depth = match at {
@@ -738,14 +779,14 @@ fn lend<L: TypedLayer>(layer: &mut L, gpu: &mut dyn Gpu, parameters: &mut PaintP
 
 /// Whether layers of `L`'s type draw from their source's tiles: false for a
 /// type without a source.
-fn has_tiles<L: TypedLayer>() -> bool {
-    <<L::Type as LayerType>::Input as Find<L::Type>>::KIND != SourceKind::None
+fn has_tiles<L: Layer>() -> bool {
+    <L::Input as Find<L::Style>>::KIND != SourceKind::None
 }
 
 /// What the engine does with a render layer, whatever its type: its base,
 /// its values, which this transitions without knowing their type, its tile
 /// values and its draws, which it writes, uploads and draws. It runs
-/// the layer's [`TypedLayer`] hooks with what is common to every layer type
+/// the layer's [`Layer`] hooks with what is common to every layer type
 /// around them.
 pub(crate) trait RenderLayer {
     fn base(&self) -> &RenderLayerBase;
@@ -761,7 +802,7 @@ pub(crate) trait RenderLayer {
     /// Makes `style`, the changed style of the layer (of the same id and
     /// type), the layer's, drops the draws, which were built for the
     /// previous style's values, with the tile values unless the layer keeps
-    /// them ([`TypedLayer::RESTYLE_KEEPS_TILES`]), and begins transitions to
+    /// them ([`Layer::RESTYLE_KEEPS_TILES`]), and begins transitions to
     /// the new values. A style of another type leaves the layer's. The next
     /// encode builds the draws again from the tiles' buckets. A custom
     /// layer's host that drew and that the style replaced goes to `ended`.
@@ -772,7 +813,7 @@ pub(crate) trait RenderLayer {
     fn transition(&mut self, parameters: &TransitionParameters);
 
     /// Evaluates the layer's paint values for a frame of `parameters`,
-    /// which the layer completes ([`TypedLayer::evaluate`]), and sets the
+    /// which the layer completes ([`Layer::evaluate`]), and sets the
     /// passes the layer draws in with them.
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters);
 
@@ -785,7 +826,7 @@ pub(crate) trait RenderLayer {
     /// The frame's update of the layer: finds the tiles of `parameters`'
     /// source the layer draws, which it adds to `parameters.found`, adds the
     /// passes their buckets were laid out for to the layer's, runs the
-    /// layer's [`TypedLayer::update`], and keeps entries for the tiles; or,
+    /// layer's [`Layer::update`], and keeps entries for the tiles; or,
     /// for a type without a source, runs its update without tiles.
     fn update(&mut self, parameters: &mut LayerUpdateParameters<'_>);
 
@@ -795,7 +836,7 @@ pub(crate) trait RenderLayer {
     /// when it changed; drops them of a layer that has nothing to draw, and
     /// otherwise starts its draws of the frame; for a layer that draws in a
     /// pass, readies the tile values and runs the layer's
-    /// [`TypedLayer::prepare`] with the tiles of its type that its update
+    /// [`Layer::prepare`] with the tiles of its type that its update
     /// found in `source`, or none for a type without a source, and writes
     /// the buffers of its draws.
     fn update_draws(
@@ -805,10 +846,10 @@ pub(crate) trait RenderLayer {
         source: Option<FrameSourceTiles<'_>>,
     );
 
-    /// How the layer meets terrain ([`TypedLayer::TERRAIN`]).
+    /// How the layer meets terrain ([`Layer::TERRAIN`]).
     fn terrain(&self) -> OnTerrain;
 
-    /// Whether the layer draws 3D geometry ([`TypedLayer::VOLUME`]).
+    /// Whether the layer draws 3D geometry ([`Layer::VOLUME`]).
     fn volume(&self) -> bool;
 
     /// Whether the layer blends with what is under it otherwise than by
@@ -817,7 +858,7 @@ pub(crate) trait RenderLayer {
     fn blends(&self) -> bool;
 
     /// The light the terrain's surface can shade the layer's drapes with
-    /// ([`TypedLayer::surface_light`]).
+    /// ([`Layer::surface_light`]).
     fn surface_light(&mut self, parameters: &PaintParameters<'_>) -> Option<SurfaceLight>;
 
     /// Where the tiles the layer's update found are among the frame's
@@ -889,15 +930,15 @@ pub(crate) trait RenderLayer {
     /// where its draws asked for them ([`LendAt::BeforePasses`]).
     fn before_passes(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>);
 
-    /// See [`TypedLayer::leave`]. The orchestrator calls it before it drops
+    /// See [`Layer::leave`]. The orchestrator calls it before it drops
     /// the layer.
     fn leave(&mut self, ended: &mut EndedHosts);
 
-    /// See [`TypedLayer::lose_context`].
+    /// See [`Layer::lose_context`].
     fn lose_context(&mut self);
 
-    /// See [`TypedLayer::query_intersects_feature`].
-    fn query_intersects_feature(
+    /// See [`Layer::hit`].
+    fn hit(
         &self,
         region: &QueryRegion<'_>,
         feature: &dyn mln_style::feature::GeometryTileFeature,
@@ -928,7 +969,7 @@ pub(crate) trait RenderLayer {
     }
 }
 
-impl<L: TypedLayer> RenderLayer for Hosted<L> {
+impl<L: Layer> RenderLayer for Hosted<L> {
     fn base(&self) -> &RenderLayerBase {
         &self.base
     }
@@ -960,11 +1001,11 @@ impl<L: TypedLayer> RenderLayer for Hosted<L> {
         let values = &mut self.values;
         let prior = std::mem::take(&mut values.unevaluated);
         values.unevaluated = values.style.paint.transitioned(parameters, prior);
-        self.base.style_dependencies = <L::Type as StyleLayerType>::PaintProperties::dependencies(&values.unevaluated);
+        self.base.style_dependencies = <L::Style as StyleLayerType>::PaintProperties::dependencies(&values.unevaluated);
     }
 
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
-        let mut evaluated = self.values.evaluate(parameters);
+        let mut evaluated = self.values.evaluate(parameters, L::CROSSFADES);
         let evaluation =
             self.layer.evaluate(EvaluateCx { values: &self.values, parameters, evaluated: &mut evaluated });
         self.base.passes = evaluation.passes();
@@ -973,11 +1014,11 @@ impl<L: TypedLayer> RenderLayer for Hosted<L> {
     }
 
     fn has_transition(&self) -> bool {
-        <L::Type as StyleLayerType>::PaintProperties::has_transition(&self.values.unevaluated)
+        <L::Style as StyleLayerType>::PaintProperties::has_transition(&self.values.unevaluated)
     }
 
     fn has_crossfade(&self) -> bool {
-        L::Type::CROSSFADES && self.values.evaluated.crossfade.t != 1.0
+        L::CROSSFADES && self.values.evaluated.crossfade.t != 1.0
     }
 
     fn update(&mut self, parameters: &mut LayerUpdateParameters<'_>) {
@@ -988,12 +1029,12 @@ impl<L: TypedLayer> RenderLayer for Hosted<L> {
         }
         let start = parameters.found.len();
         let tiles = match parameters.tiles(L::TILE_ORDER) {
-            Some((tiles, order)) => tiles.find::<L::Type>(order, &base.style.base().id, parameters.found),
+            Some((tiles, order)) => tiles.find::<L>(order, &base.style.base().id, parameters.found),
             None => FrameTiles::new(),
         };
         base.found = start..parameters.found.len();
         for data in tiles.iter().filter_map(|tile| tile.data()) {
-            base.passes |= <L::Type as LayerType>::Input::passes(data);
+            base.passes |= <L::Input as Find<L::Style>>::passes(data);
         }
         layer.update(UpdateCx { values, parameters, picked }, &tiles);
         map.set_tiles(tiles.iter().map(|tile| tile.id()));
@@ -1021,7 +1062,7 @@ impl<L: TypedLayer> RenderLayer for Hosted<L> {
         }
         match source.map(|source| (source, source.found(self.base.found.clone()))) {
             Some((source, found)) if !found.is_empty() => {
-                let tiles = source.at::<L::Type>(found, self.id());
+                let tiles = source.at::<L>(found, self.id());
                 self.draw(gpu, parameters, &tiles, DrawsFor::Map);
             }
             _ => self.remove_all_draws(),
@@ -1037,7 +1078,7 @@ impl<L: TypedLayer> RenderLayer for Hosted<L> {
     }
 
     fn blends(&self) -> bool {
-        L::Type::layer_blend(&self.values.evaluated.paint) != LayerBlendType::Normal
+        L::Style::layer_blend(&self.values.evaluated.paint) != LayerBlendType::Normal
     }
 
     fn surface_light(&mut self, parameters: &PaintParameters<'_>) -> Option<SurfaceLight> {
@@ -1071,12 +1112,9 @@ impl<L: TypedLayer> RenderLayer for Hosted<L> {
             return;
         }
         let tiles = match source {
-            Some(source) => source.overlapping::<L::Type>(
-                self.base.found.clone(),
-                self.id(),
-                drape.tile.to_unwrapped(),
-                drape.globe,
-            ),
+            Some(source) => {
+                source.overlapping::<L>(self.base.found.clone(), self.id(), drape.tile.to_unwrapped(), drape.globe)
+            }
             None => FrameTiles::new(),
         };
         if tiles.is_empty() {
@@ -1151,13 +1189,13 @@ impl<L: TypedLayer> RenderLayer for Hosted<L> {
         self.layer.lose_context();
     }
 
-    fn query_intersects_feature(
+    fn hit(
         &self,
         region: &QueryRegion<'_>,
         feature: &dyn mln_style::feature::GeometryTileFeature,
         geometry: &mln_style::feature::GeometryCollection,
         feature_state: &mln_style::feature::FeatureState,
     ) -> bool {
-        self.layer.query_intersects_feature(&self.values, region, feature, geometry, feature_state)
+        self.layer.hit(&self.values, region, feature, geometry, feature_state)
     }
 }

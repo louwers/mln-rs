@@ -6,13 +6,7 @@ use crate::property::table::{PropertyTable, PropertyVisitor};
 pub struct Hillshade;
 
 impl StyleLayerType for Hillshade {
-    const INFO: LayerTypeInfo = LayerTypeInfo {
-        name: "hillshade",
-        source: SourceKind::RasterDem,
-        fading_tiles: false,
-        cross_tile_index: false,
-        from_json: true,
-    };
+    const INFO: LayerTypeInfo = LayerTypeInfo { name: "hillshade", source: SourceKind::RasterDem, from_json: true };
     const PROPERTIES: &'static PropertyTable = &hillshade_layer_properties::PROPERTIES;
 
     type LayoutProperties = NoProperties;

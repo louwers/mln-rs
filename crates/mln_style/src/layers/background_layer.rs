@@ -6,13 +6,7 @@ use crate::property::table::{PropertyTable, PropertyVisitor};
 pub struct Background;
 
 impl StyleLayerType for Background {
-    const INFO: LayerTypeInfo = LayerTypeInfo {
-        name: "background",
-        source: SourceKind::None,
-        fading_tiles: false,
-        cross_tile_index: false,
-        from_json: true,
-    };
+    const INFO: LayerTypeInfo = LayerTypeInfo { name: "background", source: SourceKind::None, from_json: true };
     const PROPERTIES: &'static PropertyTable = &background_layer_properties::PROPERTIES;
 
     type LayoutProperties = NoProperties;

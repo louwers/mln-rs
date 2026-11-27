@@ -13,6 +13,7 @@ use mln_style::error::Error;
 use mln_style::expression::{EvaluationContext, Image};
 use mln_style::feature::{GeometryCollection, GeometryTileFeature};
 use mln_style::hash::HashMap;
+use mln_style::layer::StyleLayerType;
 use mln_style::layers::fill_layer_properties::FillLayoutProperties;
 use mln_style::layers::line_layer_properties::LineLayoutProperties;
 use mln_style::layers::{Fill, Line};
@@ -24,7 +25,7 @@ use crate::buckets::fill_bucket::FillBucket;
 use crate::buckets::line_bucket::LineBucket;
 use crate::image::image_store::ImageType;
 use crate::layer::bucket::Bucket;
-use crate::layer::layer_type::{EvaluatedLayer, LayerType};
+use crate::layer::layer_type::EvaluatedLayer;
 use crate::layer::layout::{BuildCx, Layout, LayoutCx, layers_by_id};
 use crate::util::tessellator::Tessellator;
 
@@ -56,7 +57,7 @@ impl PatternFeature {
 /// The template arguments of a `PatternLayout` instantiation.
 pub(crate) trait PatternLayoutSpec: Send + Sized + 'static {
     /// The layer type the layout lays out.
-    type Type: LayerType;
+    type Type: StyleLayerType;
     type Bucket: Bucket;
     type Layout: Clone + Send + Sync;
 

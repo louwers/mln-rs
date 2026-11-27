@@ -152,10 +152,13 @@ mod tests {
     use mln_style::expression::Functions;
     use mln_style::filter::{Filter, convert_filter};
     use mln_style::layer::{Layer, LayerStyle};
-    use mln_style::layers::{Circle, Fill, Raster};
 
     use super::*;
-    use crate::layer::layer_type::{EvaluatedLayer, LayerType};
+    use crate::layer::layer_type::{EvaluatedLayer, entry};
+    use crate::layer::render_layer::Layer as LayerType;
+    use crate::layers::render_circle_layer::RenderCircleLayer;
+    use crate::layers::render_fill_layer::RenderFillLayer;
+    use crate::layers::render_raster_layer::RenderRasterLayer;
 
     /// A filter of its own, which shares no expression with another.
     fn filter(json: &str) -> Filter {
@@ -165,16 +168,17 @@ mod tests {
 
     /// A `T` layer `id` of `source_layer` in "source".
     fn layer<T: LayerType>(id: &str, source_layer: &str, filter: Option<&Filter>) -> Arc<dyn ErasedEvaluatedLayer> {
-        let mut layer = Layer::new(crate::tests::registry().style(), T::INFO.name, id, "source").unwrap();
+        use mln_style::layer::StyleLayerType as _;
+        let mut layer = Layer::new(crate::tests::registry().style(), T::Style::INFO.name, id, "source").unwrap();
         layer.set_source_layer(source_layer);
         if let Some(filter) = filter {
             layer.set_filter(filter);
         }
-        Arc::new(EvaluatedLayer::<T>::new(LayerStyle::recover(layer.style()).unwrap()))
+        Arc::new(EvaluatedLayer::<T::Style>::new(LayerStyle::recover(layer.style()).unwrap(), entry::<T>()))
     }
 
     fn circle(id: &str, source_layer: &str, filter: Option<&Filter>) -> Arc<dyn ErasedEvaluatedLayer> {
-        layer::<Circle>(id, source_layer, filter)
+        layer::<RenderCircleLayer>(id, source_layer, filter)
     }
 
     fn ids(groups: &GroupMap) -> Vec<Vec<String>> {
@@ -206,7 +210,7 @@ mod tests {
             circle("c", "roads", Some(&motorway)),
             circle("d", "roads", None),
             circle("e", "water", Some(&motorway)),
-            layer::<Fill>("f", "roads", Some(&motorway)),
+            layer::<RenderFillLayer>("f", "roads", Some(&motorway)),
             circle("g", "roads", Some(&primary)),
             circle("h", "roads", None),
             // An equal filter that isn't shared.
@@ -236,7 +240,7 @@ mod tests {
             assert_eq!(groups, [vec!["a", "c"], vec!["b", "g"], vec!["d"], vec!["e"], vec!["f"]]);
             assert_eq!(groups, grouped_by_comparison(&layers));
         }
-        check(|id, json| layer::<Raster>(id, "", Some(&filter(json))));
+        check(|id, json| layer::<RenderRasterLayer>(id, "", Some(&filter(json))));
         check(|id, json| circle(id, "roads", Some(&filter(json))));
     }
 

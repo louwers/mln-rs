@@ -24,13 +24,7 @@ use crate::property::value::{PropertyValue, StyleValue as _};
 pub struct Symbol;
 
 impl StyleLayerType for Symbol {
-    const INFO: LayerTypeInfo = LayerTypeInfo {
-        name: "symbol",
-        source: SourceKind::Geometry,
-        fading_tiles: true,
-        cross_tile_index: true,
-        from_json: true,
-    };
+    const INFO: LayerTypeInfo = LayerTypeInfo { name: "symbol", source: SourceKind::Geometry, from_json: true };
     const PROPERTIES: &'static PropertyTable = &symbol_layer_properties::PROPERTIES;
 
     type LayoutProperties = SymbolLayoutProperties::Unevaluated;

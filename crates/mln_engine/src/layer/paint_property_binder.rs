@@ -777,7 +777,7 @@ impl<P: PaintBinders> LayerBinders<P> {
     /// paint values at `zoom`.
     pub(crate) fn new<T>(layers: &[std::sync::Arc<crate::layer::layer_type::EvaluatedLayer<T>>], zoom: f32) -> Self
     where
-        T: crate::layer::layer_type::LayerType<PaintProperties: mln_style::layer::PaintSet<Evaluated = P::Paint>>,
+        T: mln_style::layer::StyleLayerType<PaintProperties: mln_style::layer::PaintSet<Evaluated = P::Paint>>,
     {
         let mut binders: Vec<(String, P)> = Vec::with_capacity(layers.len());
         for layer in layers {

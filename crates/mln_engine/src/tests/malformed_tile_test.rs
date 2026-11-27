@@ -44,11 +44,11 @@ fn layer(json: &serde_json::Value) -> Arc<dyn ErasedEvaluatedLayer> {
         .unwrap_or_else(|| panic!("{}", error.message));
     let style = layer.style();
     match json["type"].as_str().unwrap() {
-        "line" => Arc::new(EvaluatedLayer::<Line>::new(LayerStyle::recover(style).unwrap())),
-        "fill" => Arc::new(EvaluatedLayer::<Fill>::new(LayerStyle::recover(style).unwrap())),
-        "fill-extrusion" => Arc::new(EvaluatedLayer::<FillExtrusion>::new(LayerStyle::recover(style).unwrap())),
-        "circle" => Arc::new(EvaluatedLayer::<Circle>::new(LayerStyle::recover(style).unwrap())),
-        "symbol" => Arc::new(EvaluatedLayer::<Symbol>::new(LayerStyle::recover(style).unwrap())),
+        "line" => Arc::new(EvaluatedLayer::<Line>::builtin(LayerStyle::recover(style).unwrap())),
+        "fill" => Arc::new(EvaluatedLayer::<Fill>::builtin(LayerStyle::recover(style).unwrap())),
+        "fill-extrusion" => Arc::new(EvaluatedLayer::<FillExtrusion>::builtin(LayerStyle::recover(style).unwrap())),
+        "circle" => Arc::new(EvaluatedLayer::<Circle>::builtin(LayerStyle::recover(style).unwrap())),
+        "symbol" => Arc::new(EvaluatedLayer::<Symbol>::builtin(LayerStyle::recover(style).unwrap())),
         other => panic!("no properties for {other}"),
     }
 }

@@ -449,13 +449,12 @@ impl FeatureIndex {
                 continue;
             };
 
-            let needs_cross_tile_index = render_layer.base().style.info().cross_tile_index;
+            let needs_cross_tile_index = render_layer.base().evaluated_properties.entry().places();
             // we use the float camera zoom here, not the integer tile ID zoom,
             // because for the query we take into account the actual rendered
             // size of the geometry (#2781)
             let intersects = needs_cross_tile_index
-                || region
-                    .is_some_and(|region| render_layer.query_intersects_feature(region, &feature, &geometry, &state));
+                || region.is_some_and(|region| render_layer.hit(region, &feature, &geometry, &state));
             if !intersects {
                 continue;
             }

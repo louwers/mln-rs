@@ -7,13 +7,7 @@ use crate::types::LayerBlendType;
 pub struct Fill;
 
 impl StyleLayerType for Fill {
-    const INFO: LayerTypeInfo = LayerTypeInfo {
-        name: "fill",
-        source: SourceKind::Geometry,
-        fading_tiles: false,
-        cross_tile_index: false,
-        from_json: true,
-    };
+    const INFO: LayerTypeInfo = LayerTypeInfo { name: "fill", source: SourceKind::Geometry, from_json: true };
     const PROPERTIES: &'static PropertyTable = &fill_layer_properties::PROPERTIES;
 
     type LayoutProperties = FillLayoutProperties::Unevaluated;

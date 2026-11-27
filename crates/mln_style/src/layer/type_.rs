@@ -47,11 +47,6 @@ pub struct LayerTypeInfo {
     /// The layer type as style JSON names it.
     pub name: &'static str,
     pub source: SourceKind,
-    /// Whether the type's layers draw on tiles that are fading out.
-    pub fading_tiles: bool,
-    /// Whether the type's layers take part in cross-tile indexing and
-    /// placement.
-    pub cross_tile_index: bool,
     /// Whether style JSON can create a layer of the type.
     pub from_json: bool,
 }

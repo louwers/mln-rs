@@ -15,7 +15,7 @@ use mln_style::error::Error;
 use mln_style::expression::{EvaluationContext, GlobalStateMap, UnavailableImages, Value};
 use mln_style::feature::{GeometryCollection, GeometryTileFeature};
 use mln_style::filter::Filter;
-use mln_style::layer::PaintSet;
+use mln_style::layer::{PaintSet, StyleLayerType};
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
 
@@ -23,7 +23,7 @@ use crate::image::image_store::{ImageDependencies, ImageType};
 use crate::layer::bucket::Bucket;
 use crate::layer::bucket_parameters::BucketParameters;
 use crate::layer::filter_groups::FilterGroups;
-use crate::layer::layer_type::{EvaluatedLayer, LayerType};
+use crate::layer::layer_type::EvaluatedLayer;
 use crate::layer::paint_property_binder::{LayerBinders, PaintBinders};
 use crate::layer::tile_layout::Resolved;
 use crate::layout::pattern_layout::PatternLayerMap;
@@ -37,7 +37,7 @@ use crate::tile::{OverscaledTileID, TileData, TileLayer};
 /// tile's bucket, on a tile worker: [`new`](Self::new) selects the tile's
 /// features, and once the glyphs and images it asked for are resolved,
 /// [`build`](Self::build) makes the bucket.
-pub(crate) trait Layout<T: LayerType>: Send + Sized + 'static {
+pub(crate) trait Layout<T: StyleLayerType>: Send + Sized + 'static {
     /// The bucket the layout makes.
     type Bucket: Bucket;
 
@@ -96,13 +96,13 @@ pub(crate) struct LayoutParameters<'a> {
 }
 
 /// What a layout reads of its tile while it selects features.
-pub(crate) struct LayoutCx<'a, T: LayerType> {
+pub(crate) struct LayoutCx<'a, T: StyleLayerType> {
     pub(crate) layers: &'a [Arc<EvaluatedLayer<T>>],
     pub(crate) source_layer: &'a SourceLayer,
     pub(crate) parameters: LayoutParameters<'a>,
 }
 
-impl<'a, T: LayerType> LayoutCx<'a, T> {
+impl<'a, T: StyleLayerType> LayoutCx<'a, T> {
     /// The layers of the group, its leader first, whose style the layout's
     /// layout properties and filter are.
     #[must_use]
@@ -259,7 +259,7 @@ impl Selection<'_> {
 }
 
 /// What a layout reads and writes while it builds its bucket.
-pub(crate) struct BuildCx<'a, T: LayerType> {
+pub(crate) struct BuildCx<'a, T: StyleLayerType> {
     pub(crate) layers: &'a [Arc<EvaluatedLayer<T>>],
     pub(crate) parameters: &'a BucketParameters,
     pub(crate) first_load: bool,
@@ -268,7 +268,7 @@ pub(crate) struct BuildCx<'a, T: LayerType> {
     pub(crate) feature_index: &'a mut FeatureIndexBuilder,
 }
 
-impl<'a, T: LayerType> BuildCx<'a, T> {
+impl<'a, T: StyleLayerType> BuildCx<'a, T> {
     /// The group's layers by id, the first of each id kept.
     #[must_use]
     pub(crate) fn layers_by_id(&self) -> VecMap<String, Arc<EvaluatedLayer<T>>> {
@@ -373,7 +373,9 @@ impl<'a, T: LayerType> BuildCx<'a, T> {
 }
 
 /// The group's layers by id, the first of each id kept.
-pub(crate) fn layers_by_id<T: LayerType>(group: &[Arc<EvaluatedLayer<T>>]) -> VecMap<String, Arc<EvaluatedLayer<T>>> {
+pub(crate) fn layers_by_id<T: StyleLayerType>(
+    group: &[Arc<EvaluatedLayer<T>>],
+) -> VecMap<String, Arc<EvaluatedLayer<T>>> {
     let mut layers = VecMap::new();
     for layer in group {
         layers.entry(layer.style.id.clone()).or_insert_with(|| Arc::clone(layer));

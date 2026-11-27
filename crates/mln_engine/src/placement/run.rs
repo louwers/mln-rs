@@ -17,7 +17,7 @@ use crate::Registry;
 use crate::camera::View;
 use crate::layer::layer_drawing::ChangedBuckets;
 use crate::layer::layer_type::EvaluatedLayer;
-use crate::layer::render_layer::{FrameSourceTiles, RenderLayer};
+use crate::layer::render_layer::{FrameSourceTiles, Layer, RenderLayer};
 use crate::map::MapMode;
 use crate::placement::CollisionIndex;
 use crate::render::terrain::TerrainElevation;
@@ -67,7 +67,7 @@ pub(crate) fn erase<P: Placement>(placement: P) -> Box<dyn ErasedPlacement> {
 
 impl<P: Placement> ErasedPlacement for Participant<P> {
     fn layer_type(&self) -> &'static str {
-        <P::Layer as StyleLayerType>::INFO.name
+        <<P::Layer as Layer>::Style as StyleLayerType>::INFO.name
     }
 
     fn begin_frame(&mut self) {
@@ -83,7 +83,7 @@ impl<P: Placement> ErasedPlacement for Participant<P> {
     ) -> bool {
         let base = layer.base();
         let any: &dyn Any = &*base.evaluated_properties;
-        let Some(values) = any.downcast_ref::<EvaluatedLayer<P::Layer>>() else {
+        let Some(values) = any.downcast_ref::<EvaluatedLayer<<P::Layer as Layer>::Style>>() else {
             debug_assert!(false, "a layer of another type than its participant's");
             return false;
         };

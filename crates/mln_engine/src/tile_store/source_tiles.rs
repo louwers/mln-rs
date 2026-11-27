@@ -896,8 +896,7 @@ impl SourceTiles {
             };
             debug_assert!(tile.is_renderable());
             for layer_properties in update.layers {
-                let type_info = layer_properties.style().info();
-                if entry.is_held() && !type_info.fading_tiles {
+                if entry.is_held() && !layer_properties.entry().fades_tiles() {
                     continue;
                 }
                 let updated = tile.layer_properties_updated(layer_properties);

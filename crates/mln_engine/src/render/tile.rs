@@ -14,7 +14,7 @@ use mln_style::types::TranslateAnchorType;
 use crate::camera::{ProjectionData, View};
 use crate::draw::identity::SimpleIdentity;
 use crate::layer::layer_drawing::MadeFrom;
-use crate::layer::layer_type::LayerType;
+use crate::layer::render_layer::Layer;
 use crate::layer::tile_input::TileData;
 use crate::layer::tile_input::input::Find;
 use crate::render::paint_parameters::TransformParameters;
@@ -193,7 +193,7 @@ pub(crate) struct FoundTile {
 
 /// A render tile of a frame, with what it holds for a layer of the type
 /// `T` and the world copy the layer draws it in.
-pub(crate) struct FrameTile<'a, T: LayerType> {
+pub(crate) struct FrameTile<'a, T: Layer> {
     pub(crate) tile: &'a RenderTile,
     /// The world copy the layer draws the tile in: its own, but in a drape
     /// one by the drape's.
@@ -201,15 +201,15 @@ pub(crate) struct FrameTile<'a, T: LayerType> {
     data: Option<TileData<'a, T>>,
 }
 
-impl<T: LayerType> Clone for FrameTile<'_, T> {
+impl<T: Layer> Clone for FrameTile<'_, T> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T: LayerType> Copy for FrameTile<'_, T> {}
+impl<T: Layer> Copy for FrameTile<'_, T> {}
 
-impl<'a, T: LayerType> FrameTile<'a, T> {
+impl<'a, T: Layer> FrameTile<'a, T> {
     /// The tile `tile`, which shows `content`, as the layer `layer_id`
     /// sees it, and where it found what the tile holds for the layer.
     #[must_use]
@@ -218,7 +218,7 @@ impl<'a, T: LayerType> FrameTile<'a, T> {
         content: Option<TileContent<'a>>,
         layer_id: &str,
     ) -> (Self, Option<ViewPlace>) {
-        let found = content.and_then(|content| T::Input::find(content, layer_id));
+        let found = content.and_then(|content| <T::Input as Find<T::Style>>::find(content, layer_id));
         let frame_tile = FrameTile { tile, wrap: tile.id.wrap, data: found.map(|(data, _)| data) };
         (frame_tile, found.map(|(_, place)| place))
     }
@@ -233,9 +233,12 @@ impl<'a, T: LayerType> FrameTile<'a, T> {
         layer_id: &str,
         view: Option<ViewPlace>,
     ) -> Self {
-        let data = content.zip(view).and_then(|(content, place)| T::Input::at(content, place));
+        let data = content.zip(view).and_then(|(content, place)| <T::Input as Find<T::Style>>::at(content, place));
         debug_assert_eq!(data.is_some(), view.is_some(), "a tile's contents changed since the frame's update");
-        debug_assert!(data.is_none_or(|data| T::Input::is_for(data, layer_id)), "a layer found at another's place");
+        debug_assert!(
+            data.is_none_or(|data| <T::Input as Find<T::Style>>::is_for(data, layer_id)),
+            "a layer found at another's place"
+        );
         FrameTile { tile, wrap: tile.id.wrap, data }
     }
 
@@ -248,7 +251,7 @@ impl<'a, T: LayerType> FrameTile<'a, T> {
     /// What the layer's value of the tile is made from, if the tile holds
     /// anything for the layer ([`TileContent::stamp`]).
     pub(crate) fn made_from(self) -> Option<MadeFrom> {
-        self.data.map(T::Input::made_from)
+        self.data.map(<T::Input as Find<T::Style>>::made_from)
     }
 
     /// What the tile holds for the layer, if anything.
@@ -258,7 +261,7 @@ impl<'a, T: LayerType> FrameTile<'a, T> {
 
     /// [`data`](Self::data), if it was laid out to draw in `pass`.
     pub(crate) fn data_for_pass(self, pass: RenderPass) -> Option<TileData<'a, T>> {
-        self.data.filter(|&data| T::Input::passes(data) & pass != RenderPass::None)
+        self.data.filter(|&data| <T::Input as Find<T::Style>>::passes(data) & pass != RenderPass::None)
     }
 
     /// The tile's id.

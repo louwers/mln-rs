@@ -1324,7 +1324,7 @@ impl RenderOrchestrator {
     ) -> Result<(), Error> {
         let cross_tile_symbol_index_layers: crate::query::feature_index::QueryLayers<'_> = layers
             .iter()
-            .filter(|(_, layer)| layer.base().style.info().cross_tile_index)
+            .filter(|(_, layer)| layer.base().evaluated_properties.entry().places())
             .map(|(id, layer)| (id.clone(), *layer))
             .collect();
 

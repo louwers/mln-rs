@@ -59,7 +59,8 @@ use crate::camera::View;
 use crate::draw::identity::SimpleIdentity;
 use crate::layer::bucket::{Bucket, ErasedBucket};
 use crate::layer::layer_drawing::ChangedBuckets;
-use crate::layer::layer_type::{EvaluatedLayer, LayerType};
+use crate::layer::layer_type::EvaluatedLayer;
+use crate::layer::render_layer::Layer;
 use crate::map::MapMode;
 use crate::render::terrain::TerrainElevation;
 use crate::render::tile::FrameTile;
@@ -73,7 +74,7 @@ use crate::worker::job::SourceKey;
 /// module's comment says when the engine calls each hook.
 pub(crate) trait Placement: Default + 'static {
     /// The layer type whose layers place.
-    type Layer: LayerType;
+    type Layer: Layer;
 
     /// Collects what the participant places and draws of `tiles`, the
     /// frame's tiles of `layer` in the order the layer draws them, each with
@@ -131,11 +132,11 @@ pub(crate) trait Placement: Default + 'static {
 }
 
 /// A layer that a [`Placement`] collects in the frame's update.
-pub(crate) struct CollectCx<'a, L: LayerType> {
+pub(crate) struct CollectCx<'a, L: Layer> {
     /// What the engine gives the layer to [`Placement::place`] by.
     pub(crate) key: usize,
     /// The layer's values of the frame.
-    pub(crate) values: &'a EvaluatedLayer<L>,
+    pub(crate) values: &'a EvaluatedLayer<L::Style>,
     /// The tiles of the layer's source, if it has tiles.
     pub(crate) source: Option<SourceKey>,
 }

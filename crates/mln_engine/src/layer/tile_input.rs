@@ -11,14 +11,15 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use mln_style::bitmap::PremultipliedImage;
-use mln_style::layer::SourceKind;
+use mln_style::layer::{SourceKind, StyleLayerType};
 
 use crate::draw::identity::SimpleIdentity;
 use crate::draw::tile_render_data::TileAtlasTextures;
 use crate::layer::bucket::Bucket;
 use crate::layer::bucket_geometry::BucketGeometry;
-use crate::layer::layer_type::{EvaluatedLayer, LayerType};
+use crate::layer::layer_type::EvaluatedLayer;
 use crate::layer::layout::Layout;
+use crate::layer::render_layer::Layer;
 use crate::query::feature_index::FeatureIndex;
 use crate::render::tile::{TileContent, ViewPlace};
 use crate::source::render_image_source::{ImageQuad, ImageTile};
@@ -28,22 +29,22 @@ use crate::tile_store::contents::GeometryContents;
 use crate::tile_store::dem::DemContents;
 use crate::tile_store::raster::RasterContents;
 
-/// What a layer of the type `T` draws from: a kind of tile and what such a
-/// tile holds for the layer, its [`Data`](Self::Data).
-pub(crate) trait TileInput<T: LayerType>: input::Find<T> + 'static {
+/// What a layer of the style half `T` draws from: a kind of tile and what
+/// such a tile holds for the layer, its [`Data`](Self::Data).
+pub(crate) trait TileInput<T: StyleLayerType>: input::Find<T> + 'static {
     /// What a frame's tile holds for the layer.
     type Data<'a>: Copy;
 }
 
-/// What a frame's tile holds for a layer of the type `T`: its
-/// [`LayerType::Input`]'s [`Data`](TileInput::Data).
-pub(crate) type TileData<'a, T> = <<T as LayerType>::Input as TileInput<T>>::Data<'a>;
+/// What a frame's tile holds for a layer of the type `L`: its
+/// [`Layer::Input`]'s [`Data`](TileInput::Data).
+pub(crate) type TileData<'a, L> = <<L as Layer>::Input as TileInput<<L as Layer>::Style>>::Data<'a>;
 
 /// The tiles of a geometry source, whose features the layout `L` turns into
 /// a bucket per tile. A tile's data is its [`LayerBucket`].
 pub(crate) struct Features<L>(PhantomData<fn() -> L>);
 
-impl<T: LayerType, L: Layout<T>> TileInput<T> for Features<L> {
+impl<T: StyleLayerType, L: Layout<T>> TileInput<T> for Features<L> {
     type Data<'a> = LayerBucket<'a, T, L::Bucket>;
 }
 
@@ -51,25 +52,25 @@ impl<T: LayerType, L: Layout<T>> TileInput<T> for Features<L> {
 /// itself.
 pub(crate) enum NoTiles {}
 
-impl<T: LayerType> TileInput<T> for NoTiles {
+impl<T: StyleLayerType> TileInput<T> for NoTiles {
     type Data<'a> = std::convert::Infallible;
 }
 
 /// The tiles of a raster source, or of an image source, which draws its one
 /// image in the tiles it covers. A tile's data is its [`RasterTile`].
-impl<T: LayerType> TileInput<T> for RasterTiles {
+impl<T: StyleLayerType> TileInput<T> for RasterTiles {
     type Data<'a> = RasterTile<'a>;
 }
 
 /// The tiles of a raster-dem source. A tile's data is its DEM.
-impl<T: LayerType> TileInput<T> for DemTiles {
+impl<T: StyleLayerType> TileInput<T> for DemTiles {
     type Data<'a> = &'a DemContents;
 }
 
 /// A bucket of a layer of the type `T` in a tile's layout, of the bucket
 /// type `B`, with the layer's values it was laid out with and the rest of
 /// what the layout's contents hold for the tile's draws.
-pub(crate) struct LayerBucket<'a, T: LayerType, B> {
+pub(crate) struct LayerBucket<'a, T: StyleLayerType, B> {
     pub(crate) bucket: &'a B,
     /// The bucket's identity, which tells apart what layers made of it.
     pub(crate) id: SimpleIdentity,
@@ -80,15 +81,15 @@ pub(crate) struct LayerBucket<'a, T: LayerType, B> {
     contents: &'a GeometryContents,
 }
 
-impl<T: LayerType, B> Clone for LayerBucket<'_, T, B> {
+impl<T: StyleLayerType, B> Clone for LayerBucket<'_, T, B> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<T: LayerType, B> Copy for LayerBucket<'_, T, B> {}
+impl<T: StyleLayerType, B> Copy for LayerBucket<'_, T, B> {}
 
-impl<'a, T: LayerType, B: Bucket> LayerBucket<'a, T, B> {
+impl<'a, T: StyleLayerType, B: Bucket> LayerBucket<'a, T, B> {
     /// The bucket of the layer at `index` among those `contents` laid out,
     /// if the layout laid it out as a layer of the type `T` into a `B`.
     pub(crate) fn laid(contents: &'a GeometryContents, index: usize) -> Option<Self> {
@@ -104,7 +105,7 @@ impl<'a, T: LayerType, B: Bucket> LayerBucket<'a, T, B> {
     }
 }
 
-impl<'a, T: LayerType, B> LayerBucket<'a, T, B> {
+impl<'a, T: StyleLayerType, B> LayerBucket<'a, T, B> {
     /// The geometry of the layout's buckets in the context's stores, which
     /// the draws bind.
     #[must_use]
@@ -180,12 +181,12 @@ pub(crate) mod input {
     use mln_wire::Reader;
 
     use super::{
-        DemTiles, Features, LayerBucket, NoTiles, RasterTile, RasterTiles, SourceKind, TileContent, TileInput,
-        ViewPlace,
+        DemTiles, Features, LayerBucket, NoTiles, RasterTile, RasterTiles, SourceKind, StyleLayerType, TileContent,
+        TileInput, ViewPlace,
     };
     use crate::layer::bucket::{ErasedBucket, Stored};
     use crate::layer::layer_drawing::MadeFrom;
-    use crate::layer::layer_type::{self, ErasedEvaluatedLayer, ErasedLayout, LayerType};
+    use crate::layer::layer_type::{self, ErasedEvaluatedLayer, ErasedLayout};
     use crate::layer::layout::{Layout, LayoutParameters, SourceLayer};
     use crate::render::pass::RenderPass;
     use crate::source::GeometryTiles;
@@ -196,7 +197,7 @@ pub(crate) mod input {
     /// hold it, the layout of a tile's features for an input that lays
     /// out, and what a frame's tile holds for a layer of it. It seals
     /// [`TileInput`].
-    pub(crate) trait Find<T: LayerType> {
+    pub(crate) trait Find<T: StyleLayerType> {
         /// The kind of source whose tiles hold the input.
         const KIND: SourceKind;
 
@@ -269,7 +270,7 @@ pub(crate) mod input {
         }
     }
 
-    impl<T: LayerType, L: Layout<T>> Find<T> for Features<L> {
+    impl<T: StyleLayerType, L: Layout<T>> Find<T> for Features<L> {
         const KIND: SourceKind = <GeometryTiles as Deliver>::KIND;
 
         fn needs_resources(group: &[Arc<dyn ErasedEvaluatedLayer>]) -> bool {
@@ -321,7 +322,7 @@ pub(crate) mod input {
         }
     }
 
-    impl<T: LayerType> Find<T> for RasterTiles {
+    impl<T: StyleLayerType> Find<T> for RasterTiles {
         const KIND: SourceKind = <RasterTiles as Deliver>::KIND;
 
         fn find<'a>(
@@ -348,7 +349,7 @@ pub(crate) mod input {
         }
     }
 
-    impl<T: LayerType> Find<T> for DemTiles {
+    impl<T: StyleLayerType> Find<T> for DemTiles {
         const KIND: SourceKind = <DemTiles as Deliver>::KIND;
 
         fn find<'a>(
@@ -371,7 +372,7 @@ pub(crate) mod input {
         }
     }
 
-    impl<T: LayerType> Find<T> for NoTiles {
+    impl<T: StyleLayerType> Find<T> for NoTiles {
         const KIND: SourceKind = SourceKind::None;
 
         fn find<'a>(

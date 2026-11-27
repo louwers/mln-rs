@@ -7,13 +7,7 @@ use crate::types::LayerBlendType;
 pub struct Line;
 
 impl StyleLayerType for Line {
-    const INFO: LayerTypeInfo = LayerTypeInfo {
-        name: "line",
-        source: SourceKind::Geometry,
-        fading_tiles: false,
-        cross_tile_index: false,
-        from_json: true,
-    };
+    const INFO: LayerTypeInfo = LayerTypeInfo { name: "line", source: SourceKind::Geometry, from_json: true };
     const PROPERTIES: &'static PropertyTable = &line_layer_properties::PROPERTIES;
 
     type LayoutProperties = LineLayoutProperties::Unevaluated;

@@ -13,7 +13,6 @@ use mln_gfx::{RendererBackend as _, ScissorRect};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::constants::EXTENT;
 use mln_style::geo::LatLng;
-use mln_style::layers::Raster;
 use mln_style::size::Size;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
@@ -146,8 +145,11 @@ fn a_drape_draws_the_tiles_that_overlap_its_tile() {
     let contents = vec![None; render_tiles.len()];
     let found: Vec<FoundTile> = (0..render_tiles.len()).map(|tile| FoundTile { tile, view: None }).collect();
     let source = FrameSourceTiles::new(&render_tiles, &contents, &found);
-    let drawn: Vec<UnwrappedTileID> =
-        source.overlapping::<Raster>(0..found.len(), "raster", ids[0], false).iter().map(|tile| tile.tile.id).collect();
+    let drawn: Vec<UnwrappedTileID> = source
+        .overlapping::<crate::layers::render_raster_layer::RenderRasterLayer>(0..found.len(), "raster", ids[0], false)
+        .iter()
+        .map(|tile| tile.tile.id)
+        .collect();
     assert_eq!(&ids[..4], &drawn[..]);
 }
 
@@ -165,7 +167,16 @@ fn a_globe_drape_draws_the_tiles_over_it_of_every_world_copy() {
     let source = FrameSourceTiles::new(&render_tiles, &contents, &found);
     let drape = tile(0, 0, 0, 0);
     let drawn = |globe: bool| -> Vec<UnwrappedTileID> {
-        source.overlapping::<Raster>(0..found.len(), "raster", drape, globe).iter().map(|tile| tile.tile.id).collect()
+        source
+            .overlapping::<crate::layers::render_raster_layer::RenderRasterLayer>(
+                0..found.len(),
+                "raster",
+                drape,
+                globe,
+            )
+            .iter()
+            .map(|tile| tile.tile.id)
+            .collect()
     };
     assert_eq!(ids.to_vec(), drawn(true));
     assert_eq!(ids[1..2].to_vec(), drawn(false));
