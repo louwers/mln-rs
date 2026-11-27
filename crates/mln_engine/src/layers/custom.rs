@@ -37,8 +37,7 @@ use mln_style::property::table::{PropertyTable, PropertyVisitor};
 
 use crate::camera::{FrameProjection, MapView};
 use crate::draw::draws::{Draws, LendAt, Lent};
-use crate::layer::layer_type::LayerType;
-use crate::layer::render_layer::{Hosted, LayerValues, PrepareCx, RenderLayer, TypedLayer};
+use crate::layer::render_layer::{self, LayerValues, PrepareCx};
 use crate::layer::tile_input::NoTiles;
 use crate::log_target;
 use crate::render::tile::FrameTile;
@@ -107,13 +106,7 @@ pub struct Custom;
 static PROPERTIES: PropertyTable = PropertyTable::new(&[], &[]);
 
 impl StyleLayerType for Custom {
-    const INFO: LayerTypeInfo = LayerTypeInfo {
-        name: "custom",
-        source: SourceKind::None,
-        fading_tiles: false,
-        cross_tile_index: false,
-        from_json: false,
-    };
+    const INFO: LayerTypeInfo = LayerTypeInfo { name: "custom", source: SourceKind::None, from_json: false };
     const PROPERTIES: &'static PropertyTable = &PROPERTIES;
 
     type LayoutProperties = NoProperties;
@@ -163,14 +156,6 @@ impl CustomHost {
     #[must_use]
     pub fn is(&self, host: &Arc<dyn CustomLayerHost>) -> bool {
         std::ptr::addr_eq(self.0.as_ptr(), Arc::as_ptr(host))
-    }
-}
-
-impl LayerType for Custom {
-    type Input = NoTiles;
-
-    fn render_layer(style: Arc<LayerStyle<Custom>>) -> Box<dyn RenderLayer> {
-        Hosted::<RenderCustomLayer>::boxed(style)
     }
 }
 
@@ -227,8 +212,9 @@ impl Drop for RenderCustomLayer {
     }
 }
 
-impl TypedLayer for RenderCustomLayer {
-    type Type = Custom;
+impl render_layer::Layer for RenderCustomLayer {
+    type Style = Custom;
+    type Input = NoTiles;
     type Tile = ();
 
     fn new(values: &LayerValues<Custom>) -> Self {
@@ -247,7 +233,12 @@ impl TypedLayer for RenderCustomLayer {
 
     /// Asks for the frame's commands before its passes, for the host to
     /// prerender with, and for the translucent pass, for it to render in.
-    fn prepare(&mut self, _cx: &mut PrepareCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Custom>], out: &mut Draws) {
+    fn prepare(
+        &mut self,
+        _cx: &mut PrepareCx<'_, '_, Self>,
+        _tiles: &[FrameTile<'_, RenderCustomLayer>],
+        out: &mut Draws,
+    ) {
         out.lend(LendAt::BeforePasses).lend(LendAt::Pass);
     }
 
