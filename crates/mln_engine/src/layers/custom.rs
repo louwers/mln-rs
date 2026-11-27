@@ -253,7 +253,13 @@ impl TypedLayer for RenderCustomLayer {
 
     fn lend(&mut self, _at: LendAt, lent: Lent<'_>) {
         let Some(host) = &self.host else { return };
-        let Lent { raw, frame, layer_depth } = lent;
+        let Lent { raw, frame, projection, layer_depth } = lent;
+        let frame = &CustomLayerFrame {
+            view: frame.view.map_view(f64::from(frame.pixel_ratio)),
+            projection: *projection,
+            width: frame.renderable_size.width,
+            height: frame.renderable_size.height,
+        };
         match layer_depth {
             None => host.prerender(&mut CustomLayerPrerenderParameters { encoder: raw, frame }),
             Some(layer_depth) => host.render(&mut CustomLayerRenderParameters { pass: raw, frame, layer_depth }),
