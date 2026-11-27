@@ -84,6 +84,8 @@ impl Layer for RenderHeatmapLayer {
     type Tile = StandingDraw;
 
     const TERRAIN: OnTerrain = OnTerrain::Stands { hides_behind_ground: false };
+    // A heatmap draws on the map alone, as a layer of 3D geometry does.
+    const ROUTES: bool = false;
 
     fn new(_values: &LayerValues<Heatmap>) -> Self {
         RenderHeatmapLayer {

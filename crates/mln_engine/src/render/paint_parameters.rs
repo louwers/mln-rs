@@ -144,6 +144,10 @@ pub(crate) struct DrawTarget {
     pub(crate) scissor: Option<Scissor>,
 }
 
+/// The frame's tile masks in its stencil and its next stencil value, while
+/// a pass of a stencil of its own draws.
+pub(crate) struct FrameStencil(VecMap<UnwrappedTileID, i32>, i32);
+
 /// A pass of the backend's `Gpu` that draws draw into, and its
 /// attachments' size and formats.
 #[derive(Clone, Copy)]
@@ -478,6 +482,20 @@ impl<'a> PaintParameters<'a> {
             (std::mem::take(&mut self.tile_clipping_mask_ids), std::mem::replace(&mut self.next_stencil_id, 1))
         });
         Some(Composited { group, frame, began, frame_stencil, unended: Unended })
+    }
+
+    /// Gives the pass begun next a stencil of its own, cleared, which holds
+    /// no tile's mask, and returns the frame's tile masks and next stencil
+    /// value, which [`end_own_stencil`](Self::end_own_stencil) takes back.
+    pub(crate) fn begin_own_stencil(&mut self) -> FrameStencil {
+        FrameStencil(std::mem::take(&mut self.tile_clipping_mask_ids), std::mem::replace(&mut self.next_stencil_id, 1))
+    }
+
+    /// Makes `frame`, the frame's tile masks and next stencil value that
+    /// [`begin_own_stencil`](Self::begin_own_stencil) took, those of the
+    /// passes again.
+    pub(crate) fn end_own_stencil(&mut self, frame: FrameStencil) {
+        FrameStencil(self.tile_clipping_mask_ids, self.next_stencil_id) = frame;
     }
 
     /// Copies the layer composite's frame texture onto the open pass.

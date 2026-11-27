@@ -12,7 +12,7 @@
 //! into it ([`Target::holds`]), so that a layer whose target holds the same
 //! from frame to frame draws into it once.
 
-use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, GpuError, LoadOp, TargetFormats};
+use mln_gfx::gpu::{ColorAttachment, DepthStencilAttachment, Gpu, GpuError, LoadOp, TargetFormats, TextureFormat};
 use mln_gfx::scissor_rect::ScissorRect;
 use mln_gfx::texture2d::{SamplerState, texture_format};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
@@ -145,11 +145,9 @@ impl Target {
     /// The pass that clears the target to its clear color and its depth to 1,
     /// making them through `gpu`, the context's.
     fn pass(&self, gpu: &mut dyn Gpu, context: &mut Context) -> Result<OpenPass, GpuError> {
-        let color = context.create_texture(gpu, &self.texture)?;
-        let format = context.texture(&self.texture).ok_or(GpuError::UnknownId("texture"))?.format();
+        let (color, format, size) = self.color_attachment(gpu, context)?;
         let depth_format = context.render_target_depth();
         let objects = context.target(self).ok_or(GpuError::UnknownId("render target"))?;
-        let (size, clear) = (objects.size, objects.clear);
         if objects.depth.is_none()
             && let Some(depth_format) = depth_format
         {
@@ -161,7 +159,7 @@ impl Target {
         let depth = context.target(self).and_then(|objects| objects.depth.as_ref()).map(GpuTexture::id);
         Ok(OpenPass {
             label: "render target",
-            color: Some(ColorAttachment { texture: color, load: LoadOp::Clear(clear) }),
+            color: Some(color),
             depth_stencil: depth.map(|texture| DepthStencilAttachment {
                 texture,
                 depth: LoadOp::Clear(1.0),
@@ -170,6 +168,22 @@ impl Target {
             size,
             targets: TargetFormats { color: Some(format), depth_stencil: depth.and(depth_format) },
         })
+    }
+}
+
+impl Target {
+    /// The target's texture as a pass's color attachment that clears it to
+    /// its clear color, with its format and size, making the texture
+    /// through `gpu`, the context's.
+    pub(crate) fn color_attachment(
+        &self,
+        gpu: &mut dyn Gpu,
+        context: &mut Context,
+    ) -> Result<(ColorAttachment, TextureFormat, Size), GpuError> {
+        let texture = context.create_texture(gpu, &self.texture)?;
+        let format = context.texture(&self.texture).ok_or(GpuError::UnknownId("texture"))?.format();
+        let objects = context.target(self).ok_or(GpuError::UnknownId("render target"))?;
+        Ok((ColorAttachment { texture, load: LoadOp::Clear(objects.clear) }, format, objects.size))
     }
 }
 

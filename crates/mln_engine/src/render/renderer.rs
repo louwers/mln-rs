@@ -771,10 +771,10 @@ fn draw(
     parameters.depth_range_size = depth_range_size;
     orchestrator.terrain().render_ground(gpu, parameters);
 
-    // The layers' targets, which the passes sample, and what the layers do
-    // with the frame's commands before its passes, bottom to top; then the
-    // terrain's drapes, each after its layers' targets.
-    orchestrator.visit_render_layers(|layer| layer.before_passes(gpu, parameters));
+    // The layers' targets and the shared targets, which the passes sample,
+    // and what the layers do with the frame's commands before its passes;
+    // then the terrain's drapes, each after its layers' targets.
+    orchestrator.before_passes(gpu, parameters);
     orchestrator.terrain().render_drapes(gpu, parameters);
 
     // The frame's pass, cleared to the backdrop, which shows where there are

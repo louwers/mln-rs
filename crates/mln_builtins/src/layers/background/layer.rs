@@ -145,7 +145,7 @@ impl Layer for RenderBackgroundLayer {
         out: &mut Draws,
     ) {
         let RenderBackgroundLayer { patterns } = self;
-        let PrepareCx { base, values, tiles, picked, res, frame } = cx;
+        let PrepareCx { base, values, tiles, picked, res, frame, .. } = cx;
         let Resources { gpu, context } = res;
         let layer = &*values.evaluated;
         let evaluated = &layer.paint;

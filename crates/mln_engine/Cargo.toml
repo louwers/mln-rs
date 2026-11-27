@@ -189,6 +189,12 @@ path = "tests/style_members.rs"
 # renderer.
 
 [[test]]
+name = "shared_targets"
+path = "tests/shared_targets.rs"
+# Built-in layers routed into shared targets by an extension of the test's
+# own, and read back.
+
+[[test]]
 name = "offline_download_map_test"
 path = "tests/offline_download_map.rs"
 # StubFileSource answers the download.

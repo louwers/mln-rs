@@ -23,7 +23,8 @@ use smallvec::SmallVec;
 
 use crate::camera::View;
 use crate::draw::context::Context;
-use crate::draw::draws::{DrawOrder, Group, SingleDraw};
+use crate::draw::draws::{DrawOrder, Group, SingleDraw, depth_range_size};
+use crate::draw::resources::Resources;
 use crate::exec::pool::{Pool, TaskGroup};
 use crate::image::image_store::ImageStore;
 use crate::layer::layer_drawing::ChangedBuckets;
@@ -36,6 +37,7 @@ use crate::render::frame::{Frame, FrameLayer};
 use crate::render::globe::depth_pass::GlobeDepthPass;
 use crate::render::paint_parameters::PaintParameters;
 use crate::render::pass::RenderPass;
+use crate::render::shared_targets::{Routing, Run, SharedTargets};
 use crate::render::terrain::{DrapeStacks, Draped, RenderTerrain};
 use crate::render::tile::{FoundTile, TileContent};
 use crate::render::update_parameters::UpdateParameters;
@@ -175,6 +177,11 @@ pub(crate) struct RenderOrchestrator {
     /// The frame's stacks of draped layers, whose surfaces the translucent
     /// pass draws among the layers; none without terrain.
     stacks: DrapeStacks,
+    /// The registry's routes of the version of the style the last update
+    /// drew.
+    routing: Routing,
+    /// The shared targets, and the frame's routes and reads of them.
+    shared: SharedTargets,
 
     /// Last, so that it drops after the fields above: the render sources'
     /// tiles free their data on the thread pool (`drop_on_workers`).
@@ -233,6 +240,8 @@ impl RenderOrchestrator {
             sky_pass: crate::render::sky_pass::SkyPass::default(),
             terrain: RenderTerrain::default(),
             stacks: DrapeStacks::default(),
+            routing: Routing::default(),
+            shared: SharedTargets::default(),
         }
     }
 
@@ -293,6 +302,7 @@ impl RenderOrchestrator {
         if sources_changed {
             self.sources_by_id = sources_by_id(style.get_sources());
         }
+        let style_changed = self.style.as_ref().is_none_or(|previous| !Arc::ptr_eq(previous, style));
         self.style = Some(Arc::clone(style));
         let layers = Arc::clone(style.get_layer_list());
 
@@ -303,6 +313,16 @@ impl RenderOrchestrator {
         }
 
         let render_layers_remade = self.apply_layer_changes(&layer_changes, &layers, &clock);
+        let routers = self.registry.routers();
+        if !routers.is_empty() && (style_changed || render_layers_remade) {
+            self.routing = Routing::of(routers, style, &self.layer_indexes);
+            // The frame's draws route only while the routing has routes.
+            if self.routing.is_empty() {
+                for layer in &mut self.layers {
+                    layer.set_route(None);
+                }
+            }
+        }
         let constants_mask_changed = self.evaluate_layers(&layer_changes, render_layers_remade, &mut clock);
         self.apply_source_diff(&source_diff, update_parameters);
 
@@ -886,9 +906,10 @@ impl RenderOrchestrator {
                     && layer.supports_zoom(self.zoom_history.last_zoom)
                 {
                     // On the globe the background is a sphere mesh, not the
-                    // backdrop, and over terrain it drapes, so it stays a
-                    // layer.
+                    // backdrop, over terrain it drapes, and routed it draws
+                    // into a shared target, so it stays a layer.
                     if self.background_layer_as_color
+                        && !self.routing.routes(index)
                         && frame.sky.is_none()
                         && !update_parameters.view.is_globe()
                         && !frame.terrain
@@ -982,6 +1003,7 @@ impl RenderOrchestrator {
         // transition them again.
         self.style = None;
         self.sources_by_id.clear();
+        self.routing = Routing::default();
 
         self.render_sources.clear();
         self.tile_store.clear();
@@ -1115,19 +1137,83 @@ impl RenderOrchestrator {
                     if let Some((stack, _)) = starts.next_if(|&(_, start)| start as usize == index) {
                         self.terrain.render(stack, gpu, parameters);
                     }
-                    layer.render(gpu, parameters, order);
+                    layer.render(gpu, parameters, order, false);
                 }
             }
             DrawOrder::BottomUp => {
                 for layer in &mut self.layers {
-                    layer.render(gpu, parameters, order);
+                    layer.render(gpu, parameters, order, false);
                 }
             }
             DrawOrder::TopDown => {
                 for layer in self.layers.iter_mut().rev() {
-                    layer.render(gpu, parameters, order);
+                    layer.render(gpu, parameters, order, false);
                 }
             }
+        }
+    }
+
+    /// Draws what the frame draws before its passes, outside any pass of
+    /// `gpu`, the context's: the layers' draws into their own targets and
+    /// what they do with the frame's commands before the passes, bottom to
+    /// top, and the passes of the shared targets that layers draw into or
+    /// read, each where the frame's routes order it.
+    pub(crate) fn before_passes(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>) {
+        if self.shared.order().is_empty() {
+            for layer in &mut self.layers {
+                layer.before_passes(gpu, parameters);
+            }
+            return;
+        }
+        for index in 0..self.shared.order().len() {
+            match self.shared.order()[index] {
+                Run::Own(layer) => self.layers[layer].before_passes(gpu, parameters),
+                Run::Shared(target) => self.render_shared_target(gpu, parameters, target),
+            }
+        }
+    }
+
+    /// Draws the pass of the shared target at `target`: the draws of the
+    /// layers routed into it, as the frame draws its layers, in the opaque
+    /// pass and then the translucent one, with a depth and stencil of the
+    /// targets' own.
+    fn render_shared_target(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, target: usize) {
+        let began = self.shared.pass(gpu, parameters.context, target).and_then(|pass| parameters.begin_pass(gpu, pass));
+        if let Err(error) = began {
+            parameters.context.fail(format!("Beginning a shared target's pass failed: {error}"));
+            return;
+        }
+        let RenderOrchestrator { shared, layers, .. } = self;
+        let mut groups = 0u32;
+        for index in shared.writers(target) {
+            layers[index].visit_draw_groups(&mut |_| groups += 1);
+        }
+        let frame =
+            (parameters.pass, parameters.depth_range_size, parameters.current_layer, parameters.opaque_pass_cutoff);
+        let stencil = parameters.begin_own_stencil();
+        parameters.depth_range_size = depth_range_size(groups as usize);
+        parameters.opaque_pass_cutoff = 0;
+        parameters.pass = RenderPass::Opaque;
+        if parameters.view.is_globe() {
+            parameters.current_layer = groups.wrapping_sub(1);
+            for index in shared.writers(target) {
+                layers[index].render(gpu, parameters, DrawOrder::BottomUp, true);
+            }
+        } else {
+            parameters.current_layer = 0;
+            for index in shared.writers(target).rev() {
+                layers[index].render(gpu, parameters, DrawOrder::TopDown, true);
+            }
+        }
+        parameters.pass = RenderPass::Translucent;
+        parameters.current_layer = groups.wrapping_sub(1);
+        for index in shared.writers(target) {
+            layers[index].render(gpu, parameters, DrawOrder::BottomUp, true);
+        }
+        parameters.end_own_stencil(stencil);
+        (parameters.pass, parameters.depth_range_size, parameters.current_layer, parameters.opaque_pass_cutoff) = frame;
+        if let Err(error) = parameters.end_pass(gpu) {
+            parameters.context.fail(format!("Ending a shared target's pass failed: {error}"));
         }
     }
 
@@ -1140,16 +1226,10 @@ impl RenderOrchestrator {
         }
     }
 
-    /// Drops every render layer.
+    /// Drops every render layer, and the shared targets.
     pub(crate) fn leave_layers(&mut self) {
         self.layers.clear();
-    }
-
-    /// Visits every render layer, in no order.
-    pub(crate) fn visit_render_layers(&mut self, mut f: impl FnMut(&mut dyn RenderLayer)) {
-        for layer in &mut self.layers {
-            f(&mut **layer);
-        }
+        self.shared.lose();
     }
 
     /// Makes the draws of the layers the frame draws, of the terrain, and of
@@ -1164,7 +1244,21 @@ impl RenderOrchestrator {
         paint_parameters: &mut PaintParameters<'_>,
         frame: &Frame,
     ) {
-        let layers = || frame.layers.keys().map(|&index| &*self.layers[index as usize]);
+        let size = paint_parameters.renderable_size;
+        self.shared.begin_frame(&mut Resources::new(gpu, paint_parameters.context), &self.routing, size);
+        let routes = self.shared.is_active();
+        if routes {
+            for &index in frame.layers.keys() {
+                let layer = &mut *self.layers[index as usize];
+                let route = self.shared.route(&self.routing, index as usize, layer);
+                layer.set_route(route);
+            }
+        }
+        // A routed layer draws flat into its target.
+        let layers = || {
+            let layers = frame.layers.keys().map(|&index| &*self.layers[index as usize]);
+            layers.filter(move |layer| !routes || layer.base().route.is_none())
+        };
         let stands = frame.terrain && layers().any(|layer| layer.terrain().stands());
         let hides = layers().any(|layer| layer.terrain().hides_behind_ground());
         paint_parameters.ground = self.terrain.update_ground(paint_parameters, stands, hides);
@@ -1179,26 +1273,48 @@ impl RenderOrchestrator {
                 layer_source(frame_layer, &self.render_sources, &self.tile_store, &self.found_tiles, &mut contents);
             // Over terrain, a layer that drapes draws nothing onto the frame,
             // and its tile values draw in the drapes.
-            if frame.terrain && render_layer.terrain().drapes() {
+            let drapes = frame.terrain && render_layer.terrain().drapes();
+            let route = if routes { render_layer.base().route } else { None };
+            if drapes && route.is_none() {
                 render_layer.remove_frame_draws();
                 surface = true;
                 continue;
             }
-            render_layer.update_draws(gpu, paint_parameters, layer_source);
+            if routes {
+                self.shared.begin_layer(index as usize, route);
+            }
+            render_layer.update_draws(gpu, paint_parameters, layer_source, &mut self.shared);
+            if routes && !self.shared.end_layer(render_layer.id()) {
+                // The layer draws on the map: over terrain, in the drapes.
+                render_layer.set_route(None);
+                if drapes {
+                    render_layer.remove_frame_draws();
+                    surface = true;
+                    continue;
+                }
+            }
             needs_depth = needs_depth || (render_layer.volume() && !surface);
+        }
+        if routes {
+            self.shared.finish_frame();
         }
         self.stacks = if frame.terrain {
             let layers = &mut self.layers;
             let draped = |&index: &u32| {
                 let layer = &mut layers[index as usize];
+                // A routed layer draws in its shared target's pass, in no
+                // stack.
+                if layer.base().route.is_some() {
+                    return None;
+                }
                 let draped = layer.terrain().drapes().then(|| match layer.surface_light(paint_parameters) {
                     Some(light) => Draped::Lit(light),
                     None if layer.blends() => Draped::Blends,
                     None => Draped::Plain,
                 });
-                (index, draped)
+                Some((index, draped))
             };
-            DrapeStacks::of(frame.layers.keys().map(draped))
+            DrapeStacks::of(frame.layers.keys().filter_map(draped))
         } else {
             DrapeStacks::default()
         };
@@ -1230,7 +1346,7 @@ impl RenderOrchestrator {
                     );
                     let render_layer = &mut *self.layers[*index as usize];
                     let lit = self.stacks.light(stack).is_some();
-                    drapes.update_layer(stack, gpu, paint_parameters, render_layer, layer_source, lit);
+                    drapes.update_layer(stack, gpu, paint_parameters, render_layer, layer_source, lit, &self.shared);
                 }
             }
             drapes.finish_update(paint_parameters.context);

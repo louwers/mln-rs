@@ -68,6 +68,7 @@ use crate::render::clip_masks::ClipMasks;
 use crate::render::layer_composite::LayerComposite;
 use crate::render::paint_parameters::{OpenPass, PaintParameters, TransformParameters};
 use crate::render::pass::RenderPass;
+use crate::render::shared_targets::SharedTargets;
 use crate::render::tile::TileStamp;
 use crate::render::tile_matrix::to_projection_ubo;
 use crate::tile::OverscaledTileID;
@@ -376,8 +377,9 @@ impl Drapes {
     /// Makes the draws of `layer`, a layer of `stack` that drapes, in every
     /// drape of the stack that [`choose`](Self::choose) chose, with the
     /// drape's `parameters`, from its `source`, for the surface to shade if
-    /// it `lit` the stack ([`PaintParameters::drape_lit`]). The stack's
-    /// layers update in drawing order.
+    /// it `lit` the stack ([`PaintParameters::drape_lit`]), reading the
+    /// frame's shared `targets`. The stack's layers update in drawing order.
+    #[expect(clippy::too_many_arguments, reason = "the layer, its frame's sources and targets, and where it drapes")]
     pub(crate) fn update_layer(
         &mut self,
         stack: usize,
@@ -386,6 +388,7 @@ impl Drapes {
         layer: &mut dyn RenderLayer,
         source: Option<FrameSourceTiles<'_>>,
         lit: bool,
+        targets: &SharedTargets,
     ) {
         let (globe, tiles) = (self.globe, &self.tiles);
         let style = Arc::clone(&layer.base().style);
@@ -407,7 +410,7 @@ impl Drapes {
             let mut parameters = parameters.drape(transform, clip_masks, layer_composite, size, unwrapped);
             parameters.drape_lit = lit;
             let drape = DrapeTile { tile: *tile, globe, tiles };
-            layer.update_drape_draws(gpu, &mut parameters, source, drape, &mut kept.draws);
+            layer.update_drape_draws(gpu, &mut parameters, source, drape, &mut kept.draws, targets);
             layers.push(kept);
         }
     }

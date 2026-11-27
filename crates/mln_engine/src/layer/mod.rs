@@ -59,6 +59,19 @@
 //! read the ground's height, and one that hides behind the ground reads its
 //! depth ([`draw::ground`](crate::draw::ground)).
 //!
+//! # Shared targets
+//!
+//! An extension can route the draws of other layers, of any type, into
+//! textures of the frame's size that several layers share, and process them:
+//! a [`Router`], which it registers
+//! ([`RegistryBuilder::add_router`](crate::RegistryBuilder::add_router)),
+//! declares the frames' shared targets from the style, such as from its
+//! extension members ([`mln_style::member`]), and routes layers into them,
+//! and a layer reads one in its [`prepare`](Layer::prepare)
+//! ([`PrepareCx::read_target`]). The engine draws each target's pass before
+//! the frame's, after the passes of the targets its layers read, and refuses
+//! the routes that don't fit, whose layers draw on the map.
+//!
 //! # Queries
 //!
 //! A rendered-feature query finds a tile's features near its geometry in the
@@ -126,6 +139,7 @@ pub use crate::layer::tile_input::{Features, LayerBucket, NoTiles, RasterTile, T
 pub use crate::layer::tile_layout::Resolved;
 pub use crate::query::feature_index::QueryRegion;
 #[doc(hidden)]
+pub use crate::render::shared_targets::{Router, Routes};
 pub use crate::render::terrain::SurfaceLight;
 pub use crate::render::tile::FrameTile;
 pub use crate::source::render_image_source::ImageQuad;

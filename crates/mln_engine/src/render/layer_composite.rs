@@ -110,7 +110,7 @@ impl Composite {
 
     /// Whether the shader blends with the backdrop, a copy of the frame.
     fn reads_backdrop(self) -> bool {
-        self.shader_blend() != LayerCompositeBlendMode::None
+        reads_backdrop(self.blend)
     }
 
     /// The blend function that composites the shader's color: on premultiplied
@@ -126,6 +126,12 @@ impl Composite {
             }
         }
     }
+}
+
+/// Whether a layer that composites with `blend` blends with the backdrop,
+/// a copy of the frame beneath it, in the shader.
+pub(crate) fn reads_backdrop(blend: LayerBlendType) -> bool {
+    Composite { opacity: 1.0, blend, frame_depth: false }.shader_blend() != LayerCompositeBlendMode::None
 }
 
 /// A texture that passes draw into and draws sample, with the sampler

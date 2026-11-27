@@ -856,6 +856,16 @@ impl Draws {
     }
 }
 
+impl Draws {
+    /// Moves `parameters` past the depth that [`render`](Self::render)
+    /// would draw the groups at, in `order`, without drawing them.
+    pub(crate) fn skip(&self, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
+        if self.started {
+            order.step(parameters);
+        }
+    }
+}
+
 /// What [`Draws::render`] runs where the main group draws, in the open pass.
 pub(crate) type InPass<'a> = dyn FnMut(&mut dyn Gpu, &mut PaintParameters<'_>) + 'a;
 
@@ -953,8 +963,15 @@ impl DrawGroups {
     /// the groups' 2D draws.
     #[must_use]
     pub(crate) fn depth_range_size(&self) -> f32 {
-        1.0 - ((self.count + 2) * PaintParameters::NUM_SUBLAYERS as usize) as f32 * PaintParameters::DEPTH_EPSILON
+        depth_range_size(self.count)
     }
+}
+
+/// The depth range of the 3D draws of passes of `groups` draw groups, from
+/// 0, below the depths of the groups' 2D draws.
+#[must_use]
+pub(crate) fn depth_range_size(groups: usize) -> f32 {
+    1.0 - ((groups + 2) * PaintParameters::NUM_SUBLAYERS as usize) as f32 * PaintParameters::DEPTH_EPSILON
 }
 
 /// The order the frame draws the layers' groups in, each at the depth of

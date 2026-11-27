@@ -22,6 +22,7 @@ use crate::camera::View;
 use crate::draw::context::Context;
 use crate::draw::draws::{DrawOrder, Draws, Group, LayerFrame, LendAt, Lent};
 use crate::draw::resources::Resources;
+use crate::draw::store::SharedTexture;
 use crate::geo::ScreenCoordinate;
 use crate::layer::bucket::ErasedBucket;
 use crate::layer::layer_drawing::{ChangedBuckets, TileMap};
@@ -31,6 +32,7 @@ use crate::layer::tile_input::{TileData, TileInput};
 use crate::query::feature_index::QueryRegion;
 use crate::render::paint_parameters::PaintParameters;
 use crate::render::pass::RenderPass;
+use crate::render::shared_targets::{SharedTargets, TargetReads};
 use crate::render::terrain::{SurfaceLight, TerrainElevation, TileGround};
 use crate::render::tile::{FoundTile, FrameTile, RenderTile, TILE_BOUNDS, TileContent, TileStamp, overlaps};
 use crate::render::update_parameters::UpdateParameters;
@@ -224,6 +226,10 @@ pub struct RenderLayerBase {
     /// The projection variant this layer's draws are built with.
     pub projection_variant: ProjectionVariant,
 
+    /// The shared target that the frame's draws of the layer draw into
+    /// instead of the map, if any.
+    pub(crate) route: Option<usize>,
+
     /// Where the tiles the layer's update found are among the frame's
     /// ([`LayerUpdateParameters::found`]).
     found: Range<usize>,
@@ -252,6 +258,7 @@ impl RenderLayerBase {
             style_dependencies: Dependency::NONE,
             is_renderable: false,
             projection_variant: ProjectionVariant::Mercator,
+            route: None,
             found: 0..0,
         }
     }
@@ -440,9 +447,22 @@ pub struct PrepareCx<'a, 'f, L: Layer> {
     /// What the layer makes its meshes and targets with.
     pub res: Resources<'a>,
     pub frame: &'a LayerFrame<'f>,
+    /// The frame's shared targets.
+    pub(crate) targets: TargetReads<'a>,
 }
 
 impl<'a, L: Layer> PrepareCx<'a, '_, L> {
+    /// The texture of the frame's shared target `name`
+    /// ([`Router`](crate::layer::Router)), which the layer's
+    /// draws sample: its texel at `(x, y)` is what the layers routed into it
+    /// drew at the frame's device pixel `(x, y)`. In the map's frame, the
+    /// read orders the target's pass before the layer's draws; a drape draws
+    /// after every target's pass. `None`, with a warning, for a name that the
+    /// frame has no target of.
+    pub fn read_target(&mut self, name: &str) -> Option<SharedTexture> {
+        self.targets.read(&self.base.style.base().id, name)
+    }
+
     /// The layer's values of the last update.
     #[must_use]
     pub fn values(&self) -> &LayerValues<L::Style> {
@@ -588,6 +608,11 @@ pub trait Layer: Sized + 'static {
     /// lowest such layer that draws draw without a depth test, and on the
     /// globe the planet's depth hides its geometry behind the horizon.
     const VOLUME: bool = false;
+
+    /// Whether the frame's draws of the layer can draw into a shared target
+    /// instead of the map
+    /// ([`Router`](crate::layer::Router)): not those of 3D geometry.
+    const ROUTES: bool = !Self::VOLUME;
 
     /// Whether a layer of a type without a source draws tiles it picks in
     /// its update ([`UpdateCx::pick_tiles`]), and in a drape the drape's
@@ -881,6 +906,7 @@ impl<L: Layer> Hosted<L> {
         parameters: &mut PaintParameters<'_>,
         tiles: &[FrameTile<'_, L>],
         into: DrawsFor<'_>,
+        targets: TargetReads<'_>,
     ) {
         if self.values.evaluated.render_passes == RenderPass::None.underlying_type() {
             match into {
@@ -898,7 +924,7 @@ impl<L: Layer> Hosted<L> {
         };
         draws.begin();
         let res = Resources::new(&mut *gpu, &mut *parameters.context);
-        layer.prepare(&mut PrepareCx { base, values, tiles: map, picked, res, frame: &frame }, tiles, draws);
+        layer.prepare(&mut PrepareCx { base, values, tiles: map, picked, res, frame: &frame, targets }, tiles, draws);
         let paint_params = parameters.own_paint_params();
         let clip_tiles = tiles.iter().map(|tile| tile.draw_id().to_unwrapped());
         draws.finish(gpu, parameters.context, paint_params.as_ref(), clip_tiles);
@@ -990,6 +1016,7 @@ pub trait RenderLayer {
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
         source: Option<FrameSourceTiles<'_>>,
+        targets: &mut SharedTargets,
     );
 
     /// How the layer meets terrain ([`Layer::TERRAIN`]).
@@ -997,6 +1024,18 @@ pub trait RenderLayer {
 
     /// Whether the layer draws 3D geometry ([`Layer::VOLUME`]).
     fn volume(&self) -> bool;
+
+    /// Whether the layer's draws can draw into a shared target
+    /// ([`Layer::ROUTES`]).
+    fn routes(&self) -> bool;
+
+    /// Makes `route` the shared target that the frame's draws of the layer
+    /// draw into instead of the map, or with `None` the map.
+    fn set_route(&mut self, route: Option<usize>);
+
+    /// Whether the layer's blend with its values of the frame reads what is
+    /// drawn beneath it, which a shared target's pass can't give it.
+    fn reads_backdrop(&self) -> bool;
 
     /// Whether the layer blends with what is under it otherwise than by
     /// covering it, with its values of the frame: a layer blend
@@ -1028,6 +1067,7 @@ pub trait RenderLayer {
         source: Option<FrameSourceTiles<'_>>,
         drape: DrapeTile<'_>,
         draws: &mut Draws,
+        targets: &SharedTargets,
     );
 
     /// Records that the buckets in `changed` changed, for the tiles whose
@@ -1067,8 +1107,10 @@ pub trait RenderLayer {
     /// Draws the pass's draws of the layer's groups into the open pass of
     /// `gpu`, the context's, in `order`, each at its depth, and, in the
     /// translucent pass, lends the layer the pass after its main group where
-    /// its draws asked for it ([`LendAt::Pass`]).
-    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder);
+    /// its draws asked for it ([`LendAt::Pass`]): the map's pass, or with
+    /// `routed` the pass of the shared target the layer is routed into. In
+    /// the other, the layer takes its depth and draws nothing.
+    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder, routed: bool);
 
     /// Before the frame's passes, outside any pass of `gpu`, the context's:
     /// draws into the targets of the layer's draws of the frame
@@ -1189,8 +1231,10 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         gpu: &mut dyn Gpu,
         parameters: &mut PaintParameters<'_>,
         source: Option<FrameSourceTiles<'_>>,
+        targets: &mut SharedTargets,
     ) {
-        let stands = L::TERRAIN.stands() && parameters.ground.is_some();
+        // A layer routed into a shared target draws flat into it.
+        let stands = L::TERRAIN.stands() && parameters.ground.is_some() && self.base.route.is_none();
         self.use_projection_variant(ProjectionVariant::new(parameters.view.is_globe(), stands));
         if !has_tiles::<L>() {
             // A layer that picks tiles draws those its update picked.
@@ -1200,14 +1244,14 @@ impl<L: Layer> RenderLayer for Hosted<L> {
             if L::PICKS_TILES && self.tiles.is_empty() {
                 self.remove_all_draws();
             } else {
-                self.draw(gpu, parameters, &[], DrawsFor::Map);
+                self.draw(gpu, parameters, &[], DrawsFor::Map, TargetReads::Map(targets));
             }
             return;
         }
         match source.map(|source| (source, source.found(self.base.found.clone()))) {
             Some((source, found)) if !found.is_empty() => {
                 let tiles = source.at::<L>(found, self.id());
-                self.draw(gpu, parameters, &tiles, DrawsFor::Map);
+                self.draw(gpu, parameters, &tiles, DrawsFor::Map, TargetReads::Map(targets));
             }
             _ => self.remove_all_draws(),
         }
@@ -1219,6 +1263,18 @@ impl<L: Layer> RenderLayer for Hosted<L> {
 
     fn volume(&self) -> bool {
         L::VOLUME
+    }
+
+    fn routes(&self) -> bool {
+        L::ROUTES
+    }
+
+    fn set_route(&mut self, route: Option<usize>) {
+        self.base.route = route;
+    }
+
+    fn reads_backdrop(&self) -> bool {
+        crate::render::layer_composite::reads_backdrop(L::Style::layer_blend(&self.values.evaluated.paint))
     }
 
     fn blends(&self) -> bool {
@@ -1240,6 +1296,7 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         source: Option<FrameSourceTiles<'_>>,
         drape: DrapeTile<'_>,
         draws: &mut Draws,
+        targets: &SharedTargets,
     ) {
         // Only a layer that drapes builds the code of its draws in a drape.
         if !L::TERRAIN.drapes() {
@@ -1252,7 +1309,7 @@ impl<L: Layer> RenderLayer for Hosted<L> {
             if L::PICKS_TILES {
                 self.tiles.set_tiles(drape.tiles.iter().copied());
             }
-            self.draw(gpu, parameters, &[], DrawsFor::Drape(draws, &drape.tile));
+            self.draw(gpu, parameters, &[], DrawsFor::Drape(draws, &drape.tile), TargetReads::Drape(targets));
             return;
         }
         let tiles = match source {
@@ -1264,7 +1321,7 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         if tiles.is_empty() {
             draws.clear();
         } else {
-            self.draw(gpu, parameters, &tiles, DrawsFor::Drape(draws, &drape.tile));
+            self.draw(gpu, parameters, &tiles, DrawsFor::Drape(draws, &drape.tile), TargetReads::Drape(targets));
         }
     }
 
@@ -1305,9 +1362,11 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         }
     }
 
-    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
+    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder, routed: bool) {
         let Hosted { base, draws, layer, .. } = self;
-        if base.is_renderable {
+        if base.is_renderable && base.route.is_some() != routed {
+            draws.skip(parameters, order);
+        } else if base.is_renderable {
             let lends = draws.lends(LendAt::Pass) && parameters.pass == RenderPass::Translucent;
             let mut lend_pass = |gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>| {
                 lend(layer, gpu, parameters, LendAt::Pass);

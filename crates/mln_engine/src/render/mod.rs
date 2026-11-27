@@ -13,6 +13,7 @@ pub(crate) mod orchestrator;
 pub(crate) mod paint_parameters;
 pub(crate) mod pass;
 pub(crate) mod renderer;
+pub(crate) mod shared_targets;
 pub(crate) mod sky;
 pub(crate) mod sky_pass;
 pub(crate) mod static_data;

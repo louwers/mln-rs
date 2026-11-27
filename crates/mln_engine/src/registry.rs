@@ -1,6 +1,6 @@
 //! The registrations that a runtime, its renderers and its tile workers
-//! share: the expression functions, the layer types, the source types and
-//! the extension members.
+//! share: the expression functions, the layer types, the source types, the
+//! extension members and the routers of layers into shared targets.
 //!
 //! An app fills a [`RegistryBuilder`] by explicit calls, `mln_builtins`'s
 //! `register_builtins` first, and builds the [`Registry`] once. Tile workers
@@ -21,6 +21,7 @@ use crate::layer::layer_type::{ErasedLayerType, entry};
 use crate::layer::render_layer::Layer;
 use crate::layer::tile_input::input::Find;
 use crate::placement::{ErasedPlacement, Placement, participant};
+use crate::render::shared_targets::Router;
 use crate::source::erased::{self, ErasedSourceType};
 use crate::source::{SourceSummary, SourceType, kind};
 
@@ -35,6 +36,7 @@ pub struct RegistryBuilder {
     placing_types: VecMap<&'static str, MakePlacement>,
     source_types: VecMap<&'static str, &'static dyn ErasedSourceType>,
     members: Vec<&'static dyn ErasedMember>,
+    routers: Vec<&'static dyn Router>,
 }
 
 impl std::fmt::Debug for RegistryBuilder {
@@ -45,6 +47,7 @@ impl std::fmt::Debug for RegistryBuilder {
             .field("placing_types", &self.placing_types.keys().collect::<Vec<_>>())
             .field("source_types", &self.source_types.keys().collect::<Vec<_>>())
             .field("members", &self.members.iter().map(|member| member.name()).collect::<Vec<_>>())
+            .field("routers", &self.routers.len())
             .finish()
     }
 }
@@ -122,10 +125,18 @@ impl RegistryBuilder {
         Ok(())
     }
 
+    /// Adds `router`, which declares the shared targets of the frames of
+    /// each version of a style and routes its layers' draws into them. The
+    /// routers route in the order they were added: of two routes of a
+    /// layer, the later stands.
+    pub fn add_router(&mut self, router: &'static dyn Router) {
+        self.routers.push(router);
+    }
+
     #[must_use]
     pub fn build(self) -> Arc<Registry> {
-        let RegistryBuilder { functions, layer_types, placing_types, source_types, members } = self;
-        Registry::new(Arc::new(functions), layer_types, placing_types, source_types, members)
+        let RegistryBuilder { functions, layer_types, placing_types, source_types, members, routers } = self;
+        Registry::new(Arc::new(functions), layer_types, placing_types, source_types, members, routers)
     }
 }
 
@@ -145,6 +156,7 @@ pub struct Registry {
     layer_types: VecMap<&'static str, &'static dyn ErasedLayerType>,
     placing_types: VecMap<&'static str, MakePlacement>,
     source_types: VecMap<&'static str, &'static dyn ErasedSourceType>,
+    routers: Vec<&'static dyn Router>,
 }
 
 impl std::fmt::Debug for Registry {
@@ -160,11 +172,12 @@ impl Registry {
         placing_types: VecMap<&'static str, MakePlacement>,
         source_types: VecMap<&'static str, &'static dyn ErasedSourceType>,
         members: Vec<&'static dyn ErasedMember>,
+        routers: Vec<&'static dyn Router>,
     ) -> Arc<Registry> {
         let style_halves = layer_types.values().map(|&layer_type| style_half(layer_type));
         let style_source_halves = source_types.values().map(|&source_type| source_type.style());
         let style = StyleRegistry::new(functions, style_halves, style_source_halves, members);
-        Arc::new(Registry { style: Arc::new(style), layer_types, placing_types, source_types })
+        Arc::new(Registry { style: Arc::new(style), layer_types, placing_types, source_types, routers })
     }
 
     #[must_use]
@@ -186,6 +199,11 @@ impl Registry {
     /// order they registered.
     pub(crate) fn placing_types(&self) -> impl Iterator<Item = MakePlacement> + '_ {
         self.placing_types.values().copied()
+    }
+
+    /// The routers, in the order they were added.
+    pub(crate) fn routers(&self) -> &[&'static dyn Router] {
+        &self.routers
     }
 
     pub(crate) fn source_type(&self, name: &str) -> Option<&'static dyn ErasedSourceType> {
