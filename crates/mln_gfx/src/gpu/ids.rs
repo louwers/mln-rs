@@ -105,7 +105,6 @@ impl<K: Id, V> SlotMap<K, V> {
     #[must_use]
     pub fn with_key() -> SlotMap<K, V> {
         static NEXT_MAP: AtomicU32 = AtomicU32::new(0);
-        
         SlotMap { map: slotmap::SlotMap::with_key(), tag: NEXT_MAP.fetch_add(1, Ordering::Relaxed), key: PhantomData }
     }
 
