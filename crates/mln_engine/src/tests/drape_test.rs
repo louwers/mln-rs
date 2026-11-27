@@ -28,6 +28,7 @@ use crate::render::clip_masks::ClipMasks;
 use crate::render::frame::Frame;
 use crate::render::layer_composite::LayerComposite;
 use crate::render::paint_parameters::{PaintParameters, TransformParameters};
+use crate::render::terrain::Drapes;
 use crate::render::tile::{FoundTile, RenderTile, overlaps};
 use crate::render::update_parameters::UpdateParameters;
 use crate::storage::{FileSource, Resource, Responder, Response};
@@ -275,11 +276,29 @@ const TWO_STACKS: &str = r#"{
     ]
 }"#;
 
+/// A style over a terrain of flat ground with a raster layer of a source
+/// whose one tile covers the world, under every drape of a view of zoom 2.
+const ONE_TILE_UNDER_EVERY_DRAPE: &str = r#"{
+    "version": 8,
+    "terrain": {"source": "dem"},
+    "sources": {
+        "dem": {"type": "raster-dem", "tiles": ["dem/{z}/{x}/{y}.png"], "tileSize": 256, "maxzoom": 10},
+        "world": {"type": "raster", "tiles": ["a/{z}/{x}/{y}.png"], "maxzoom": 0}
+    },
+    "layers": [{"id": "world", "type": "raster", "source": "world", "paint": {"raster-fade-duration": 0}}]
+}"#;
+
+/// The tile and stack of each drape of a map of `style` that has a texture
+/// ([`drapes_of`]).
+fn textured_drapes(style: &str) -> Option<BTreeSet<(OverscaledTileID, usize)>> {
+    drapes_of(style, |drapes| drapes.textured().into_iter().collect())
+}
+
 /// A continuous map of `style` at zoom 2 over 10° E, 10° S, seen from above
 /// over a 256 px WebGPU target, drawn until a frame of the camera on the
-/// terrain's ground is complete. Returns the tile and stack of each drape
-/// that has a texture then.
-fn textured_drapes(style: &str) -> Option<BTreeSet<(OverscaledTileID, usize)>> {
+/// terrain's ground is complete. Returns what `read` reads of its drapes
+/// then.
+fn drapes_of<R>(style: &str, read: impl FnOnce(&Drapes) -> R) -> Option<R> {
     let registry = crate::tests::registry();
     let parsed = Style::from_json(registry.style(), style).expect("the style");
     let mut style = Style::new(Arc::clone(registry.style()));
@@ -366,9 +385,9 @@ fn textured_drapes(style: &str) -> Option<BTreeSet<(OverscaledTileID, usize)>> {
         std::thread::sleep(Duration::from_millis(1));
     }
     assert!(complete, "no frame was complete");
-    let textured = renderer.terrain().drapes().textured().into_iter().collect();
+    let read = read(renderer.terrain().drapes());
     target.tear_down(backend.gpu());
-    Some(textured)
+    Some(read)
 }
 
 /// A stack has a drape with a texture only in the terrain tiles where its
@@ -382,4 +401,19 @@ fn a_stack_has_a_drape_texture_only_where_its_layers_draw() {
         return;
     };
     assert_eq!(expected, actual);
+}
+
+/// The drapes that a tile overlaps draw its one value: each draws the same
+/// mesh of the world's one raster tile.
+#[test]
+fn the_drapes_a_tile_overlaps_draw_its_one_value() {
+    let Some(meshes) = drapes_of(ONE_TILE_UNDER_EVERY_DRAPE, |drapes| drapes.meshes(0)) else {
+        return;
+    };
+    assert!(meshes.len() > 1, "the tile under more than one drape: {meshes:?}");
+    let first = meshes[0].1.clone();
+    assert_eq!(1, first.len(), "one draw of the tile in each drape: {meshes:?}");
+    for (tile, drawn) in &meshes {
+        assert_eq!(&first, drawn, "the drape of {tile:?} draws another mesh");
+    }
 }

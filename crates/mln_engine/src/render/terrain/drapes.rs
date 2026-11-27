@@ -439,6 +439,27 @@ impl Drapes {
         }
     }
 
+    /// The meshes that the draws of each drape of `stack` that has a
+    /// texture draw, by their order ([`Mesh::seq`]), in the cover's order.
+    ///
+    /// [`Mesh::seq`]: crate::draw::objects::Mesh::seq
+    #[cfg(test)]
+    pub(crate) fn meshes(&self, stack: usize) -> Vec<(OverscaledTileID, Vec<i64>)> {
+        let drapes = self.drapes.iter().filter_map(|drape| Some((drape.tile, drape.stacks.get(stack)?)));
+        let textured = drapes.filter(|(_, drape)| drape.texture.is_some());
+        textured
+            .map(|(tile, drape)| {
+                let mut meshes = Vec::new();
+                for layer in &drape.layers {
+                    layer
+                        .draws
+                        .visit_groups(&mut |group| meshes.extend(group.meshes().map(crate::draw::objects::Mesh::seq)));
+                }
+                (tile, meshes)
+            })
+            .collect()
+    }
+
     /// The tile and stack of each drape that has a texture, in the cover's
     /// order.
     #[cfg(test)]

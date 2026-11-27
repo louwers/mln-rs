@@ -541,6 +541,12 @@ impl Group {
         self.composite.filter(|_| !self.draws.is_empty()).map(|composite| (self.id, composite))
     }
 
+    /// The meshes of the draws, in drawing order.
+    #[cfg(test)]
+    pub(crate) fn meshes(&self) -> impl Iterator<Item = &Mesh> {
+        self.draws.iter().map(|draw| &draw.mesh)
+    }
+
     /// Uploads the meshes of the draws, in drawing order.
     pub(crate) fn upload(&self, gpu: &mut dyn Gpu, context: &mut Context) {
         for draw in &self.draws {
