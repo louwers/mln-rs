@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use mln_gfx::gpu::ShaderKey;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
@@ -7,7 +5,6 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_style::constants::TILE_SIZE_D;
-use mln_style::layer::LayerStyle;
 use mln_style::layers::Background;
 use mln_style::range::Range;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
@@ -21,10 +18,7 @@ use crate::draw::objects::{DrawGeometry, Mesh, Textures, raw_vertices};
 use crate::draw::resources::Resources;
 use crate::draw::segment::SegmentBase;
 use crate::draw::vertex_attribute::Uniforms;
-use crate::layer::layer_type::LayerType;
-use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, Hosted, LayerValues, OnTerrain, PrepareCx, RenderLayer, TypedLayer, UpdateCx,
-};
+use crate::layer::render_layer::{EvaluateCx, Evaluation, Layer, LayerValues, OnTerrain, PrepareCx, UpdateCx};
 use crate::layer::tile_input::NoTiles;
 use crate::layers::background::pattern_atlas::PatternAtlas;
 use crate::layers::background::programs;
@@ -38,15 +32,6 @@ use crate::render::tile::FrameTile;
 use crate::render::tile_matrix::{projection_data, to_projection_ubo};
 use crate::tile::OverscaledTileID;
 use crate::tile_store::tile_cover::{TileCoverParameters, tile_cover};
-
-impl LayerType for Background {
-    type Input = NoTiles;
-    const CROSSFADES: bool = true;
-
-    fn render_layer(style: Arc<LayerStyle<Background>>) -> Box<dyn RenderLayer> {
-        Hosted::<RenderBackgroundLayer>::boxed(style)
-    }
-}
 
 /// What the layer keeps of a tile: its mesh, and the passes it was built
 /// for and whether with a pattern.
@@ -138,8 +123,10 @@ impl RenderBackgroundLayer {
     }
 }
 
-impl TypedLayer for RenderBackgroundLayer {
-    type Type = Background;
+impl Layer for RenderBackgroundLayer {
+    type Style = Background;
+    type Input = NoTiles;
+    const CROSSFADES: bool = true;
     type Tile = BackgroundTile;
     const TERRAIN: OnTerrain = OnTerrain::Drapes;
     const PICKS_TILES: bool = true;
@@ -157,7 +144,12 @@ impl TypedLayer for RenderBackgroundLayer {
     /// Pushes the frame's draws of the layer, one of each tile it picked:
     /// the tiles that cover the view, or a drape's tile. It builds the mesh
     /// of a tile it keeps none of.
-    fn prepare(&mut self, cx: &mut PrepareCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Background>], out: &mut Draws) {
+    fn prepare(
+        &mut self,
+        cx: &mut PrepareCx<'_, '_, Self>,
+        _tiles: &[FrameTile<'_, RenderBackgroundLayer>],
+        out: &mut Draws,
+    ) {
         let RenderBackgroundLayer { patterns } = self;
         let PrepareCx { base, values, tiles, picked, res, frame } = cx;
         let Resources { gpu, context } = res;
@@ -280,7 +272,7 @@ impl TypedLayer for RenderBackgroundLayer {
     /// Picks the tiles that cover the view, which the layer draws, having no
     /// source, and packs its patterns, again those whose images the style
     /// replaced.
-    fn update(&mut self, mut cx: UpdateCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Background>]) {
+    fn update(&mut self, mut cx: UpdateCx<'_, '_, Self>, _tiles: &[FrameTile<'_, RenderBackgroundLayer>]) {
         let (state, update_parameters, images) =
             (cx.parameters.view, cx.parameters.update_parameters, cx.parameters.images);
         let zoom = state.integer_zoom();
