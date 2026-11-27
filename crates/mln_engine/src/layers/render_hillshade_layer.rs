@@ -1,11 +1,11 @@
 // Each DEM tile is first drawn into its own render target by the prepare
-// shader (slopes from the DEM), then the tile's draw shades that texture.
-// The layer keeps the render targets and the quads of the masks per tile
-// contents' id (`dem_targets`, `mask_quads`), each target with the
-// generation of the DEM's border it was made at, which the frame's draws and
-// the drapes' share. The slopes depend on nothing but the DEM and its tile's
-// zoom, so each target is prepared once, by the first frame whose prepare
-// draw, pass and submission don't fail.
+// shader (slopes from the DEM), then the tile's draw, with the quads of the
+// tile's mask, shades that texture. The layer keeps the render targets per
+// tile contents' id (`dem_targets`), each with the generation of the DEM's
+// border it was made at, which outlive the draws that a new mask builds
+// again. The slopes depend on nothing but the DEM and its tile's zoom, so
+// each target is prepared once, by the first frame whose prepare draw, pass
+// and submission don't fail.
 
 use std::collections::hash_map::Entry;
 use std::mem::offset_of;
@@ -31,7 +31,7 @@ use mln_style::math::deg2radf;
 use mln_style::types::{HillshadeIlluminationAnchorType, HillshadeMethodType, ResamplingType, TranslateAnchorType};
 
 use super::cast_matrix;
-use crate::buckets::raster_bucket::{MaskQuads, RasterLayoutVertex};
+use crate::buckets::raster_bucket::{RasterLayoutVertex, StoredQuads};
 use crate::draw::context::Context;
 use crate::draw::draws::{Draw, Draws, LayerFrame, SingleDraw};
 use crate::draw::identity::SimpleIdentity;
@@ -100,12 +100,9 @@ pub(crate) struct RenderHillshadeLayer {
     /// Each DEM's render target, by the id of its tile's contents. They draw
     /// while the layer is renderable.
     dem_targets: HashMap<SimpleIdentity, DemTarget>,
-    /// The quads of each tile's mask, by the id of its contents.
-    mask_quads: MaskQuads,
     /// The contents whose targets the last frame prepared.
     prepared_in_frame: Vec<SimpleIdentity>,
-    /// The contents of the frame's tiles, which keep their render targets
-    /// and quads.
+    /// The contents of the frame's tiles, which keep their render targets.
     live_dems: HashSet<SimpleIdentity>,
     /// The illumination of the evaluation the draws last drew with, before
     /// a viewport anchor turns it by the map's bearing.
@@ -290,7 +287,6 @@ impl TypedLayer for RenderHillshadeLayer {
             static_data_indices: None,
             globe_meshes: GlobeTileMeshCache::new(),
             dem_targets: HashMap::default(),
-            mask_quads: MaskQuads::default(),
             prepared_in_frame: Vec::new(),
             live_dems: HashSet::default(),
             illumination: None,
@@ -345,7 +341,6 @@ impl TypedLayer for RenderHillshadeLayer {
             static_data_indices,
             globe_meshes,
             dem_targets,
-            mask_quads,
             ..
         } = self;
         let context = &mut *cx.context;
@@ -368,7 +363,7 @@ impl TypedLayer for RenderHillshadeLayer {
                     globe_mesh.indexes(),
                     globe_mesh.segments.iter().map(SegmentBase::copy).collect(),
                 )
-            } else if let Some(quads) = mask_quads.get(context, dem.id(), masking) {
+            } else if let Some(quads) = StoredQuads::of_mask(context, masking) {
                 (
                     quads.vertices.clone(),
                     quads.vertices.count(),
@@ -426,10 +421,10 @@ impl TypedLayer for RenderHillshadeLayer {
         for tile in render_tiles {
             let tile_id = tile.draw_id();
             let Some(dem) = tile.data().filter(|dem| dem.has_data()) else {
-                cx.tiles.drop_value(&tile_id);
+                cx.tiles.drop_value(&tile.id());
                 continue;
             };
-            let Some(entry) = cx.tiles.entry(&tile_id) else {
+            let Some(entry) = cx.tiles.entry(&tile.id()) else {
                 continue;
             };
             let context = &mut *cx.context;
@@ -466,9 +461,8 @@ impl TypedLayer for RenderHillshadeLayer {
     }
 
     /// Keeps the source's maximum zoom, which the DEMs' preparation reads,
-    /// and drops the render targets and quads of the tiles the frame
-    /// doesn't draw, in every frame, including one the layer draws nothing
-    /// in.
+    /// and drops the render targets of the tiles the frame doesn't draw, in
+    /// every frame, including one the layer draws nothing in.
     fn update(&mut self, cx: UpdateCx<'_, '_, Self>, tiles: &[FrameTile<'_, Hillshade>]) {
         if let Some(max_zoom) = cx.parameters.source.and_then(RenderSource::max_zoom) {
             self.maxzoom = max_zoom;
@@ -477,12 +471,10 @@ impl TypedLayer for RenderHillshadeLayer {
         live_dems.clear();
         live_dems.extend(tiles.iter().filter_map(|tile| Some(tile.data()?.id())));
         self.dem_targets.retain(|id, _| live_dems.contains(id));
-        self.mask_quads.retain(live_dems);
     }
 
     fn release(&mut self) {
         self.dem_targets.clear();
-        self.mask_quads.clear();
     }
 
     /// Uploads the draws that prepare the targets that don't hold their
