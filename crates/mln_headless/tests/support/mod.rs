@@ -109,14 +109,13 @@ pub(crate) fn get_image_diff(base: &str, actual: &PremultipliedImage, pixel_thre
         return 1.0;
     }
 
-    let pixels = pixelmatch::pixelmatch(
+    let pixels = image_diff::differing_pixels(
         &actual.data,
         &expected.data,
-        expected.size.width as usize,
-        expected.size.height as usize,
-        Some(&mut diff.data),
+        expected.size.width,
+        expected.size.height,
         pixel_threshold,
-        false,
+        Some(&mut diff.data),
     );
 
     write_output(base, "diff.png", &diff);

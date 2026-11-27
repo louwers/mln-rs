@@ -14,6 +14,7 @@ members = [
   "tools/c-abi-gen",
   "tools/c-abi-test",
   "tools/expression-test",
+  "tools/image-diff",
   "tools/ratchet",
   "tools/render-test",
   "tools/style-codegen",
@@ -72,7 +73,8 @@ mln_vulkan = { package = "mln-rs-vulkan", path = "crates/mln_vulkan", version = 
 mln_wire = { package = "mln-rs-wire", path = "crates/mln_wire", version = "=0.0.18" }
 mln_wire_derive = { package = "mln-rs-wire-derive", path = "crates/mln_wire_derive", version = "=0.0.18" }
 mln_webgpu = { package = "mln-rs-webgpu", path = "crates/mln_webgpu", version = "=0.0.18" }
-pixelmatch = { package = "mln-rs-pixelmatch", path = "vendor/pixelmatch", version = "=0.0.18" }
+# The image comparison of the tests. Not published.
+image_diff = { package = "mln-rs-image-diff", path = "tools/image-diff" }
 # The render and query test runner, for the render tests of the layer
 # types outside mln_builtins (the tests of crates/mln_ngon,
 # crates/mln_image_process and crates/mln_location_puck). Not published.
@@ -84,6 +86,9 @@ style_codegen = { package = "mln-rs-style-codegen", path = "tools/style-codegen"
 #
 # The coverage of the font-face glyphs' outlines (mln_engine's text/rasterize.rs).
 ab_glyph_rasterizer = { version = "0.1.10" }
+# tools/image-diff's comparison: pixelmatch's YIQ distance and antialiasing
+# detection. Without its default features, which add image codecs and a CLI.
+blazediff = { version = "8.1.2", default-features = false }
 # min_const_generics: Pod for any array length (mln_gfx's UBOs).
 bytemuck = { version = "1.25.2", features = ["derive", "min_const_generics"] }
 # The buffers that pmtiles reads headers and directories from.

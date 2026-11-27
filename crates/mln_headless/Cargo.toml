@@ -41,6 +41,7 @@ path = "tests/main.rs"
 geo-types.workspace = true
 geojson.workspace = true
 glam.workspace = true
+image_diff.workspace = true
 # system_fonts_test shapes text with the engine's Shaper in-process.
 mln_engine = { workspace = true, features = [
   "font-face-shaper",
@@ -48,7 +49,6 @@ mln_engine = { workspace = true, features = [
   "stub-file-source",
 ] }
 mln_style = { workspace = true, features = ["dsl"] }
-pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }
 serde_json.workspace = true
 # The custom layer test's hosts, which draw with each backend's own API.
 mln_webgpu.workspace = true

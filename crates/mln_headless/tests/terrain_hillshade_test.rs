@@ -83,7 +83,7 @@ fn render(bearing: f64, paint: &str) -> Option<PremultipliedImage> {
 
 /// How many pixels of `a` and `b` differ, as the render tests count them.
 fn differing(a: &PremultipliedImage, b: &PremultipliedImage) -> u64 {
-    pixelmatch::pixelmatch(&a.data, &b.data, SIDE as usize, SIDE as usize, None, 0.1285, false)
+    image_diff::differing_pixels(&a.data, &b.data, SIDE, SIDE, 0.1285, None)
 }
 
 /// How many pixels the hill's shading differs by between ways of drawing

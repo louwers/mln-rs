@@ -1,0 +1,20 @@
+[package]
+name = "mln-rs-image-diff"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+# Only the tests use it (and tools/render-test). Not released.
+publish = false
+
+[lib]
+name = "image_diff"
+doctest = false
+
+[dependencies]
+blazediff.workspace = true
+
+[lints]
+workspace = true

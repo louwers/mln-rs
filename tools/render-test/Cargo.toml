@@ -25,6 +25,7 @@ path = "src/main.rs"
 fastrand.workspace = true
 geojson.workspace = true
 geometry.workspace = true
+image_diff.workspace = true
 log.workspace = true
 mln_gfx.workspace = true
 mln_headless.workspace = true
@@ -33,7 +34,6 @@ mln_builtins.workspace = true
 mln_engine = { workspace = true, features = ["font-face-shaper", "sqlite"] }
 mln_style.workspace = true
 parking_lot.workspace = true
-pixelmatch.workspace = true
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true

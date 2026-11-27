@@ -27,14 +27,13 @@ fn check_image(base: &str, actual: &PremultipliedImage) {
     let pixel_threshold = 0.0;
     let expected = decode_image(&read_file(&format!("{base}/expected.png"))).expect("expected.png");
     let diff = if expected.size == actual.size {
-        let pixels = pixelmatch::pixelmatch(
+        let pixels = image_diff::differing_pixels(
             &actual.data,
             &expected.data,
-            expected.size.width as usize,
-            expected.size.height as usize,
-            None,
+            expected.size.width,
+            expected.size.height,
             pixel_threshold,
-            false,
+            None,
         );
         pixels as f64 / f64::from(expected.size.width * expected.size.height)
     } else {

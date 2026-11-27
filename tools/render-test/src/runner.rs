@@ -511,7 +511,7 @@ impl TestRunner {
 
             self.write_output(metadata, "actual.png", &metadata.actual);
 
-            let mut image_diff = PremultipliedImage::new(actual_image.size);
+            let mut diff_image = PremultipliedImage::new(actual_image.size);
 
             let mut pixels: f64;
             let mut expected_images_paths = Vec::new();
@@ -555,15 +555,15 @@ impl TestRunner {
                 // image has more pixels than the actual one, that reads and
                 // writes out of bounds (undefined behaviour); the port counts
                 // every pixel as different instead.
-                if width * height * 4 <= actual_image.data.len() {
-                    pixels = pixelmatch::pixelmatch(
-                        &actual_image.data,
+                let len = width * height * 4;
+                if len <= actual_image.data.len() {
+                    pixels = image_diff::differing_pixels(
+                        &actual_image.data[..len],
                         &expected_image.data,
-                        width,
-                        height,
-                        Some(&mut image_diff.data),
+                        expected_image.size.width,
+                        expected_image.size.height,
                         metadata.threshold,
-                        false,
+                        Some(&mut diff_image.data[..len]),
                     ) as f64;
                 } else {
                     log::warning(
@@ -580,7 +580,7 @@ impl TestRunner {
                     pixels = f64::from(expected_image.size.area());
                 }
 
-                metadata.diff = encode_png(&image_diff);
+                metadata.diff = encode_png(&diff_image);
 
                 self.write_output(metadata, "diff.png", &metadata.diff);
 

@@ -105,7 +105,7 @@ fn the_world_copies_beside_the_central_one_draw_alike_after_the_stencil_overflow
     assert!(clears > 0, "the stencil values overflowed");
     let differing = |copy: usize, central: usize| {
         let (copy, central) = (columns(&image, copy), columns(&image, central));
-        pixelmatch::pixelmatch(&copy, &central, WORLD / 2, HEIGHT as usize, None, 0.1, false)
+        image_diff::differing_pixels(&copy, &central, WORLD as u32 / 2, HEIGHT, 0.1, None)
     };
     assert_eq!(0, differing(0, WORLD), "the east half of copy -1");
     assert_eq!(0, differing(3 * WORLD / 2, WORLD / 2), "the west half of copy 1");

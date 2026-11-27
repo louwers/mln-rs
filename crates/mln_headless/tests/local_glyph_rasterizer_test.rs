@@ -45,14 +45,13 @@ fn get_image_diff(base: &str, actual: &PremultipliedImage, pixel_threshold: f64)
         return 1.0;
     }
 
-    let pixels = pixelmatch::pixelmatch(
+    let pixels = image_diff::differing_pixels(
         &actual.data,
         &expected.data,
-        expected.size.width as usize,
-        expected.size.height as usize,
-        None,
+        expected.size.width,
+        expected.size.height,
         pixel_threshold,
-        false,
+        None,
     );
     pixels as f64 / (f64::from(expected.size.width) * f64::from(expected.size.height))
 }

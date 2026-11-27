@@ -49,12 +49,12 @@ thiserror.workspace = true
 js-sys.workspace = true
 
 [dev-dependencies]
+image_diff.workspace = true
 # The unit tests' layouts of tiles (`mln_engine::bench`), and the GPU and
 # MLT tiles they upload and decode with.
 mln_engine = { workspace = true, features = ["bench"] }
 mln_webgpu.workspace = true
 mlt-core.workspace = true
-pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }
 
 [lints]
 workspace = true

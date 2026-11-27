@@ -157,7 +157,7 @@ fn pixel(image: &PremultipliedImage, x: u32, y: u32) -> [u8; 4] {
 
 /// How many pixels of `a` and `b` differ, as the render tests count them.
 fn differing(a: &PremultipliedImage, b: &PremultipliedImage) -> u64 {
-    pixelmatch::pixelmatch(&a.data, &b.data, SIDE as usize, SIDE as usize, None, 0.1285, false)
+    image_diff::differing_pixels(&a.data, &b.data, SIDE, SIDE, 0.1285, None)
 }
 
 #[test]

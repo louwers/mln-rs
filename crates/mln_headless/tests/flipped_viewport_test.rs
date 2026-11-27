@@ -53,7 +53,7 @@ fn flipped(image: &PremultipliedImage) -> PremultipliedImage {
 }
 
 fn differing(image: &PremultipliedImage, other: &PremultipliedImage) -> u64 {
-    pixelmatch::pixelmatch(&image.data, &other.data, SIDE as usize, SIDE as usize, None, 0.1285, false)
+    image_diff::differing_pixels(&image.data, &other.data, SIDE, SIDE, 0.1285, None)
 }
 
 /// How many pixels of the map drawn with `style` in a flipped viewport,

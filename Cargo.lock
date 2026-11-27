@@ -295,6 +295,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "blazediff"
+version = "8.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8cc06834ca7148bf5cbe966e6f3a58dc37908ffdc66273e64bc26d92a1dbef38"
+dependencies = [
+ "blazediff-shared",
+ "serde",
+]
+
+[[package]]
+name = "blazediff-shared"
+version = "7.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e4302b6dec064abec5fb757be4363471b9dce4bba501a33a7f95737e9381ecb"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
 name = "block-buffer"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2554,7 +2573,7 @@ dependencies = [
  "mln-rs-engine",
  "mln-rs-geometry",
  "mln-rs-gfx",
- "mln-rs-pixelmatch",
+ "mln-rs-image-diff",
  "mln-rs-style",
  "mln-rs-webgpu",
  "mln-rs-wire",
@@ -2694,7 +2713,6 @@ dependencies = [
  "mln-rs-geometry",
  "mln-rs-gfx",
  "mln-rs-headless",
- "mln-rs-pixelmatch",
  "mln-rs-style",
  "mln-rs-webgpu",
  "mln-rs-wire",
@@ -2814,8 +2832,8 @@ dependencies = [
  "mln-rs-engine",
  "mln-rs-gfx",
  "mln-rs-gl",
+ "mln-rs-image-diff",
  "mln-rs-mtl",
- "mln-rs-pixelmatch",
  "mln-rs-runtime",
  "mln-rs-style",
  "mln-rs-vulkan",
@@ -2827,6 +2845,13 @@ dependencies = [
  "parking_lot",
  "serde_json",
  "wgpu",
+]
+
+[[package]]
+name = "mln-rs-image-diff"
+version = "0.0.18"
+dependencies = [
+ "blazediff",
 ]
 
 [[package]]
@@ -2898,10 +2923,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mln-rs-pixelmatch"
-version = "0.0.18"
-
-[[package]]
 name = "mln-rs-ratchet"
 version = "0.0.18"
 dependencies = [
@@ -2921,7 +2942,7 @@ dependencies = [
  "mln-rs-geometry",
  "mln-rs-gfx",
  "mln-rs-headless",
- "mln-rs-pixelmatch",
+ "mln-rs-image-diff",
  "mln-rs-style",
  "mln-rs-wire",
  "parking_lot",
