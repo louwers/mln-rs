@@ -27,7 +27,6 @@ use crate::layer::layer_drawing::{ChangedBuckets, TileMap};
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer, entry};
 use crate::layer::tile_input::input::Find;
 use crate::layer::tile_input::{TileData, TileInput};
-use crate::layers::custom::EndedHosts;
 use crate::query::feature_index::QueryRegion;
 use crate::render::paint_parameters::PaintParameters;
 use crate::render::pass::RenderPass;
@@ -689,26 +688,17 @@ pub trait Layer: Sized + 'static {
     /// the masks of the layer's tiles where a draw clips.
     fn prepare(&mut self, _cx: &mut PrepareCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Self>], _out: &mut Draws) {}
 
-    /// Called when the layer's style changed to another of the same id and
-    /// type, once it is the layer's, of the values `values`, and before its
-    /// values transition. A custom layer whose host the style replaced puts
-    /// the old host that drew in `ended`.
-    fn style_changed(&mut self, _values: &LayerValues<Self::Style>, _ended: &mut EndedHosts) {}
-
     /// Draws with the backend's commands that the frame lends the layer
     /// `at` its time in the frame, where its draws asked for them
     /// ([`Draws::lend`]): `lent`, which the layer may use only until this
     /// returns. A frame without commands to lend, such as one outside a
     /// pass at [`LendAt::Pass`], lends none.
+    ///
+    /// What the layer makes with the commands, the engine doesn't know of:
+    /// the layer frees it through work it queues for after the GPU
+    /// ([`Lent::after_gpu`]), at the latest as it drops, which is when it
+    /// leaves the renderer.
     fn lend(&mut self, _at: LendAt, _lent: Lent<'_>) {}
-
-    /// Lets go of a custom layer's host as the layer leaves the renderer: a
-    /// host that drew goes to `ended`, to hear that the renderer stopped.
-    fn leave(&mut self, _ended: &mut EndedHosts) {}
-
-    /// Tells a custom layer's host that the renderer's graphics objects are
-    /// lost, and lets go of it.
-    fn lose_context(&mut self) {}
 
     /// How far outside a feature of `data`, a tile's bucket of the layer, a
     /// query still hits it, from `layer`'s current values and the bucket's
@@ -876,7 +866,9 @@ fn lend<L: Layer>(layer: &mut L, gpu: &mut dyn Gpu, parameters: &mut PaintParame
         LendAt::Pass if parameters.pass_target().is_some() => Some(f64::from(parameters.layer_depth())),
         LendAt::Pass => return,
     };
-    let lent = gpu.lend(&mut |raw| layer.lend(at, Lent { raw, frame: &frame, projection: &projection, layer_depth }));
+    let after_gpu = parameters.context.after_gpu().handle();
+    let lent = gpu
+        .lend(&mut |raw| layer.lend(at, Lent { raw, frame: &frame, projection: &projection, layer_depth, after_gpu }));
     if let Err(error) = lent {
         parameters.context.fail(format!("Lending a layer the frame's commands failed: {error}"));
     }
@@ -909,9 +901,8 @@ pub trait RenderLayer {
     /// previous style's values, with the tile values unless the layer keeps
     /// them ([`Layer::RESTYLE_KEEPS_TILES`]), and begins transitions to
     /// the new values. A style of another type leaves the layer's. The next
-    /// encode builds the draws again from the tiles' buckets. A custom
-    /// layer's host that drew and that the style replaced goes to `ended`.
-    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>, ended: &mut EndedHosts);
+    /// encode builds the draws again from the tiles' buckets.
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>);
 
     /// Begins transitions for the paint values that changed since the last
     /// frame, to those of the layer's style.
@@ -1035,13 +1026,6 @@ pub trait RenderLayer {
     /// where its draws asked for them ([`LendAt::BeforePasses`]).
     fn before_passes(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>);
 
-    /// See [`Layer::leave`]. The orchestrator calls it before it drops
-    /// the layer.
-    fn leave(&mut self, ended: &mut EndedHosts);
-
-    /// See [`Layer::lose_context`].
-    fn lose_context(&mut self);
-
     /// See [`Layer::hit`].
     fn hit(
         &self,
@@ -1083,12 +1067,7 @@ impl<L: Layer> RenderLayer for Hosted<L> {
         L::TILE_ORDER
     }
 
-    fn restyle(
-        &mut self,
-        parameters: &TransitionParameters,
-        style: &Arc<dyn ErasedLayerStyle>,
-        ended: &mut EndedHosts,
-    ) {
+    fn restyle(&mut self, parameters: &TransitionParameters, style: &Arc<dyn ErasedLayerStyle>) {
         if L::RESTYLE_KEEPS_TILES {
             self.draws.clear();
         } else {
@@ -1098,7 +1077,6 @@ impl<L: Layer> RenderLayer for Hosted<L> {
             self.values.style = recovered;
             self.base.style = Arc::clone(style);
         }
-        self.layer.style_changed(&self.values, ended);
         self.transition(parameters);
     }
 
@@ -1284,14 +1262,6 @@ impl<L: Layer> RenderLayer for Hosted<L> {
                 lend(&mut self.layer, gpu, parameters, LendAt::BeforePasses);
             }
         }
-    }
-
-    fn leave(&mut self, ended: &mut EndedHosts) {
-        self.layer.leave(ended);
-    }
-
-    fn lose_context(&mut self) {
-        self.layer.lose_context();
     }
 
     fn hit(

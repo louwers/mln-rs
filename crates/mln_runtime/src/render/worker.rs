@@ -1664,12 +1664,12 @@ impl Worker {
             state.viewed_teardown |= viewed;
             (state.keep_graphics, viewed, state.lifecycle == RenderSessionState::Abandoned)
         };
-        // The host's graphics objects may be gone, and the custom layers'
-        // hosts with them, so they forget theirs instead of destroying them.
+        // The host's graphics objects may be gone, so the layers' work after
+        // the GPU forgets what it made instead of destroying it.
         if (keep || abandoned)
             && let Some(renderer) = gfx.target.renderer_mut()
         {
-            renderer.lose_custom_layers();
+            renderer.lose_context();
         }
         if keep {
             // The host's graphics objects behind them may be gone already.

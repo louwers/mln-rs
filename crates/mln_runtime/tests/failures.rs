@@ -1,24 +1,27 @@
 // Frames that fail on the GPU, through a session's own WebGPU device: a
-// custom layer that records a draw that WebGPU rejects fails the frame's
+// layer that records a draw that WebGPU rejects fails the frame's
 // submit, as a device out of memory would fail it. A still image ends with
 // the error, and a continuous map reports it once, shows what drew, and
 // draws again later.
 
 #![cfg(all(feature = "webgpu", not(target_family = "wasm")))]
 
+use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use mln_engine::RenderMode;
+use mln_engine::draw::LendAt;
 use mln_engine::map::{MapEvent, MapMode};
-use mln_engine::{CustomLayerHost, CustomLayerRenderParameters, RenderMode};
 use mln_runtime::{
     AttachOptions, BackendType, DemandMode, Device, DeviceOptions, ErrorKind, FrameDemand, FrameDisposition,
     FrameResult, LogicalExtent, Map, MapOptions, RenderSession, RenderTarget, Runtime, RuntimeEventKind,
 };
 use mln_style::size::Size;
 
-use crate::support::{EventLog, eventually, result_of, runtime, wait};
+use crate::support::lends::{self, LendingHost, runtime};
+use crate::support::{EventLog, eventually, result_of, wait};
 
 const SIZE: Size = Size { width: 64, height: 64 };
 
@@ -26,16 +29,17 @@ const RED: [u8; 4] = [255, 0, 0, 255];
 
 const STYLE: &str = r##"{"version":8,"transition":{"duration":0,"delay":0},"sources":{},"layers":[{"id":"bg","type":"background","paint":{"background-color":"#ff0000"}}]}"##;
 
-/// A custom layer that, while `broken`, records a draw without a pipeline,
-/// which WebGPU rejects when the frame is submitted.
+/// A layer that, while `broken`, records a draw without a pipeline in the
+/// frame's pass, which WebGPU rejects when the frame is submitted.
 struct Breaking {
     broken: Arc<AtomicBool>,
 }
 
-impl CustomLayerHost for Breaking {
-    fn render(&self, parameters: &mut CustomLayerRenderParameters<'_>) {
-        if self.broken.load(Ordering::SeqCst)
-            && let Some(lent) = parameters.pass.downcast_mut::<mln_webgpu::CustomLayerPass>()
+impl LendingHost for Breaking {
+    fn lend(&self, at: LendAt, raw: &mut dyn Any) {
+        if at == LendAt::Pass
+            && self.broken.load(Ordering::SeqCst)
+            && let Some(lent) = raw.downcast_mut::<mln_webgpu::CustomLayerPass>()
         {
             lent.pass.draw(0..3, 0..1);
         }
@@ -48,7 +52,7 @@ impl CustomLayerHost for Breaking {
 fn broken_map(runtime: &Runtime, mode: MapMode) -> Option<(Map, RenderSession, Arc<AtomicBool>)> {
     let map = red_map(runtime, mode, SIZE);
     let broken = Arc::new(AtomicBool::new(false));
-    wait(map.add_custom_layer("breaking", Arc::new(Breaking { broken: Arc::clone(&broken) }), None));
+    wait(lends::add_layer(&map, "breaking", Breaking { broken: Arc::clone(&broken) }));
     let session = offscreen_session(&map, SIZE)?;
     Some((map, session, broken))
 }

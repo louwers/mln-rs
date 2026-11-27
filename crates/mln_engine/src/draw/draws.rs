@@ -34,6 +34,7 @@ use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::{CullFaceWindingType, DepthMaskType};
 
 use crate::camera::{FrameProjection, ProjectionData, View, ViewportMode};
+use crate::draw::after_gpu::AfterGpu;
 use crate::draw::context::Context;
 use crate::draw::identity::SimpleIdentity;
 use crate::draw::objects::{DrawBuffers, Mesh};
@@ -679,6 +680,10 @@ pub struct Lent<'a> {
     /// The depth that the frame's 2D layers write at the layer's place in
     /// the layers' order, in a pass; `None` before the passes.
     pub layer_depth: Option<f64>,
+    /// Where the layer queues what waits for the GPU to finish what it
+    /// drew with the commands, such as the freeing of what it made with
+    /// them. A clone stays usable for as long as the layer.
+    pub after_gpu: &'a AfterGpu,
 }
 
 /// A layer's draws of a frame, the map's or a drape's, which the engine

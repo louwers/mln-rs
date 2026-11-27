@@ -57,7 +57,6 @@ impl Layer for DotLayer {
 fn a_layer_type_of_another_crate_registers_and_parses() {
     let mut builder = RegistryBuilder::new();
     register_builtin_functions(builder.functions_mut()).unwrap();
-    mln_engine::register_layer_types(&mut builder).unwrap();
     builder.add_layer_type::<DotLayer>().unwrap();
     assert_eq!(builder.add_layer_type::<DotLayer>(), Err(RegisterError::Duplicate("org.example.dot".to_owned())));
     let registry = builder.build();

@@ -28,11 +28,10 @@ mod log_target {
 }
 
 /// Adds the style specification's expression functions, layer types and
-/// source types and the custom layer type. Fails for a name that an earlier
-/// call took, or a role that an earlier function has.
+/// source types. Fails for a name that an earlier call took, or a role that
+/// an earlier function has.
 pub fn register_builtins(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
     register_builtin_functions(builder.functions_mut())?;
-    mln_engine::register_layer_types(builder)?;
     layers::register_layer_types(builder)?;
     sources::register_source_types(builder)
 }

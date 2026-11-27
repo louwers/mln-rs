@@ -14,7 +14,7 @@ use mln_engine::map::{MapEvent, MapMode, MapSnapshot};
 use mln_engine::text::GlyphCache;
 use mln_engine::text::font_face_engine::FontFaceEngine;
 use mln_engine::text::local_fonts::LocalGlyphs;
-use mln_engine::{Custom, CustomLayerHost, Registry, UpdateReader};
+use mln_engine::{Registry, UpdateReader};
 use mln_style::error::{Error, ErrorKind};
 use mln_style::geo::LatLngBounds;
 use mln_style::hash::HashMap;
@@ -1177,23 +1177,17 @@ impl Map {
         self.command(move |map| map.edit_loaded_style(|style| style.add_layer_json(&json, before_layer_id.as_deref())))
     }
 
-    /// Adds a custom layer named `layer_id` that `host` draws, below
-    /// `before_layer_id` or above every layer. See `Style::add_layer` for the
-    /// errors. The map lets go of `host` once the style no longer has
-    /// the layer, and no renderer draws it.
-    pub fn add_custom_layer(
+    /// Adds `layer` to the style, below `before_layer_id` or above every
+    /// layer: one of a type that isn't made from JSON, or one that holds a
+    /// value for as long as the style has it
+    /// ([`Layer::from_style_holding`](mln_style::layer::Layer::from_style_holding)).
+    /// See `Style::add_layer` for the errors.
+    pub fn add_style_layer(
         &self,
-        layer_id: impl Into<String>,
-        host: Arc<dyn CustomLayerHost>,
+        layer: mln_style::layer::Layer,
         before_layer_id: Option<String>,
     ) -> Result<Completion<Applied>, Error> {
-        let layer_id = layer_id.into();
-        self.command(move |map| {
-            map.edit_loaded_style(|style| {
-                let layer = Custom::layer(style.registry(), &layer_id, host);
-                style.add_layer(layer, before_layer_id.as_deref())
-            })
-        })
+        self.command(move |map| map.edit_loaded_style(|style| style.add_layer(layer, before_layer_id.as_deref())))
     }
 
     /// Removes a layer from the style. Completes with

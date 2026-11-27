@@ -5,7 +5,6 @@ mod support;
 
 // An image source whose corners make a concave quad draws inside its outline.
 mod concave_image_test;
-mod custom_layer_test;
 // Empty and absent tiles of vector and raster sources through Map -> HeadlessFrontend.
 mod empty_tile_test;
 // A viewport flipped upside down draws the map upside down.
@@ -33,6 +32,8 @@ mod gtest_symbol_rendering;
 mod gtest_tile_lod;
 // A hillshade's shading of a plane slope.
 mod hillshade_test;
+// A layer that draws with the backend's own commands, which the frame lends it.
+mod lent_commands_test;
 // gtests-data: test/text/local_glyph_rasterizer.test.cpp (renders a map
 // through HeadlessFrontend with a StubFileSource).
 mod local_glyph_rasterizer_test;

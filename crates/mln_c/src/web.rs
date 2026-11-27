@@ -143,7 +143,7 @@ mod tile_worker {
     #[expect(unreachable_pub, reason = "wasm-bindgen exports only `pub` functions")]
     #[wasm_bindgen(js_name = mlnWebServeTileWorker)]
     pub fn serve(port: &web_sys::MessagePort) {
-        mln_web_host::tile_worker::serve(port, crate::custom_source::registry());
+        mln_web_host::tile_worker::serve(port, crate::registry::registry());
     }
 }
 

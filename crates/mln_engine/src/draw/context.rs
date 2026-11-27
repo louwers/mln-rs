@@ -24,6 +24,7 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::TextureChannelDataType;
 use mln_style::hash::HashMap;
 
+use crate::draw::after_gpu::AfterGpuQueue;
 use crate::draw::buffer::{self, Buffer};
 use crate::draw::indexes::{Indexes, SharedIndexes};
 use crate::draw::objects::{DrawObjects, Mesh};
@@ -85,6 +86,9 @@ pub struct Context {
     /// Whether [`tear_down`](Self::tear_down) destroyed what the context
     /// made.
     torn_down: bool,
+    /// The work that waits for the GPU, which [`Lent`](crate::draw::Lent)
+    /// gives layers a handle to.
+    after_gpu: AfterGpuQueue,
 }
 
 impl Context {
@@ -112,7 +116,13 @@ impl Context {
             releases: Vec::new(),
             doomed: Vec::new(),
             torn_down: false,
+            after_gpu: AfterGpuQueue::new(),
         }
+    }
+
+    /// The work that waits for the GPU.
+    pub(crate) fn after_gpu(&self) -> &AfterGpuQueue {
+        &self.after_gpu
     }
 
     /// What the renderer makes its buffers and textures with.
@@ -624,9 +634,8 @@ impl Context {
         }
     }
 
-    /// Destroys what the context made and what the renderer released, and
-    /// tells the custom layers' hosts that it stopped. What drops later
-    /// still goes to the queue, and goes with the `Gpu`.
+    /// Destroys what the context made and what the renderer released. What
+    /// drops later still goes to the queue, and goes with the `Gpu`.
     pub fn tear_down(&mut self, gpu: &mut dyn Gpu) {
         self.global_uniform_buffers = UniformBufferArray::new();
         self.default_vertex_buffers.clear();

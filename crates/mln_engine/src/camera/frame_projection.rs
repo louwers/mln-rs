@@ -1,7 +1,7 @@
 //! Where a frame drew the map, for a host that draws into the frame
 //! depth-tested against it. The renderer computes it
-//! (`crate::render::frame_projection`); it lives here so that the style's
-//! custom layers, which get it with each frame, can name it.
+//! (`crate::render::frame_projection`); it lives here so that layers that a
+//! frame lends its commands to, which get it with them, can name it.
 
 use glam::DMat4;
 pub use mln_gfx::gpu::ClipDepthRange;

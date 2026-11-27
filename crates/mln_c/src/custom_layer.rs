@@ -1,12 +1,24 @@
-//! Custom layers: the host's `mln_custom_layer_host` as the renderer's
-//! `CustomLayerHost`, which hands the callbacks the backend's commands as the
+//! Custom layers: the library's own `custom` layer type, whose layers a
+//! host's `mln_custom_layer_host` callbacks draw with the backend's
+//! commands, which the frame lends the layer and the callbacks get as the
 //! header's variants.
 
-use std::any::Any;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+// How a custom layer's host hears that its session ended: a host that drew
+// through a renderer's layer hears it once the layer lets go of it, as the
+// layer leaves the renderer or the style gives its id a new host. The layer
+// queues the end for after the GPU (`AfterGpu`), so that `deinitialize` runs
+// once the GPU finished what the host drew, and `context_lost` instead when
+// the renderer's graphics objects are lost.
 
-use mln_engine::{CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters};
+use std::any::Any;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Weak};
+
+use mln_engine::draw::{AfterGpu, Draws, GpuEnd, LendAt, Lent};
+use mln_engine::layer::{EvaluateCx, Evaluation, FrameTile, Layer, LayerValues, NoTiles, PrepareCx};
+use mln_style::expression::functions::Functions;
+use mln_style::layer::{Layer as StyleLayer, LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
+use mln_style::property::table::{PropertyTable, PropertyVisitor};
 
 use crate::callback::Registration;
 use crate::generated::types::{
@@ -19,8 +31,129 @@ use crate::{abi, map, projection, render_session};
 
 abi::versioned!(mln_custom_layer_host);
 
+/// The style half of the `custom` layer type. Its layers aren't made from
+/// style JSON: `mln_map_add_custom_layer()` makes one ([`layer`]).
+pub(crate) struct Custom;
+
+static PROPERTIES: PropertyTable = PropertyTable::new(&[], &[]);
+
+impl StyleLayerType for Custom {
+    const INFO: LayerTypeInfo = LayerTypeInfo { name: "custom", source: SourceKind::None, from_json: false };
+    const PROPERTIES: &'static PropertyTable = &PROPERTIES;
+
+    type LayoutProperties = NoProperties;
+    type PaintProperties = NoProperties;
+    type Extra = HostRef;
+
+    fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
+        None
+    }
+}
+
+/// The host of a custom layer, as its style data refers to it: there while
+/// the style has the layer or a renderer draws it. A renderer that is
+/// leaked with its style data, because its graphics objects are gone,
+/// doesn't keep it, so its user data is still released.
+#[derive(Clone, Default)]
+pub(crate) struct HostRef(Weak<Host>);
+
+impl HostRef {
+    /// The host, unless the style no longer has the layer and no renderer
+    /// draws it.
+    fn get(&self) -> Option<Arc<Host>> {
+        self.0.upgrade()
+    }
+
+    /// Whether `host` is this one.
+    fn is(&self, host: &Arc<Host>) -> bool {
+        std::ptr::eq(self.0.as_ptr(), Arc::as_ptr(host))
+    }
+}
+
+/// A layer named `id` that `host` draws, whose filter and visibility parse
+/// against `functions`. The layer holds `host`, and its style data only
+/// refers to it.
+fn layer(functions: Arc<Functions>, id: String, host: Arc<Host>) -> StyleLayer {
+    let mut style = LayerStyle::<Custom>::new(id, String::new());
+    style.extra = HostRef(Arc::downgrade(&host));
+    StyleLayer::from_style_holding(Arc::new(style), functions, host)
+}
+
+/// The render half of a custom layer, which keeps no tiles and pushes no
+/// draws: what it draws is what its host draws with the commands the frame
+/// lends it.
+pub(crate) struct CustomLayer {
+    /// The host, while the renderer draws through it.
+    host: Option<Arc<Host>>,
+    /// Where the host's end waits for the GPU, once a frame lent the host
+    /// its commands through this layer: a host that drew hears that the
+    /// renderer stopped.
+    drew: Option<AfterGpu>,
+}
+
+impl CustomLayer {
+    /// Lets go of the host, which hears that the renderer stopped once the
+    /// GPU finished what it drew, if it drew.
+    fn end(&mut self) {
+        if let (Some(host), Some(after_gpu)) = (self.host.take(), self.drew.take()) {
+            after_gpu.push(move |end| host.end(end));
+        }
+    }
+}
+
+impl Drop for CustomLayer {
+    /// The layer leaves the renderer.
+    fn drop(&mut self) {
+        self.end();
+    }
+}
+
+impl Layer for CustomLayer {
+    type Style = Custom;
+    type Input = NoTiles;
+    type Tile = ();
+
+    fn new(values: &LayerValues<Custom>) -> Self {
+        CustomLayer { host: values.style().extra.get(), drew: None }
+    }
+
+    /// A new host for the same layer id is a new layer to the host: the old
+    /// one ends.
+    fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
+        let host = &cx.values().style().extra;
+        if !self.host.as_ref().is_some_and(|drawn| host.is(drawn)) {
+            self.end();
+            self.host = host.get();
+        }
+        Evaluation::TRANSLUCENT
+    }
+
+    /// Asks for the frame's commands before its passes, for the host to
+    /// prerender with, and for the translucent pass, for it to render in.
+    fn prepare(&mut self, _cx: &mut PrepareCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Self>], out: &mut Draws) {
+        out.lend(LendAt::BeforePasses).lend(LendAt::Pass);
+    }
+
+    fn lend(&mut self, _at: LendAt, lent: Lent<'_>) {
+        let Some(host) = &self.host else { return };
+        let Lent { raw, frame, projection: frame_projection, layer_depth, after_gpu } = lent;
+        let view = frame.view().map_view(f64::from(frame.pixel_ratio()));
+        let frame = mln_custom_layer_frame {
+            view: host.view(&view),
+            frame_projection: render_session::frame_projection(frame_projection),
+            width: frame.size().width,
+            height: frame.size().height,
+        };
+        match layer_depth {
+            None => host.prerender(raw, &frame),
+            Some(layer_depth) => host.render(raw, &frame, layer_depth),
+        }
+        self.drew.get_or_insert_with(|| after_gpu.clone());
+    }
+}
+
 /// A host's callbacks, which a session runs on its graphics thread.
-struct Host {
+pub(crate) struct Host {
     registration: Registration,
     prerender: mln_custom_layer_prerender_callback,
     render: mln_custom_layer_render_callback,
@@ -35,34 +168,15 @@ struct Host {
 }
 
 impl Host {
-    fn frame(&self, frame: &CustomLayerFrame) -> mln_custom_layer_frame {
-        let mut view = projection::from_map_view(&frame.view);
+    /// The header's view of `view`, with the map's exact scale factor.
+    fn view(&self, view: &mln_engine::camera::MapView) -> crate::generated::types::mln_map_view {
+        let mut view = projection::from_map_view(view);
         view.extent.scale_factor = map::exact_scale_factor(self.scale_factor, view.extent.scale_factor);
-        mln_custom_layer_frame {
-            view,
-            frame_projection: render_session::frame_projection(&frame.projection),
-            width: frame.width,
-            height: frame.height,
-        }
+        view
     }
 
-    fn end(&self, callback: mln_custom_layer_session_end_callback) {
-        if !self.drew.swap(false, Ordering::AcqRel) {
-            return;
-        }
-        if let Some(callback) = callback
-            && !crate::process_exit::exiting()
-        {
-            // SAFETY: the host's callback, with its user data, as the header
-            // promises; it runs on the session's graphics thread.
-            unsafe { callback(self.registration.user_data().get()) };
-        }
-    }
-}
-
-impl CustomLayerHost for Host {
-    fn prerender(&self, parameters: &mut CustomLayerPrerenderParameters<'_>) {
-        let Some((backend, encoder)) = native::encoder(parameters.encoder) else {
+    fn prerender(&self, encoder: &mut dyn Any, frame: &mln_custom_layer_frame) {
+        let Some((backend, encoder)) = native::encoder(encoder) else {
             return;
         };
         self.drew.store(true, Ordering::Release);
@@ -71,15 +185,15 @@ impl CustomLayerHost for Host {
             size: size_of::<mln_custom_layer_prerender_parameters>() as u32,
             backend,
             encoder,
-            frame: self.frame(parameters.frame),
+            frame: *frame,
         };
         // SAFETY: the host's callback, with its user data and parameters that
         // stay valid until it returns.
         unsafe { callback(self.registration.user_data().get(), &raw const parameters) };
     }
 
-    fn render(&self, parameters: &mut CustomLayerRenderParameters<'_>) {
-        let Some((backend, pass)) = native::pass(parameters.pass) else {
+    fn render(&self, pass: &mut dyn Any, frame: &mln_custom_layer_frame, layer_depth: f64) {
+        let Some((backend, pass)) = native::pass(pass) else {
             return;
         };
         self.drew.store(true, Ordering::Release);
@@ -88,19 +202,31 @@ impl CustomLayerHost for Host {
             size: size_of::<mln_custom_layer_render_parameters>() as u32,
             backend,
             pass,
-            frame: self.frame(parameters.frame),
-            layer_depth: parameters.layer_depth,
+            frame: *frame,
+            layer_depth,
         };
         // SAFETY: as for `prerender`.
         unsafe { callback(self.registration.user_data().get(), &raw const parameters) };
     }
 
-    fn deinitialize(&self) {
-        self.end(self.deinitialize);
-    }
-
-    fn context_lost(&self) {
-        self.end(self.context_lost);
+    /// Ends the host's session, if it drew since the last ended, as `end`
+    /// says the GPU's work ended: `deinitialize` once it finished,
+    /// `context_lost` once it was lost.
+    fn end(&self, end: GpuEnd) {
+        if !self.drew.swap(false, Ordering::AcqRel) {
+            return;
+        }
+        let callback = match end {
+            GpuEnd::Finished => self.deinitialize,
+            GpuEnd::Lost => self.context_lost,
+        };
+        if let Some(callback) = callback
+            && !crate::process_exit::exiting()
+        {
+            // SAFETY: the host's callback, with its user data, as the header
+            // promises; it runs on the session's graphics thread.
+            unsafe { callback(self.registration.user_data().get()) };
+        }
     }
 }
 
@@ -274,7 +400,9 @@ pub(crate) unsafe extern "C" fn mln_map_add_custom_layer(
         };
         // SAFETY: the caller's contract.
         let registration = unsafe { abi::read_sized(host) }?;
-        let scale_factor = map::resolve(map)?.scale_factor;
+        let object = map::resolve(map)?;
+        let (scale_factor, functions) = (object.scale_factor, Arc::clone(object.map.registry().functions()));
+        drop(object);
         let host = Arc::new(Host {
             registration: Registration::new(
                 "custom layer host",
@@ -291,9 +419,9 @@ pub(crate) unsafe extern "C" fn mln_map_add_custom_layer(
             drew: AtomicBool::new(false),
         });
         host.registration.accept();
-        let layer_host: Arc<dyn CustomLayerHost> = Arc::<Host>::clone(&host);
+        let layer = layer(functions, id, Arc::clone(&host));
         // SAFETY: the caller's contract.
-        let sent = unsafe { map::command(map, completion, |map| map.add_custom_layer(id, layer_host, before)) };
+        let sent = unsafe { map::command(map, completion, |map| map.add_style_layer(layer, before)) };
         if sent.is_err() {
             // This handle outlives the copies that the failed call dropped,
             // so the registration drops unaccepted.
@@ -301,4 +429,51 @@ pub(crate) unsafe extern "C" fn mln_map_add_custom_layer(
         }
         sent
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+
+    use mln_style::layer::LayerStyle;
+
+    use super::{Custom, Host, layer};
+    use crate::callback::Registration;
+
+    fn host() -> Arc<Host> {
+        Arc::new(Host {
+            registration: Registration::new(
+                "custom layer host",
+                true,
+                std::ptr::null_mut(),
+                None,
+                crate::handles::NULL,
+            )
+            .unwrap(),
+            prerender: None,
+            render: None,
+            deinitialize: None,
+            context_lost: None,
+            scale_factor: 1.0,
+            drew: AtomicBool::new(false),
+        })
+    }
+
+    /// A renderer that is leaked with the style data, because its graphics
+    /// objects are gone, must not keep the host, whose user data is
+    /// released once the host goes.
+    #[test]
+    fn the_style_data_of_a_removed_layer_doesnt_keep_its_host() {
+        let host = host();
+        let functions = Arc::clone(crate::registry::registry().functions());
+        let layer = layer(functions, "custom".to_owned(), Arc::clone(&host));
+        let style = LayerStyle::<Custom>::recover(layer.style()).unwrap();
+        assert!(style.extra.is(&host));
+        assert!(style.extra.get().is_some());
+        drop(layer);
+        assert!(style.extra.get().is_some(), "the caller still holds the host");
+        drop(host);
+        assert!(style.extra.get().is_none());
+    }
 }

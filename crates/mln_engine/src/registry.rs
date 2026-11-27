@@ -18,7 +18,6 @@ use mln_style::{Source, StyleRegistry};
 use crate::layer::layer_type::{ErasedLayerType, entry};
 use crate::layer::render_layer::Layer;
 use crate::layer::tile_input::input::Find;
-use crate::layers::custom::RenderCustomLayer;
 use crate::placement::{ErasedPlacement, Placement, participant};
 use crate::source::erased::{self, ErasedSourceType};
 use crate::source::{SourceSummary, SourceType, kind};
@@ -111,13 +110,6 @@ impl RegistryBuilder {
 
 fn style_half(layer_type: &'static dyn ErasedLayerType) -> &'static dyn ErasedStyleLayerType {
     layer_type.style()
-}
-
-/// Adds the layer type that the engine holds, the custom layer type:
-/// `mln_builtins`'s `register_builtins` calls it with the built-in layer
-/// types'. Fails for a name that an earlier call took.
-pub fn register_layer_types(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
-    builder.add_layer_type::<RenderCustomLayer>()
 }
 
 /// The expression functions, layer types and source types that a style

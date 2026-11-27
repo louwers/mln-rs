@@ -1,20 +1,167 @@
-// A custom layer whose host draws a green quad with the backend's own GPU
-// commands, in the map's render pass, at its place among the map's layers: over
-// a red background and under a half-transparent blue one, or over both.
+// A layer of the tests' own type that draws with the backend's own GPU
+// commands, which the frame lends it: its host draws a green quad in the
+// map's render pass, at its place among the map's layers, over a red
+// background and under a half-transparent blue one, or over both. A host
+// that drew hears that the renderer stopped through the work the layer
+// queues for after the GPU.
 
+use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use mln_engine::camera::FrameProjection;
 use mln_engine::exec::pool::Pool;
 use mln_engine::exec::queue::Queue;
 use mln_engine::map::{Map, MapMode, MapOptions};
-use mln_engine::{Custom, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters};
 use mln_headless::HeadlessFrontend;
 use mln_runtime::{BackendType, Device, DeviceOptions};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::error::ErrorKind;
 use mln_style::size::Size;
 use parking_lot::Mutex;
+
+/// The tests' `lends` layer type, whose layers lend the frame's commands
+/// to a host before the frame's passes and in its translucent pass.
+mod lends {
+    use std::sync::Arc;
+
+    use mln_engine::draw::{AfterGpu, Draws, GpuEnd, LendAt, Lent};
+    use mln_engine::layer::{EvaluateCx, Evaluation, FrameTile, Layer, LayerValues, NoTiles, PrepareCx};
+    use mln_engine::{Registry, RegistryBuilder};
+    use mln_style::StyleRegistry;
+    use mln_style::layer::{Layer as StyleLayer, LayerStyle, LayerTypeInfo, NoProperties, SourceKind, StyleLayerType};
+    use mln_style::property::table::{PropertyTable, PropertyVisitor};
+
+    use super::{Frame, LendingHost, PrerenderParameters, RenderParameters};
+
+    /// The built-ins and the `lends` layer type.
+    pub(super) fn registry() -> Arc<Registry> {
+        let mut builder = RegistryBuilder::new();
+        mln_builtins::register_builtins(&mut builder).unwrap();
+        builder.add_layer_type::<Lending>().unwrap();
+        builder.build()
+    }
+
+    /// A layer named `id` that `host` draws.
+    pub(super) fn layer(registry: &StyleRegistry, id: &str, host: Arc<dyn LendingHost>) -> StyleLayer {
+        let mut style = LayerStyle::<Lends>::new(id.to_owned(), String::new());
+        style.extra = Some(host);
+        StyleLayer::from_style(Arc::new(style), Arc::clone(registry.functions()))
+    }
+
+    pub(super) struct Lends;
+
+    static PROPERTIES: PropertyTable = PropertyTable::new(&[], &[]);
+
+    impl StyleLayerType for Lends {
+        const INFO: LayerTypeInfo = LayerTypeInfo { name: "lends", source: SourceKind::None, from_json: false };
+        const PROPERTIES: &'static PropertyTable = &PROPERTIES;
+
+        type LayoutProperties = NoProperties;
+        type PaintProperties = NoProperties;
+        type Extra = Option<Arc<dyn LendingHost>>;
+
+        fn visit_property<V: PropertyVisitor<LayerStyle<Self>>>(_slot: usize, _visitor: V) -> Option<V::Output> {
+            None
+        }
+    }
+
+    /// A layer of the type, whose host, once it drew, ends once the GPU is
+    /// done with what it drew: as the layer drops, or as the style gives the
+    /// layer's id a new host.
+    struct Lending {
+        host: Option<Arc<dyn LendingHost>>,
+        drew: Option<AfterGpu>,
+    }
+
+    impl Lending {
+        fn end(&mut self) {
+            if let (Some(host), Some(after_gpu)) = (self.host.take(), self.drew.take()) {
+                after_gpu.push(move |end| match end {
+                    GpuEnd::Finished => host.deinitialize(),
+                    GpuEnd::Lost => host.context_lost(),
+                });
+            }
+        }
+    }
+
+    impl Drop for Lending {
+        fn drop(&mut self) {
+            self.end();
+        }
+    }
+
+    impl Layer for Lending {
+        type Style = Lends;
+        type Input = NoTiles;
+        type Tile = ();
+
+        fn new(values: &LayerValues<Lends>) -> Self {
+            Lending { host: values.style().extra.clone(), drew: None }
+        }
+
+        fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
+            let host = &cx.values().style().extra;
+            let same = matches!((&self.host, host), (Some(drawn), Some(host)) if Arc::ptr_eq(drawn, host));
+            if !same {
+                self.end();
+                self.host.clone_from(host);
+            }
+            Evaluation::TRANSLUCENT
+        }
+
+        fn prepare(&mut self, _cx: &mut PrepareCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Self>], out: &mut Draws) {
+            out.lend(LendAt::BeforePasses).lend(LendAt::Pass);
+        }
+
+        fn lend(&mut self, _at: LendAt, lent: Lent<'_>) {
+            let Some(host) = &self.host else { return };
+            let Lent { raw, frame, projection, layer_depth, after_gpu } = lent;
+            let frame = &Frame { width: frame.size().width, height: frame.size().height, projection: *projection };
+            match layer_depth {
+                None => host.prerender(&mut PrerenderParameters { encoder: raw, frame }),
+                Some(layer_depth) => host.render(&mut RenderParameters { pass: raw, frame, layer_depth }),
+            }
+            self.drew.get_or_insert_with(|| after_gpu.clone());
+        }
+    }
+}
+
+/// What a `lends` layer's host draws with, on the thread that renders the
+/// map: a `prerender` before the frame's passes, a `render` in its pass, and
+/// once the renderer stopped after the host drew, a `deinitialize`, or a
+/// `context_lost` where its graphics objects may be gone.
+trait LendingHost: Send + Sync {
+    fn prerender(&self, _parameters: &mut PrerenderParameters<'_>) {}
+
+    fn render(&self, _parameters: &mut RenderParameters<'_>) {}
+
+    fn deinitialize(&self) {}
+
+    fn context_lost(&self) {}
+}
+
+/// The frame that a host draws into.
+struct Frame {
+    width: u32,
+    height: u32,
+    projection: FrameProjection,
+}
+
+/// The frame's commands outside its passes, as the backend's
+/// `CustomLayerEncoder`.
+struct PrerenderParameters<'a> {
+    encoder: &'a mut dyn Any,
+    frame: &'a Frame,
+}
+
+/// The frame's pass, as the backend's `CustomLayerPass`, and the depth of
+/// the map's 2D layers at the layer's place.
+struct RenderParameters<'a> {
+    pass: &'a mut dyn Any,
+    frame: &'a Frame,
+    layer_depth: f64,
+}
 
 const SIDE: u32 = 64;
 
@@ -53,12 +200,12 @@ struct Calls {
 }
 
 impl Calls {
-    fn prerender(&self, parameters: &CustomLayerPrerenderParameters<'_>) {
+    fn prerender(&self, parameters: &PrerenderParameters<'_>) {
         assert_eq!((parameters.frame.width, parameters.frame.height), (SIDE, SIDE));
         self.prerenders.fetch_add(1, Ordering::Relaxed);
     }
 
-    fn render(&self, parameters: &CustomLayerRenderParameters<'_>) {
+    fn render(&self, parameters: &RenderParameters<'_>) {
         // Every prerender of a frame comes before its renders.
         assert_eq!(self.prerenders.load(Ordering::Relaxed), self.renders.load(Ordering::Relaxed) + 1);
         let frame = parameters.frame;
@@ -70,7 +217,7 @@ impl Calls {
 /// Renders the style with `host`'s layer below the layer named `before`, or
 /// above every layer, on `backend`, and drops the renderer. `None` where the
 /// machine has no device of `backend`, such as no EGL.
-fn render(backend: BackendType, host: Arc<dyn CustomLayerHost>, before: Option<&str>) -> Option<PremultipliedImage> {
+fn render(backend: BackendType, host: Arc<dyn LendingHost>, before: Option<&str>) -> Option<PremultipliedImage> {
     let run_loop = Queue::new();
     let (mut frontend, mut map) = session(backend, host, before, &run_loop)?;
     Some(frontend.render(&mut map).expect("a frame").image)
@@ -81,7 +228,7 @@ fn render(backend: BackendType, host: Arc<dyn CustomLayerHost>, before: Option<&
 /// `None` where the machine has no device of `backend`.
 fn session(
     backend: BackendType,
-    host: Arc<dyn CustomLayerHost>,
+    host: Arc<dyn LendingHost>,
     before: Option<&str>,
     run_loop: &Queue<()>,
 ) -> Option<(HeadlessFrontend, Map)> {
@@ -99,13 +246,13 @@ fn session(
         HeadlessFrontend::with_device(device, size, 1.0, Arc::default(), run_loop, &pool).expect("a frontend");
     let mut map = Map::new(
         MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() },
-        mln_builtins::registry(),
+        lends::registry(),
         &pool,
     )
     .unwrap();
     frontend.attach(&mut map);
     map.load_style_json(STYLE);
-    map.edit_style(|style| style.add_layer(Custom::layer(style.registry(), "quad", host), before))
+    map.edit_style(|style| style.add_layer(lends::layer(style.registry(), "quad", host), before))
         .expect("the custom layer");
     Some((frontend, map))
 }
@@ -122,7 +269,7 @@ fn assert_near(actual: [u8; 4], expected: [u8; 4], what: &str) {
 
 /// Draws the quad under and over the blue layer on `backend`, and checks the
 /// pixels, the callbacks, and that the renderer deinitialized the host.
-fn check(backend: BackendType, host: impl Fn() -> (Arc<dyn CustomLayerHost>, Arc<Calls>)) {
+fn check(backend: BackendType, host: impl Fn() -> (Arc<dyn LendingHost>, Arc<Calls>)) {
     let (below, calls) = host();
     let Some(image) = render(backend, below, Some("blue")) else { return };
     assert_near(pixel(&image, SIDE / 2, SIDE / 2), [0, 128, 128, 255], "the quad under the blue layer");
@@ -141,9 +288,10 @@ fn check(backend: BackendType, host: impl Fn() -> (Arc<dyn CustomLayerHost>, Arc
 }
 
 mod webgpu {
-    use mln_engine::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
 
-    use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, QUAD_WGSL, check};
+    use super::{
+        Arc, BackendType, Calls, LendingHost, Mutex, Ordering, PrerenderParameters, QUAD_WGSL, RenderParameters, check,
+    };
 
     #[derive(Default)]
     struct Host {
@@ -151,13 +299,13 @@ mod webgpu {
         pipeline: Mutex<Option<wgpu::RenderPipeline>>,
     }
 
-    impl CustomLayerHost for Host {
-        fn prerender(&self, parameters: &mut CustomLayerPrerenderParameters<'_>) {
+    impl LendingHost for Host {
+        fn prerender(&self, parameters: &mut PrerenderParameters<'_>) {
             assert!(parameters.encoder.is::<mln_webgpu::CustomLayerEncoder>());
             self.calls.prerender(parameters);
         }
 
-        fn render(&self, parameters: &mut CustomLayerRenderParameters<'_>) {
+        fn render(&self, parameters: &mut RenderParameters<'_>) {
             self.calls.render(parameters);
             let pass = parameters.pass.downcast_mut::<mln_webgpu::CustomLayerPass>().expect("a WebGPU pass");
             let mut pipeline = self.pipeline.lock();
@@ -216,10 +364,11 @@ mod webgpu {
 #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
 #[expect(unsafe_code, reason = "the host draws through ash")]
 mod vulkan {
-    use mln_engine::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
     use mln_vulkan::ash::{self, vk};
 
-    use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, QUAD_WGSL, check};
+    use super::{
+        Arc, BackendType, Calls, LendingHost, Mutex, Ordering, PrerenderParameters, QUAD_WGSL, RenderParameters, check,
+    };
 
     /// The host's objects, made on the session's device.
     struct Objects {
@@ -304,14 +453,14 @@ mod vulkan {
         }
     }
 
-    impl CustomLayerHost for Host {
-        fn prerender(&self, parameters: &mut CustomLayerPrerenderParameters<'_>) {
+    impl LendingHost for Host {
+        fn prerender(&self, parameters: &mut PrerenderParameters<'_>) {
             let encoder = parameters.encoder.downcast_ref::<mln_vulkan::CustomLayerEncoder>().expect("Vulkan");
             assert_ne!(encoder.command_buffer, vk::CommandBuffer::null());
             self.calls.prerender(parameters);
         }
 
-        fn render(&self, parameters: &mut CustomLayerRenderParameters<'_>) {
+        fn render(&self, parameters: &mut RenderParameters<'_>) {
             self.calls.render(parameters);
             let pass = parameters.pass.downcast_ref::<mln_vulkan::CustomLayerPass>().expect("a Vulkan pass");
             let mut objects = self.objects.lock();
@@ -375,11 +524,13 @@ mod gl {
     use glow::HasContext as _;
     use khronos_egl as egl;
     use mln_engine::map::Map;
-    use mln_engine::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
     use mln_headless::HeadlessFrontend;
     use mln_style::Edit;
 
-    use super::{Arc, BackendType, Calls, Custom, CustomLayerHost, Mutex, Ordering, Queue, check, session};
+    use super::{
+        Arc, BackendType, Calls, LendingHost, Mutex, Ordering, PrerenderParameters, Queue, RenderParameters, check,
+        lends, session,
+    };
 
     const VERTEX: &str = "#version 300 es
 const vec2 corners[6] = vec2[6](
@@ -412,13 +563,13 @@ void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }
         deinitialized_on_its_context: Mutex<Option<bool>>,
     }
 
-    impl CustomLayerHost for Host {
-        fn prerender(&self, parameters: &mut CustomLayerPrerenderParameters<'_>) {
+    impl LendingHost for Host {
+        fn prerender(&self, parameters: &mut PrerenderParameters<'_>) {
             assert!(parameters.encoder.is::<mln_gl::CustomLayerEncoder>());
             self.calls.prerender(parameters);
         }
 
-        fn render(&self, parameters: &mut CustomLayerRenderParameters<'_>) {
+        fn render(&self, parameters: &mut RenderParameters<'_>) {
             self.calls.render(parameters);
             *self.context.lock() = current_context();
             let pass = parameters.pass.downcast_ref::<mln_gl::CustomLayerPass>().expect("an OpenGL pass");
@@ -500,7 +651,7 @@ void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }
         check_end(|frontend, map| {
             map.edit_style(|style| style.apply(Edit::RemoveLayer("quad".to_owned()))).expect("the layer");
             map.edit_style(|style| {
-                style.add_layer(Custom::layer(style.registry(), "quad", Arc::new(Host::default())), None)
+                style.add_layer(lends::layer(style.registry(), "quad", Arc::new(Host::default())), None)
             })
             .expect("the new host");
             frontend.as_mut().unwrap().render(map).expect("a frame");
@@ -523,7 +674,6 @@ void main() { color = vec4(0.0, 1.0, 0.0, 1.0); }
 mod metal {
     use std::sync::atomic::AtomicUsize;
 
-    use mln_engine::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
     use objc2::rc::Retained;
     use objc2::runtime::ProtocolObject;
     use objc2_foundation::NSString;
@@ -533,7 +683,7 @@ mod metal {
         MTLRenderCommandEncoder, MTLRenderPipelineDescriptor, MTLRenderPipelineState,
     };
 
-    use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, check};
+    use super::{Arc, BackendType, Calls, LendingHost, Mutex, Ordering, PrerenderParameters, RenderParameters, check};
 
     /// The quad of `QUAD_WGSL`, in MSL.
     const QUAD_MSL: &str = "
@@ -587,8 +737,8 @@ fragment float4 fs() { return float4(0.0, 1.0, 0.0, 1.0); }
         Objects { pipeline, depth }
     }
 
-    impl CustomLayerHost for Host {
-        fn prerender(&self, parameters: &mut CustomLayerPrerenderParameters<'_>) {
+    impl LendingHost for Host {
+        fn prerender(&self, parameters: &mut PrerenderParameters<'_>) {
             let encoder = parameters.encoder.downcast_ref::<mln_mtl::CustomLayerEncoder>().expect("a Metal encoder");
             let command_buffer = &encoder.command_buffer;
             assert_eq!(command_buffer.status(), MTLCommandBufferStatus::NotEnqueued, "an open command buffer");
@@ -599,7 +749,7 @@ fragment float4 fs() { return float4(0.0, 1.0, 0.0, 1.0); }
             self.calls.prerender(parameters);
         }
 
-        fn render(&self, parameters: &mut CustomLayerRenderParameters<'_>) {
+        fn render(&self, parameters: &mut RenderParameters<'_>) {
             self.calls.render(parameters);
             assert_eq!(self.prerender_blits.load(Ordering::Relaxed), self.calls.prerenders.load(Ordering::Relaxed));
             let pass = parameters.pass.downcast_ref::<mln_mtl::CustomLayerPass>().expect("a Metal pass");
@@ -643,9 +793,8 @@ mod d3d12 {
     };
     use mln_d3d12::windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC};
     use mln_d3d12::{ShaderCompiler, ShaderStage};
-    use mln_engine::{CustomLayerPrerenderParameters, CustomLayerRenderParameters};
 
-    use super::{Arc, BackendType, Calls, CustomLayerHost, Mutex, Ordering, check};
+    use super::{Arc, BackendType, Calls, LendingHost, Mutex, Ordering, PrerenderParameters, RenderParameters, check};
 
     /// The quad's corners in clip space, the middle half of the frame, as
     /// `QUAD_WGSL` draws it.
@@ -726,14 +875,14 @@ float4 ps() : SV_Target {
         }
     }
 
-    impl CustomLayerHost for Host {
-        fn prerender(&self, parameters: &mut CustomLayerPrerenderParameters<'_>) {
+    impl LendingHost for Host {
+        fn prerender(&self, parameters: &mut PrerenderParameters<'_>) {
             let encoder = parameters.encoder.downcast_ref::<mln_d3d12::CustomLayerEncoder>().expect("D3D12");
             let _: &ID3D12GraphicsCommandList = &encoder.command_list;
             self.calls.prerender(parameters);
         }
 
-        fn render(&self, parameters: &mut CustomLayerRenderParameters<'_>) {
+        fn render(&self, parameters: &mut RenderParameters<'_>) {
             self.calls.render(parameters);
             let (width, height) = (parameters.frame.width, parameters.frame.height);
             let pass = parameters.pass.downcast_ref::<mln_d3d12::CustomLayerPass>().expect("a D3D12 pass");
@@ -778,9 +927,7 @@ float4 ps() : SV_Target {
 mod ending {
     use mln_style::Edit;
 
-    use super::{
-        Arc, AtomicUsize, BackendType, Custom, CustomLayerHost, HeadlessFrontend, Map, Ordering, Queue, session,
-    };
+    use super::{Arc, AtomicUsize, BackendType, HeadlessFrontend, LendingHost, Map, Ordering, Queue, lends, session};
 
     /// A host that draws nothing, and counts how it ended.
     #[derive(Default)]
@@ -789,7 +936,7 @@ mod ending {
         losses: AtomicUsize,
     }
 
-    impl CustomLayerHost for Host {
+    impl LendingHost for Host {
         fn deinitialize(&self) {
             self.deinitializations.fetch_add(1, Ordering::Relaxed);
         }
@@ -842,7 +989,7 @@ mod ending {
         check_end(|frontend, map| {
             map.edit_style(|style| style.apply(Edit::RemoveLayer("quad".to_owned()))).expect("the layer");
             map.edit_style(|style| {
-                style.add_layer(Custom::layer(style.registry(), "quad", Arc::new(Host::default())), None)
+                style.add_layer(lends::layer(style.registry(), "quad", Arc::new(Host::default())), None)
             })
             .expect("the new host");
             frontend.as_mut().unwrap().render(map).expect("a frame");
@@ -857,5 +1004,24 @@ mod ending {
     #[test]
     fn dropping_the_renderer_deinitializes() {
         check_end(|frontend, _| drop(frontend.take()));
+    }
+
+    /// A renderer whose graphics objects are lost tells the host that drew
+    /// so, once, and never that it stopped.
+    #[test]
+    fn a_lost_context_loses_the_hosts_objects() {
+        for &backend in BACKENDS {
+            let run_loop = Queue::new();
+            let host = Arc::new(Host::default());
+            let Some((mut frontend, mut map)) = session(backend, Arc::<Host>::clone(&host), None, &run_loop) else {
+                continue;
+            };
+            frontend.render(&mut map).expect("a frame");
+            frontend.renderer().lose_context();
+            assert_eq!(host.losses.load(Ordering::Relaxed), 1, "{backend:?}");
+            drop(frontend);
+            assert_eq!(host.losses.load(Ordering::Relaxed), 1, "{backend:?}");
+            assert_eq!(host.deinitializations.load(Ordering::Relaxed), 0, "{backend:?}");
+        }
     }
 }

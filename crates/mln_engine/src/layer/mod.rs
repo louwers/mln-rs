@@ -38,7 +38,8 @@
 //!    layer may draw into targets of its own first
 //!    ([`Draws::target`](crate::draw::Draws::target)), or ask for the
 //!    backend's own commands ([`Draws::lend`](crate::draw::Draws::lend),
-//!    [`Layer::lend`]).
+//!    [`Layer::lend`]), and free what it makes with them once the GPU is
+//!    done with it ([`AfterGpu`](crate::draw::AfterGpu)).
 //!
 //! [`Layer::evaluate`] says whether and how the layer draws with its freshly
 //! evaluated values ([`Evaluation`]); [`Layer::update`] brings up to date
@@ -119,8 +120,6 @@ pub use crate::layer::render_layer::{
 };
 pub use crate::layer::tile_input::{Features, LayerBucket, NoTiles, RasterTile, TileData, TileInput};
 pub use crate::layer::tile_layout::Resolved;
-#[doc(hidden)]
-pub use crate::layers::custom::EndedHosts;
 pub use crate::query::feature_index::QueryRegion;
 #[doc(hidden)]
 pub use crate::render::terrain::SurfaceLight;

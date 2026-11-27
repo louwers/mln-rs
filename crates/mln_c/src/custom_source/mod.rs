@@ -3,12 +3,10 @@
 //! demand. A source holds the host's tile functions, which its origin's
 //! provider calls on a pool thread with a [`CustomSourceHandle`] that the
 //! host answers through. The runtimes that the C API makes register both
-//! types ([`registry`]).
+//! types (`crate::registry`).
 
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
-use mln_builtins::register_builtins;
-use mln_engine::{Registry, RegistryBuilder};
 use mln_style::error::Error;
 use mln_style::geo::LatLngBounds;
 use mln_style::tile_id::CanonicalTileID;
@@ -20,22 +18,6 @@ mod vector;
 
 pub(crate) use geometry::{CustomGeometrySourceOptions, CustomGeometrySourceType, TileOptions};
 pub(crate) use vector::{CustomVectorSourceOptions, CustomVectorSourceType, CustomVectorTileData, TileDataFormat};
-
-/// The registry of the C API's runtimes and tile workers: the built-ins and
-/// the custom source types.
-pub(crate) fn registry() -> Arc<Registry> {
-    static REGISTRY: LazyLock<Arc<Registry>> = LazyLock::new(|| {
-        let mut builder = RegistryBuilder::new();
-        // Into an empty builder, the built-ins and the custom source types,
-        // whose names differ, register.
-        let registered = register_builtins(&mut builder)
-            .and_then(|()| builder.add_source_type::<CustomGeometrySourceType>())
-            .and_then(|()| builder.add_source_type::<CustomVectorSourceType>());
-        debug_assert_eq!(registered, Ok(()));
-        builder.build()
-    });
-    Arc::clone(&REGISTRY)
-}
 
 /// Called with the canonical ID of a tile that the map needs, or no longer
 /// needs, and the handle that the host answers through. It runs on a pool

@@ -15,7 +15,7 @@ use mln_engine::exec::queue::Queue;
 use mln_engine::map::Map;
 use mln_engine::text::GlyphCache;
 use mln_engine::text::local_fonts::LocalGlyphs;
-use mln_engine::{Renderer, RendererEvent, RendererEvents, UpdateParameters, UpdateReader};
+use mln_engine::{Registry, Renderer, RendererEvent, RendererEvents, UpdateParameters, UpdateReader};
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_runtime::{BackendRef, BackendType, Device, DeviceOptions, GlApi, LocalTarget};
 use mln_style::bitmap::PremultipliedImage;
@@ -46,6 +46,9 @@ pub struct HeadlessFrontend {
     glyph_cache: Arc<GlyphCache>,
     /// The local fonts the renderer draws from: none unless set.
     local_glyphs: LocalGlyphs,
+    /// The layer and source types the renderer draws: the attached map's,
+    /// or the built-ins before the frontend attaches.
+    registry: Arc<Registry>,
     /// The calling thread's queue, which [`render`](Self::render) runs.
     queue: Queue<()>,
     /// Where the renderer's background work runs.
@@ -132,6 +135,7 @@ impl HeadlessFrontend {
             target,
             glyph_cache,
             local_glyphs: LocalGlyphs::default(),
+            registry: mln_builtins::registry(),
             queue: queue.clone(),
             pool: pool.clone(),
             reports_to: Arc::default(),
@@ -177,7 +181,7 @@ impl HeadlessFrontend {
     }
 
     /// Renders `map` from now on: the frontend reads the map's updates, and
-    /// its renderer reports to the map. It sets the map's waker to
+    /// its renderer, which draws the map's registry, reports to the map. It sets the map's waker to
     /// [`waker`](Self::waker), which [`render`](Self::render) needs: an owner
     /// that sets a waker of its own after must have it wake the queue too.
     /// Attaching to the map it renders already does nothing.
@@ -185,6 +189,12 @@ impl HeadlessFrontend {
         let reader = map.update_reader();
         if self.updates.as_ref().is_some_and(|updates| updates.ptr_eq(&reader)) {
             return;
+        }
+        if !Arc::ptr_eq(&self.registry, map.registry()) {
+            self.registry = Arc::clone(map.registry());
+            if let Some(stats) = self.target.tear_down_renderer() {
+                self.stats = stats;
+            }
         }
         let events = map.renderer_events();
         *self.reports_to.lock() = Some(events.clone());
@@ -207,9 +217,10 @@ impl HeadlessFrontend {
     }
 
     /// The renderer, made on first use, which reports to the attached map
-    /// and draws the built-in registrations (`mln_builtins::registry`).
+    /// and draws its registry, or before the frontend attaches the built-in
+    /// registrations (`mln_builtins::registry`).
     pub fn renderer(&mut self) -> &mut Renderer {
-        let HeadlessFrontend { target, pixel_ratio, glyph_cache, local_glyphs, pool, reports_to, .. } = self;
+        let HeadlessFrontend { target, pixel_ratio, glyph_cache, local_glyphs, registry, pool, reports_to, .. } = self;
         target.renderer_or(|gpu| {
             let reports_to = Arc::clone(reports_to);
             let events = reports_to.lock().clone();
@@ -218,7 +229,7 @@ impl HeadlessFrontend {
                 *pixel_ratio,
                 local_glyphs.clone(),
                 Arc::clone(glyph_cache),
-                mln_builtins::registry(),
+                Arc::clone(registry),
                 Arc::new(move || {
                     let events = reports_to.lock().clone();
                     if let Some(events) = events {

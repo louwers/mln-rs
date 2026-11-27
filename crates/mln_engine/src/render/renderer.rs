@@ -14,7 +14,6 @@ use crate::draw::context::Context;
 use crate::draw::draws::{DrawGroups, DrawOrder};
 use crate::exec::event_queue::Waker;
 use crate::exec::pool::Pool;
-use crate::layers::custom::end_hosts;
 use crate::render::clip_masks::ClipMasks;
 use crate::render::events::{RenderMode, RendererEvent, RendererEvents};
 use crate::render::frame::Frame;
@@ -77,8 +76,8 @@ pub struct RenderTimings {
 ///
 /// [`tear_down`](Self::tear_down) frees the renderer's GPU objects. A
 /// renderer dropped without it leaves them to the `Gpu`, which frees them
-/// when it drops, and its custom layers' hosts hear that their graphics
-/// objects are lost.
+/// when it drops, and runs the work after the GPU that its layers queued as
+/// lost ([`GpuEnd::Lost`](crate::draw::GpuEnd::Lost)).
 pub struct Renderer {
     orchestrator: RenderOrchestrator,
     encoder: Encoder,
@@ -292,8 +291,8 @@ impl Renderer {
     /// sources, tiles, layers and placement. Returns the frame to draw,
     /// which the host [renders](Self::render) into a frame of its target,
     /// or `None` when there is nothing to draw: a still image that hasn't
-    /// loaded yet. Custom layers that the update removed or gave a new host
-    /// end on `gpu`.
+    /// loaded yet. The work after the GPU that layers queued
+    /// ([`AfterGpu`](crate::draw::AfterGpu)) runs once `gpu` finished.
     pub fn update(&mut self, gpu: &mut dyn Gpu, update_parameters: &Arc<UpdateParameters>) -> Option<UpdatedFrame> {
         let orchestrator = &mut self.orchestrator;
         // Whether terrain draws depends on whether the backend has its shader.
@@ -301,7 +300,7 @@ impl Renderer {
         let frame = orchestrator.update(update_parameters);
         report(orchestrator, self.events.as_ref());
         let encoder = &mut self.encoder;
-        end_hosts(gpu, orchestrator.take_ended_hosts());
+        encoder.context.after_gpu().finish(gpu);
         if std::mem::take(&mut encoder.shaders_replaced) {
             encoder.context.release_shaders();
         }
@@ -481,11 +480,13 @@ impl Renderer {
         self.orchestrator.tile_cache_enabled()
     }
 
-    /// Tells the hosts of the custom layers that the renderer's graphics
-    /// objects are lost, so that they forget theirs, and lets go of them.
-    /// Call it before the renderer goes when its device or target went first.
-    pub fn lose_custom_layers(&mut self) {
-        self.orchestrator.visit_render_layers(|layer| layer.lose_context());
+    /// Drops every layer, and runs the work after the GPU as lost
+    /// ([`GpuEnd::Lost`](crate::draw::GpuEnd::Lost)). Call it only before
+    /// the renderer goes, when its device or target went first: the
+    /// renderer's other GPU objects stay those of the lost device.
+    pub fn lose_context(&mut self) {
+        self.orchestrator.leave_layers();
+        self.encoder.context.after_gpu().lose();
     }
 
     /// Lets go of what the orchestrator caches, destroys what it and the
@@ -510,28 +511,27 @@ impl Renderer {
     }
 
     /// Lets go of the map's data: its sources, tiles and layers, which the
-    /// next update loads again. The custom layers that go hear through
-    /// `gpu` that the renderer stopped.
+    /// next update loads again. The work after the GPU runs once `gpu`
+    /// finished.
     pub fn clear_data(&mut self, gpu: &mut dyn Gpu) {
         self.orchestrator.clear_data();
-        end_hosts(gpu, self.orchestrator.take_ended_hosts());
+        self.encoder.context.after_gpu().finish(gpu);
         report(&mut self.orchestrator, self.events.as_ref());
     }
 
-    /// Destroys the renderer's GPU objects on `gpu`, and tells its custom
-    /// layers' hosts that it stopped. Returns its rendering stats as it
-    /// leaves them, with all its resources released.
+    /// Destroys the renderer's GPU objects on `gpu`, and runs the work after
+    /// the GPU once `gpu` finished. Returns its rendering stats as it leaves
+    /// them, with all its resources released.
     pub fn tear_down(self, gpu: &mut dyn Gpu) -> RenderingStats {
         let Renderer { mut orchestrator, mut encoder, .. } = self;
-        // The layers' GPU objects go to the context's queue, and their
-        // custom layers' hosts to the ended ones.
+        // The layers' GPU objects go to the context's queue, and their work
+        // after the GPU to its queue.
         orchestrator.leave_layers();
-        let ended = orchestrator.take_ended_hosts();
         drop(orchestrator);
         encoder.clip_masks = ClipMasks::default();
         encoder.layer_composite = LayerComposite::default();
         encoder.context.tear_down(gpu);
-        end_hosts(gpu, ended);
+        encoder.context.after_gpu().finish(gpu);
         encoder.context.stats()
     }
 }

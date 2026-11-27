@@ -22,7 +22,9 @@
 //! A layer sees its frame as a [`LayerFrame`]: the map's, or a drape's. A
 //! layer that draws with the backend's own commands asks the frame to lend
 //! them ([`Draws::lend`]), at a time in the frame ([`LendAt`]), and gets them
-//! with the frame and where it draws the map ([`Lent`]).
+//! with the frame and where it draws the map ([`Lent`]). What it makes with
+//! them, the engine doesn't know of: the layer frees it once the GPU is done
+//! with it, through work it queues for after the GPU ([`AfterGpu`]).
 //!
 //! The objects and their handles belong to the renderer's thread.
 //!
@@ -30,6 +32,7 @@
 //! (`context`) keeps the stores of what draws share, and the queue that
 //! releases it in order.
 
+pub(crate) mod after_gpu;
 pub(crate) mod atlas_binding;
 pub(crate) mod buffer;
 pub(crate) mod context;
@@ -82,6 +85,7 @@ pub fn texture_size(size: mln_style::size::Size) -> mln_gfx::Size {
     mln_gfx::Size::new(size.width, size.height)
 }
 
+pub use crate::draw::after_gpu::{AfterGpu, GpuEnd};
 pub use crate::draw::atlas_binding::AtlasBinding;
 pub use crate::draw::context::Context;
 pub use crate::draw::draws::{Depth, Draw, Draws, Group, LayerFrame, LendAt, Lent};

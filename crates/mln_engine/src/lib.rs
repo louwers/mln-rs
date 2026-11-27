@@ -16,7 +16,6 @@ pub mod layer;
 // Each layer type's programs and the engine's, public for the backends'
 // tests, which compile them. Not API.
 #[doc(hidden)]
-pub mod layers;
 pub mod map;
 #[cfg(feature = "sqlite")]
 pub mod offline;
@@ -35,10 +34,7 @@ pub mod tile;
 pub mod tile_store;
 pub mod worker;
 
-pub use layers::custom::{
-    Custom, CustomHost, CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerRenderParameters,
-};
-pub use registry::{Registry, RegistryBuilder, register_layer_types};
+pub use registry::{Registry, RegistryBuilder};
 pub use render::events::{
     FontStack, GlyphRange, RenderMode, RendererEvent, RendererEvents, RenderingStats, TileOperation,
 };

@@ -27,6 +27,7 @@ use mln_style::size::Size;
 use mln_style::unitbezier::UnitBezier;
 use parking_lot::Mutex;
 
+use crate::support::lends::{self, LendingHost};
 use crate::support::{EventLog, TIMEOUT, eventually, result_of, runtime, wait, wait_err};
 
 const SIZE: Size = Size { width: 64, height: 64 };
@@ -1666,21 +1667,21 @@ fn cluster_queries_read_a_clustered_source() {
 
 // MARK: - Panics
 
-/// A custom layer whose drawing hits a bug.
+/// A layer whose drawing hits a bug.
 struct PanickingLayer;
 
-impl mln_engine::CustomLayerHost for PanickingLayer {
-    fn prerender(&self, _parameters: &mut mln_engine::CustomLayerPrerenderParameters<'_>) {
+impl LendingHost for PanickingLayer {
+    fn lend(&self, _at: mln_engine::draw::LendAt, _raw: &mut dyn std::any::Any) {
         panic!("a bug in the library");
     }
 }
 
 #[test]
 fn a_panic_on_the_sessions_thread_fails_the_session() {
-    let runtime = runtime();
+    let runtime = lends::runtime();
     let map = red_map(&runtime);
     let session = attach(&map);
-    wait(map.add_custom_layer("panics", Arc::new(PanickingLayer), None));
+    wait(lends::add_layer(&map, "panics", PanickingLayer));
     demand(&session, DemandMode::Force, 1);
     let result = take_one(&session);
     assert_eq!((Some(1), FrameDisposition::Failed), (result.token, result.disposition));
@@ -1714,21 +1715,21 @@ fn a_runtime_that_a_panic_stopped_ends_the_work_of_its_sessions() {
     wait(map.release());
 }
 
-/// A custom layer whose teardown hits a bug.
+/// A layer whose teardown hits a bug.
 struct PanickingTeardown;
 
-impl mln_engine::CustomLayerHost for PanickingTeardown {
-    fn deinitialize(&self) {
+impl LendingHost for PanickingTeardown {
+    fn end(&self, _end: mln_engine::draw::GpuEnd) {
         panic!("a bug in the library");
     }
 }
 
 #[test]
 fn a_panic_in_a_detach_still_detaches_the_session() {
-    let runtime = runtime();
+    let runtime = lends::runtime();
     let map = red_map(&runtime);
     let session = attach(&map);
-    wait(map.add_custom_layer("panics", Arc::new(PanickingTeardown), None));
+    wait(lends::add_layer(&map, "panics", PanickingTeardown));
     demand(&session, DemandMode::Force, 1);
     assert_eq!(FrameDisposition::Rendered, take_one(&session).disposition);
     wait(session.detach());

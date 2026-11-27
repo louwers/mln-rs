@@ -14,6 +14,8 @@ use mln_runtime::{
 use mln_style::size::Size;
 use parking_lot::{Condvar, Mutex};
 
+pub(crate) mod lends;
+
 pub(crate) const TIMEOUT: Duration = Duration::from_secs(10);
 
 pub(crate) const EMPTY_STYLE: &str = r#"{"version":8,"sources":{},"layers":[]}"#;

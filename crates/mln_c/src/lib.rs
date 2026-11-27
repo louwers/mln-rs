@@ -63,6 +63,7 @@ mod parse_thread;
 mod process_exit;
 mod projection;
 mod query;
+mod registry;
 mod render_session;
 mod render_target;
 mod resources;

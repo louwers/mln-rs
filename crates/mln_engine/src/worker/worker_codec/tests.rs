@@ -503,11 +503,7 @@ fn properties_cross_while_a_paint_property_transitions() {
     render_layer.transition(&TransitionParameters::new(Some(start), TransitionOptions::default()));
     render_layer.evaluate(&at(start));
     let transition = TransitionOptions::new(Some(Duration::from_millis(300)), None, true);
-    render_layer.restyle(
-        &TransitionParameters::new(Some(start), transition),
-        convert(&constant).style(),
-        &mut Vec::new(),
-    );
+    render_layer.restyle(&TransitionParameters::new(Some(start), transition), convert(&constant).style());
     render_layer.evaluate(&at(start + Duration::from_millis(100)));
     let transitioning = Arc::clone(&render_layer.base().evaluated_properties);
     assert!(!EvaluatedLayer::<Fill>::recover(&transitioning).unwrap().paint.fill_color.is_constant());
