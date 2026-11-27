@@ -1,12 +1,13 @@
 //! Textures of a layer's own that its draws draw into ahead of a frame and
 //! that its other draws sample: [`Target`]s.
 //!
-//! A layer makes a target of a size ([`Resources::target`]) and keeps it. In a frame it pushes the
+//! A layer makes a target of a size and a clear color
+//! ([`Resources::target`]) and keeps it. In a frame it pushes the
 //! draws into the target into the target's group of its draws
 //! ([`Draws::target`](crate::draw::draws::Draws::target)), and binds the
 //! target's [`texture`](Target::texture) to the draws that sample it. The
 //! engine makes the target's texture, and the depth it draws with, of its
-//! size; clears it and draws the group into it before the frame, or the
+//! size; clears it to its clear color and draws the group into it before the frame, or the
 //! drape, whose draws sample it; and keeps whether it holds what was drawn
 //! into it ([`Target::holds`]), so that a layer whose target holds the same
 //! from frame to frame draws into it once.
@@ -35,6 +36,8 @@ pub struct Target {
 /// What the context keeps of a [`Target`].
 pub(crate) struct TargetObjects {
     size: Size,
+    /// The color the target clears to before its draws.
+    clear: Rgba,
     /// The depth the target's draws draw with, of its size, made with its
     /// first pass where the backend draws with one
     /// ([`Context::render_target_depth`]).
@@ -49,7 +52,7 @@ pub(crate) struct TargetObjects {
 impl Target {
     /// See [`Resources::target`]: of the type the backend draws into for
     /// `type_` ([`Context::render_target_type`]).
-    pub(crate) fn new(context: &mut Context, size: Size, type_: TextureChannelDataType) -> Target {
+    pub(crate) fn new(context: &mut Context, size: Size, type_: TextureChannelDataType, clear: Rgba) -> Target {
         let format = texture_format(TexturePixelType::RGBA, context.render_target_type(type_));
         let texture = context.add_texture_with(|texture| {
             texture.set_size(size);
@@ -62,7 +65,7 @@ impl Target {
                 ..SamplerState::default()
             });
         });
-        let key = context.add_target(TargetObjects { size, depth: None, holds: false, drawn: false });
+        let key = context.add_target(TargetObjects { size, clear, depth: None, holds: false, drawn: false });
         Target { key, texture }
     }
 
@@ -84,7 +87,7 @@ impl Target {
         let Some(objects) = context.target_mut(self).filter(|objects| objects.size != size) else {
             return;
         };
-        *objects = TargetObjects { size, depth: None, holds: false, drawn: false };
+        *objects = TargetObjects { size, clear: objects.clear, depth: None, holds: false, drawn: false };
         if let Some(mut texture) = context.texture_mut(&self.texture) {
             texture.set_size(size);
         }
@@ -98,7 +101,7 @@ impl Target {
         res.context.target(self).is_some_and(|objects| objects.holds)
     }
 
-    /// Clears the target to opaque black and its depth to 1, and runs
+    /// Clears the target to its clear color and its depth to 1, and runs
     /// `draw` with `parameters` into the target in the opaque pass and then
     /// the translucent one, each as the first layer of a frame of its own,
     /// outside any other pass, through `gpu`, the context's. `draw` returns
@@ -139,14 +142,14 @@ impl Target {
         }
     }
 
-    /// The pass that clears the target to opaque black and its depth to 1,
+    /// The pass that clears the target to its clear color and its depth to 1,
     /// making them through `gpu`, the context's.
     fn pass(&self, gpu: &mut dyn Gpu, context: &mut Context) -> Result<OpenPass, GpuError> {
         let color = context.create_texture(gpu, &self.texture)?;
         let format = context.texture(&self.texture).ok_or(GpuError::UnknownId("texture"))?.format();
         let depth_format = context.render_target_depth();
         let objects = context.target(self).ok_or(GpuError::UnknownId("render target"))?;
-        let size = objects.size;
+        let (size, clear) = (objects.size, objects.clear);
         if objects.depth.is_none()
             && let Some(depth_format) = depth_format
         {
@@ -158,7 +161,7 @@ impl Target {
         let depth = context.target(self).and_then(|objects| objects.depth.as_ref()).map(GpuTexture::id);
         Ok(OpenPass {
             label: "render target",
-            color: Some(ColorAttachment { texture: color, load: LoadOp::Clear(Rgba::new(0.0, 0.0, 0.0, 1.0)) }),
+            color: Some(ColorAttachment { texture: color, load: LoadOp::Clear(clear) }),
             depth_stencil: depth.map(|texture| DepthStencilAttachment {
                 texture,
                 depth: LoadOp::Clear(1.0),

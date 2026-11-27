@@ -23,7 +23,7 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, Rgba};
 use mln_style::StyleValue as _;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_intersect};
@@ -178,7 +178,10 @@ impl Layer for RenderHeatmapLayer {
     ) {
         let viewport_size = cx.frame.view.size();
         let size = mln_gfx::Size::new(viewport_size.width / 2, viewport_size.height / 2);
-        let target = self.target.get_or_insert_with(|| cx.res.target(size, TextureChannelDataType::HalfFloat));
+        // The tiles' draws add their heat to none.
+        let target = self
+            .target
+            .get_or_insert_with(|| cx.res.target(size, TextureChannelDataType::HalfFloat, Rgba::TRANSPARENT));
         target.set_size(&mut cx.res, size);
         Self::draw_tiles(cx, render_tiles, out.target(target));
         self.draw_texture(cx, out);

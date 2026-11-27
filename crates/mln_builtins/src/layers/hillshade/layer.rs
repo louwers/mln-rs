@@ -32,7 +32,7 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, Size};
+use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, Rgba, Size};
 use mln_style::color::Color;
 use mln_style::constants::EXTENT;
 use mln_style::layers::Hillshade;
@@ -434,8 +434,9 @@ impl DemTarget {
             let dem = dem.dem();
             (dem.dim as u16, dem.stride, dem.encoding, dem.image().clone())
         };
-        let target =
-            res.target(Size::new(u32::from(tilesize), u32::from(tilesize)), TextureChannelDataType::UnsignedByte);
+        // The draw into the target covers every texel, unblended.
+        let size = Size::new(u32::from(tilesize), u32::from(tilesize));
+        let target = res.target(size, TextureChannelDataType::UnsignedByte, Rgba::TRANSPARENT);
 
         // Nearest, as the Sobel kernel samples exact texel values.
         let dem = res.context.add_texture_with(|texture| {

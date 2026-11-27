@@ -11,7 +11,7 @@ use mln_gfx::gpu::{
 };
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::types::TextureChannelDataType;
-use mln_gfx::{ColorMode, Size};
+use mln_gfx::{ColorMode, Rgba, Size};
 
 use crate::draw::buffer::{self, Buffer};
 use crate::draw::context::Context;
@@ -49,11 +49,12 @@ impl<'a> Resources<'a> {
     }
 
     /// A target of `size`, whose texture's channels are of `type_`, or of
-    /// the type the backend draws into for it. Its texture is sampled
-    /// linearly and clamped to its edges.
+    /// the type the backend draws into for it, and which clears to `clear`
+    /// before its draws. Its texture is sampled linearly and clamped to its
+    /// edges.
     #[must_use]
-    pub fn target(&mut self, size: Size, type_: TextureChannelDataType) -> Target {
-        Target::new(self.context, size, type_)
+    pub fn target(&mut self, size: Size, type_: TextureChannelDataType, clear: Rgba) -> Target {
+        Target::new(self.context, size, type_, clear)
     }
 }
 

@@ -11,6 +11,9 @@ pub struct Rgba {
 }
 
 impl Rgba {
+    /// No color and no coverage: all four zero.
+    pub const TRANSPARENT: Rgba = Rgba::new(0.0, 0.0, 0.0, 0.0);
+
     #[must_use]
     pub const fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
         Rgba { r, g, b, a }
