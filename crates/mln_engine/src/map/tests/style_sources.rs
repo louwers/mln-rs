@@ -19,8 +19,8 @@ use crate::map::{Map, MapEvent, MapOptions};
 use crate::storage::response::{Reason, ResourceError};
 use crate::storage::stub_file_source::{ResponseType, StubFileSource};
 use crate::storage::{Kind, Response};
-use crate::tests::builtin_sources::geojson::{create_geojson_data, geojson_data, set_data};
-use crate::tests::builtin_sources::image::set_image;
+use crate::tests::types::geojson::{create_geojson_data, geojson_data, set_data};
+use crate::tests::types::image::set_image;
 
 const EMPTY_GEOJSON_SOURCE: &str = r#"{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}"#;
 
@@ -370,22 +370,17 @@ fn inline_geojson_loads_in_the_background() {
     assert_eq!(3, feature_count(&map, "source"));
 }
 
-// GeoJSON that the style gives but that isn't GeoJSON, or that can't be
-// clustered, fails its source as it loads, not the style: the style loads,
-// and the source has no data.
+// GeoJSON that the style gives but that doesn't describe its source fails
+// the source as it loads, not the style: the style loads, and the source
+// has no data.
 #[test]
 fn invalid_inline_geojson_fails_the_source_not_the_style() {
-    for data in [
-        r#"{"type":"Nothing"}"#,
-        r#"{"type":"FeatureCollection","features":[{"type":"Feature","properties":{},"geometry":{"type":"LineString","coordinates":[[0,0],[1,1]]}}]}"#,
-    ] {
-        let run_loop = Queue::<()>::new();
-        let mut map = map_over(&StubFileSource::on_queue(&run_loop, ResponseType::Asynchronous));
-        map.load_style_json(&format!(
-            r#"{{"version":8,"sources":{{"source":{{"type":"geojson","cluster":true,"data":{data}}}}},"layers":[]}}"#
-        ));
-        assert!(map.source("source").is_some(), "the style parsed with {data}");
-        run_until(&mut map, &run_loop, Map::style_loaded);
-        assert!(map.source("source").and_then(geojson_data).is_none(), "{data}");
-    }
+    let run_loop = Queue::<()>::new();
+    let mut map = map_over(&StubFileSource::on_queue(&run_loop, ResponseType::Asynchronous));
+    map.load_style_json(
+        r#"{"version":8,"sources":{"source":{"type":"geojson","data":{"type":"Nothing"}}},"layers":[]}"#,
+    );
+    assert!(map.source("source").is_some(), "the style parsed");
+    run_until(&mut map, &run_loop, Map::style_loaded);
+    assert!(map.source("source").and_then(geojson_data).is_none());
 }

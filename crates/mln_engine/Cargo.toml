@@ -170,8 +170,8 @@ web-sys.workspace = true
 httpmock.workspace = true
 # The built-in registrations of the integration tests' maps.
 mln_builtins = { package = "mln-rs-builtins", path = "../mln_builtins" }
-# What the unit tests' copy of mln_builtins' GeoJSON source type cuts and
-# clusters with (src/tests/mod.rs).
+# What the unit tests' GeoJSON source type cuts its tiles with
+# (src/tests/types/geojson.rs).
 mln_geojson.workspace = true
 mln_headless = { package = "mln-rs-headless", path = "../mln_headless" }
 mln_webgpu = { package = "mln-rs-webgpu", path = "../mln_webgpu" }

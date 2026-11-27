@@ -51,24 +51,19 @@ mod terrain_test;
 // The VectorTile tests of test/tile/vector_tile.test.cpp.
 mod vector_tile_test;
 
-// The style specification's source types, whose engine halves are
-// mln_builtins', above this crate: the tests compile its sources module into
-// this crate's test build, against this crate as `mln_engine`, to load and
-// draw sources of those types.
-#[path = "../../../mln_builtins/src/sources/mod.rs"]
-#[expect(unreachable_pub, unused_imports, reason = "mln_builtins' API, of which the tests use a part")]
-pub(crate) mod builtin_sources;
+// The tests' own source types.
+pub(crate) mod types;
 
 /// The registrations that the tests' maps, renderers and styles use: the
-/// specification's expression functions, layer types and source types, as
-/// `mln_builtins::registry` makes them.
+/// specification's expression functions, the engine's layer types and the
+/// tests' source types.
 pub(crate) fn registry() -> std::sync::Arc<crate::Registry> {
     static REGISTRY: std::sync::LazyLock<std::sync::Arc<crate::Registry>> = std::sync::LazyLock::new(|| {
         let mut builder = crate::RegistryBuilder::new();
         mln_style::expression::functions::register_builtin_functions(builder.functions_mut())
             .and_then(|()| crate::register_layer_types(&mut builder))
-            .and_then(|()| builtin_sources::register_source_types(&mut builder))
-            .expect("the built-ins register into an empty builder");
+            .and_then(|()| types::register_source_types(&mut builder))
+            .expect("the tests' types register into an empty builder");
         builder.build()
     });
     std::sync::Arc::clone(&REGISTRY)
@@ -169,21 +164,21 @@ pub(crate) fn given(kind: mln_style::layer::SourceKind) -> Box<dyn crate::source
     }
 }
 
-/// Port-only: the origin that the built-in type of `source` supplies.
+/// Port-only: the origin that the tests' type of `source` supplies.
 pub(crate) fn origin_of(source: &mln_style::Source) -> Box<dyn crate::source::erased::ErasedOrigin> {
     let registry = registry();
-    let source_type = registry.source_type(source.info().name).expect("a built-in source type");
+    let source_type = registry.source_type(source.info().name).expect("a source type of the tests");
     match source_type.supply(source) {
         crate::source::Supplied::Tiles(origin) => origin,
         crate::source::Supplied::Image(_) => panic!("a source with tiles"),
     }
 }
 
-/// Port-only: how the built-in type of `source`, an image source, reads its
+/// Port-only: how the tests' type of `source`, an image source, reads its
 /// image.
 pub(crate) fn image_of(source: &mln_style::Source) -> crate::source::ImageOf {
     let registry = registry();
-    let source_type = registry.source_type(source.info().name).expect("a built-in source type");
+    let source_type = registry.source_type(source.info().name).expect("a source type of the tests");
     match source_type.supply(source) {
         crate::source::Supplied::Image(image_of) => image_of,
         crate::source::Supplied::Tiles(_) => panic!("an image source"),
@@ -192,7 +187,7 @@ pub(crate) fn image_of(source: &mln_style::Source) -> crate::source::ImageOf {
 
 /// Port-only: the tileset origin's state of `tile`, a tile of a tileset
 /// source.
-pub(crate) fn tileset_tile(tile: &crate::tile_store::tile::Tile) -> &builtin_sources::tileset::TilesetTile {
+pub(crate) fn tileset_tile(tile: &crate::tile_store::tile::Tile) -> &types::tileset::TestTilesetTile {
     let state = tile.load.state.as_deref().expect("the origin's state of the tile");
     state.downcast_ref().expect("a tileset tile")
 }
@@ -241,7 +236,7 @@ impl OneTile {
     }
 
     /// Tiles `ids` of `source`, in `store`, whose data comes from the
-    /// origin its built-in type supplies, loaded through `file_source` and
+    /// origin its type supplies, loaded through `file_source` and
     /// laid out for `mode`. The origin takes in `source`, then the tiles'
     /// loads start as a cover starts them.
     pub(crate) fn with_origin(
@@ -432,27 +427,27 @@ pub(crate) fn style(
     })
 }
 
-/// Port-only: the render layer of the layer `style`, of a built-in type.
+/// Port-only: the render layer of the layer `style`, of a type of the registry.
 pub(crate) fn render_layer(
     style: &std::sync::Arc<dyn mln_style::layer::ErasedLayerStyle>,
 ) -> Box<dyn crate::layer::render_layer::RenderLayer> {
     let registry = registry();
-    let layer_type = registry.layer_type(style.info().name).expect("a built-in layer type");
+    let layer_type = registry.layer_type(style.info().name).expect("a layer type of the registry");
     layer_type.create_render_layer(style).expect("a layer of its type")
 }
 
-/// The render source of `source`, through the built-in registry.
+/// The render source of `source`, through the tests' registry.
 pub(crate) fn create_render_source(
     source: &mln_style::Source,
     store: &mut crate::tile_store::store::TileStore,
 ) -> Box<dyn crate::source::render_source::RenderSource> {
-    crate::source::render_source::create(&registry(), source, store).expect("a built-in source type")
+    crate::source::render_source::create(&registry(), source, store).expect("a source type of the tests")
 }
 
 /// `source` with the description that its type knows without a fetch, such
 /// as the tileset or the GeoJSON a style lists, as the map's loader gives it.
 pub(crate) fn ready(source: mln_style::Source) -> mln_style::Source {
-    let source_type = registry().source_type(source.info().name).expect("a built-in source type");
+    let source_type = registry().source_type(source.info().name).expect("a source type of the tests");
     match source_type.plan_load(&source) {
         crate::source::Load::Ready(description) => source.with_description(Some(description)),
         crate::source::Load::Describe => {

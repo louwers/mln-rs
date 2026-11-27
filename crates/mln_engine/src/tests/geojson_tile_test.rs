@@ -10,12 +10,11 @@ use mln_style::property::evaluation::PropertyEvaluationParameters;
 use mln_style::source::SourceData;
 use mln_style::sources::GeoJsonSourceType;
 use mln_style::sources::geojson::GeoJsonSourceOptions;
-use mln_style::tile_id::CanonicalTileID;
 
 use crate::exec::pool::TaskGroup;
 use crate::layer::layer_type::{ErasedEvaluatedLayer, EvaluatedLayer};
 use crate::map::MapMode;
-use crate::tests::builtin_sources::geojson::{Features, GeoJSONData, TileFeatures};
+use crate::tests::types::geojson::TestGeoJson;
 use crate::tests::{OneTile, map_settings, style};
 use crate::tile::OverscaledTileID;
 use crate::worker::tile_workers::TileWorkers;
@@ -34,7 +33,7 @@ impl GeoJSONTileTest {
     /// updates; the tiles get their data before their style.
     fn tiles(
         &self,
-        data: Arc<dyn GeoJSONData>,
+        data: Arc<TestGeoJson>,
         ids: &[OverscaledTileID],
         workers: Box<dyn TileWorkers>,
         synchronous: bool,
@@ -54,14 +53,14 @@ impl GeoJSONTileTest {
 
 /// A GeoJSON source of `data`, whose tiles lay out as they take it in with
 /// `synchronous` updates.
-fn geojson_source(data: Arc<dyn GeoJSONData>, synchronous: bool) -> Source {
+fn geojson_source(data: Arc<TestGeoJson>, synchronous: bool) -> Source {
     let options = GeoJsonSourceOptions { synchronous_update: synchronous, ..GeoJsonSourceOptions::new(Arc::default()) };
     Source::new("source", SourceData::<GeoJsonSourceType>::with_description(options, Arc::new(data)))
 }
 
 /// Gives the GeoJSON source of `tiles` new data, `data`, as `setData` does
 /// on a continuous map: its tiles load it again.
-fn set_data(tiles: &mut OneTile, data: Arc<dyn GeoJSONData>) {
+fn set_data(tiles: &mut OneTile, data: Arc<TestGeoJson>) {
     let source = geojson_source(data, false);
     let (tiles_of_source, ctx) = tiles.store.source_mut(tiles.key).expect("the source");
     tiles_of_source.update_origin(&source, ctx, &map_settings(MapMode::Continuous, None), false).expect("a cover");
@@ -73,32 +72,8 @@ impl Drop for GeoJSONTileTest {
     }
 }
 
-#[derive(Debug)]
-struct FakeGeoJSONData {
-    features: Arc<TileFeatures>,
-}
-
-impl GeoJSONData for FakeGeoJSONData {
-    fn get_tile(&self, _id: &CanonicalTileID) -> Arc<TileFeatures> {
-        Arc::clone(&self.features)
-    }
-
-    fn get_children(&self, _cluster_id: u32) -> Result<Features, Error> {
-        Ok(Features::new())
-    }
-
-    fn get_leaves(&self, _cluster_id: u32, _limit: u32, _offset: u32) -> Result<Features, Error> {
-        Ok(Features::new())
-    }
-
-    fn get_cluster_expansion_zoom(&self, _cluster_id: u32) -> Result<u8, Error> {
-        Ok(0)
-    }
-}
-
-fn point_data() -> Arc<dyn GeoJSONData> {
-    let features = vec![Feature { geometry: Some(Point::new(0i16, 0).into()), ..Feature::default() }];
-    Arc::new(FakeGeoJSONData { features: Arc::new(features) })
+fn point_data() -> Arc<TestGeoJson> {
+    TestGeoJson::every_tile(vec![Feature { geometry: Some(Point::new(0i16, 0).into()), ..Feature::default() }])
 }
 
 fn circle_layer_properties() -> Arc<dyn ErasedEvaluatedLayer> {

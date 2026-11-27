@@ -440,9 +440,8 @@ fn new_data_draws_the_drapes_whose_tiles_changed_again() {
     }"#
     .parse()
     .unwrap();
-    let data = crate::tests::builtin_sources::geojson::create_geojson_data(geojson, &GeoJSONOptions::default_options())
-        .unwrap();
-    map.edit(crate::tests::builtin_sources::geojson::set_data("shapes", Some(data)));
+    let data = crate::tests::types::geojson::create_geojson_data(geojson, &GeoJSONOptions::default_options()).unwrap();
+    map.edit(crate::tests::types::geojson::set_data("shapes", Some(data)));
     // The source indexes its new data on the workers before its tiles lay
     // out again.
     let mut drawn = BTreeSet::new();

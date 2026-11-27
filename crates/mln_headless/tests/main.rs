@@ -26,6 +26,8 @@ mod gtest_memory;
 mod gtest_prefetch;
 // gtests-core: test/api/query.test.cpp.
 mod gtest_query;
+// The built-in source types' tiles as a host of the runtime sees them load.
+mod source_tiles;
 // gtests-core: test/renderer/symbol_rendering.test.cpp (maplibre-native #4628).
 mod gtest_symbol_rendering;
 mod gtest_tile_lod;
