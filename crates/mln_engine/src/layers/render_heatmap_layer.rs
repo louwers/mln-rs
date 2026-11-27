@@ -15,7 +15,6 @@ use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_style::StyleValue as _;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_intersect};
-use mln_style::layer::LayerStyle;
 use mln_style::layers::Heatmap;
 use mln_style::layers::heatmap_layer_properties::{HeatmapPaintProperties, default_heatmap_color};
 use mln_style::size::Size;
@@ -33,11 +32,8 @@ use crate::draw::target::Target;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::SharedVertices;
 use crate::layer::bucket_geometry::{bucket_indexes, bucket_vertices, copied_vertices, paint_vertices};
-use crate::layer::layer_type::LayerType;
 use crate::layer::paint_property_binder::PaintBinders as _;
-use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, Hosted, LayerValues, OnTerrain, PrepareCx, RenderLayer, TileCx, TypedLayer,
-};
+use crate::layer::render_layer::{EvaluateCx, Evaluation, Layer, LayerValues, OnTerrain, PrepareCx, TileCx};
 use crate::layer::tile_input::{Features, TileData};
 use crate::layers::heatmap::programs;
 use crate::layers::heatmap::ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO, HeatmapTexturePropsUBO};
@@ -56,14 +52,6 @@ const IMAGE_SLOT: usize = programs::HEATMAP_TEXTURE.texture_slot("image");
 /// The pass the layer's draws draw in, onto the frame and into its render
 /// target.
 const RENDER_PASS: RenderPass = RenderPass::Translucent;
-
-impl LayerType for Heatmap {
-    type Input = Features<HeatmapLayout>;
-
-    fn render_layer(style: Arc<LayerStyle<Heatmap>>) -> Box<dyn RenderLayer> {
-        Hosted::<RenderHeatmapLayer>::boxed(style)
-    }
-}
 
 pub(crate) struct RenderHeatmapLayer {
     color_ramp: Rc<PremultipliedImage>,
@@ -97,8 +85,9 @@ impl RenderHeatmapLayer {
     }
 }
 
-impl TypedLayer for RenderHeatmapLayer {
-    type Type = Heatmap;
+impl Layer for RenderHeatmapLayer {
+    type Style = Heatmap;
+    type Input = Features<HeatmapLayout>;
     type Tile = StandingDraw;
 
     const TERRAIN: OnTerrain = OnTerrain::Stands { hides_behind_ground: false };
@@ -144,8 +133,8 @@ impl TypedLayer for RenderHeatmapLayer {
     fn tile(
         &mut self,
         cx: &mut TileCx<'_, '_, Self>,
-        tile: FrameTile<'_, Heatmap>,
-        _data: TileData<'_, Heatmap>,
+        tile: FrameTile<'_, RenderHeatmapLayer>,
+        _data: TileData<'_, RenderHeatmapLayer>,
         _previous: Option<StandingDraw>,
     ) -> Option<StandingDraw> {
         let render_data = tile.data_for_pass(RENDER_PASS)?;
@@ -188,7 +177,12 @@ impl TypedLayer for RenderHeatmapLayer {
     /// Pushes the tiles' draws into the layer's target, of half the
     /// view's size, and the layer's draw of the frame, which colors the
     /// target's heat onto it.
-    fn prepare(&mut self, cx: &mut PrepareCx<'_, '_, Self>, render_tiles: &[FrameTile<'_, Heatmap>], out: &mut Draws) {
+    fn prepare(
+        &mut self,
+        cx: &mut PrepareCx<'_, '_, Self>,
+        render_tiles: &[FrameTile<'_, RenderHeatmapLayer>],
+        out: &mut Draws,
+    ) {
         let viewport_size = cx.frame.view.size();
         let size = mln_gfx::Size::new(viewport_size.width / 2, viewport_size.height / 2);
         let target = self.target.get_or_insert_with(|| cx.res.target(size, TextureChannelDataType::HalfFloat));
@@ -201,7 +195,11 @@ impl TypedLayer for RenderHeatmapLayer {
 impl RenderHeatmapLayer {
     /// Pushes the tiles' draws into `target`, the group of the layer's
     /// target, with their meshes in the tiles' values.
-    fn draw_tiles(cx: &mut PrepareCx<'_, '_, Self>, render_tiles: &[FrameTile<'_, Heatmap>], target: &mut Group) {
+    fn draw_tiles(
+        cx: &mut PrepareCx<'_, '_, Self>,
+        render_tiles: &[FrameTile<'_, RenderHeatmapLayer>],
+        target: &mut Group,
+    ) {
         let PrepareCx { base, values, tiles, res, frame, .. } = cx;
 
         let evaluated = &values.evaluated.paint;
