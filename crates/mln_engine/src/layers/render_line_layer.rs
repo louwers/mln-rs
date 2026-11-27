@@ -382,7 +382,7 @@ impl TypedLayer for RenderLineLayer {
             };
             let evaluated = &render_data.layer.paint;
 
-            let Some(mut entry) = cx.tiles.entry(&tile_id) else {
+            let Some(mut entry) = cx.tiles.entry(&tile.id()) else {
                 continue;
             };
             // The draw's attributes read the bucket's vertices in the
