@@ -1,7 +1,7 @@
-// The layer keeps one texture and the quads of one mask per tile contents'
-// id (`textures`, `mask_quads`), in the context's store, which its draws of a
-// tile in the frame and in drapes share. A tile's draw stays until the
-// tile's mask, or an image source's mesh, changes, and is then built again.
+// A tile's draw, with the quads of the tile's mask, stays until the tile's
+// mask, or an image source's mesh, changes, and is then built again. The
+// layer keeps one texture per tile contents' id (`textures`), in the
+// context's store, which outlives the draws that a new mask builds again.
 
 use std::mem::offset_of;
 use std::rc::Rc;
@@ -20,7 +20,7 @@ use mln_style::layers::Raster;
 use mln_style::types::{RasterResamplingType, ResamplingType, TranslateAnchorType};
 
 use super::cast_matrix;
-use crate::buckets::raster_bucket::{MaskQuads, RasterLayoutVertex};
+use crate::buckets::raster_bucket::{RasterLayoutVertex, StoredQuads};
 use crate::draw::context::Context;
 use crate::draw::draws::{Draw, Draws, Group, LayerFrame};
 use crate::draw::identity::SimpleIdentity;
@@ -84,9 +84,7 @@ pub(crate) struct RenderRasterLayer {
 
     /// The texture of each tile's image, by its id.
     textures: HashMap<SimpleIdentity, SharedTexture>,
-    /// The quads of each tile's mask, by the id of its contents.
-    mask_quads: MaskQuads,
-    /// The contents of the frame's tiles, whose textures and quads stay.
+    /// The contents of the frame's tiles, whose textures stay.
     live_contents: HashSet<SimpleIdentity>,
 }
 
@@ -271,7 +269,6 @@ impl TypedLayer for RenderRasterLayer {
             static_geometry: None,
             globe_meshes: GlobeTileMeshCache::new(),
             textures: HashMap::default(),
-            mask_quads: MaskQuads::default(),
             live_contents: HashSet::default(),
         }
     }
@@ -313,7 +310,7 @@ impl TypedLayer for RenderRasterLayer {
                         globe_mesh.indexes(),
                         &globe_mesh.segments,
                     )
-                } else if let Some(quads) = self.mask_quads.get(context, raster.id(), &raster.masking) {
+                } else if let Some(quads) = StoredQuads::of_mask(context, &raster.masking) {
                     raster_geometry(
                         &quads.vertices,
                         quads.vertices.count(),
@@ -353,26 +350,23 @@ impl TypedLayer for RenderRasterLayer {
 
         for tile in render_tiles {
             let tile_id = tile.draw_id();
-            raster_draw(cx.tiles.get_mut(&tile_id).map(|kept| &*kept), tile_id, cx.frame, out.main());
+            raster_draw(cx.tiles.get_mut(&tile.id()).map(|kept| &*kept), tile_id, cx.frame, out.main());
         }
 
         let quad = render_tiles.iter().find_map(|tile| tile.data()).map_or(ImageQuad::TILE, RasterTile::quad);
         Self::share_frame_draws(cx.values, out.main(), &quad);
     }
 
-    /// Drops the textures and quads of the tiles the frame doesn't draw,
-    /// in every frame, including one the layer draws nothing in. The frame's
-    /// draws and its drapes' share the others.
+    /// Drops the textures of the tiles the frame doesn't draw, in every
+    /// frame, including one the layer draws nothing in.
     fn update(&mut self, _cx: UpdateCx<'_, '_, Self>, tiles: &[FrameTile<'_, Raster>]) {
         let live_contents = &mut self.live_contents;
         live_contents.clear();
         live_contents.extend(tiles.iter().filter_map(|tile| Some(tile.data()?.id())));
         self.textures.retain(|id, _| live_contents.contains(id));
-        self.mask_quads.retain(live_contents);
     }
 
     fn release(&mut self) {
         self.textures.clear();
-        self.mask_quads.clear();
     }
 }

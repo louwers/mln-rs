@@ -1,14 +1,11 @@
 // The raster meshes: the quads that draw what a raster or raster-dem tile's
-// mask keeps, which each layer makes of the tiles it draws (`MaskQuads`).
-
-use std::collections::hash_map::Entry;
+// mask keeps, which each layer's value of the tile holds
+// (`StoredQuads::of_mask`).
 
 use geometry::Point;
 use mln_style::constants;
-use mln_style::hash::{HashMap, HashSet};
 
 use crate::draw::context::Context;
-use crate::draw::identity::SimpleIdentity;
 use crate::draw::indexes::{Indexes, SharedIndexes};
 use crate::draw::mesh::Indexed;
 use crate::draw::segment::SegmentBase;
@@ -49,6 +46,16 @@ impl StoredQuads {
         let indexes = context.add_indexes(Indexes::new(indices));
         StoredQuads { vertices, indexes, segments }
     }
+
+    /// The quads of `masking`'s mask in `context`'s stores; `None` where
+    /// it keeps the whole tile or nothing, and the tile draws its quad.
+    pub(crate) fn of_mask(context: &mut Context, masking: &Masking) -> Option<StoredQuads> {
+        if !masking.is_masked() {
+            return None;
+        }
+        let (vertices, indices, segments) = mask_quads(masking.mask());
+        (!vertices.is_empty()).then(|| StoredQuads::new(context, vertices, indices, segments))
+    }
 }
 
 /// The vertices, indices and segments of a quad for each tile of `mask`,
@@ -70,47 +77,4 @@ pub(crate) fn mask_quads(mask: &TileMask) -> (Vec<RasterLayoutVertex>, Vec<u16>,
         triangles.add(&mut vertices, first, [[0, 1, 2], [1, 2, 3]]);
     }
     (vertices, indices, segments)
-}
-
-/// The quads of the masks of the raster or raster-dem tiles a layer draws,
-/// by the id of the tiles' contents, as the layer keeps their textures. The
-/// layer's draws of a tile, in the frame and in its drapes, share them.
-#[derive(Default)]
-pub(crate) struct MaskQuads {
-    /// The quads of each masked contents' mask, with the mask's generation;
-    /// `None` for a mask with none.
-    quads: HashMap<SimpleIdentity, (u64, Option<StoredQuads>)>,
-}
-
-impl MaskQuads {
-    /// The quads of `masking`, the mask of the contents `id`, in `context`'s
-    /// stores: those made before, or new ones if there were none or the mask
-    /// changed since. `None` where there are none to draw, and the tile draws
-    /// its quad.
-    pub(crate) fn get(&mut self, context: &mut Context, id: SimpleIdentity, masking: &Masking) -> Option<&StoredQuads> {
-        if !masking.is_masked() {
-            // The quads of a mask before go.
-            self.quads.remove(&id);
-            return None;
-        }
-        let generation = masking.generation();
-        let (_, quads) = match self.quads.entry(id) {
-            Entry::Occupied(entry) if entry.get().0 == generation => entry.into_mut(),
-            entry => {
-                let (vertices, indices, segments) = mask_quads(masking.mask());
-                let quads = (!vertices.is_empty()).then(|| StoredQuads::new(context, vertices, indices, segments));
-                entry.insert_entry((generation, quads)).into_mut()
-            }
-        };
-        quads.as_ref()
-    }
-
-    /// Drops the quads of the contents not in `live`.
-    pub(crate) fn retain(&mut self, live: &HashSet<SimpleIdentity>) {
-        self.quads.retain(|id, _| live.contains(id));
-    }
-
-    pub(crate) fn clear(&mut self) {
-        self.quads.clear();
-    }
 }

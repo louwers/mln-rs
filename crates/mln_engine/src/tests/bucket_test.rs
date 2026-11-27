@@ -23,9 +23,8 @@ use crate::buckets::circle_bucket::CircleBucket;
 use crate::buckets::fill_bucket::FillBucket;
 use crate::buckets::fill_extrusion_bucket::{FillExtrusionBucket, tile_units_per_meter};
 use crate::buckets::line_bucket::LineBucket;
-use crate::buckets::raster_bucket::{MaskQuads, RasterLayoutVertex, mask_quads};
+use crate::buckets::raster_bucket::{RasterLayoutVertex, StoredQuads, mask_quads};
 use crate::draw::context::Context;
-use crate::draw::identity::SimpleIdentity;
 use crate::draw::indexes::DrawIndexes;
 use crate::draw::segment::SegmentBase;
 use crate::gfx::line_mesh::LineLayoutVertex;
@@ -552,25 +551,17 @@ fn symbol_bucket() {
 
 // gtest: Buckets.RasterBucket
 #[test]
-fn a_layers_mask_quads_go_into_the_stores_once_per_mask() {
+fn a_masks_quads_go_into_the_stores() {
     let mut masking = Masking::default();
-    masking.set(mask(&[(1, 0, 0), (1, 1, 1)]));
-    let id = SimpleIdentity::new();
-    let mut quads = MaskQuads::default();
-
     with_context(|_, context| {
-        let first = quads.get(context, id, &masking).expect("the mask's quads");
-        assert_eq!(context.vertices(&first.vertices).expect("stored").count(), 8);
-        let first = first.vertices.clone();
-        let again = quads.get(context, id, &masking).expect("the mask's quads");
-        assert!(again.vertices == first, "made once per mask");
+        assert!(StoredQuads::of_mask(context, &masking).is_none(), "an unmasked tile draws the tile's quad");
 
-        masking.set(mask(&[(1, 0, 0)]));
-        let quads_of_new_mask = quads.get(context, id, &masking).expect("the new mask's quads");
-        assert_eq!(context.vertices(&quads_of_new_mask.vertices).expect("stored").count(), 4);
+        masking.set(mask(&[(1, 0, 0), (1, 1, 1)]));
+        let quads = StoredQuads::of_mask(context, &masking).expect("the mask's quads");
+        assert_eq!(context.vertices(&quads.vertices).expect("stored").count(), 8);
 
         masking.set(mask(&[(0, 0, 0)]));
-        assert!(quads.get(context, id, &masking).is_none(), "the whole tile draws the tile's quad");
+        assert!(StoredQuads::of_mask(context, &masking).is_none(), "the whole tile draws the tile's quad");
     });
 }
 
