@@ -158,7 +158,7 @@ impl TypedLayer for RenderBackgroundLayer {
     /// of a tile it keeps none of.
     fn prepare(&mut self, cx: &mut PrepareCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Background>], out: &mut Draws) {
         let RenderBackgroundLayer { patterns } = self;
-        let PrepareCx { base, values, tiles, gpu, context, frame } = cx;
+        let PrepareCx { base, values, tiles, picked, gpu, context, frame } = cx;
         let layer = &*values.evaluated;
         let evaluated = &layer.paint;
         let built_for = Self::built_for(values);
@@ -193,7 +193,8 @@ impl TypedLayer for RenderBackgroundLayer {
         let variant = base.projection_variant;
         let color_mode =
             if draw_passes == RenderPass::Translucent { ColorMode::alpha_blended() } else { ColorMode::unblended() };
-        for (tile_id, entry) in tiles.entries() {
+        for &tile_id in *picked {
+            let Some(entry) = tiles.entry(&tile_id) else { continue };
             let cached = entry.value.get_or_insert_with(|| BackgroundTile {
                 mesh: Self::build_tile(context, &tile_id, shader.clone(), color_mode, variant),
                 built_for,
