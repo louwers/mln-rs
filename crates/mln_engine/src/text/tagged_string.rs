@@ -42,7 +42,7 @@ pub fn font_stack_hash(font_stack: &FontStack) -> FontStackHash {
 #[derive(Clone, Debug)]
 pub struct SectionOptions {
     /// The section's font size, relative to the label's `text-size`.
-    pub scale: f32,
+    pub(crate) scale: f32,
     pub font_stack: FontStack,
     pub(crate) font_stack_hash: FontStackHash,
     pub type_: GlyphIDType,
@@ -153,7 +153,7 @@ impl TaggedString {
 
     /// The section of the character at `index`. Panics when out of range.
     #[must_use]
-    pub fn section_of(&self, index: usize) -> &SectionOptions {
+    pub(crate) fn section_of(&self, index: usize) -> &SectionOptions {
         &self.sections[usize::from(self.section_index(index))]
     }
 

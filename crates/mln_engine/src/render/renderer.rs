@@ -44,17 +44,17 @@ enum RenderState {
 pub struct RenderTimings {
     /// The update up to symbol placement: the style's changes, the layers'
     /// values, the sources' tiles and the layers' choice of them.
-    pub sources: Duration,
+    pub(crate) sources: Duration,
     /// The rest of the update: placing symbols across tiles and updating
     /// their buckets.
-    pub symbols: Duration,
+    pub(crate) symbols: Duration,
     /// Making the layers' draws from the tiles, with their uniforms.
-    pub layers: Duration,
+    pub(crate) layers: Duration,
     /// Making the shaders when there are none, and uploading buffers and
     /// textures.
-    pub upload: Duration,
+    pub(crate) upload: Duration,
     /// Encoding the render passes and submitting them.
-    pub draw: Duration,
+    pub(crate) draw: Duration,
 }
 
 /// Draws a map's updates into the frames of one backend's [`Gpu`]: it keeps
@@ -148,7 +148,21 @@ impl DrawnFrame {
 }
 
 impl Renderer {
-    /// A renderer with a glyph cache of its own, which draws the layer and
+    /// A renderer with a glyph cache of its own, as
+    /// [`with_glyph_cache`](Self::with_glyph_cache) makes.
+    #[cfg(test)]
+    pub(crate) fn new(
+        gpu: &dyn Gpu,
+        pixel_ratio: f32,
+        local_glyphs: LocalGlyphs,
+        registry: Arc<Registry>,
+        waker: Waker,
+        pool: &Pool,
+    ) -> Self {
+        Self::with_glyph_cache(gpu, pixel_ratio, local_glyphs, Arc::default(), registry, waker, pool)
+    }
+
+    /// A renderer that uses `glyph_cache`, which draws the layer and
     /// source types of `registry`, runs its background work on `pool` and
     /// draws `local_glyphs`. Its chooser of the device's
     /// fonts runs there too, one choice at a time, never on the thread that
@@ -166,20 +180,8 @@ impl Renderer {
     ///
     /// The map that the renderer draws must have a registry filled by the
     /// same calls as `registry`: a layer whose type `registry` lacks isn't
-    /// drawn.
-    pub fn new(
-        gpu: &dyn Gpu,
-        pixel_ratio: f32,
-        local_glyphs: LocalGlyphs,
-        registry: Arc<Registry>,
-        waker: Waker,
-        pool: &Pool,
-    ) -> Self {
-        Self::with_glyph_cache(gpu, pixel_ratio, local_glyphs, Arc::default(), registry, waker, pool)
-    }
-
-    /// A renderer that uses `glyph_cache`: renderers given the same
-    /// `GlyphCache` share the glyphs they parse from glyph PBFs.
+    /// drawn. Renderers given the same `GlyphCache` share the glyphs they
+    /// parse from glyph PBFs.
     pub fn with_glyph_cache(
         gpu: &dyn Gpu,
         pixel_ratio: f32,
@@ -258,12 +260,6 @@ impl Renderer {
         self.orchestrator.release_shaders();
     }
 
-    /// The device pixels per logical pixel the renderer draws at.
-    #[must_use]
-    pub fn pixel_ratio(&self) -> f32 {
-        self.encoder.pixel_ratio
-    }
-
     /// Runs the tiles' jobs, and the raster tiles' workers, in
     /// `workers` (by default on the renderer's pool). Set it before the
     /// first render so that every tile uses it.
@@ -336,13 +332,6 @@ impl Renderer {
     /// sources of an earlier update. The renderer's drop waits for it.
     pub fn drop_on_workers<T: Send + 'static>(&self, value: T) {
         self.orchestrator.drop_on_workers(value);
-    }
-
-    /// What the last frame that [`render`](Self::render) drew
-    /// spent on each of its steps.
-    #[must_use]
-    pub fn render_timings(&self) -> RenderTimings {
-        self.encoder.timings
     }
 
     /// Where the last frame that [`render`](Self::render) drew put the map,

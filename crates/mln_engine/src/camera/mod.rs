@@ -29,14 +29,15 @@ pub use camera_momentum::{
 };
 pub use elevation::Elevation;
 pub use frame_projection::{ClipDepthRange, FrameProjection};
-pub use ground::GroundHit;
+#[cfg(test)]
+pub(crate) use ground::GroundHit;
 pub use map_projection::MapProjection;
 pub use map_view::{Camera, LogicalExtent, MapView, Viewport};
 pub use mode::{ConstrainMode, ViewportMode};
 pub use projection_mode::{AxonometricMode, ProjectionMode};
 mod camera_pose;
 pub mod constants;
-pub mod tile_coordinate;
+pub(crate) mod tile_coordinate;
 mod tile_projector;
 pub mod transform;
 mod transform_state;

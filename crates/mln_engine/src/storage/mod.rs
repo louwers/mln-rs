@@ -16,12 +16,12 @@ pub mod chrono;
 pub mod compression;
 pub mod constants;
 #[cfg(feature = "sqlite")]
-pub mod database_file_source;
+pub(crate) mod database_file_source;
 #[cfg(target_family = "wasm")]
 mod fetch_transport;
-pub mod file_source;
+pub(crate) mod file_source;
 mod http_file_source;
-pub mod http_header;
+pub(crate) mod http_header;
 pub mod http_header_transform;
 mod http_timeout;
 #[cfg(target_os = "android")]
@@ -37,15 +37,18 @@ pub mod network_status;
 #[cfg(target_vendor = "apple")]
 mod nsurlsession_transport;
 pub mod offline;
+// Public for the crate's test of a download that a map renders from
+// (tests/offline_download_map.rs). Not API.
 #[cfg(feature = "sqlite")]
+#[doc(hidden)]
 pub mod offline_database;
 #[cfg(feature = "sqlite")]
 mod offline_schema;
-pub mod online_file_source;
+pub(crate) mod online_file_source;
 mod pmtiles_file_source;
 #[cfg(not(any(target_family = "wasm", target_vendor = "apple")))]
 mod redirect;
-pub mod request;
+pub(crate) mod request;
 pub mod resource;
 mod resource_options;
 pub mod resource_transform;
@@ -55,7 +58,7 @@ pub mod response;
 pub mod simulated_network;
 #[cfg(any(test, feature = "stub-file-source"))]
 pub mod stub_file_source;
-pub mod token;
+pub(crate) mod token;
 #[cfg(not(any(target_family = "wasm", target_vendor = "apple", target_os = "android")))]
 mod ureq_transport;
 
@@ -63,8 +66,6 @@ mod ureq_transport;
 pub use database_file_source::{Cache, DatabaseFileSource};
 pub use file_source::{FileSource, FileSourceExt};
 pub use loader::{Loader, LoaderBuilder};
-#[cfg(feature = "sqlite")]
-pub use offline_database::OfflineDatabase;
 pub use online_file_source::OnlineFileSource;
 pub use request::{Callback, Request, Responder};
 pub use resource::{Kind, LoadingMethod, RequestOrder, Resource, StoragePolicy, TileFormat};

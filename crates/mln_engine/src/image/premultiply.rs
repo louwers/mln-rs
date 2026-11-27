@@ -5,7 +5,7 @@ use mln_style::bitmap::{PremultipliedImage, UnassociatedImage};
 /// Multiplies each color channel by alpha: `c = (c * a + 127) / 255` in
 /// integer arithmetic.
 #[must_use]
-pub fn premultiply(src: UnassociatedImage) -> PremultipliedImage {
+pub(crate) fn premultiply(src: UnassociatedImage) -> PremultipliedImage {
     let (size, mut data) = src.into_parts();
     let bytes = PremultipliedImage::CHANNELS * size.width as usize * size.height as usize;
     for px in data.as_chunks_mut::<4>().0.iter_mut().take(bytes / 4) {
@@ -21,7 +21,7 @@ pub fn premultiply(src: UnassociatedImage) -> PremultipliedImage {
 /// `c = ((255 * c + (a / 2)) / a) as u8`. The cast wraps modulo 256 when
 /// `c > a` (not a valid premultiplied pixel), as the C++ `static_cast` does.
 #[must_use]
-pub fn unpremultiply(src: PremultipliedImage) -> UnassociatedImage {
+pub(crate) fn unpremultiply(src: PremultipliedImage) -> UnassociatedImage {
     let (size, mut data) = src.into_parts();
     let bytes = UnassociatedImage::CHANNELS * size.width as usize * size.height as usize;
     for px in data.as_chunks_mut::<4>().0.iter_mut().take(bytes / 4) {

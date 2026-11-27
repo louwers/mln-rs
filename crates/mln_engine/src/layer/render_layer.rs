@@ -191,7 +191,7 @@ pub struct LayerUpdateParameters<'a> {
     pub update_parameters: &'a UpdateParameters,
     /// The layer's source, `None` for a layer without one or a source type
     /// the renderer has no render source for.
-    pub source: Option<&'a dyn RenderSource>,
+    pub(crate) source: Option<&'a dyn RenderSource>,
     /// What each of the source's render tiles shows, at its index.
     pub(crate) contents: &'a [Option<TileContent<'a>>],
     /// The images of the style.
@@ -273,24 +273,6 @@ pub struct LayerValues<T: StyleLayerType> {
 }
 
 impl<T: StyleLayerType> LayerValues<T> {
-    /// The layer's style.
-    #[must_use]
-    pub fn style(&self) -> &Arc<LayerStyle<T>> {
-        &self.style
-    }
-
-    /// The layer's paint values as the style sets them, in transition.
-    #[must_use]
-    pub fn unevaluated(&self) -> &<T::PaintProperties as PaintSet>::Unevaluated {
-        &self.unevaluated
-    }
-
-    /// The layer's values of the last frame that evaluated them.
-    #[must_use]
-    pub fn evaluated(&self) -> &Arc<EvaluatedLayer<T>> {
-        &self.evaluated
-    }
-
     /// The values of the layer `style` of `layer_type`, before any
     /// transition, and the base of a render layer that holds them.
     pub(crate) fn new(
@@ -376,26 +358,6 @@ pub struct EvaluateCx<'a, L: Layer> {
     pub evaluated: &'a mut EvaluatedLayer<L::Style>,
 }
 
-impl<L: Layer> EvaluateCx<'_, L> {
-    /// The layer's values before the evaluation.
-    #[must_use]
-    pub fn values(&self) -> &LayerValues<L::Style> {
-        self.values
-    }
-
-    /// What the values are evaluated for: the zoom, the time and the
-    /// style's global state.
-    #[must_use]
-    pub fn parameters(&self) -> &PropertyEvaluationParameters {
-        self.parameters
-    }
-
-    /// The new evaluation, which becomes the layer's once the hook returns.
-    pub fn evaluated(&mut self) -> &mut EvaluatedLayer<L::Style> {
-        self.evaluated
-    }
-}
-
 /// How a layer type meets terrain.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OnTerrain {
@@ -451,7 +413,7 @@ pub struct PrepareCx<'a, 'f, L: Layer> {
     pub(crate) targets: Option<&'a mut SharedTargets>,
 }
 
-impl<'a, L: Layer> PrepareCx<'a, '_, L> {
+impl<L: Layer> PrepareCx<'_, '_, L> {
     /// The texture of the frame's shared target `name`
     /// ([`Router`](crate::layer::Router)), which the layer's
     /// draws sample: its texel at `(x, y)` is what the layers routed into it
@@ -461,35 +423,6 @@ impl<'a, L: Layer> PrepareCx<'a, '_, L> {
     /// and, with a warning, for a name that the frame has no target of.
     pub fn read_target(&mut self, name: &str) -> Option<SharedTexture> {
         self.targets.as_deref_mut()?.read(&self.base.style.base().id, name)
-    }
-
-    /// The layer's values of the last update.
-    #[must_use]
-    pub fn values(&self) -> &LayerValues<L::Style> {
-        self.values
-    }
-
-    /// The frame the layer makes its draws for, the map's or a drape's.
-    #[must_use]
-    pub fn frame(&self) -> &LayerFrame<'_> {
-        self.frame
-    }
-
-    /// What the layer makes its meshes and targets with.
-    pub fn res(&mut self) -> &mut Resources<'a> {
-        &mut self.res
-    }
-
-    /// The layer's value of `tile`, if the engine keeps one.
-    pub fn tile(&mut self, tile: &FrameTile<'_, L>) -> Option<&mut L::Tile> {
-        self.tiles.get_mut(&tile.id())
-    }
-
-    /// The tiles that a layer that picks its tiles ([`Layer::PICKS_TILES`])
-    /// draws in the frame, in id order; none for another layer.
-    #[must_use]
-    pub fn picked(&self) -> &[OverscaledTileID] {
-        self.picked
     }
 }
 
@@ -505,25 +438,6 @@ pub struct TileCx<'a, 'f, L: Layer> {
     pub frame: &'a LayerFrame<'f>,
 }
 
-impl<'a, L: Layer> TileCx<'a, '_, L> {
-    /// The layer's values of the last update.
-    #[must_use]
-    pub fn values(&self) -> &LayerValues<L::Style> {
-        self.values
-    }
-
-    /// The frame the value is made in.
-    #[must_use]
-    pub fn frame(&self) -> &LayerFrame<'_> {
-        self.frame
-    }
-
-    /// What the layer makes its meshes and targets with.
-    pub fn res(&mut self) -> &mut Resources<'a> {
-        &mut self.res
-    }
-}
-
 /// What a layer's [`Layer::update`] reads, besides its tiles.
 pub struct UpdateCx<'a, 'p, L: Layer> {
     pub values: &'a LayerValues<L::Style>,
@@ -537,12 +451,6 @@ impl<L: Layer> UpdateCx<'_, '_, L> {
     #[must_use]
     pub fn source_max_zoom(&self) -> Option<u8> {
         self.parameters.source.and_then(RenderSource::max_zoom)
-    }
-
-    /// The layer's values of the last update.
-    #[must_use]
-    pub fn values(&self) -> &LayerValues<L::Style> {
-        self.values
     }
 
     /// Makes `tiles` those that a layer that picks its tiles

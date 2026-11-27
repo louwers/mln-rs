@@ -22,7 +22,7 @@ pub mod offline;
 pub mod placement;
 pub mod query;
 mod registry;
-pub mod render;
+pub(crate) mod render;
 // Each layer type's programs and the engine's, public for the backends'
 // tests, which compile them. Not API.
 #[doc(hidden)]

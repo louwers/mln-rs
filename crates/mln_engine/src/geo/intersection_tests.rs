@@ -177,7 +177,7 @@ pub fn polygon_intersects_buffered_multi_line(
 }
 
 #[must_use]
-pub fn polygon_intersects_polygon(polygon_a: &[GeometryCoordinate], polygon_b: &[GeometryCoordinate]) -> bool {
+pub(crate) fn polygon_intersects_polygon(polygon_a: &[GeometryCoordinate], polygon_b: &[GeometryCoordinate]) -> bool {
     for p in polygon_a {
         if polygon_contains_point(polygon_b, *p) {
             return true;

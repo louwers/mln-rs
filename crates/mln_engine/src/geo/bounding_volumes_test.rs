@@ -8,7 +8,7 @@ use super::*;
 // gtest: BoundingVolumes.CreateAabb
 #[test]
 fn create_aabb() {
-    let aabb = AABB::new(dvec3(0.0, 0.0, 0.0), dvec3(2.0, 4.0, 6.0));
+    let aabb = Aabb::new(dvec3(0.0, 0.0, 0.0), dvec3(2.0, 4.0, 6.0));
 
     assert_eq!(aabb.min, dvec3(0.0, 0.0, 0.0));
     assert_eq!(aabb.max, dvec3(2.0, 4.0, 6.0));
@@ -17,9 +17,9 @@ fn create_aabb() {
 // gtest: BoundingVolumes.AabbEquality
 #[test]
 fn aabb_equality() {
-    let aabb0 = AABB::new(dvec3(-4.23, 1.01, 2.0), dvec3(-1.0, 1.02, 100.0));
-    let aabb1 = AABB::new(dvec3(-4.23, 1.01, 2.0), dvec3(-1.0, 1.02, 100.0));
-    let aabb2 = AABB::new(dvec3(-4.23, 1.01, 2.0), dvec3(-1.0, 1.03, 55.0));
+    let aabb0 = Aabb::new(dvec3(-4.23, 1.01, 2.0), dvec3(-1.0, 1.02, 100.0));
+    let aabb1 = Aabb::new(dvec3(-4.23, 1.01, 2.0), dvec3(-1.0, 1.02, 100.0));
+    let aabb2 = Aabb::new(dvec3(-4.23, 1.01, 2.0), dvec3(-1.0, 1.03, 55.0));
 
     assert_eq!(aabb0, aabb1);
     assert_ne!(aabb0, aabb2);
@@ -28,12 +28,12 @@ fn aabb_equality() {
 // gtest: BoundingVolumes.CreateAabbQuadrants
 #[test]
 fn create_aabb_quadrants() {
-    let aabb = AABB::new(dvec3(0.0, 0.0, 0.0), dvec3(2.0, 4.0, 16.0));
+    let aabb = Aabb::new(dvec3(0.0, 0.0, 0.0), dvec3(2.0, 4.0, 16.0));
 
-    let quadrant0 = AABB::new(dvec3(0.0, 0.0, 0.0), dvec3(1.0, 2.0, 16.0));
-    let quadrant1 = AABB::new(dvec3(1.0, 0.0, 0.0), dvec3(2.0, 2.0, 16.0));
-    let quadrant2 = AABB::new(dvec3(0.0, 2.0, 0.0), dvec3(1.0, 4.0, 16.0));
-    let quadrant3 = AABB::new(dvec3(1.0, 2.0, 0.0), dvec3(2.0, 4.0, 16.0));
+    let quadrant0 = Aabb::new(dvec3(0.0, 0.0, 0.0), dvec3(1.0, 2.0, 16.0));
+    let quadrant1 = Aabb::new(dvec3(1.0, 0.0, 0.0), dvec3(2.0, 2.0, 16.0));
+    let quadrant2 = Aabb::new(dvec3(0.0, 2.0, 0.0), dvec3(1.0, 4.0, 16.0));
+    let quadrant3 = Aabb::new(dvec3(1.0, 2.0, 0.0), dvec3(2.0, 4.0, 16.0));
 
     assert_eq!(aabb.quadrant(0), quadrant0);
     assert_eq!(aabb.quadrant(1), quadrant1);
@@ -44,7 +44,7 @@ fn create_aabb_quadrants() {
 // gtest: BoundingVolumes.AabbDistanceToPoint
 #[test]
 fn aabb_distance_to_point() {
-    let aabb = AABB::new(dvec3(-1.0, -1.0, -1.0), dvec3(1.0, 1.0, 1.0));
+    let aabb = Aabb::new(dvec3(-1.0, -1.0, -1.0), dvec3(1.0, 1.0, 1.0));
 
     assert_eq!(aabb.distance_xyz(dvec3(0.5, -0.5, 0.5)), dvec3(0.0, 0.0, 0.0));
     assert_eq!(aabb.distance_xyz(dvec3(1.0, 1.0, 1.0)), dvec3(0.0, 0.0, 0.0));
@@ -55,10 +55,10 @@ fn aabb_distance_to_point() {
 // gtest: BoundingVolumes.AabbAabbIntersection
 #[test]
 fn aabb_aabb_intersection() {
-    let aabb0 = AABB::new(dvec3(1.0, 0.0, 0.0), dvec3(3.0, 2.0, 1.0));
-    let aabb1 = AABB::new(dvec3(2.5, 1.5, -1.0), dvec3(6.0, 2.5, 1.0));
-    let aabb2 = AABB::new(dvec3(3.5, -2.0, -2.0), dvec3(5.0, 1.0, -1.5));
-    let aabb3 = AABB::new(dvec3(0.5, -1.0, -1.0), dvec3(6.5, 3.0, 4.0));
+    let aabb0 = Aabb::new(dvec3(1.0, 0.0, 0.0), dvec3(3.0, 2.0, 1.0));
+    let aabb1 = Aabb::new(dvec3(2.5, 1.5, -1.0), dvec3(6.0, 2.5, 1.0));
+    let aabb2 = Aabb::new(dvec3(3.5, -2.0, -2.0), dvec3(5.0, 1.0, -1.5));
+    let aabb3 = Aabb::new(dvec3(0.5, -1.0, -1.0), dvec3(6.5, 3.0, 4.0));
 
     assert!(aabb0.intersects(&aabb1));
     assert!(!aabb0.intersects(&aabb2));
@@ -118,10 +118,10 @@ fn create_test_frustum(fovy: f64, aspect_ratio: f64, z_near: f64, z_far: f64, el
 fn aabb_fully_inside_frustum() {
     let frustum = create_test_frustum(PI / 2.0, 1.0, 0.1, 100.0, -5.0, 0.0);
 
-    let aabb_array: [AABB; 3] = [
-        AABB::new(dvec3(-1.0, -1.0, 0.0), dvec3(1.0, 1.0, 0.0)),
-        AABB::new(dvec3(-5.0, -5.0, 0.0), dvec3(5.0, 5.0, 0.0)),
-        AABB::new(dvec3(-5.0, -5.0, 0.0), dvec3(-4.0, -2.0, 0.0)),
+    let aabb_array: [Aabb; 3] = [
+        Aabb::new(dvec3(-1.0, -1.0, 0.0), dvec3(1.0, 1.0, 0.0)),
+        Aabb::new(dvec3(-5.0, -5.0, 0.0), dvec3(5.0, 5.0, 0.0)),
+        Aabb::new(dvec3(-5.0, -5.0, 0.0), dvec3(-4.0, -2.0, 0.0)),
     ];
 
     assert_eq!(frustum.intersects(&aabb_array[0]), IntersectionResult::Contains);
@@ -134,9 +134,9 @@ fn aabb_fully_inside_frustum() {
 fn aabb_intersects_frustum() {
     let frustum = create_test_frustum(PI / 2.0, 1.0, 0.1, 100.0, -5.0, 0.0);
 
-    let aabb_array: [AABB; 2] = [
-        AABB::new(dvec3(-6.0, -6.0, 0.0), dvec3(6.0, 6.0, 0.0)),
-        AABB::new(dvec3(-6.0, -6.0, 0.0), dvec3(-4.5, -4.5, 0.0)),
+    let aabb_array: [Aabb; 2] = [
+        Aabb::new(dvec3(-6.0, -6.0, 0.0), dvec3(6.0, 6.0, 0.0)),
+        Aabb::new(dvec3(-6.0, -6.0, 0.0), dvec3(-4.5, -4.5, 0.0)),
     ];
 
     assert_eq!(frustum.intersects(&aabb_array[0]), IntersectionResult::Intersects);
@@ -148,12 +148,12 @@ fn aabb_touching_the_frustum_is_separate_from_it() {
     let frustum = create_test_frustum(PI / 2.0, 1.0, 0.1, 100.0, -5.0, 0.0);
 
     // At a corner and along an edge, from outside.
-    let corner = AABB::new(dvec3(-6.0, -6.0, 0.0), dvec3(-5.0, -5.0, 0.0));
-    let edge = AABB::new(dvec3(5.0, -1.0, 0.0), dvec3(6.0, 1.0, 0.0));
+    let corner = Aabb::new(dvec3(-6.0, -6.0, 0.0), dvec3(-5.0, -5.0, 0.0));
+    let edge = Aabb::new(dvec3(5.0, -1.0, 0.0), dvec3(6.0, 1.0, 0.0));
     assert_eq!(frustum.intersects(&corner), IntersectionResult::Separate);
     assert_eq!(frustum.intersects(&edge), IntersectionResult::Separate);
     // From inside, the frustum still contains it.
-    let inside = AABB::new(dvec3(4.0, -1.0, 0.0), dvec3(5.0, 1.0, 0.0));
+    let inside = Aabb::new(dvec3(4.0, -1.0, 0.0), dvec3(5.0, 1.0, 0.0));
     assert_eq!(frustum.intersects(&inside), IntersectionResult::Contains);
 }
 
@@ -167,8 +167,8 @@ fn aabb_one_pixel_inside_the_frustum_far_from_the_origin_intersects_it() {
         * DMat4::from_translation(dvec3(-x, 0.0, -5.0));
     let frustum = Frustum::from_inv_proj_matrix(&proj.try_inverse().unwrap(), 1.0, 0.0, false, None);
 
-    let overlapping = AABB::new(dvec3(x + 5.0 - 1.0 / 512.0, -1.0, 0.0), dvec3(x + 6.0, 1.0, 0.0));
-    let touching = AABB::new(dvec3(x + 5.0, -1.0, 0.0), dvec3(x + 6.0, 1.0, 0.0));
+    let overlapping = Aabb::new(dvec3(x + 5.0 - 1.0 / 512.0, -1.0, 0.0), dvec3(x + 6.0, 1.0, 0.0));
+    let touching = Aabb::new(dvec3(x + 5.0, -1.0, 0.0), dvec3(x + 6.0, 1.0, 0.0));
     assert_eq!(frustum.intersects(&overlapping), IntersectionResult::Intersects);
     assert_eq!(frustum.intersects(&touching), IntersectionResult::Separate);
 }
@@ -177,7 +177,7 @@ fn aabb_one_pixel_inside_the_frustum_far_from_the_origin_intersects_it() {
 #[test]
 fn aabb_intersects_frustum_edge_case() {
     let frustum = create_test_frustum(PI / 2.0, 1.0, 0.1, 100.0, -5.0, PI / 4.0);
-    let aabb = AABB::new(dvec3(-10.0, 10.0, 0.0), dvec3(10.0, 12.0, 0.0));
+    let aabb = Aabb::new(dvec3(-10.0, 10.0, 0.0), dvec3(10.0, 12.0, 0.0));
 
     // Intersection test should report intersection even though shapes are separate
     assert_eq!(frustum.intersects(&aabb), IntersectionResult::Intersects);
@@ -230,7 +230,7 @@ fn metres_frustum_agrees_with_the_tile_unit_frustum_on_flat_boxes() {
         for i in -12..12 {
             for j in -12..12 {
                 let min = dvec3(center + f64::from(i) * 0.37 + 0.011, center + f64::from(j) * 0.41 + 0.013, 0.0);
-                let aabb = AABB::new(min, min + dvec3(0.3, 0.3, 0.0));
+                let aabb = Aabb::new(min, min + dvec3(0.3, 0.3, 0.0));
                 let result = tiles.intersects(&aabb);
                 assert_eq!(result, metres.intersects_box(&aabb), "pitch {pitch}, box {aabb:?}");
                 separate += usize::from(result == IntersectionResult::Separate);
@@ -259,12 +259,12 @@ fn raised_box_below_the_bottom_edge_is_kept_and_raising_does_not_keep_one_past_t
     // `depth` up to `height` meters.
     let strip = |step: i32, depth: f64, height: f64| {
         let y = center + toward_camera * f64::from(step) * 0.1;
-        AABB::new(
+        Aabb::new(
             dvec3(center - 0.05, y.min(y + toward_camera * 0.1), depth),
             dvec3(center + 0.05, y.max(y + toward_camera * 0.1), height),
         )
     };
-    let visible = |aabb: AABB| frustum.intersects_box(&aabb) != IntersectionResult::Separate;
+    let visible = |aabb: Aabb| frustum.intersects_box(&aabb) != IntersectionResult::Separate;
     assert!(visible(strip(0, 0.0, 0.0)));
     let bottom = (0..100).find(|&step| !visible(strip(step, 0.0, 0.0))).expect("a box below the bottom edge");
     let top =

@@ -525,7 +525,7 @@ impl GeometryContents {
 }
 
 /// What a tile draws.
-pub enum Contents {
+pub(crate) enum Contents {
     Geometry(GeometryContents),
     /// A raster tile's image.
     Raster(RasterContents),

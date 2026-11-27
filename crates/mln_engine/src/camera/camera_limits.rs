@@ -39,7 +39,7 @@ impl Default for CameraLimits {
 impl CameraLimits {
     /// The widest limits that any map allows.
     #[must_use]
-    pub fn widest() -> Self {
+    pub(crate) fn widest() -> Self {
         CameraLimits { max_zoom: MAX_ZOOM, max_pitch: PITCH_MAX, ..CameraLimits::default() }
     }
 
@@ -47,7 +47,7 @@ impl CameraLimits {
     /// map allows, or `Err` for limits that leave the camera nowhere to go:
     /// a number that isn't finite, a minimum above its maximum, or invalid
     /// bounds.
-    pub fn validated(self) -> Result<Self, Error> {
+    pub(crate) fn validated(self) -> Result<Self, Error> {
         if ![self.min_zoom, self.max_zoom, self.min_pitch, self.max_pitch].iter().all(|value| value.is_finite()) {
             return Err(Error::invalid_argument("camera limits must be finite"));
         }

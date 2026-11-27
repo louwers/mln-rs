@@ -31,7 +31,7 @@ pub(crate) trait ImageDecoder: Send + Sync {
 /// Decodes `data`, handing the result to `done`: before returning, or later
 /// on the calling thread. Data of no type `decode_image` recognizes fails
 /// before returning, with its error.
-pub fn decode(data: &[u8], done: impl FnOnce(DecodeResult) + 'static) {
+pub(crate) fn decode(data: &[u8], done: impl FnOnce(DecodeResult) + 'static) {
     let Some(kind) = image_type(data) else {
         done(Err(Error::unsupported(UNSUPPORTED)));
         return;

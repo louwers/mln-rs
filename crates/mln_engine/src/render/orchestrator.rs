@@ -191,7 +191,7 @@ pub(crate) struct RenderOrchestrator {
 impl RenderOrchestrator {
     /// An orchestrator whose background work runs in a group of its own on
     /// `pool`, which its drop waits for, and whose tiles and glyphs call
-    /// `waker` for an update (see `Renderer::new`).
+    /// `waker` for an update (see `Renderer::with_glyph_cache`).
     pub(crate) fn new(
         background_layer_as_color: bool,
         local_glyphs: LocalGlyphs,

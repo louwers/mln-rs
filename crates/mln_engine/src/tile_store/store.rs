@@ -211,7 +211,7 @@ fn find(
     Some((source, id))
 }
 
-pub struct TileStore {
+pub(crate) struct TileStore {
     sources: HashMap<SourceKey, SourceTiles>,
     /// The sources in the style's order, which orders the tiles' jobs within
     /// a load order.

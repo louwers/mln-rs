@@ -65,7 +65,7 @@ pub(crate) use self::schedule::{PlacementController, PlacementInputs};
 use crate::camera::View;
 use crate::draw::identity::SimpleIdentity;
 use crate::layer::bucket::{Bucket, ErasedBucket};
-pub use crate::layer::layer_drawing::ChangedBuckets;
+pub(crate) use crate::layer::layer_drawing::ChangedBuckets;
 use crate::layer::layer_type::EvaluatedLayer;
 use crate::layer::render_layer::Layer;
 use crate::map::MapMode;
@@ -225,7 +225,7 @@ pub struct UpdateCx<'a> {
 pub struct Prepared {
     /// Whether the participant can place items it couldn't before, which in
     /// a flat view shortens the wait of a continuous map for its next
-    /// placement to [`Prepared::SOON`].
+    /// placement to `Prepared::SOON`.
     pub added: bool,
     /// Whether placing now would place from other inputs than the current
     /// placement did, which a continuous map places again for.
@@ -236,7 +236,7 @@ impl Prepared {
     /// How soon after a placement a flat view places again where a
     /// participant [added](Self::added) items: new items usually come from
     /// several tiles in a row, which the short wait places together.
-    pub const SOON: Duration = Duration::from_millis(30);
+    pub(crate) const SOON: Duration = Duration::from_millis(30);
 }
 
 /// What a placement changed of what shows, which the schedule of a

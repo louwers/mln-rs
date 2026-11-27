@@ -39,16 +39,15 @@ mod terrain;
 mod transition;
 
 use gesture::GestureState;
-pub use terrain::TerrainGround;
-pub(crate) use terrain::lowest_ground;
+pub(crate) use terrain::{TerrainGround, lowest_ground};
 use transition::{FrameFn, JointEnd, Transition};
 
 use crate::map::events::{CameraChange, CameraChangeSource};
 
 /// A frame time older than this is stale, and counts as unset (see
-/// [`Transform::set_frame_time`]): longer than a frame at 10 fps, so any host
+/// `Transform::set_frame_time`): longer than a frame at 10 fps, so any host
 /// that draws sets a fresh one first.
-pub const STALE_FRAME_TIME: Duration = Duration::from_millis(100);
+pub(crate) const STALE_FRAME_TIME: Duration = Duration::from_millis(100);
 
 /// Converts the given angle (in radians) to be numerically close to the
 /// anchor angle, allowing it to be interpolated properly without sudden
@@ -99,7 +98,7 @@ fn frame_unproject(p: &Point<f64>, scale: f64, wrap_mode: WrapMode) -> Option<La
 }
 
 /// Identifies a camera command that the transform started, in the
-/// [`TransformEvent::CommandEnded`] that reports its end. Each command the
+/// `TransformEvent::CommandEnded` that reports its end. Each command the
 /// transform starts gets its own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CameraCommandId(u64);
@@ -109,14 +108,14 @@ pub struct CameraCommandId(u64);
 pub struct CommandEnd {
     pub command: CameraCommandId,
     /// The command's [`AnimationOptions::transition_id`].
-    pub transition_id: Option<u64>,
+    pub(crate) transition_id: Option<u64>,
     pub end: TransitionEnd,
 }
 
 /// What the transform reports, in order, for its owner to drain with
 /// [`Transform::drain_events`].
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum TransformEvent {
+pub(crate) enum TransformEvent {
     CameraWillChange(CameraChange),
     CameraIsChanging,
     CameraDidChange(CameraChange),
@@ -153,7 +152,7 @@ fn camera_fields(camera: &CameraOptions) -> u16 {
 
 /// The time of the latest frame that a map's host drew, which the map's
 /// animations sample at and its camera commands start from (see
-/// [`Transform::set_frame_time`]). A clone shares the clock, so the thread
+/// `Transform::set_frame_time`). A clone shares the clock, so the thread
 /// that draws can set it while the map lives on another.
 #[derive(Clone, Debug, Default)]
 pub struct FrameClock(Arc<Mutex<Option<Instant>>>);
@@ -251,15 +250,8 @@ impl Transform {
 
     /// Drains what the transform reported since the last call, oldest
     /// first. The transform keeps its buffer for what it reports next.
-    pub fn drain_events(&mut self) -> std::vec::Drain<'_, TransformEvent> {
+    pub(crate) fn drain_events(&mut self) -> std::vec::Drain<'_, TransformEvent> {
         self.events.drain(..)
-    }
-
-    /// Whether the transform reported something that
-    /// [`drain_events`](Self::drain_events) hasn't drained.
-    #[must_use]
-    pub fn has_events(&self) -> bool {
-        !self.events.is_empty()
     }
 
     fn emit(&mut self, event: TransformEvent) {
@@ -307,13 +299,13 @@ impl Transform {
 
     /// Returns the current camera options.
     #[must_use]
-    pub fn camera_options(&self, padding: Option<EdgeInsets>) -> CameraOptions {
+    pub(crate) fn camera_options(&self, padding: Option<EdgeInsets>) -> CameraOptions {
         self.state.camera_options(padding)
     }
 
     /// Change any combination of center, zoom, bearing, and pitch, without a
     /// transition. Omitted options keep their current animations.
-    pub fn jump_to(&mut self, camera: &CameraOptions) -> CameraCommandId {
+    pub(crate) fn jump_to(&mut self, camera: &CameraOptions) -> CameraCommandId {
         self.command(|transform| transform.jump(camera))
     }
 
@@ -348,7 +340,8 @@ impl Transform {
     /// Pans the map by the given amount.
     /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a NaN
     /// or infinite offset.
-    pub fn move_by(
+    #[cfg(test)]
+    pub(crate) fn move_by(
         &mut self,
         offset: &ScreenCoordinate,
         animation: &AnimationOptions,
@@ -368,7 +361,7 @@ impl Transform {
     /// location the first of them grabbed, wherever
     /// [`VerticalPerspectiveProjection::drag_center_holding`] has a center
     /// that does. Fails as [`move_by`](Self::move_by) does.
-    pub fn move_by_with_anchor(
+    pub(crate) fn move_by_with_anchor(
         &mut self,
         offset: &ScreenCoordinate,
         anchor: Option<ScreenCoordinate>,
@@ -601,7 +594,7 @@ impl Transform {
 
     /// Sets the limits the camera moves within (see
     /// [`TransformState::set_limits`]).
-    pub fn set_limits(&mut self, limits: CameraLimits) -> Result<(), Error> {
+    pub(crate) fn set_limits(&mut self, limits: CameraLimits) -> Result<(), Error> {
         self.state.set_limits(limits)
     }
 
@@ -611,7 +604,7 @@ impl Transform {
 
     // MARK: - Projection
 
-    pub fn set_projection_definition(&mut self, definition: &ProjectionDefinition) {
+    pub(crate) fn set_projection_definition(&mut self, definition: &ProjectionDefinition) {
         self.state.set_projection_definition(definition);
     }
 
@@ -643,20 +636,20 @@ impl Transform {
 
     // MARK: - Constrain mode
 
-    pub fn set_constrain_mode(&mut self, mode: ConstrainMode) {
+    pub(crate) fn set_constrain_mode(&mut self, mode: ConstrainMode) {
         self.state.set_constrain_mode(mode);
         self.state.constrain_position(self.state.view().scale());
     }
 
     // MARK: - Viewport mode
 
-    pub fn set_viewport_mode(&mut self, mode: ViewportMode) {
+    pub(crate) fn set_viewport_mode(&mut self, mode: ViewportMode) {
         self.state.set_viewport_mode(mode);
     }
 
     /// Sets whether the center stands on the terrain. The map hands the
     /// setting to [`set_terrain`](Self::set_terrain) on its next update.
-    pub fn set_center_clamped_to_ground(&mut self, clamped: bool) {
+    pub(crate) fn set_center_clamped_to_ground(&mut self, clamped: bool) {
         self.state.set_center_clamped_to_ground(clamped);
     }
 
@@ -687,7 +680,7 @@ impl Transform {
     /// Orbis starts animations on the first frame after the call, which
     /// keeps the camera still for that frame; a glide that continues a drag
     /// would pause there.
-    pub fn set_frame_time(&mut self, time: Option<Instant>) {
+    pub(crate) fn set_frame_time(&mut self, time: Option<Instant>) {
         self.frame_time.set(time);
     }
 
@@ -718,14 +711,14 @@ impl Transform {
     /// Whether a gesture or a command moves the camera: the renderer draws
     /// such frames for speed rather than crispness.
     #[must_use]
-    pub fn is_camera_moving(&self) -> bool {
+    pub(crate) fn is_camera_moving(&self) -> bool {
         self.gesture_in_progress || self.moving & (CENTER | ZOOM | BEARING) != 0
     }
 
     // MARK: - Transform state
 
     #[must_use]
-    pub fn state(&self) -> &TransformState {
+    pub(crate) fn state(&self) -> &TransformState {
         &self.state
     }
 
@@ -753,7 +746,7 @@ impl Transform {
     // MARK: Conversion and projection
 
     #[must_use]
-    pub fn lat_lng_to_screen_coordinate(&self, lat_lng: &LatLng) -> ScreenCoordinate {
+    pub(crate) fn lat_lng_to_screen_coordinate(&self, lat_lng: &LatLng) -> ScreenCoordinate {
         let mut point = self.state.view().lat_lng_to_screen_coordinate(lat_lng);
         point.y = f64::from(self.state.view().size().height) - point.y;
         point
@@ -762,7 +755,11 @@ impl Transform {
     /// The location under `point`, in screen coordinates (y down).
     /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a NaN
     /// or infinite point.
-    pub fn screen_coordinate_to_lat_lng(&self, point: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {
+    pub(crate) fn screen_coordinate_to_lat_lng(
+        &self,
+        point: &ScreenCoordinate,
+        wrap_mode: WrapMode,
+    ) -> Result<LatLng, Error> {
         let mut flipped_point = *point;
         flipped_point.y = f64::from(self.state.view().size().height) - flipped_point.y;
         self.state.view().screen_coordinate_to_lat_lng(&flipped_point, wrap_mode)

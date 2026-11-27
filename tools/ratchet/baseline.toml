@@ -23,7 +23,7 @@
 "crates/mln_c/src/render_session.rs" = 3
 "crates/mln_c/src/web.rs" = 5
 "crates/mln_style/src/expression/parse.rs" = 11
-"crates/mln_engine/src/worker/worker_codec/host.rs" = 5
+"crates/mln_engine/src/worker/worker_codec/host.rs" = 3
 "crates/mln_runtime/src/render/driver.rs" = 2
 "crates/mln_runtime/src/render/session.rs" = 9
 "crates/mln_runtime/src/web.rs" = 1

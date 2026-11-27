@@ -85,7 +85,7 @@ impl Layer for Lending {
     type Tile = ();
 
     fn new(values: &LayerValues<Lends>) -> Self {
-        Lending { host: values.style().extra.clone(), drew: None }
+        Lending { host: values.style.extra.clone(), drew: None }
     }
 
     fn prepare(&mut self, _cx: &mut PrepareCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Self>], out: &mut Draws) {

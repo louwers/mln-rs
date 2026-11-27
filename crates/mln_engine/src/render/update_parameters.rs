@@ -31,7 +31,7 @@ pub struct UpdateParameters {
     pub style: Arc<Style>,
     /// The faces that the style's text draws with: the style's own
     /// `font-faces`, then the app's fallback faces
-    /// ([`style_font_faces`](crate::text::glyph::style_font_faces)).
+    /// (`style_font_faces`).
     pub font_faces: Option<Arc<FontFaces>>,
     pub sprite_loaded: bool,
     /// The map's feature state. Each render source takes its own, in place

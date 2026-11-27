@@ -30,7 +30,7 @@ pub enum ResponseType {
 type Answer = Arc<dyn Fn(&Resource) -> Option<Response> + Send + Sync>;
 
 /// What a stub runs when it wants a [`poll`](StubFileSource::poll).
-pub type Waker = Arc<dyn Fn() + Send + Sync>;
+pub(crate) type Waker = Arc<dyn Fn() + Send + Sync>;
 
 struct Pending {
     resource: Resource,
@@ -91,7 +91,7 @@ impl StubFileSource {
     /// Sets what an asynchronous stub runs, on any thread, when it wants the
     /// test to call [`poll`](Self::poll). It asks once until the poll
     /// starts.
-    pub fn set_waker(&self, waker: Option<Waker>) {
+    pub(crate) fn set_waker(&self, waker: Option<Waker>) {
         self.state.lock().waker = waker;
     }
 
@@ -143,7 +143,7 @@ impl StubFileSource {
     /// A request whose answer is an error, or `None`, waits for the next
     /// poll, which the waker asks for a millisecond later, from another
     /// thread.
-    pub fn poll(&self) {
+    pub(crate) fn poll(&self) {
         let pending: Vec<(u64, Resource, Option<Answer>, Responder)> = {
             let mut state = self.state.lock();
             state.poll_asked = false;

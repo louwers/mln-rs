@@ -49,7 +49,7 @@ impl Layer for ImageProcessLayer {
     /// have, draws nothing.
     fn prepare(&mut self, cx: &mut PrepareCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Self>], out: &mut Draws) {
         let values = cx.values;
-        let members = values.style().members();
+        let members = values.style.members();
         let Some(TargetName(source)) = members.get(&SOURCE) else { return };
         let operations = members.get(&OPERATIONS).map_or(&[][..], |operations| &operations.0[..]);
         let frame = cx.frame.size();

@@ -59,7 +59,7 @@ impl Indexes {
 
     /// Whether the CPU copy of the indexes is still there.
     #[must_use]
-    pub fn has_data(&self) -> bool {
+    pub(crate) fn has_data(&self) -> bool {
         matches!(self.place, Place::Data(_))
     }
 

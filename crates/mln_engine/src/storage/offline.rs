@@ -385,4 +385,5 @@ pub struct OfflineRegion {
     pub metadata: OfflineRegionMetadata,
 }
 
-pub type OfflineRegions = Vec<OfflineRegion>;
+#[cfg(feature = "sqlite")]
+pub(crate) type OfflineRegions = Vec<OfflineRegion>;

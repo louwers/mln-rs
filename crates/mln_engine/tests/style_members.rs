@@ -63,11 +63,11 @@ impl Layer for SeeingLayer {
     type Tile = ();
 
     fn new(values: &LayerValues<Seeing>) -> Self {
-        SeeingLayer(Arc::clone(&values.style().extra))
+        SeeingLayer(Arc::clone(&values.style.extra))
     }
 
     fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
-        *self.0.group.lock() = cx.values().style().members().get(&GROUP).map(|group| group.0.clone());
+        *self.0.group.lock() = cx.values.style.members().get(&GROUP).map(|group| group.0.clone());
         Evaluation::TRANSLUCENT
     }
 

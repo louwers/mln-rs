@@ -109,7 +109,7 @@ impl Layer for CopyLayer {
     }
 
     fn prepare(&mut self, cx: &mut PrepareCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Self>], out: &mut Draws) {
-        let Some(Name(source)) = cx.values().style().members().get(&SOURCE) else { return };
+        let Some(Name(source)) = cx.values.style.members().get(&SOURCE) else { return };
         let Some(texture) = cx.read_target(&source.clone()) else { return };
         if self.mesh.as_ref().is_none_or(|(read, _)| *read != texture) {
             let shader = cx.res.context.shader_key(&LAYER_COMPOSITE, Uniforms::default(), ProjectionVariant::Mercator);
@@ -190,11 +190,11 @@ impl<const DRAPES: bool> Layer for ProbeLayer<DRAPES> {
     }
 
     fn prepare(&mut self, cx: &mut PrepareCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Self>], _out: &mut Draws) {
-        let style = cx.values().style();
+        let style = &cx.values.style;
         let (id, source) = (style.id.clone(), style.members().get(&SOURCE).map(|Name(name)| name.clone()));
         let read = source.is_some_and(|source| cx.read_target(&source).is_some());
         let stands = cx.base.projection_variant.stands();
-        let ground_depth = cx.frame().ground.as_ref().is_some_and(|ground| ground.depth().is_some());
+        let ground_depth = cx.frame.ground.as_ref().is_some_and(|ground| ground.depth().is_some());
         SEEN.lock().push((id, Seen { read, stands, ground_depth }));
     }
 }

@@ -114,13 +114,13 @@ impl Layer for CustomLayer {
     type Tile = ();
 
     fn new(values: &LayerValues<Custom>) -> Self {
-        CustomLayer { host: values.style().extra.get(), drew: None }
+        CustomLayer { host: values.style.extra.get(), drew: None }
     }
 
     /// A new host for the same layer id is a new layer to the host: the old
     /// one ends.
     fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
-        let host = &cx.values().style().extra;
+        let host = &cx.values.style.extra;
         if !self.host.as_ref().is_some_and(|drawn| host.is(drawn)) {
             self.end();
             self.host = host.get();

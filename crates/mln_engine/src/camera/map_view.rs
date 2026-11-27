@@ -12,7 +12,7 @@ use crate::camera::constants;
 use crate::camera::mode::{ConstrainMode, ViewportMode};
 use crate::camera::projection_mode::{AxonometricMode, ProjectionMode};
 use crate::camera::transform_state::TransformState;
-use crate::camera::view::{View, ViewParams, map_offset, zoom_scale};
+use crate::camera::view::{ViewParams, map_offset, zoom_scale};
 use crate::geo::{EdgeInsets, NorthOrientation};
 
 /// A camera with every member set: the camera that a map has, where
@@ -111,7 +111,7 @@ pub struct MapView {
     pub camera: Camera,
     pub extent: LogicalExtent,
     /// Sets every member when it comes from a map. A member that a view leaves
-    /// unset takes the default of [`View`].
+    /// unset takes the default of [`View`](crate::camera::View).
     pub projection_mode: ProjectionMode,
     pub viewport: Viewport,
     /// The style's projection at the camera's zoom. A view from a map never
@@ -170,7 +170,8 @@ impl MapView {
 
     /// The view that this describes, to draw it or convert coordinates for
     /// it. `Err`: as [`to_state`](Self::to_state).
-    pub fn to_view(&self) -> Result<View, Error> {
+    #[cfg(test)]
+    pub(crate) fn to_view(self) -> Result<crate::camera::view::View, Error> {
         Ok(self.to_state()?.view().clone())
     }
 

@@ -577,7 +577,7 @@ impl OfflineDatabase {
     }
 
     /// The stored copy of `resource`, if any.
-    pub fn get(&mut self, resource: &Resource) -> Option<Response> {
+    pub(crate) fn get(&mut self, resource: &Resource) -> Option<Response> {
         let result = if self.disabled() { Ok(None) } else { self.get_internal(resource) };
         self.report(result, "read resource").ok().flatten().map(|(response, _size)| response)
     }
@@ -625,7 +625,7 @@ impl OfflineDatabase {
     /// `put(const Resource&, const Response&)`: (inserted, stored size). The ambient cache doesn't
     /// keep a tile the tileset doesn't have (`Response::tile_not_found`), since it would read back as
     /// an empty tile.
-    pub fn put(&mut self, resource: &Resource, response: &Response) -> (bool, u64) {
+    pub(crate) fn put(&mut self, resource: &Resource, response: &Response) -> (bool, u64) {
         if self.read_only || response.tile_not_found {
             return (false, 0);
         }
@@ -848,13 +848,13 @@ impl OfflineDatabase {
     }
 
     /// Every region whose definition can be read.
-    pub fn list_regions(&mut self) -> DbResult<OfflineRegions> {
+    pub(crate) fn list_regions(&mut self) -> DbResult<OfflineRegions> {
         let result = self.read_regions("SELECT id, definition, description FROM regions", [], true);
         self.report(result, "list regions")
     }
 
     /// The region `region_id`, or `None` when the database has none.
-    pub fn get_region(&mut self, region_id: i64) -> DbResult<Option<OfflineRegion>> {
+    pub(crate) fn get_region(&mut self, region_id: i64) -> DbResult<Option<OfflineRegion>> {
         let sql = "SELECT id, definition, description FROM regions WHERE id = ?1";
         let result = self.read_regions(sql, params![region_id], false).map(|regions| regions.into_iter().next());
         self.report(result, "get region")
@@ -882,7 +882,7 @@ impl OfflineDatabase {
     }
 
     /// How long the region's stored resources stay usable.
-    pub fn get_region_expiry(&mut self, region_id: i64) -> DbResult<OfflineRegionExpiry> {
+    pub(crate) fn get_region_expiry(&mut self, region_id: i64) -> DbResult<OfflineRegionExpiry> {
         let result = (|| -> DbResult<OfflineRegionExpiry> {
             let mut sql = Vec::new();
             for table in [Table::Tiles, Table::Resources] {
@@ -909,7 +909,7 @@ impl OfflineDatabase {
         self.report(result, "get region expiry")
     }
 
-    pub fn merge_database(&mut self, side_database_path: &str) -> Result<OfflineRegions, DatabaseError> {
+    pub(crate) fn merge_database(&mut self, side_database_path: &str) -> Result<OfflineRegions, DatabaseError> {
         self.check_flags()?;
 
         match self.execute("ATTACH DATABASE ?1 AS side", params![side_database_path]) {
@@ -958,7 +958,7 @@ impl OfflineDatabase {
         }
     }
 
-    pub fn update_metadata(
+    pub(crate) fn update_metadata(
         &mut self,
         region_id: i64,
         metadata: &OfflineRegionMetadata,
@@ -977,7 +977,7 @@ impl OfflineDatabase {
         self.report(result, "update region metadata")
     }
 
-    pub fn delete_region(&mut self, region: &OfflineRegion) -> DbResult<()> {
+    pub(crate) fn delete_region(&mut self, region: &OfflineRegion) -> DbResult<()> {
         let result = (|| -> DbResult<()> {
             self.check_flags()?;
             // Eviction uses the stored timestamps if this fails.
@@ -998,19 +998,20 @@ impl OfflineDatabase {
 
     /// The stored copy of `resource`, with its stored size, whether or not
     /// the ambient cache is enabled.
-    pub fn get_region_resource(&mut self, resource: &Resource) -> Option<(Response, u64)> {
+    pub(crate) fn get_region_resource(&mut self, resource: &Resource) -> Option<(Response, u64)> {
         let result = self.get_internal(resource);
         self.report(result, "read region resource").ok().flatten()
     }
 
     /// The stored size and caching rules of the copy of `resource`; `None`
     /// without one, or for a copy without data.
-    pub fn check_region_resource(&mut self, resource: &Resource) -> Option<(u64, Caching)> {
+    pub(crate) fn check_region_resource(&mut self, resource: &Resource) -> Option<(u64, Caching)> {
         let result = self.has_internal(resource);
         self.report(result, "query region resource").ok().flatten()
     }
 
-    pub fn put_region_resource(&mut self, region_id: i64, resource: &Resource, response: &Response) -> u64 {
+    #[cfg(test)]
+    pub(crate) fn put_region_resource(&mut self, region_id: i64, resource: &Resource, response: &Response) -> u64 {
         let result = (|| -> DbResult<u64> {
             self.check_flags()?;
 
@@ -1027,7 +1028,7 @@ impl OfflineDatabase {
         })
     }
 
-    pub fn put_region_resources(
+    pub(crate) fn put_region_resources(
         &mut self,
         region_id: i64,
         resources: &[(Resource, Response)],
@@ -1123,7 +1124,7 @@ impl OfflineDatabase {
 
     /// The number and size of the resources that the region holds, tiles
     /// included, and of its tiles.
-    pub fn get_region_completed_status(&mut self, region_id: i64) -> DbResult<OfflineRegionStatus> {
+    pub(crate) fn get_region_completed_status(&mut self, region_id: i64) -> DbResult<OfflineRegionStatus> {
         let result = (|| -> DbResult<OfflineRegionStatus> {
             let mut status = OfflineRegionStatus::default();
             for table in [Table::Tiles, Table::Resources] {
@@ -1318,7 +1319,7 @@ impl OfflineDatabase {
         self.report(result, "set maximum ambient cache size")
     }
 
-    pub fn mark_used_resources(&mut self, region_id: i64, resources: &[Resource]) {
+    pub(crate) fn mark_used_resources(&mut self, region_id: i64, resources: &[Resource]) {
         let result = (|| -> DbResult<()> {
             if self.db.is_none() {
                 self.initialize()?;

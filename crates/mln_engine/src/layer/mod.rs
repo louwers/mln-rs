@@ -17,8 +17,8 @@
 //! 1. What it draws from, its [`Layer::Input`]: a geometry source's tiles,
 //!    whose features a [`Layout`] lays out into a [`Bucket`] per tile on a
 //!    tile worker ([`Features`]); a raster or image source's tiles, each
-//!    tile's image ([`RasterTiles`], [`RasterTile`]); a raster-dem source's
-//!    tiles, each tile's elevations ([`DemTiles`], [`DemContents`]); or
+//!    tile's image ([`RasterTiles`](crate::source::RasterTiles), [`RasterTile`]); a raster-dem source's
+//!    tiles, each tile's elevations ([`DemTiles`](crate::source::DemTiles), [`DemContents`]); or
 //!    nothing, for a layer without a source ([`NoTiles`]). The registration
 //!    doesn't compile for an input of another kind of source than the style
 //!    half names.
@@ -108,8 +108,6 @@ pub mod binders {
         PaintBinders, PaintPropertyBinder, PaintPropertyBinderBase, PatternDependency, PatternLayerMap,
         bind_paint_property, shared_paint,
     };
-    pub use crate::layer::paint_property_statistics::StatisticValue;
-    pub use crate::paint_property_binders;
 }
 pub(crate) mod bucket_geometry;
 pub(crate) mod bucket_parameters;
@@ -136,7 +134,6 @@ pub use crate::layer::render_layer::{
     EvaluateCx, Evaluation, FrameQuery, Layer, LayerValues, OnTerrain, PrepareCx, TileCx, UpdateCx,
 };
 pub use crate::layer::tile_input::{Features, LayerBucket, NoTiles, RasterTile, TileData, TileInput};
-pub use crate::layer::tile_layout::Resolved;
 pub use crate::query::feature_index::QueryRegion;
 #[doc(hidden)]
 pub use crate::render::shared_targets::{Router, Routes};
@@ -144,5 +141,4 @@ pub use crate::render::terrain::SurfaceLight;
 pub use crate::render::tile::FrameTile;
 pub use crate::source::render_image_source::ImageQuad;
 pub use crate::source::render_source::TileOrder;
-pub use crate::source::{DemTiles, RasterTiles};
 pub use crate::tile_store::dem::DemContents;

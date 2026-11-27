@@ -9,14 +9,14 @@ use crate::geo::projection::Projection;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TileRange {
-    pub range: Range<Point<u32>>,
+    pub(crate) range: Range<Point<u32>>,
     pub(crate) zoom_range: Range<u8>,
 }
 
 impl TileRange {
     /// Compute the range of tiles covered by the bounds at maxZoom.
     #[must_use]
-    pub fn from_lat_lng_bounds_range(bounds: &LatLngBounds, mut min_zoom: u8, mut max_zoom: u8) -> TileRange {
+    pub(crate) fn from_lat_lng_bounds_range(bounds: &LatLngBounds, mut min_zoom: u8, mut max_zoom: u8) -> TileRange {
         if min_zoom > max_zoom {
             std::mem::swap(&mut min_zoom, &mut max_zoom);
         }

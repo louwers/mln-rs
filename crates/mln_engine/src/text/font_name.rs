@@ -4,15 +4,15 @@
 
 /// The parts of a font name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct FontName<'a> {
+pub(crate) struct FontName<'a> {
     /// The name without the style words at its end: "Open Sans". The whole
     /// name when it has nothing else.
-    pub family: &'a str,
+    pub(crate) family: &'a str,
     /// The OpenType weight (`usWeightClass`) of the last weight word in the
     /// name, or 400.
-    pub weight: u16,
+    pub(crate) weight: u16,
     /// Whether the name says "Italic" or "Oblique".
-    pub italic: bool,
+    pub(crate) italic: bool,
 }
 
 /// The weight words, as whole words of a name in any case, with the weights
@@ -66,7 +66,7 @@ const STYLE_WORDS: [&str; 22] = [
 
 /// Reads `name`.
 #[must_use]
-pub fn parse(name: &str) -> FontName<'_> {
+pub(crate) fn parse(name: &str) -> FontName<'_> {
     let lower = name.to_ascii_lowercase();
     let weight = WEIGHTS.iter().rev().find(|(word, _)| has_word(&lower, word)).map_or(400, |&(_, weight)| weight);
     let italic = has_word(&lower, "italic") || has_word(&lower, "oblique");

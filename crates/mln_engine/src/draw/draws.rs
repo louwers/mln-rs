@@ -89,13 +89,6 @@ impl LayerFrame<'_> {
         self.view
     }
 
-    /// Whether a gesture or an animation moves the camera: draws favor
-    /// speed over crispness then.
-    #[must_use]
-    pub fn camera_moving(&self) -> bool {
-        self.camera_moving
-    }
-
     /// The device pixels of the frame's target per logical pixel.
     #[must_use]
     pub fn pixel_ratio(&self) -> f32 {

@@ -20,8 +20,8 @@ pub struct ImagePosition {
     pub stretch_x: ImageStretches,
     pub stretch_y: ImageStretches,
     pub content: Option<ImageContent>,
-    pub text_fit_width: Option<TextFit>,
-    pub text_fit_height: Option<TextFit>,
+    pub(crate) text_fit_width: Option<TextFit>,
+    pub(crate) text_fit_height: Option<TextFit>,
 }
 
 impl ImagePosition {

@@ -97,13 +97,13 @@ pub enum TransitionOutcome {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct CameraVelocity {
     /// Logical pixels per second that the map's content moves on screen.
-    pub pan: ScreenCoordinate,
+    pub(crate) pan: ScreenCoordinate,
     /// Zoom levels per second.
-    pub zoom: f64,
+    pub(crate) zoom: f64,
     /// Degrees per second.
-    pub bearing: f64,
+    pub(crate) bearing: f64,
     /// Degrees per second.
-    pub pitch: f64,
+    pub(crate) pitch: f64,
 }
 
 /// How a camera command ended, once every field of it has: completed,

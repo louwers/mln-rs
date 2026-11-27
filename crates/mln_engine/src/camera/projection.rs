@@ -10,13 +10,13 @@ use crate::tile::UnwrappedTileID;
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ProjectionData {
     pub main_matrix: DMat4,
-    pub tile_mercator_coords: DVec4,
+    pub(crate) tile_mercator_coords: DVec4,
     pub clipping_plane: DVec4,
-    pub projection_transition: f64,
+    pub(crate) projection_transition: f64,
     pub fallback_matrix: DMat4,
     /// Clip-space Z shift for this drawable's layer, the same one the
     /// Mercator matrix carries.
-    pub depth_offset: f64,
+    pub(crate) depth_offset: f64,
     /// The layer's translation in tile units, added on the sphere; the
     /// fallback matrix already carries it.
     pub translate: DVec2,
@@ -26,10 +26,10 @@ pub struct ProjectionData {
     /// On the globe, the point on the unit sphere under the middle of the
     /// tile, which the shaders place the tile's geometry relative to; zero on
     /// Mercator.
-    pub sphere_anchor: DVec3,
+    pub(crate) sphere_anchor: DVec3,
     /// The sine and cosine of the anchor's longitude, then of its latitude,
     /// in the angles of [`VerticalPerspectiveProjection::tile_coordinates_to_sphere`].
-    pub sphere_anchor_angles: DVec4,
+    pub(crate) sphere_anchor_angles: DVec4,
 }
 
 /// A tile point in clip space, as the vertex shaders would place it.
@@ -161,7 +161,7 @@ impl Projection {
     /// `circle_radius_correction` extended to a point away from the center,
     /// by its latitude, blended the same way.
     #[must_use]
-    pub fn pitched_text_correction(self, view: &View, point: &Point<f64>, tile_id: &UnwrappedTileID) -> f64 {
+    pub(crate) fn pitched_text_correction(self, view: &View, point: &Point<f64>, tile_id: &UnwrappedTileID) -> f64 {
         match self {
             Projection::Mercator => 1.0,
             Projection::VerticalPerspective => {

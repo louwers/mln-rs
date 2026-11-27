@@ -75,7 +75,7 @@ impl MapProjection {
 
     /// The height the projection's ground was drawn at, at `lat_lng`, in
     /// meters with the terrain's exaggeration
-    /// ([`View::drawn_height_at`](crate::camera::View::drawn_height_at)).
+    /// (`View::drawn_height_at`).
     /// `None` on the flat map, and where no ground was drawn.
     #[must_use]
     pub fn elevation(&self, lat_lng: &LatLng) -> Option<f64> {

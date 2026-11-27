@@ -32,6 +32,7 @@ pub fn now() -> Timestamp {
 
 /// `gmtime_r` fields for `rfc1123`: (weekday 0 = Sunday, mday, month 0-11,
 /// year, hour, minute, second).
+#[cfg(any(test, not(target_family = "wasm")))]
 fn gmtime(secs: i64) -> (usize, i64, usize, i64, i64, i64, i64) {
     let days = secs.div_euclid(86400);
     let rem = secs.rem_euclid(86400);
@@ -55,8 +56,9 @@ fn gmtime(secs: i64) -> (usize, i64, usize, i64, i64, i64, i64) {
 /// GMT". Unlike `httpdate::fmt_http_date`, which panics outside the years
 /// 1970 to 9999, it formats any timestamp, such as a cached response's
 /// modification date.
+#[cfg(any(test, not(target_family = "wasm")))]
 #[must_use]
-pub fn rfc1123(timestamp: Timestamp) -> String {
+pub(crate) fn rfc1123(timestamp: Timestamp) -> String {
     const WEEK: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     let (wday, mday, month, year, hour, min, sec) = gmtime(timestamp.secs_since_epoch());
@@ -66,7 +68,8 @@ pub fn rfc1123(timestamp: Timestamp) -> String {
 /// Formats `timestamp` as an ISO 8601 date in UTC, e.g. "1994-11-06
 /// 08:49:37".
 #[must_use]
-pub fn iso8601(timestamp: Timestamp) -> String {
+#[cfg(test)]
+pub(crate) fn iso8601(timestamp: Timestamp) -> String {
     let (_, mday, month, year, hour, min, sec) = gmtime(timestamp.secs_since_epoch());
     format!("{year:04}-{:02}-{mday:02} {hour:02}:{min:02}:{sec:02}", month + 1)
 }
@@ -76,13 +79,13 @@ pub fn iso8601(timestamp: Timestamp) -> String {
 /// ("Sun, 06 Nov 1994 08:49:37 GMT"), RFC 850 and asctime. `None` when it is
 /// none of them or falls outside the years 1970 to 9999.
 #[must_use]
-pub fn parse_http_date(date: &str) -> Option<Timestamp> {
+pub(crate) fn parse_http_date(date: &str) -> Option<Timestamp> {
     let since_epoch = httpdate::parse_http_date(date).ok()?.duration_since(std::time::UNIX_EPOCH).ok()?;
     Some(Timestamp::from_secs(i64::try_from(since_epoch.as_secs()).ok()?))
 }
 
 #[must_use]
-pub fn parse_timestamp_i32(timestamp: i32) -> Timestamp {
+pub(crate) fn parse_timestamp_i32(timestamp: i32) -> Timestamp {
     Timestamp::from_secs(i64::from(timestamp))
 }
 

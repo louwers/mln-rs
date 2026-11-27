@@ -1,7 +1,7 @@
 use std::sync::{Arc, LazyLock};
 use std::thread::ThreadId;
 
-use mln_engine::text::font_stack::FontStack;
+use mln_engine::FontStack;
 use mln_engine::text::glyph::{FontData, FontFace};
 use mln_engine::text::local_fonts::{FontChooser, LocalGlyphs};
 use mln_style::Edit;

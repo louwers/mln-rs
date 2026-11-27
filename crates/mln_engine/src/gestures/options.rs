@@ -19,7 +19,7 @@ pub struct Notch {
 
 impl Notch {
     /// North.
-    pub const NORTH: Notch = Notch { spacing: 360.0, offset: 0.0, kind: 0 };
+    pub(crate) const NORTH: Notch = Notch { spacing: 360.0, offset: 0.0, kind: 0 };
 }
 
 /// How gestures move the map's content.
@@ -144,7 +144,7 @@ pub struct GestureOptions {
 impl GestureOptions {
     /// The options of `axis`.
     #[must_use]
-    pub fn axis(&self, axis: Axis) -> &AxisOptions {
+    pub(crate) fn axis(&self, axis: Axis) -> &AxisOptions {
         match axis {
             Axis::Zoom => &self.zoom,
             Axis::Bearing => &self.bearing,

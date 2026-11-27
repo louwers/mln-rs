@@ -1,5 +1,5 @@
 //! Tiles' ids and data: unwrapped and overscaled tile ids around
-//! `mln_style::tile_id`'s canonical one, and tile ranges ([`tile_id`],
+//! `mln_style::tile_id`'s canonical one, and tile ranges (`tile_id`,
 //! [`tile_range`]); the layers and features of vector tiles, and the
 //! geometry functions that work on them; and DEM data (`dem_data`).
 //!
@@ -21,13 +21,11 @@ pub mod geometry_tile_data;
 mod mlt;
 mod mvt;
 mod tile_data;
-pub mod tile_id;
+pub(crate) mod tile_id;
 pub mod tile_range;
 
-pub use error::TileError;
-pub use geometry_tile_data::{
-    convert_feature, is_boundary_edge, is_entirely_outside, limit_holes, round_polygon_corners,
-};
+pub(crate) use error::TileError;
+pub(crate) use geometry_tile_data::convert_feature;
 pub use mlt::{MltFeature, MltLayer, MltTile};
 pub use mvt::{MvtFeature, MvtLayer, MvtTile};
 pub use tile_data::{Feature, FeatureGroups, GeoJsonFeature, TileData, TileLayer};

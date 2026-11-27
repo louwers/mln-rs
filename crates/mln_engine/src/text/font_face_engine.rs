@@ -55,7 +55,7 @@ pub fn default_engine() -> Arc<dyn FontFaceEngine> {
 /// parse.
 #[cfg(not(feature = "font-face-shaper"))]
 #[must_use]
-pub fn default_engine() -> Arc<dyn FontFaceEngine> {
+pub(crate) fn default_engine() -> Arc<dyn FontFaceEngine> {
     struct NoEngine;
     impl FontFaceEngine for NoEngine {
         fn prepare(&self, ready: Box<dyn FnOnce(Result<(), String>) + Send>) {

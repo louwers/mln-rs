@@ -29,15 +29,14 @@ const ACCESSED_FLUSH_DELAY: Duration = Duration::from_millis(250);
 /// The queue of a database's worker, whose tasks run on the database's
 /// thread in the order they were posted. Once the database has dropped, the
 /// worker has ended and the queue drops what is posted to it.
-pub type DatabaseQueue<E> = Queue<DatabaseWorker<E>>;
+pub(crate) type DatabaseQueue<E> = Queue<DatabaseWorker<E>>;
 
 /// What a database's worker owns, on the database's thread: the database,
 /// and what an extension keeps beside it, such as the offline regions'
 /// downloads.
 pub struct DatabaseWorker<E: 'static> {
-    pub db: OfflineDatabase,
-    pub extension: E,
-    network: Option<Arc<dyn FileSource>>,
+    pub(crate) db: OfflineDatabase,
+    pub(crate) extension: E,
 }
 
 /// Makes the extension of a database worker, on the worker's thread, from
@@ -70,13 +69,8 @@ impl<E: 'static> DatabaseWorker<E> {
                 });
             }
         }));
-        let extension = make(queue.clone(), network.clone());
-        DatabaseWorker { db, extension, network }
-    }
-
-    /// The network that offline regions download through, if there is one.
-    pub fn network(&self) -> Option<&Arc<dyn FileSource>> {
-        self.network.as_ref()
+        let extension = make(queue.clone(), network);
+        DatabaseWorker { db, extension }
     }
 
     /// Answers a request with the stored copy, whatever its freshness: its
@@ -144,7 +138,7 @@ impl<E: 'static> DatabaseFileSource<E> {
     /// extension that `make` makes on the worker's thread, from the
     /// worker's queue and the database's network.
     #[must_use]
-    pub fn with_extension(
+    pub(crate) fn with_extension(
         cache_path: &str,
         network: Option<Arc<dyn FileSource>>,
         read_only: bool,

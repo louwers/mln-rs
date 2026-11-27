@@ -19,7 +19,7 @@ pub fn catch<R>(work: impl FnOnce() -> R) -> Result<R, String> {
 
 /// The message of a panic whose payload is `payload`.
 #[must_use]
-pub fn message(payload: &(dyn Any + Send)) -> String {
+pub(crate) fn message(payload: &(dyn Any + Send)) -> String {
     if let Some(message) = payload.downcast_ref::<&str>() {
         (*message).to_owned()
     } else if let Some(message) = payload.downcast_ref::<String>() {

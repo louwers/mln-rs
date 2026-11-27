@@ -29,7 +29,7 @@ pub trait FontChooser: Send + Sync {
     /// The device's font that draws `cluster` in a label of `font_stack`: the
     /// first font the stack names that the device has and that draws all of
     /// it, else the font the platform picks for it at the weight and style of
-    /// the stack's first name ([`font_name`](crate::text::font_name)), else the
+    /// the stack's first name (`font_name`), else the
     /// font of its first character alone. `None` when no font draws that.
     ///
     /// The face is one [`FontFace::device`] made: it holds its font file, and

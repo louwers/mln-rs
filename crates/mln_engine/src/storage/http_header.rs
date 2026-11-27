@@ -6,13 +6,13 @@ use crate::storage::chrono::{Timestamp, now, parse_http_date, parse_timestamp_i3
 /// The directives of a response's `Cache-Control` that a private cache
 /// heeds (RFC 9111 §5.2.2). Durations are in seconds.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct CacheControl {
-    pub max_age: Option<u64>,
-    pub must_revalidate: bool,
+pub(crate) struct CacheControl {
+    pub(crate) max_age: Option<u64>,
+    pub(crate) must_revalidate: bool,
     /// Only the unqualified form: `no-cache="field"` restricts the named
     /// fields, not the response (§5.2.2.4).
-    pub no_cache: bool,
-    pub no_store: bool,
+    pub(crate) no_cache: bool,
+    pub(crate) no_store: bool,
 }
 
 /// The largest delta-seconds a cache needs to tell apart (RFC 9111 §1.2.2).
@@ -70,7 +70,7 @@ impl CacheControl {
     /// 9111 §4.2.1); one whose value doesn't parse, and unknown ones, don't
     /// count.
     #[must_use]
-    pub fn parse(value: &str) -> CacheControl {
+    pub(crate) fn parse(value: &str) -> CacheControl {
         let mut result = CacheControl::default();
         for element in list_elements(value) {
             let (name, argument) = match element.split_once('=') {
@@ -96,28 +96,28 @@ const MAX_HEURISTIC_LIFETIME: u64 = 7 * 24 * 60 * 60;
 
 /// The caching headers of a response, as it arrived.
 #[derive(Clone, Debug)]
-pub struct CachingHeaders<'a> {
-    pub cache_control: &'a CacheControl,
+pub(crate) struct CachingHeaders<'a> {
+    pub(crate) cache_control: &'a CacheControl,
     /// The `Expires` field value; one that isn't a date means expired.
-    pub expires: Option<&'a str>,
-    pub date: Option<Timestamp>,
+    pub(crate) expires: Option<&'a str>,
+    pub(crate) date: Option<Timestamp>,
     /// The `Age` in seconds.
-    pub age: Option<u64>,
+    pub(crate) age: Option<u64>,
     /// When the resource last changed, from `Last-Modified` or the cached
     /// copy a 304 revalidates; with it a heuristic gives a response without
     /// an explicit lifetime one.
-    pub last_modified: Option<Timestamp>,
+    pub(crate) last_modified: Option<Timestamp>,
 }
 
 /// What a response's caching headers allow, as times on the local clock.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Freshness {
+pub(crate) struct Freshness {
     /// When the response stops being fresh.
-    pub expires: Timestamp,
+    pub(crate) expires: Timestamp,
     /// A stale copy is never used without revalidating it (`must-revalidate`
     /// or `no-cache`).
-    pub must_revalidate: bool,
-    pub no_store: bool,
+    pub(crate) must_revalidate: bool,
+    pub(crate) no_store: bool,
 }
 
 impl CachingHeaders<'_> {
@@ -129,7 +129,7 @@ impl CachingHeaders<'_> {
     /// - It counts from the response's `Age`. The apparent age from `Date`
     ///   isn't added, since it holds the difference between the clocks.
     #[must_use]
-    pub fn freshness(&self, received: Timestamp) -> Freshness {
+    pub(crate) fn freshness(&self, received: Timestamp) -> Freshness {
         let cc = self.cache_control;
         let origin = self.date.unwrap_or(received);
         let lifetime = if cc.no_cache {
@@ -175,7 +175,7 @@ fn stoi(s: &str) -> Option<i32> {
 /// When to retry a rate-limited request, from `Retry-After` (seconds or an
 /// HTTP date) or else `X-Rate-Limit-Reset` (a Unix time). `None` when the
 /// header it reads is absent or doesn't parse.
-pub fn parse_retry_headers(retry_after: &Option<String>, x_rate_limit_reset: &Option<String>) -> Option<Timestamp> {
+pub(crate) fn parse_retry_headers(retry_after: Option<&str>, x_rate_limit_reset: Option<&str>) -> Option<Timestamp> {
     if let Some(retry_after) = retry_after {
         match stoi(retry_after) {
             Some(secs) => Some(Timestamp::from_secs(now().secs_since_epoch() + i64::from(secs))),

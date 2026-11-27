@@ -48,13 +48,13 @@ const MAX_EYE_RAISES: usize = 3;
 /// The terrain the camera stands on, which the map hands the transform
 /// while its style's terrain draws outside tile mode, on every projection.
 #[derive(Clone, Debug)]
-pub struct TerrainGround {
+pub(crate) struct TerrainGround {
     /// The ground the renderer last drew, or `None` before it drew any:
     /// the eye then stays above sea level, and the ground under the center
     /// counts as loading.
-    pub elevation: Option<Arc<dyn Elevation>>,
+    pub(crate) elevation: Option<Arc<dyn Elevation>>,
     /// Whether the center stands on the ground at rest.
-    pub clamped: bool,
+    pub(crate) clamped: bool,
 }
 
 impl Transform {
@@ -63,7 +63,7 @@ impl Transform {
     /// terrain goes, the view fits the flat map again, a clamped center
     /// goes to sea level, keeping its location and zoom, and a gesture
     /// holds the altitude from where that leaves it.
-    pub fn set_terrain(&mut self, terrain: Option<TerrainGround>) {
+    pub(crate) fn set_terrain(&mut self, terrain: Option<TerrainGround>) {
         let clamped = self.clamped();
         let goes = self.terrain.is_some() && terrain.is_none();
         self.terrain = terrain;
@@ -120,7 +120,7 @@ impl Transform {
     /// renderer compares to tell whether a frame's camera stood on its
     /// newest ground. The terrain moves the camera, not a command, so this
     /// reports no camera change. Returns whether the view changed.
-    pub fn follow_terrain(&mut self) -> bool {
+    pub(crate) fn follow_terrain(&mut self) -> bool {
         let Some(TerrainGround { elevation, clamped }) = &self.terrain else { return false };
         let (elevation, clamped) = (elevation.clone(), *clamped);
         let ground = |view: &View| (view.terrain_min_elevation(), view.center_altitude());

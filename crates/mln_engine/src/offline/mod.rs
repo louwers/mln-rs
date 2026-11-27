@@ -7,6 +7,9 @@ mod database_file_source;
 mod offline_download;
 
 pub use database_file_source::{DatabaseFileSourceExt, RegionDatabase, region_database};
+// Public for the crate's test of a download that a map renders from
+// (tests/offline_download_map.rs). Not API.
+#[doc(hidden)]
 pub use offline_download::{DownloadTask, Downloads, OfflineDownload, Post};
 
 #[cfg(test)]

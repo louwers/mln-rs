@@ -48,7 +48,7 @@ impl MltTile {
     }
 
     #[must_use]
-    pub fn fast_pfor_enabled(&self) -> bool {
+    pub(crate) fn fast_pfor_enabled(&self) -> bool {
         self.0.fast_pfor_enabled
     }
 

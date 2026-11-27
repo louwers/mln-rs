@@ -58,7 +58,7 @@ pub fn limit_holes(polygon: &mut GeometryCollection, max_holes: u32) {
 /// Converts a feature of `tile_id` whose geometry is `geometries` to a
 /// `Feature` in longitude/latitude, with its properties and id. Fails as
 /// [`convert_geometry`] does.
-pub fn convert_feature(
+pub(crate) fn convert_feature(
     feature: &dyn GeometryTileFeature,
     geometries: &GeometryCollection,
     tile_id: &CanonicalTileID,

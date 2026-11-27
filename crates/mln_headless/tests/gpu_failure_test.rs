@@ -266,10 +266,11 @@ impl FailingMap {
         let mut map = Map::with_file_source(file_source, options, mln_builtins::registry(), &pool).unwrap();
         let events = map.renderer_events();
         let invalidate = events.clone();
-        let mut renderer = Renderer::new(
+        let mut renderer = Renderer::with_glyph_cache(
             backend.gpu(),
             1.0,
             mln_engine::text::local_fonts::LocalGlyphs::default(),
+            Arc::default(),
             mln_builtins::registry(),
             Arc::new(move || invalidate.push(RendererEvent::Invalidate)),
             &pool,

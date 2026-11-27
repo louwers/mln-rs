@@ -294,7 +294,7 @@ impl<'a, T: StyleLayerType> BuildCx<'a, T> {
 
     /// The tile's zoom.
     #[must_use]
-    pub fn zoom(&self) -> f32 {
+    pub(crate) fn zoom(&self) -> f32 {
         f32::from(self.parameters.tile_id.overscaled_z)
     }
 

@@ -409,10 +409,12 @@ impl DataCache {
     }
 
     /// The bytes the cache keeps, by its estimate.
+    #[cfg(test)]
     pub(crate) fn retained_bytes(&self) -> usize {
         self.retained
     }
 
+    #[cfg(test)]
     pub(crate) fn set_budget(&mut self, budget: usize) {
         self.budget = budget;
         self.evict(None);

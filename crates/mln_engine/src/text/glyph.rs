@@ -11,7 +11,7 @@ use crate::text::font_stack::FontStack;
 use crate::text::tagged_string::FontStackHash;
 
 /// Where a glyph comes from: glyph PBFs, or a font file that shapes text,
-/// with a type numbered at runtime ([`face_type`]).
+/// with a type numbered at runtime (`face_type`).
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default, mln_wire::Wire)]
 pub enum GlyphIDType {
     #[default]
@@ -46,9 +46,12 @@ impl GlyphIDType {
 }
 
 /// `GLYPHS_PER_GLYPH_RANGE` etc. (`glyph_range.hpp`).
-pub const GLYPHS_PER_GLYPH_RANGE: u32 = 256;
-pub const GLYPH_RANGES_PER_FONT_STACK: u32 = 256;
-pub const NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK: u32 = 97;
+#[cfg(any(test, feature = "sqlite"))]
+pub(crate) const GLYPHS_PER_GLYPH_RANGE: u32 = 256;
+#[cfg(any(test, feature = "sqlite"))]
+pub(crate) const GLYPH_RANGES_PER_FONT_STACK: u32 = 256;
+#[cfg(any(test, feature = "sqlite"))]
+pub(crate) const NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK: u32 = 97;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct GlyphRange {
@@ -85,7 +88,7 @@ impl Ord for GlyphRange {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, mln_wire::Wire)]
 pub struct GlyphID {
     pub code: u16,
-    pub type_: GlyphIDType,
+    pub(crate) type_: GlyphIDType,
 }
 
 impl GlyphID {
@@ -105,7 +108,7 @@ impl GlyphID {
     /// The character that a glyph PBF glyph stands for; `None` for a
     /// surrogate code.
     #[must_use]
-    pub fn char(self) -> Option<char> {
+    pub(crate) fn char(self) -> Option<char> {
         char::from_u32(u32::from(self.code))
     }
 
@@ -146,7 +149,7 @@ pub(crate) fn pbf_code(c: char) -> Option<u16> {
     u16::try_from(u32::from(c)).ok()
 }
 
-pub type GlyphIDs = BTreeSet<GlyphID>;
+pub(crate) type GlyphIDs = BTreeSet<GlyphID>;
 
 /// The 256-glyph range that contains `glyph`. Only works for the BMP.
 #[must_use]
@@ -186,7 +189,7 @@ impl Glyph {
     pub(crate) const BORDER_SIZE: u8 = 3;
 }
 
-pub type Glyphs = BTreeMap<GlyphID, Option<Arc<Glyph>>>;
+pub(crate) type Glyphs = BTreeMap<GlyphID, Option<Arc<Glyph>>>;
 pub type GlyphMap = VecMap<FontStackHash, Glyphs>;
 
 /// A glyph or an inline image of a shaped label, placed relative to the
@@ -264,7 +267,7 @@ impl Shaping {
     }
 }
 
-pub use mln_style::font_face::FontFaceRange;
+pub(crate) use mln_style::font_face::FontFaceRange;
 
 /// The bytes of a font file that an app already holds, such as a
 /// memory-mapped file, shared without a copy, and which of its faces to use.
@@ -278,7 +281,7 @@ pub struct FontData {
 
 impl FontData {
     /// The file's first face.
-    pub fn new(bytes: Arc<dyn AsRef<[u8]> + Send + Sync>) -> Self {
+    pub(crate) fn new(bytes: Arc<dyn AsRef<[u8]> + Send + Sync>) -> Self {
         FontData { bytes, face_index: 0 }
     }
 
@@ -349,18 +352,18 @@ pub struct FontFace {
     pub type_: GlyphIDType,
     /// The `text-font` name it draws, or "" for a fallback.
     pub name: String,
-    pub url: String,
+    pub(crate) url: String,
     /// The code points it draws, first and last.
     pub ranges: Vec<FontFaceRange>,
     /// The font file itself, which the map then uses instead of fetching
     /// `url`. Left out of the faces that workers get, which don't read
     /// font files.
     #[wire(skip)]
-    pub data: Option<FontData>,
+    pub(crate) data: Option<FontData>,
     /// The OpenType weight a variable font loads at: regular (400) unless
     /// made at another. Left out of the faces that workers get, like `data`.
     #[wire(skip, default = "regular_weight")]
-    pub weight: u16,
+    pub(crate) weight: u16,
 }
 
 /// [`REGULAR_WEIGHT`](crate::text::weight::REGULAR_WEIGHT) as an OpenType weight.
@@ -379,15 +382,6 @@ impl FontFace {
             data: None,
             weight: regular_weight(),
         }
-    }
-
-    /// A fallback face, without a name, for the font file at `url`, which
-    /// draws the code points in `ranges`, with its glyph type.
-    #[must_use]
-    pub fn fallback(url: &str, ranges: Vec<FontFaceRange>) -> Self {
-        let mut face = FontFace::new("", url, ranges);
-        face.type_ = face_type(&face.url, "", &face.ranges);
-        face
     }
 
     /// The device's fonts, as a fallback face: in a style with glyph PBFs,
@@ -419,14 +413,9 @@ impl FontFace {
 
     /// The face with its font file in memory, so that `url` only names it.
     #[must_use]
-    pub fn with_data(mut self, data: FontData) -> Self {
+    pub(crate) fn with_data(mut self, data: FontData) -> Self {
         self.data = Some(data);
         self
-    }
-
-    #[must_use]
-    pub fn valid(&self) -> bool {
-        !self.name.is_empty() && !self.url.is_empty() && !self.ranges.is_empty()
     }
 }
 
@@ -453,7 +442,7 @@ pub type FontFaces = Vec<FontFace>;
 /// `font-faces`, then `fallback`, the app's. `None` when the style has no
 /// `font-faces` and the app no fallback faces.
 #[must_use]
-pub fn style_font_faces(
+pub(crate) fn style_font_faces(
     style: Option<&mln_style::font_face::FontFaces>,
     fallback: Option<&FontFaces>,
 ) -> Option<Arc<FontFaces>> {
@@ -466,10 +455,10 @@ pub fn style_font_faces(
 }
 
 /// The texts that each font face of each font stack shapes.
-pub type ShapeRequests = VecMap<FontStack, VecMap<GlyphIDType, BTreeSet<Vec<char>>>>;
+pub(crate) type ShapeRequests = VecMap<FontStack, VecMap<GlyphIDType, BTreeSet<Vec<char>>>>;
 
 /// Each font-face text of each font stack, shaped by its face: what
-/// [`ShapeRequests`] resolve to.
+/// `ShapeRequests` resolve to.
 pub type ShapeResults = VecMap<FontStack, VecMap<GlyphIDType, BTreeMap<Vec<char>, Arc<crate::text::ShapedText>>>>;
 
 /// The glyphs and the shapings of text that a layout asks for: the
@@ -508,7 +497,7 @@ static FACE_TYPES: Mutex<FaceTypes> = Mutex::new(FaceTypes { last: 0, types: Vec
 /// The glyph type of the face of the font file at `url` that draws `font`'s
 /// `ranges`: the same for the same three for the life of the process, and
 /// a new one otherwise, which after `u16::MAX - 1` types repeats the first.
-pub fn face_type(url: &str, font: &str, ranges: &[FontFaceRange]) -> GlyphIDType {
+pub(crate) fn face_type(url: &str, font: &str, ranges: &[FontFaceRange]) -> GlyphIDType {
     let mut types = FACE_TYPES.lock();
     let found = types.types.iter().find(|((u, f, r), _)| u == url && f == font && r == ranges);
     if let Some(&(_, id)) = found {

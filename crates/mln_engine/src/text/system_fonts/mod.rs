@@ -52,11 +52,11 @@ mod fontconfig;
 #[cfg(not(target_family = "wasm"))]
 pub use glyphs::SystemFonts;
 
-/// The ranges of [`shaped_ranges`], once found.
+/// The ranges of `shaped_ranges`, once found.
 static SHAPED: OnceLock<Vec<FontFaceRange>> = OnceLock::new();
 
 /// Starts loading the platform's font matcher and finding
-/// [`shaped_ranges`] on a thread of their own, unless that has started, so
+/// `shaped_ranges` on a thread of their own, unless that has started, so
 /// that the first map that needs them waits less.
 pub fn prefetch() {
     static STARTED: OnceLock<()> = OnceLock::new();
@@ -72,11 +72,11 @@ pub fn prefetch() {
 /// The code points of the scripts that glyph PBFs can't shape that the
 /// system has a font for. Finds them the first time, which can take a
 /// moment; then it returns the same ranges.
-pub fn shaped_ranges() -> &'static [FontFaceRange] {
+pub(crate) fn shaped_ranges() -> &'static [FontFaceRange] {
     SHAPED.get_or_init(find)
 }
 
-/// The system's fonts as a map's fallback face, for [`shaped_ranges`]
+/// The system's fonts as a map's fallback face, for `shaped_ranges`
 /// where the style has glyph PBFs (`Map::set_fallback_font_face_list`):
 /// `None` without a font matcher, as in the browser.
 #[must_use]

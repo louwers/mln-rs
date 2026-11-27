@@ -8,10 +8,12 @@
 // from the `LatLng` constructor while projecting a point whose latitude is
 // out of range.
 
+#[cfg(any(test, feature = "sqlite"))]
 use geo_types::{Coord, Geometry, LineString, Polygon};
 use geometry::Point;
 use glam::DVec3;
 use mln_style::constants;
+#[cfg(any(test, feature = "sqlite"))]
 use mln_style::error::Error;
 use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
 use mln_style::math::{fmax, fmin};
@@ -20,11 +22,12 @@ use mln_style::tile_id::CanonicalTileID;
 
 use crate::camera::{TileCoordinate, View, ViewportMode};
 use crate::geo::ScreenCoordinate;
-use crate::geo::bounding_volumes::{AABB, Frustum, IntersectionResult};
+use crate::geo::bounding_volumes::{Aabb, Frustum, IntersectionResult};
 use crate::geo::projection::Projection;
 use crate::render::terrain::ElevationRanges;
 use crate::tile::{OverscaledTileID, UnwrappedTileID};
 use crate::tile_store::TileLodMode;
+#[cfg(any(test, feature = "sqlite"))]
 use crate::tile_store::tile_cover_impl::Impl;
 use crate::tile_store::tile_lod::{TileZoomFunction, elevation_for_tile_culling};
 
@@ -176,13 +179,15 @@ fn tile_cover_points(
 }
 
 /// Helper class to stream tile-cover results per row
-pub struct TileCover {
+#[cfg(any(test, feature = "sqlite"))]
+pub(crate) struct TileCover {
     impl_: Box<Impl>,
 }
 
+#[cfg(any(test, feature = "sqlite"))]
 impl TileCover {
     #[must_use]
-    pub fn new_from_bounds(bounds_: &LatLngBounds, z: u8) -> TileCover {
+    pub(crate) fn new_from_bounds(bounds_: &LatLngBounds, z: u8) -> TileCover {
         let mut bounds = LatLngBounds::hull(
             bounds_lat_lng(f64::max(bounds_.south(), -constants::LATITUDE_MAX), bounds_.west()),
             bounds_lat_lng(f64::min(bounds_.north(), constants::LATITUDE_MAX), bounds_.east()),
@@ -206,16 +211,17 @@ impl TileCover {
     /// The cover at zoom `z` of `geom` in longitudes and latitudes. Fails
     /// with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a point
     /// that isn't a valid `LatLng`.
-    pub fn new_from_geometry(geom: &Geometry<f64>, z: u8) -> Result<TileCover, Error> {
+    pub(crate) fn new_from_geometry(geom: &Geometry<f64>, z: u8) -> Result<TileCover, Error> {
         Ok(TileCover { impl_: Box::new(Impl::new_projected(i32::from(z), geom)?) })
     }
 
     #[must_use]
-    pub fn has_next(&self) -> bool {
+    pub(crate) fn has_next(&self) -> bool {
         self.impl_.has_next()
     }
 }
 
+#[cfg(any(test, feature = "sqlite"))]
 impl Iterator for TileCover {
     type Item = UnwrappedTileID;
 
@@ -266,7 +272,7 @@ impl TileCoverParameters {
 /// The zoom level of the tiles, `size` pixels wide, that cover a view at
 /// `zoom`: the nearest level if `round_zoom`, else the level below.
 #[must_use]
-pub fn covering_zoom_level(zoom: f64, round_zoom: bool, size: u16) -> i32 {
+pub(crate) fn covering_zoom_level(zoom: f64, round_zoom: bool, size: u16) -> i32 {
     let mut zoom = zoom;
     zoom += (constants::TILE_SIZE_D / f64::from(size)).log2();
     if round_zoom { zoom.round() as i32 } else { zoom.floor() as i32 }
@@ -831,7 +837,7 @@ pub fn tile_cover(
 ) -> Vec<OverscaledTileID> {
     #[derive(Clone, Copy, Debug)]
     struct Node {
-        aabb: AABB,
+        aabb: Aabb,
         zoom: u8,
         x: u32,
         y: u32,
@@ -907,7 +913,7 @@ pub fn tile_cover(
 
     let new_root_tile = |wrap: i16| -> Node {
         Node {
-            aabb: AABB::new(
+            aabb: Aabb::new(
                 DVec3::new(f64::from(wrap) * num_tiles, 0.0, 0.0),
                 DVec3::new(f64::from(i32::from(wrap) + 1) * num_tiles, num_tiles, 0.0),
             ),
@@ -1118,7 +1124,7 @@ pub(crate) fn mercator_covering_tiles(
         let (min_elevation, max_elevation) =
             ranges.range(tile).unwrap_or((f64::min(0.0, culling_elevation), f64::max(0.0, culling_elevation)));
         let tiles_at_zoom = f64::from(1u32 << node.zoom);
-        let aabb = AABB::new(
+        let aabb = Aabb::new(
             DVec3::new(
                 f64::from(node.wrap) + f64::from(node.x) / tiles_at_zoom,
                 f64::from(node.y) / tiles_at_zoom,
@@ -1228,8 +1234,9 @@ pub(crate) fn tile_cover_geometry(geometry: &Geometry<f64>, z: u8) -> Result<Vec
 /// Taken from <https://github.com/mapbox/sphericalmercator#xyzbbox-zoom-tms_style-srs>
 /// Computes the projected tiles for the lower left and upper right points of the bounds
 /// and uses that to compute the tile cover count
+#[cfg(any(test, feature = "sqlite"))]
 #[must_use]
-pub fn tile_count_bounds(bounds: &LatLngBounds, zoom: u8) -> u64 {
+pub(crate) fn tile_count_bounds(bounds: &LatLngBounds, zoom: u8) -> u64 {
     if zoom == 0 {
         return 1;
     }
@@ -1248,7 +1255,8 @@ pub fn tile_count_bounds(bounds: &LatLngBounds, zoom: u8) -> u64 {
     ((dx + 1.0) * (dy + 1.0)) as u64
 }
 
-pub fn tile_count_geometry(geometry: &Geometry<f64>, z: u8) -> Result<u64, Error> {
+#[cfg(any(test, feature = "sqlite"))]
+pub(crate) fn tile_count_geometry(geometry: &Geometry<f64>, z: u8) -> Result<u64, Error> {
     let mut tile_count: u64 = 0;
 
     let mut tc = TileCover::new_from_geometry(geometry, z)?;

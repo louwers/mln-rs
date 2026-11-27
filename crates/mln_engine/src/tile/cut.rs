@@ -36,11 +36,11 @@ fn buffer(extent: u32) -> i64 {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Cut {
     /// How many zooms deeper the tile is.
-    pub dz: u8,
+    pub(crate) dz: u8,
     /// The tile's column and row among the `2^dz` by `2^dz` tiles that the
     /// source tile holds.
-    pub x: u32,
-    pub y: u32,
+    pub(crate) x: u32,
+    pub(crate) y: u32,
 }
 
 impl Cut {
@@ -71,7 +71,7 @@ impl Cut {
     /// that leaves runs along the edge it left by. Empty if nothing is
     /// left.
     #[must_use]
-    pub fn geometry(&self, kind: FeatureType, geometry: &GeometryCollection, extent: u32) -> GeometryCollection {
+    pub(crate) fn geometry(&self, kind: FeatureType, geometry: &GeometryCollection, extent: u32) -> GeometryCollection {
         let scale = (1u64 << self.dz) as f64;
         let offset = [f64::from(self.x) * f64::from(EXTENT), f64::from(self.y) * f64::from(EXTENT)];
         let rings: Vec<Vec<P>> = geometry
@@ -267,7 +267,7 @@ impl AncestorLayer {
 
 /// The `shared::Kind` of ancestors, which cross to a worker once for all the
 /// tiles cut from them.
-pub struct SharedAncestor;
+pub(crate) struct SharedAncestor;
 
 impl shared::Kind for SharedAncestor {
     type Value = Ancestor;
@@ -351,12 +351,12 @@ impl CutData {
     }
 
     #[must_use]
-    pub fn ancestor(&self) -> &Arc<Ancestor> {
+    pub(crate) fn ancestor(&self) -> &Arc<Ancestor> {
         &self.ancestor
     }
 
     #[must_use]
-    pub fn cut(&self) -> Cut {
+    pub(crate) fn cut(&self) -> Cut {
         self.cut
     }
 

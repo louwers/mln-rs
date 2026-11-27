@@ -67,7 +67,7 @@ impl<T> EventQueue<T> {
     /// Whether the queue has no events. A push counts once it has queued its
     /// event, before it runs the waker.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.shared.events.lock().is_empty()
     }
 

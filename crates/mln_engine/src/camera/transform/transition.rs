@@ -525,13 +525,13 @@ impl Transform {
 
     /// Whether any camera command is still animating.
     #[must_use]
-    pub fn in_transition(&self) -> bool {
+    pub(crate) fn in_transition(&self) -> bool {
         !self.transitions.is_empty()
     }
 
     /// Moves the camera to where its commands are at `now`, and ends the
     /// ones that have run out; `None`, for a map without a clock, ends them all.
-    pub fn update_transitions(&mut self, now: Option<Instant>) {
+    pub(crate) fn update_transitions(&mut self, now: Option<Instant>) {
         if self.transitions.is_empty() {
             return;
         }
@@ -651,7 +651,7 @@ impl Transform {
     /// Cancels the commands whose [`AnimationOptions::transition_id`] equals
     /// `transition_id`, leaves the others running, and returns whether any
     /// command ended.
-    pub fn cancel_transitions_with_id(&mut self, transition_id: u64) -> bool {
+    pub(crate) fn cancel_transitions_with_id(&mut self, transition_id: u64) -> bool {
         let mut finished: Vec<_> = self
             .transitions
             .extract_if(.., |transition| transition.animation.transition_id == Some(transition_id))
@@ -670,7 +670,7 @@ impl Transform {
     /// Ends the running commands as closed, without a camera change. A map's
     /// owner calls it before it drops the map, so that it hears every
     /// command's end.
-    pub fn close(&mut self) {
+    pub(crate) fn close(&mut self) {
         for transition in std::mem::take(&mut self.transitions) {
             let end = TransitionEnd { outcome: TransitionOutcome::Closed, ..transition.end() };
             self.report_end(transition.command, transition.animation.transition_id, end);

@@ -118,12 +118,12 @@ impl UnwrappedTileID {
     }
 
     #[must_use]
-    pub fn is_child_of(&self, parent: &UnwrappedTileID) -> bool {
+    pub(crate) fn is_child_of(&self, parent: &UnwrappedTileID) -> bool {
         self.wrap == parent.wrap && self.canonical.is_child_of(&parent.canonical)
     }
 
     #[must_use]
-    pub fn children(&self) -> [UnwrappedTileID; 4] {
+    pub(crate) fn children(&self) -> [UnwrappedTileID; 4] {
         let child_z = self.canonical.z.wrapping_add(1);
         let child_x = self.canonical.x.wrapping_mul(2);
         let child_y = self.canonical.y.wrapping_mul(2);
@@ -152,7 +152,7 @@ impl UnwrappedTileID {
     }
 
     #[must_use]
-    pub fn unwrap_to(&self, new_wrap: i16) -> UnwrappedTileID {
+    pub(crate) fn unwrap_to(&self, new_wrap: i16) -> UnwrappedTileID {
         UnwrappedTileID::with_wrap(new_wrap, self.canonical)
     }
 }

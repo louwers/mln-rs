@@ -51,7 +51,7 @@ pub struct Projection;
 impl Projection {
     /// Map pixel width at given scale.
     #[must_use]
-    pub fn world_size(scale: f64) -> f64 {
+    pub(crate) fn world_size(scale: f64) -> f64 {
         scale * TILE_SIZE_D
     }
 
@@ -98,7 +98,7 @@ impl Projection {
 
     /// The point of `lat_lng` on a world `2^zoom` tiles wide.
     #[must_use]
-    pub fn project_zoom(lat_lng: &LatLng, zoom: i32) -> Point<f64> {
+    pub(crate) fn project_zoom(lat_lng: &LatLng, zoom: i32) -> Point<f64> {
         Self::project_(lat_lng, 2f64.powi(zoom))
     }
 

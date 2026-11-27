@@ -130,7 +130,7 @@ impl Downloads {
 
     /// The download of the region `region_id`, made at its first use. Fails
     /// without a network, and for a region that the database doesn't have.
-    pub fn download(
+    pub(crate) fn download(
         &mut self,
         db: &mut OfflineDatabase,
         region_id: i64,
@@ -160,12 +160,13 @@ impl Downloads {
     }
 
     /// The download of `region_id`, if it has one.
-    pub fn get_mut(&mut self, region_id: i64) -> Option<&mut OfflineDownload> {
+    #[cfg(test)]
+    pub(crate) fn get_mut(&mut self, region_id: i64) -> Option<&mut OfflineDownload> {
         self.downloads.get_mut(&region_id)
     }
 
     /// Stops and forgets the download of `region_id`.
-    pub fn remove(&mut self, region_id: i64) -> Option<OfflineDownload> {
+    pub(crate) fn remove(&mut self, region_id: i64) -> Option<OfflineDownload> {
         self.downloads.remove(&region_id)
     }
 
@@ -264,14 +265,9 @@ impl OfflineDownload {
         }
     }
 
-    /// The region's id.
-    #[must_use]
-    pub fn id(&self) -> i64 {
-        self.id
-    }
-
     /// Sets the most requests the download has in flight at once.
-    pub fn set_maximum_concurrent_requests(&mut self, maximum: u32) {
+    #[cfg(test)]
+    pub(crate) fn set_maximum_concurrent_requests(&mut self, maximum: u32) {
         self.maximum_concurrent_requests = maximum;
     }
 
@@ -308,7 +304,7 @@ impl OfflineDownload {
     /// The download's status: while it's active, what it found so far, else
     /// what the region holds of what its stored style lists.
     #[must_use]
-    pub fn get_status(&self, db: &mut OfflineDatabase) -> OfflineRegionStatus {
+    pub(crate) fn get_status(&self, db: &mut OfflineDatabase) -> OfflineRegionStatus {
         if self.status.download_state == OfflineRegionDownloadState::Active {
             return self.status;
         }

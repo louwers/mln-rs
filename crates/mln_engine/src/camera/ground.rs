@@ -30,21 +30,21 @@ const BAND_PADDING: f64 = 10.0;
 
 /// A point of the ground a frame drew.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct GroundHit {
+pub(crate) struct GroundHit {
     /// Its Web Mercator point at zoom 0 (from 0 to 1 across, y south), with
     /// x in the world copy the view shows it in. On a globe's polar cap y is
     /// past 0 or 1.
-    pub world: DVec2,
+    pub(crate) world: DVec2,
     /// The height of the surface there, in meters with the terrain's
     /// exaggeration ([`Elevation::surface_at`]).
-    pub height: f64,
+    pub(crate) height: f64,
 }
 
 impl GroundHit {
     /// Its location, in the world copy of [`world`](Self::world) unless
     /// `wrap_mode` wraps it.
     #[must_use]
-    pub fn location(&self, wrap_mode: WrapMode) -> LatLng {
+    pub(crate) fn location(&self, wrap_mode: WrapMode) -> LatLng {
         let world = Point::new(self.world.x, self.world.y);
         // A finite point of the world always has a location.
         Projection::unproject(&world, 1.0 / TILE_SIZE_D, wrap_mode).unwrap_or_default()
@@ -68,7 +68,7 @@ impl View {
     /// the range's edge below it drew. `None` where the line meets no drawn
     /// ground, and while the view shows nothing.
     #[must_use]
-    pub fn ground_under(&self, point: &ScreenCoordinate, ground: &dyn Elevation) -> Option<GroundHit> {
+    pub(crate) fn ground_under(&self, point: &ScreenCoordinate, ground: &dyn Elevation) -> Option<GroundHit> {
         if self.is_globe() {
             return self.ground_under_on_globe(point, ground);
         }
@@ -83,7 +83,7 @@ impl View {
     /// stands in for the ground, on the globe the sphere
     /// ([`screen_coordinate_to_lat_lng_at`](Self::screen_coordinate_to_lat_lng_at)).
     /// Fails as [`screen_coordinate_to_lat_lng`](Self::screen_coordinate_to_lat_lng).
-    pub fn screen_coordinate_to_lat_lng_on(
+    pub(crate) fn screen_coordinate_to_lat_lng_on(
         &self,
         point: &ScreenCoordinate,
         ground: &dyn Elevation,
@@ -104,7 +104,7 @@ impl View {
     ///
     /// [`screen_coordinate_to_lat_lng_on`]: Self::screen_coordinate_to_lat_lng_on
     #[must_use]
-    pub fn lat_lng_to_screen_coordinate_on(&self, lat_lng: &LatLng, ground: &dyn Elevation) -> ScreenCoordinate {
+    pub(crate) fn lat_lng_to_screen_coordinate_on(&self, lat_lng: &LatLng, ground: &dyn Elevation) -> ScreenCoordinate {
         let height = self.drawn_height_at(lat_lng, ground);
         self.lat_lng_to_screen_coordinate_at(lat_lng, height.unwrap_or_else(|| self.center_altitude()))
     }
@@ -115,7 +115,7 @@ impl View {
     /// the camera may stand on ground under its center that wasn't drawn
     /// ([`Elevation::at`]).
     #[must_use]
-    pub fn drawn_height_at(&self, lat_lng: &LatLng, ground: &dyn Elevation) -> Option<f64> {
+    pub(crate) fn drawn_height_at(&self, lat_lng: &LatLng, ground: &dyn Elevation) -> Option<f64> {
         let near = self.lat_lng_near_center(lat_lng);
         if self.is_globe() && near.latitude().abs() > LATITUDE_MAX {
             return Some(0.0);
@@ -180,7 +180,7 @@ impl View {
     /// sampling every 4 pixels across the ground at the view's zoom. `None`
     /// where the line meets no drawn ground.
     #[must_use]
-    pub fn ground_along(&self, near: DVec3, far: DVec3, ground: &dyn Elevation) -> Option<GroundHit> {
+    pub(crate) fn ground_along(&self, near: DVec3, far: DVec3, ground: &dyn Elevation) -> Option<GroundHit> {
         let (low, high) = ground.range()?;
         let (low, high) = (low - BAND_PADDING, high + BAND_PADDING);
         let along = far - near;

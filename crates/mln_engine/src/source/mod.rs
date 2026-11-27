@@ -74,7 +74,7 @@
 //! or decode.
 //!
 //! A load's work runs wherever the origin puts it: on the renderer's pool
-//! ([`LoadContext::pool`]), which runs on the renderer's thread in the
+//! ([`OriginUpdate::pool`]), which runs on the renderer's thread in the
 //! browser, on a file source's threads, or in a host's callback. Its
 //! [`Replier`] and its replies are `Send`, and a replier sends as many
 //! replies as its load has. What the tiles take in lays out or decodes on
@@ -98,7 +98,7 @@
 //! [tried](LoadContext::tried_optional) what it can while optional, so a
 //! parent never loads for a tile that loads at once. It makes a tile in a
 //! new world copy show the same tile's contents in another, which
-//! [`WorldCopy::take`] makes the new tile's answer, and hands a reply to
+//! [`WorldCopy::take_into`] makes the new tile's answer, and hands a reply to
 //! the origin only while its load is the tile's latest. It lays out and
 //! decodes what tiles take in, knows when a tile has done what it can, and
 //! starts a failed tile over when its retry loads anew. How data is
@@ -139,7 +139,6 @@ use crate::tile_store::inbox::{InboxSender, TileEvent};
 pub use crate::tile_store::loading::TileTimes;
 pub use crate::tile_store::tile::{TileNecessity, TileOperation};
 use crate::tile_store::tile_mut::{CopyAnswer, TileMut};
-pub use crate::worker::job::SourceKey;
 use crate::worker::job::TileKey;
 
 pub(crate) mod erased;
@@ -147,7 +146,7 @@ mod loading;
 pub(crate) mod render_image_source;
 pub(crate) mod render_source;
 pub(crate) mod render_tile_source;
-pub mod source_state;
+pub(crate) mod source_state;
 
 pub use loading::{Described, Fetch, Load, OfflineResources, Respond, SourceSummary};
 
@@ -233,7 +232,7 @@ pub trait SourceType: Send + Sync + 'static {
     /// makes it once, as the source joins the renderer's style. A source
     /// that later takes its place with the same id and type, as a style
     /// reload makes, keeps the supply: its origin takes the new source in
-    /// [`DataOrigin::update`], and an image's [`ImageOf`] reads it.
+    /// [`DataOrigin::update`], and an image's `ImageOf` reads it.
     fn supply(source: &Source) -> Supply<Self::Data>;
 
     /// The `field` of the extension `extension` of `feature`, a feature
@@ -265,7 +264,7 @@ pub(crate) enum Supplied {
 }
 
 /// The image of a source, if it is one of the type's.
-pub type ImageOf = fn(&Source) -> Option<SourceImage>;
+pub(crate) type ImageOf = fn(&Source) -> Option<SourceImage>;
 
 impl<K: TileKind> Supply<K> {
     /// Tiles whose data comes from `origin`.
@@ -438,7 +437,7 @@ pub trait DataOrigin: 'static {
     /// ([`set_necessity`](Self::set_necessity)) as it retains it, after
     /// this. On a flat map, `copy` is the same tile in another world copy,
     /// whose contents the new tile already shows, and
-    /// [`copy.take(cx)`](WorldCopy::take) settles the tile on them, as its
+    /// [`copy.take_into(cx)`](WorldCopy::take_into) settles the tile on them, as its
     /// load's answer. Otherwise the origin delivers the tile's data at once,
     /// starts a load, or waits until the tile is needed.
     fn start(&mut self, cx: &mut LoadContext<'_, '_, Self>, copy: Option<WorldCopy<'_, Self::Tile>>) -> Self::Tile;
@@ -652,19 +651,6 @@ impl<'a, 't, O: ?Sized> LoadContext<'a, 't, O> {
         self.tile.tile().is_renderable()
     }
 
-    /// Whether the tile's geometry lays out on the renderer's thread as it
-    /// takes it in, as a source that updates synchronously does.
-    #[must_use]
-    pub fn is_synchronous(&self) -> bool {
-        self.tile.is_synchronous()
-    }
-
-    /// The renderer's thread pool.
-    #[must_use]
-    pub fn pool(&self) -> &Pool {
-        self.tile.store().pool.pool()
-    }
-
     /// [`begin_load`](Self::begin_load) of a load whose replies are `R`,
     /// which must be the [`Reply`](DataOrigin::Reply) of the tile's origin:
     /// the origin gets no other replies.
@@ -702,7 +688,7 @@ impl<'a, 't, O: ?Sized> LoadContext<'a, 't, O> {
     /// [`fail`](Self::fail), and until the origin begins a load or gives the
     /// tile anything ([`begin_load`](Self::begin_load),
     /// [`deliver`](Self::deliver), [`missing`](Self::missing),
-    /// [`keep_data`](Self::keep_data) or [`WorldCopy::take`]), the tile
+    /// [`keep_data`](Self::keep_data) or [`WorldCopy::take_into`]), the tile
     /// counts as failed rather than loading: out of the view, one with
     /// nothing to show goes rather than wait in the cache for the retry, and
     /// is made anew if the view comes back.
@@ -793,13 +779,8 @@ impl<'a, T> WorldCopy<'a, T> {
     /// load's answer: a geometry tile lays out the copy's data for itself,
     /// and a raster or raster-dem tile keeps what it shows. Returns false,
     /// and changes nothing, if the copy has no data to give, as one whose
-    /// decode is still pending.
-    pub fn take<O: DataOrigin<Tile = T> + ?Sized>(self, cx: &mut LoadContext<'_, '_, O>) -> bool {
-        self.take_into(cx)
-    }
-
-    /// [`take`](Self::take) through a context of any origin's, as a
-    /// non-generic core takes it ([`LoadContext::cast`]).
+    /// decode is still pending. It takes a context of any origin's, as a
+    /// non-generic core has ([`LoadContext::cast`]).
     pub fn take_into<O: ?Sized>(self, cx: &mut LoadContext<'_, '_, O>) -> bool {
         let Some(answer) = self.answer else {
             return false;

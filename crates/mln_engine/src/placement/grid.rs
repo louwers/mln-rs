@@ -32,7 +32,7 @@ pub enum Shape {
 impl Shape {
     /// The smallest box that holds the shape.
     #[must_use]
-    pub fn bounds(&self) -> Aabb {
+    pub(crate) fn bounds(&self) -> Aabb {
         match *self {
             Shape::Box(aabb) => aabb,
             Shape::Circle { center, radius } => Aabb::new(center - radius, center + radius),
@@ -42,7 +42,7 @@ impl Shape {
     /// Whether the shapes overlap. Boxes that touch overlap; circles that
     /// touch don't.
     #[must_use]
-    pub fn intersects(&self, other: &Shape) -> bool {
+    pub(crate) fn intersects(&self, other: &Shape) -> bool {
         match (self, other) {
             (Shape::Box(a), Shape::Box(b)) => a.intersects(b),
             (Shape::Circle { center: a, radius: ra }, Shape::Circle { center: b, radius: rb }) => {

@@ -48,7 +48,7 @@ impl Default for TransformState {
 
 impl TransformState {
     #[must_use]
-    pub fn new(constrain_mode: ConstrainMode, viewport_mode: ViewportMode) -> Self {
+    pub(crate) fn new(constrain_mode: ConstrainMode, viewport_mode: ViewportMode) -> Self {
         TransformState {
             view: View::new(ViewParams::new(constrain_mode, viewport_mode)),
             limits: CameraLimits::default(),
@@ -172,7 +172,7 @@ impl TransformState {
         CameraPose::orientation_from_frame(unit_quat * DVec3::NEG_Z, unit_quat * DVec3::NEG_Y)
     }
 
-    pub fn set_free_camera_options(&mut self, options: &FreeCameraOptions) {
+    pub(crate) fn set_free_camera_options(&mut self, options: &FreeCameraOptions) {
         if !self.is_valid() {
             return;
         }
@@ -206,36 +206,36 @@ impl TransformState {
         self.update(|p| p.size = size);
     }
 
-    pub fn set_frustum_offset(&mut self, frustum_offset: &EdgeInsets) {
+    pub(crate) fn set_frustum_offset(&mut self, frustum_offset: &EdgeInsets) {
         self.update(|p| p.frustum_offset = *frustum_offset);
     }
 
-    pub fn set_north_orientation(&mut self, orientation: NorthOrientation) {
+    pub(crate) fn set_north_orientation(&mut self, orientation: NorthOrientation) {
         self.update(|p| p.north_orientation = orientation);
     }
 
     #[must_use]
-    pub fn constrain_mode(&self) -> ConstrainMode {
+    pub(crate) fn constrain_mode(&self) -> ConstrainMode {
         self.view.params().constrain_mode
     }
 
-    pub fn set_constrain_mode(&mut self, mode: ConstrainMode) {
+    pub(crate) fn set_constrain_mode(&mut self, mode: ConstrainMode) {
         self.update(|p| p.constrain_mode = mode);
     }
 
-    pub fn set_viewport_mode(&mut self, mode: ViewportMode) {
+    pub(crate) fn set_viewport_mode(&mut self, mode: ViewportMode) {
         self.update(|p| p.viewport_mode = mode);
     }
 
-    pub fn set_center_clamped_to_ground(&mut self, clamped: bool) {
+    pub(crate) fn set_center_clamped_to_ground(&mut self, clamped: bool) {
         self.update(|p| p.center_clamped_to_ground = clamped);
     }
 
-    pub fn set_globe_free_bearing(&mut self, free_bearing: bool) {
+    pub(crate) fn set_globe_free_bearing(&mut self, free_bearing: bool) {
         self.update(|p| p.globe_free_bearing = free_bearing);
     }
 
-    pub fn set_padding(&mut self, padding: &EdgeInsets) {
+    pub(crate) fn set_padding(&mut self, padding: &EdgeInsets) {
         self.update(|p| p.padding = *padding);
     }
 
@@ -243,7 +243,7 @@ impl TransformState {
 
     /// The camera, with `padding` in place of its own if given.
     #[must_use]
-    pub fn camera_options(&self, padding: Option<EdgeInsets>) -> CameraOptions {
+    pub(crate) fn camera_options(&self, padding: Option<EdgeInsets>) -> CameraOptions {
         let mut camera = self.view.camera();
         if let Some(padding) = padding {
             camera.padding = padding;
@@ -257,14 +257,14 @@ impl TransformState {
     /// lets the zoom fall below `min_zoom()` toward the poles by the
     /// anchored-zoom adjustment, so the planet keeps its size on screen.
     #[must_use]
-    pub fn min_zoom_at_latitude(&self, latitude: f64) -> f64 {
+    pub(crate) fn min_zoom_at_latitude(&self, latitude: f64) -> f64 {
         self.min_zoom_at_latitude_with(latitude, self.view.is_globe())
     }
 
     /// [`min_zoom_at_latitude`](Self::min_zoom_at_latitude) for a
     /// camera on the globe or not, whatever the current projection.
     #[must_use]
-    pub fn min_zoom_at_latitude_with(&self, latitude: f64, globe: bool) -> f64 {
+    pub(crate) fn min_zoom_at_latitude_with(&self, latitude: f64, globe: bool) -> f64 {
         if !globe {
             return self.min_zoom();
         }
@@ -276,7 +276,7 @@ impl TransformState {
     /// The center `constrain` would settle on for this one at this zoom: on
     /// the globe the zoom decides how close to a pole the center can be.
     #[must_use]
-    pub fn constrained_center(&self, lat_lng: &LatLng, zoom: f64) -> LatLng {
+    pub(crate) fn constrained_center(&self, lat_lng: &LatLng, zoom: f64) -> LatLng {
         if self.constrain_mode() == ConstrainMode::None || !self.view.is_globe() {
             return *lat_lng;
         }
@@ -300,7 +300,7 @@ impl TransformState {
     }
 
     /// Sets the limits the camera moves within, clamped to what any map
-    /// allows (see [`CameraLimits::validated`]), and moves the center into
+    /// allows (see `CameraLimits::validated`), and moves the center into
     /// new bounds. `Err`, changing nothing, for limits that leave the camera
     /// nowhere to go.
     pub fn set_limits(&mut self, limits: CameraLimits) -> Result<(), Error> {
@@ -350,13 +350,13 @@ impl TransformState {
         }
     }
 
-    pub fn set_fov(&mut self, fov: f64) {
+    pub(crate) fn set_fov(&mut self, fov: f64) {
         if fov.is_finite() {
             self.update(|p| p.fov = fov);
         }
     }
 
-    pub fn set_roll(&mut self, roll: f64) {
+    pub(crate) fn set_roll(&mut self, roll: f64) {
         if roll.is_finite() {
             self.update(|p| p.roll = roll);
         }
@@ -368,19 +368,19 @@ impl TransformState {
         }
     }
 
-    pub fn set_x_skew(&mut self, skew: f64) {
+    pub(crate) fn set_x_skew(&mut self, skew: f64) {
         if skew.is_finite() {
             self.update(|p| p.x_skew = skew);
         }
     }
 
-    pub fn set_y_skew(&mut self, skew: f64) {
+    pub(crate) fn set_y_skew(&mut self, skew: f64) {
         if skew.is_finite() {
             self.update(|p| p.y_skew = skew);
         }
     }
 
-    pub fn set_axonometric(&mut self, axonometric: bool) {
+    pub(crate) fn set_axonometric(&mut self, axonometric: bool) {
         self.update(|p| p.axonometric = axonometric);
     }
 
@@ -390,7 +390,7 @@ impl TransformState {
     /// range. Toward the poles the globe goes below the minimum scale;
     /// `set_lat_lng_zoom` holds it to the floor there.
     #[must_use]
-    pub fn is_valid(&self) -> bool {
+    pub(crate) fn is_valid(&self) -> bool {
         let scale = self.view.scale();
         self.view.is_valid()
             && (if self.view.is_globe() { scale > 0.0 } else { scale >= self.min_scale() })
@@ -407,7 +407,7 @@ impl TransformState {
     /// lat/lng bounds on the screen at `scale`: the center only if it had to
     /// move. Other modes return `scale` unchanged and no center.
     #[must_use]
-    pub fn constrain_screen(&self, scale: f64) -> (f64, Option<LatLng>) {
+    pub(crate) fn constrain_screen(&self, scale: f64) -> (f64, Option<LatLng>) {
         if self.constrain_mode() != ConstrainMode::Screen {
             return (scale, None);
         }
@@ -420,7 +420,7 @@ impl TransformState {
     /// The `(scale, x, y)` nearest the given ones that the constrain mode
     /// allows.
     #[must_use]
-    pub fn constrain(&self, mut scale: f64, mut x: f64, mut y: f64) -> (f64, f64, f64) {
+    pub(crate) fn constrain(&self, mut scale: f64, mut x: f64, mut y: f64) -> (f64, f64, f64) {
         let constrain_mode = self.constrain_mode();
         if constrain_mode == ConstrainMode::None || constrain_mode == ConstrainMode::Screen {
             return (scale, x, y);
@@ -458,7 +458,7 @@ impl TransformState {
 
     /// Moves the camera to the position nearest its own at `scale` that the
     /// constrain mode allows.
-    pub fn constrain_position(&mut self, scale: f64) {
+    pub(crate) fn constrain_position(&mut self, scale: f64) {
         let (scale, x, y) = self.constrain(scale, self.view.x(), self.view.y());
         if scale.is_finite() && x.is_finite() && y.is_finite() {
             self.update(|p| {
@@ -469,7 +469,11 @@ impl TransformState {
         }
     }
 
-    pub fn constrain_camera_and_zoom_to_bounds(&self, requested_camera: &mut CameraOptions, requested_zoom: &mut f64) {
+    pub(crate) fn constrain_camera_and_zoom_to_bounds(
+        &self,
+        requested_camera: &mut CameraOptions,
+        requested_zoom: &mut f64,
+    ) {
         if self.constrain_mode() != ConstrainMode::Screen || self.limits.bounds == LatLngBounds::default() {
             return;
         }
@@ -604,7 +608,7 @@ impl TransformState {
     /// [`constrain_camera_and_zoom_to_bounds`](Self::constrain_camera_and_zoom_to_bounds)
     /// raises lower zooms to. `None` in the other modes or without bounds.
     #[must_use]
-    pub fn min_zoom_for_screen_bounds(&self) -> Option<f64> {
+    pub(crate) fn min_zoom_for_screen_bounds(&self) -> Option<f64> {
         if self.constrain_mode() != ConstrainMode::Screen || self.limits.bounds == LatLngBounds::default() {
             return None;
         }
@@ -624,7 +628,8 @@ impl TransformState {
     /// point on screen.
     /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a
     /// NaN or infinite anchor.
-    pub fn move_lat_lng(&mut self, lat_lng: &LatLng, anchor: &ScreenCoordinate) -> Result<(), Error> {
+    #[cfg(test)]
+    pub(crate) fn move_lat_lng(&mut self, lat_lng: &LatLng, anchor: &ScreenCoordinate) -> Result<(), Error> {
         self.move_lat_lng_at(lat_lng, anchor, 0.0)
     }
 
@@ -635,7 +640,12 @@ impl TransformState {
     /// [`move_lat_lng`](Self::move_lat_lng). The globe turns to hold
     /// `lat_lng` on the sphere `height` meters above sea level, keeping the
     /// planet's size on the screen. Fails as `move_lat_lng` does.
-    pub fn move_lat_lng_at(&mut self, lat_lng: &LatLng, anchor: &ScreenCoordinate, height: f64) -> Result<(), Error> {
+    pub(crate) fn move_lat_lng_at(
+        &mut self,
+        lat_lng: &LatLng,
+        anchor: &ScreenCoordinate,
+        height: f64,
+    ) -> Result<(), Error> {
         let view = &self.view;
         if view.is_globe() {
             if let Some(center) =
@@ -670,7 +680,7 @@ impl TransformState {
     /// points are Mercator's, as
     /// [`crate::camera::View::screen_coordinate_to_lat_lng_at`] reads them. Fails as
     /// [`move_lat_lng_at`](Self::move_lat_lng_at) does.
-    pub fn center_for_lat_lng_at(
+    pub(crate) fn center_for_lat_lng_at(
         &self,
         lat_lng: &LatLng,
         anchor: &ScreenCoordinate,
@@ -751,7 +761,7 @@ impl TransformState {
 
     /// Sets the center's altitude, in meters, which then holds through
     /// changes of the zoom and the center.
-    pub fn set_center_altitude(&mut self, alt_m: f64) {
+    pub(crate) fn set_center_altitude(&mut self, alt_m: f64) {
         if !alt_m.is_finite() {
             return;
         }
@@ -762,7 +772,7 @@ impl TransformState {
     /// meters, exaggerated, or `None` without terrain. With it, the view's
     /// near and far planes fit raised and sunken ground; without it, they
     /// fit the flat map. A height that isn't finite changes nothing.
-    pub fn set_terrain_min_elevation(&mut self, min_elevation: Option<f64>) {
+    pub(crate) fn set_terrain_min_elevation(&mut self, min_elevation: Option<f64>) {
         if min_elevation.is_some_and(|min| !min.is_finite()) {
             return;
         }
@@ -778,7 +788,7 @@ impl TransformState {
     /// vertical, which the eye is near wherever it can come near the
     /// ground. Returns whether the view changed; while the view shows
     /// nothing, it doesn't.
-    pub fn raise_eye(&mut self, lift: f64) -> bool {
+    pub(crate) fn raise_eye(&mut self, lift: f64) -> bool {
         let view = &self.view;
         if !lift.is_finite() || !view.is_valid() {
             return false;
@@ -824,7 +834,7 @@ impl TransformState {
     /// eye, and where the limits would move the zoom or the center: the zoom
     /// range, the bounds, and in [`ConstrainMode::Screen`] the bounds the
     /// screen must stay within.
-    pub fn recenter_on(&mut self, hit: &GroundHit) -> bool {
+    pub(crate) fn recenter_on(&mut self, hit: &GroundHit) -> bool {
         let view = &self.view;
         if !view.is_valid() {
             return false;

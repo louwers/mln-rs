@@ -517,12 +517,6 @@ impl<C: GestureCamera> GestureRecognizer<C> {
         }
     }
 
-    /// The camera it moves.
-    #[must_use]
-    pub fn camera(&self) -> &C {
-        &self.camera
-    }
-
     #[must_use]
     pub fn options(&self) -> &GestureOptions {
         &self.options

@@ -1,9 +1,9 @@
 //! The map's geometry: the camera's screen coordinates, edge insets and
 //! orientation; spherical Mercator ([`projection`]); the camera's frustum
-//! and the bounding volumes it culls ([`bounding_volumes`]); intersection
+//! and the bounding volumes it culls (`bounding_volumes`); intersection
 //! tests, point math, and the Earth's size ([`constants`]).
 
-pub mod bounding_volumes;
+pub(crate) mod bounding_volumes;
 pub mod constants;
 pub mod intersection_tests;
 pub mod math;
@@ -14,7 +14,7 @@ use mln_style::geo::LatLng;
 use mln_style::size::Size;
 
 pub type ScreenCoordinate = Point<f64>;
-pub type ScreenLineString = Vec<Point<f64>>;
+pub(crate) type ScreenLineString = Vec<Point<f64>>;
 
 /// Determines the orientation of the map.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -67,7 +67,7 @@ impl EdgeInsets {
     /// The center of the area these insets leave in a viewport of `size`, in
     /// pixels from its top left.
     #[must_use]
-    pub fn center_in(&self, size: Size) -> ScreenCoordinate {
+    pub(crate) fn center_in(&self, size: Size) -> ScreenCoordinate {
         Point::new(
             (f64::from(size.width) - self.left() - self.right()) / 2.0 + self.left(),
             (f64::from(size.height) - self.top() - self.bottom()) / 2.0 + self.top(),
@@ -93,9 +93,10 @@ impl std::ops::Add for EdgeInsets {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct LatLngAltitude {
-    pub location: LatLng,
-    pub altitude: f64,
+#[cfg(test)]
+pub(crate) struct LatLngAltitude {
+    pub(crate) location: LatLng,
+    pub(crate) altitude: f64,
 }
 
 /// The latitudes of the north and the south edges of `id`, in degrees.

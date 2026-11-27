@@ -27,7 +27,9 @@
 
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+#[cfg(test)]
+use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use mln_style::collections::VecMap;
@@ -52,7 +54,7 @@ use crate::storage::response::{Reason, ResourceError, Response};
 /// The queue of an [`OnlineCore`], whose tasks run in the order they were
 /// posted. It stops once its source has dropped, and the queue's owner then
 /// closes it.
-pub type OnlineQueue = Queue<OnlineCore>;
+pub(crate) type OnlineQueue = Queue<OnlineCore>;
 
 struct OnlineRequest {
     resource: Resource,
@@ -192,6 +194,10 @@ impl OnlineRequest {
 
 /// The state of an [`OnlineFileSource`]'s requests, which the tasks of its
 /// [`OnlineQueue`] change on the thread that owns it.
+#[cfg_attr(
+    not(target_family = "wasm"),
+    expect(unreachable_pub, reason = "only the browser build's `OnlineFileSource::local` hands it out")
+)]
 pub struct OnlineCore {
     /// For the transform's answers, the transfers' responses and the
     /// deadlines.
@@ -264,13 +270,6 @@ impl OnlineCore {
             self.transform(id);
         } else {
             self.activate_or_queue_request(id);
-        }
-    }
-
-    fn set_online(&mut self, online: bool) {
-        self.online = online;
-        if online {
-            self.network_is_reachable_again();
         }
     }
 
@@ -544,8 +543,7 @@ impl OnlineCore {
 }
 
 /// The `Network` file source: HTTP(S) requests, revalidated when they
-/// expire and retried with a backoff after errors, with at most
-/// [`maximum_concurrent_requests`](Self::maximum_concurrent_requests)
+/// expire and retried with a backoff after errors, with a bounded number of
 /// transfers in flight. Requests that would send the same transfer at once
 /// share it. Its requests follow the [`NetworkStatus`] it was made with.
 ///
@@ -554,6 +552,7 @@ impl OnlineCore {
 /// thread. When that thread can't start, the source logs why and fails each
 /// request.
 pub struct OnlineFileSource {
+    #[cfg(test)]
     maximum_concurrent_requests: AtomicU32,
     /// The id of the next request.
     next_request_id: AtomicU64,
@@ -654,6 +653,7 @@ impl OnlineFileSource {
             clock: None,
         };
         let source = OnlineFileSource {
+            #[cfg(test)]
             maximum_concurrent_requests: AtomicU32::new(DEFAULT_MAXIMUM_CONCURRENT_REQUESTS),
             next_request_id: AtomicU64::new(1),
             queue,
@@ -686,21 +686,16 @@ impl OnlineFileSource {
 
     /// The most transfers in flight at once; the requests beyond wait.
     #[must_use]
-    pub fn maximum_concurrent_requests(&self) -> u32 {
+    #[cfg(test)]
+    pub(crate) fn maximum_concurrent_requests(&self) -> u32 {
         self.maximum_concurrent_requests.load(Ordering::Relaxed)
     }
 
     /// Sets the most transfers in flight at once.
-    pub fn set_maximum_concurrent_requests(&self, maximum: u32) {
+    #[cfg(test)]
+    pub(crate) fn set_maximum_concurrent_requests(&self, maximum: u32) {
         self.maximum_concurrent_requests.store(maximum, Ordering::Relaxed);
         self.queue.post(move |core| core.maximum_concurrent_requests = maximum);
-    }
-
-    /// Takes the source offline or back online. Offline, every transfer
-    /// fails with a connection error; back online, the requests that failed
-    /// that way retry at once.
-    pub fn set_online(&self, online: bool) {
-        self.queue.post(move |core| core.set_online(online));
     }
 
     /// Rewrites the URLs of requests before they load, or stops rewriting

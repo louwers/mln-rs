@@ -23,34 +23,6 @@ pub(crate) fn dist_sqr_i16_f32(a: Point<i16>, b: Point<f32>) -> f32 {
     dx * dx + dy * dy
 }
 
-/// The distance between `a` and `b`.
-#[must_use]
-pub fn dist_f64(a: Point<f64>, b: Point<f64>) -> f64 {
-    let dx = b.x - a.x;
-    let dy = b.y - a.y;
-    (dx * dx + dy * dy).sqrt()
-}
-
-/// The unit vector from `a` to `b` (NaN when they are equal).
-#[must_use]
-pub fn normal(a: Point<f64>, b: Point<f64>) -> Point<f64> {
-    let dx = b.x - a.x;
-    let dy = b.y - a.y;
-    let c = (dx * dx + dy * dy).sqrt();
-    Point::new(dx / c, dy / c)
-}
-
-#[must_use]
-pub fn cross_product(a: Point<f64>, b: Point<f64>) -> f64 {
-    a.x * b.y - a.y * b.x
-}
-
-/// The signed angle from `a` to `b`.
-#[must_use]
-pub fn angle_between(a: Point<f64>, b: Point<f64>) -> f64 {
-    (a.x * b.y - a.y * b.x).atan2(a.x * b.x + a.y * b.y)
-}
-
 #[cfg(test)]
 #[must_use]
 pub(crate) fn length_f32(a: f32, b: f32) -> f32 {
@@ -76,7 +48,7 @@ pub fn unit(a: Point<f64>) -> Point<f64> {
 
 /// Rotates `a` by `angle` radians, computed in float and truncated back.
 #[must_use]
-pub fn rotate_i16(a: Point<i16>, angle: f32) -> Point<i16> {
+pub(crate) fn rotate_i16(a: Point<i16>, angle: f32) -> Point<i16> {
     let cos = angle.cos();
     let sin = angle.sin();
     let x = cos * f32::from(a.x) - sin * f32::from(a.y);

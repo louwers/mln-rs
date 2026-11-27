@@ -46,7 +46,7 @@ impl PendingEnd {
 
     /// The command's end, once it has come; `None` before.
     #[must_use]
-    pub fn take(&self) -> Option<TransitionEnd> {
+    pub(crate) fn take(&self) -> Option<TransitionEnd> {
         self.0.lock().take()
     }
 

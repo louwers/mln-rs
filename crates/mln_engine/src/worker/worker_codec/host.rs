@@ -59,17 +59,6 @@ impl TileWorkerHost {
         }
     }
 
-    /// Sets how many bytes of tile data the host keeps for later jobs.
-    pub fn set_data_cache_budget(&self, bytes: usize) {
-        self.jobs.borrow_mut().cache.set_budget(bytes);
-    }
-
-    /// The bytes of tile data the host keeps, by its estimate.
-    #[must_use]
-    pub fn data_cache_bytes(&self) -> usize {
-        self.jobs.borrow().cache.retained_bytes()
-    }
-
     /// Runs the job in a frame from the map side, and sends its reply.
     pub fn handle(&self, request: &[u8]) {
         let Some((id, body)) = envelope::read_job_id(request) else {

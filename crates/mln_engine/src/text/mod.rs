@@ -21,10 +21,11 @@ pub mod browser_glyph_rasterizer;
 pub mod constants;
 mod face;
 pub mod font_face_engine;
-pub mod font_name;
-pub mod font_stack;
+#[cfg(any(feature = "system-fonts", target_family = "wasm"))]
+pub(crate) mod font_name;
+pub(crate) mod font_stack;
 pub mod glyph;
-pub mod glyph_cache;
+pub(crate) mod glyph_cache;
 pub mod glyph_pbf;
 pub(crate) mod glyph_store;
 mod line_breaks;
@@ -38,12 +39,13 @@ mod shaping_test;
 pub mod system_fonts;
 pub mod tagged_string;
 pub mod tiny_sdf;
-pub mod weight;
+pub(crate) mod weight;
 mod woff;
 
 pub use arabic::shape_arabic;
 pub use bidi::{BiDiRun, starts_right_to_left, visual_runs};
-pub use face::FontFile;
+#[cfg(all(feature = "system-fonts", not(target_family = "wasm")))]
+pub(crate) use face::FontFile;
 pub use glyph::{
     Bounds, Glyph, GlyphID, GlyphIDType, GlyphMap, GlyphMetrics, GlyphPosition, GlyphPositions, GlyphRange,
     PositionedGlyph, PositionedLine, ShapeResults, Shaping,

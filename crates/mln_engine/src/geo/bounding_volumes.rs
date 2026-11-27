@@ -104,7 +104,7 @@ fn project_points_to_axis(points: &[DVec3], origin: DVec3, axis: DVec3) -> Point
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum IntersectionResult {
+pub(crate) enum IntersectionResult {
     Separate,
     Intersects,
     Contains,
@@ -112,15 +112,15 @@ pub enum IntersectionResult {
 
 /// An axis-aligned box.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct AABB {
+pub(crate) struct Aabb {
     pub(crate) min: DVec3,
     pub(crate) max: DVec3,
 }
 
-impl AABB {
+impl Aabb {
     #[must_use]
-    pub fn new(min: DVec3, max: DVec3) -> Self {
-        AABB { min, max }
+    pub(crate) fn new(min: DVec3, max: DVec3) -> Self {
+        Aabb { min, max }
     }
 
     #[must_use]
@@ -131,14 +131,14 @@ impl AABB {
     /// The distance along each axis from `point` to the box, 0 on the axes
     /// where the point is within it.
     #[must_use]
-    pub fn distance_xyz(&self, point: DVec3) -> DVec3 {
+    pub(crate) fn distance_xyz(&self, point: DVec3) -> DVec3 {
         (self.closest_point(point) - point).abs()
     }
 
     /// The quadrant `idx` of the box on its XY-plane: 0 is the minimum x and
     /// y, 1 the maximum x, 2 the maximum y and 3 both maxima.
     #[must_use]
-    pub fn quadrant(&self, idx: usize) -> AABB {
+    pub(crate) fn quadrant(&self, idx: usize) -> Aabb {
         debug_assert!(idx < 4);
         let center = (self.min + self.max) * 0.5;
         let mut min = self.min;
@@ -153,11 +153,11 @@ impl AABB {
         } else {
             min.y = center.y;
         }
-        AABB::new(min, max)
+        Aabb::new(min, max)
     }
 
     #[must_use]
-    pub(crate) fn intersects(&self, aabb: &AABB) -> bool {
+    pub(crate) fn intersects(&self, aabb: &Aabb) -> bool {
         self.min.cmple(aabb.max).all() && aabb.min.cmple(self.max).all()
     }
 }
@@ -179,8 +179,8 @@ struct Projection {
 }
 
 #[derive(Clone, Debug)]
-pub struct Frustum {
-    bounds: AABB,
+pub(crate) struct Frustum {
+    bounds: Aabb,
     points: [DVec3; 8],
     planes: [DVec4; 6],
     projections: [Projection; 12],
@@ -194,7 +194,7 @@ impl Frustum {
         let z_bounds = project_points_to_axis(&points, DVec3::ZERO, DVec3::Z);
 
         let bounds =
-            AABB::new(DVec3::new(x_bounds.x, y_bounds.x, z_bounds.x), DVec3::new(x_bounds.y, y_bounds.y, z_bounds.y));
+            Aabb::new(DVec3::new(x_bounds.x, y_bounds.x, z_bounds.x), DVec3::new(x_bounds.y, y_bounds.y, z_bounds.y));
 
         // Precompute a set of separating axis candidates for precise intersection
         // tests. Remaining axes not covered in basic intersection tests are: axis[]
@@ -224,7 +224,7 @@ impl Frustum {
     /// units of `zoom`. With `horizon_plane`, the far plane is pulled in to
     /// the horizon so nothing behind it counts as visible.
     #[must_use]
-    pub fn from_inv_proj_matrix(
+    pub(crate) fn from_inv_proj_matrix(
         inv_proj: &DMat4,
         world_size: f64,
         zoom: f64,
@@ -241,7 +241,12 @@ impl Frustum {
     /// tested against it with [`intersects_box`](Self::intersects_box) take
     /// the same units.
     #[must_use]
-    pub fn from_inv_proj_matrix_metres(inv_proj: &DMat4, world_size: f64, zoom: f64, flipped_y: bool) -> Frustum {
+    pub(crate) fn from_inv_proj_matrix_metres(
+        inv_proj: &DMat4,
+        world_size: f64,
+        zoom: f64,
+        flipped_y: bool,
+    ) -> Frustum {
         let scale = 2.0f64.powf(zoom);
         let corners = Self::clip_corners(inv_proj).map(|corner| {
             let xy = corner / world_size * scale;
@@ -296,7 +301,7 @@ impl Frustum {
     /// and one that touches it from inside is within it. `aabb` must lie on
     /// the plane z = 0.
     #[must_use]
-    pub fn intersects(&self, aabb: &AABB) -> IntersectionResult {
+    pub(crate) fn intersects(&self, aabb: &Aabb) -> IntersectionResult {
         // Each frustum plane together with 3 major axes define the separating
         // axes. Both points of the box have zero elevation, so testing its 4
         // corners on the plane is enough.
@@ -337,7 +342,7 @@ impl Frustum {
     /// `edge_cases_only`, it tests only the axes that
     /// [`intersects`](Self::intersects) doesn't.
     #[must_use]
-    pub fn intersects_precise(&self, aabb: &AABB, edge_cases_only: bool) -> IntersectionResult {
+    pub(crate) fn intersects_precise(&self, aabb: &Aabb, edge_cases_only: bool) -> IntersectionResult {
         if !edge_cases_only {
             let result = self.intersects(aabb);
 
@@ -373,7 +378,7 @@ impl Frustum {
     /// report an intersection where there is none. A box that only touches a
     /// plane from outside intersects it.
     #[must_use]
-    pub fn intersects_box(&self, aabb: &AABB) -> IntersectionResult {
+    pub(crate) fn intersects_box(&self, aabb: &Aabb) -> IntersectionResult {
         let mut fully_inside = true;
         for plane in &self.planes {
             // The plane's distance to the box's corners nearest and farthest
@@ -403,12 +408,12 @@ impl Frustum {
     }
 
     #[must_use]
-    pub fn points(&self) -> &[DVec3; 8] {
+    pub(crate) fn points(&self) -> &[DVec3; 8] {
         &self.points
     }
 
     #[must_use]
-    pub fn planes(&self) -> &[DVec4; 6] {
+    pub(crate) fn planes(&self) -> &[DVec4; 6] {
         &self.planes
     }
 
@@ -416,7 +421,7 @@ impl Frustum {
     /// JS's `pushFrustumFarPlane`. Each far corner moves along its ray from
     /// the camera to the moved plane, so the frustum stays a pyramid.
     #[must_use]
-    pub fn with_far_plane_pushed(&self, distance: f64, camera: DVec3) -> Frustum {
+    pub(crate) fn with_far_plane_pushed(&self, distance: f64, camera: DVec3) -> Frustum {
         const FAR: usize = 5;
         let normal = self.planes[FAR].xyz();
         let mut points = self.points;

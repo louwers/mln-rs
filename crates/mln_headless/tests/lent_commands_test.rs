@@ -97,11 +97,11 @@ mod lends {
         type Tile = ();
 
         fn new(values: &LayerValues<Lends>) -> Self {
-            Lending { host: values.style().extra.clone(), drew: None }
+            Lending { host: values.style.extra.clone(), drew: None }
         }
 
         fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
-            let host = &cx.values().style().extra;
+            let host = &cx.values.style.extra;
             let same = matches!((&self.host, host), (Some(drawn), Some(host)) if Arc::ptr_eq(drawn, host));
             if !same {
                 self.end();

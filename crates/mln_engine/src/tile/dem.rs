@@ -25,8 +25,8 @@ pub const TERRAIN_RGB_MAXZOOM: u8 = 15;
 /// same on the CPU and the GPU.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DemUnpack {
-    pub weights: [f32; 3],
-    pub base: f32,
+    pub(crate) weights: [f32; 3],
+    pub(crate) base: f32,
     pub scale: f32,
 }
 

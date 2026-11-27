@@ -126,7 +126,7 @@ impl RenderTile {
 /// tile store, or an image source's image, which each of the source's
 /// tiles draws.
 #[derive(Clone, Copy)]
-pub enum TileContent<'a> {
+pub(crate) enum TileContent<'a> {
     Tile(&'a Contents),
     Image(&'a ImageTile),
 }

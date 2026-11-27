@@ -265,7 +265,7 @@ fn build_response(resource: &Resource, transfer: Result<Transfer, Box<ResourceEr
         response.error = Some(Box::new(ResourceError::with_retry_after(
             Reason::RateLimit,
             "HTTP status code 429",
-            parse_retry_headers(&retry_after, &x_rate_limit_reset),
+            parse_retry_headers(retry_after.as_deref(), x_rate_limit_reset.as_deref()),
         )));
     } else if response_code == 408 {
         // The server timed out waiting for the request, which may be sent again.
@@ -275,7 +275,7 @@ fn build_response(resource: &Resource, transfer: Result<Transfer, Box<ResourceEr
         response.error = Some(Box::new(ResourceError::with_retry_after(
             Reason::Server,
             format!("HTTP status code {response_code}"),
-            parse_retry_headers(&retry_after, &None),
+            parse_retry_headers(retry_after.as_deref(), None),
         )));
     } else {
         response.error = Some(Box::new(ResourceError::new(Reason::Other, format!("HTTP status code {response_code}"))));

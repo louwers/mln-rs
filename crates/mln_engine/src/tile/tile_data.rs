@@ -46,7 +46,7 @@ impl TileData {
 
     /// Whether the data has a layer named `name`, found without decoding the
     /// layer where the data can. Fails as [`layer`](Self::layer) does.
-    pub fn has_layer(&self, name: &str) -> Result<bool, TileError> {
+    pub(crate) fn has_layer(&self, name: &str) -> Result<bool, TileError> {
         match self {
             TileData::Mvt(tile) => tile.has_layer(name),
             TileData::Mlt(tile) => Ok(tile.layer(name).is_some()),
@@ -69,7 +69,7 @@ pub enum TileLayer<'a> {
 impl TileLayer<'_> {
     /// The layer's name; empty for features.
     #[must_use]
-    pub fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &str {
         match self {
             TileLayer::Mvt(layer) => layer.name(),
             TileLayer::Mlt(layer) => layer.name(),
@@ -81,7 +81,7 @@ impl TileLayer<'_> {
     /// The units across the tile of the layer as encoded; its features'
     /// geometry is in [`EXTENT`](mln_style::constants::EXTENT)'s.
     #[must_use]
-    pub fn extent(&self) -> u32 {
+    pub(crate) fn extent(&self) -> u32 {
         match self {
             TileLayer::Mvt(layer) => layer.extent(),
             TileLayer::Mlt(layer) => layer.extent(),
@@ -129,7 +129,7 @@ impl TileLayer<'_> {
     /// same result. `None` if the layer can't group them cheaply, or nearly
     /// every feature would be a group of its own.
     #[must_use]
-    pub fn group_features(&self, keys: &[String]) -> Option<FeatureGroups> {
+    pub(crate) fn group_features(&self, keys: &[String]) -> Option<FeatureGroups> {
         match self {
             TileLayer::Mvt(layer) => layer.group_features(keys),
             TileLayer::Mlt(layer) => layer.group_features(keys),
@@ -138,13 +138,13 @@ impl TileLayer<'_> {
     }
 }
 
-/// [`TileLayer::group_features`].
+/// `TileLayer::group_features`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FeatureGroups {
     /// Each feature's group.
-    pub of_feature: Vec<u32>,
+    pub(crate) of_feature: Vec<u32>,
     /// Each group's first feature; groups are numbered in feature order.
-    pub first: Vec<usize>,
+    pub(crate) first: Vec<usize>,
 }
 
 /// A feature of a [`TileLayer`]. Expressions and buckets read it as a

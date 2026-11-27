@@ -15,7 +15,7 @@ pub fn compress(raw: &[u8]) -> Result<Vec<u8>, String> {
 /// Whether `v` is longer than two bytes and starts with a gzip or zlib header
 /// (with one of the four usual zlib compression levels).
 #[must_use]
-pub fn is_compressed(v: &[u8]) -> bool {
+pub(crate) fn is_compressed(v: &[u8]) -> bool {
     if v.len() > 2 {
         let (byte0, byte1) = (v[0], v[1]);
         if byte0 == 0x1f && byte1 == 0x8b {
@@ -39,7 +39,7 @@ pub fn is_compressed(v: &[u8]) -> bool {
 /// `MAX_WBITS + 32`). Like the C++ loop, bytes after the end of the stream
 /// are ignored, and a stream that ends early is an error. The error message
 /// is flate2's, not zlib's.
-pub fn decompress(raw: &[u8]) -> Result<Vec<u8>, String> {
+pub(crate) fn decompress(raw: &[u8]) -> Result<Vec<u8>, String> {
     if raw.len() >= 2 && raw[0] == 0x1f && raw[1] == 0x8b {
         // gzip (rfc1952): one member; zlib checks the CRC-32 and size trailer.
         let mut decoder = flate2::bufread::GzDecoder::new(raw);

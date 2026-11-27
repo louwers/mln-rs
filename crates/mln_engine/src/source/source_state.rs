@@ -27,7 +27,7 @@ pub(crate) trait FeatureStateTarget {
 /// source layer stands for none. A source without state has no entry. An
 /// update shares the state of the sources it leaves alone with the update
 /// before.
-pub type FeatureStatesBySource = BTreeMap<String, SourceFeatureStates>;
+pub(crate) type FeatureStatesBySource = BTreeMap<String, SourceFeatureStates>;
 
 /// A source's feature state, as of its newest change: a whole state, and the
 /// changes made since it, newest first. A renderer that holds an older
@@ -64,14 +64,14 @@ struct Change<'a> {
 impl SourceFeatureStates {
     /// The state `states`, whole.
     #[must_use]
-    pub fn new(states: LayerFeatureStates) -> Self {
+    pub(crate) fn new(states: LayerFeatureStates) -> Self {
         SourceFeatureStates(Arc::new(StatesNode::Whole(states)))
     }
 
     /// This state with the feature `feature_id` of `source_layer` taking
     /// `state`, the whole of its new state, empty for none.
     #[must_use]
-    pub fn with_change(&self, source_layer: &str, feature_id: &str, state: FeatureState) -> Self {
+    pub(crate) fn with_change(&self, source_layer: &str, feature_id: &str, state: FeatureState) -> Self {
         SourceFeatureStates(Arc::new(StatesNode::Change {
             source_layer: source_layer.to_owned(),
             feature_id: feature_id.to_owned(),
@@ -82,14 +82,16 @@ impl SourceFeatureStates {
 
     /// Whether `self` and `other` are the same value, not just equal ones.
     #[must_use]
-    pub fn ptr_eq(&self, other: &SourceFeatureStates) -> bool {
+    #[cfg(test)]
+    pub(crate) fn ptr_eq(&self, other: &SourceFeatureStates) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
 
     /// The feature's state, empty when it has none. Walks the changes since
     /// the whole state, so it costs as many steps as there are changes.
     #[must_use]
-    pub fn get(&self, source_layer: &str, feature_id: &str) -> FeatureState {
+    #[cfg(test)]
+    pub(crate) fn get(&self, source_layer: &str, feature_id: &str) -> FeatureState {
         let mut node = self;
         loop {
             match &*node.0 {

@@ -118,9 +118,9 @@ pub struct VerticalPerspectiveProjection;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CenterAndBearing {
-    pub center: LatLng,
+    pub(crate) center: LatLng,
     /// In degrees, with `CameraOptions`'s sign.
-    pub bearing: f64,
+    pub(crate) bearing: f64,
 }
 
 // GL JS vertical_perspective_camera_helper constants.
@@ -151,7 +151,7 @@ impl VerticalPerspectiveProjection {
     /// Globe radius in pixels at the given world size and center latitude, so
     /// zoom means the same on both projections.
     #[must_use]
-    pub fn globe_radius_pixels(world_size: f64, center_latitude: f64) -> f64 {
+    pub(crate) fn globe_radius_pixels(world_size: f64, center_latitude: f64) -> f64 {
         world_size / (2.0 * PI) / Self::planet_scale(center_latitude)
     }
 
@@ -197,7 +197,7 @@ impl VerticalPerspectiveProjection {
     /// padded view. Its near plane is half a pixel from the eye, or the
     /// terrain's ([`View::near_z`]) while terrain draws.
     #[must_use]
-    pub fn globe_view_projection_matrix(view: &View, radius: f64) -> DMat4 {
+    pub(crate) fn globe_view_projection_matrix(view: &View, radius: f64) -> DMat4 {
         let size = view.size();
         let camera_to_center_distance = view.camera_to_center_distance();
         let center = view.center(WrapMode::Unwrapped);
@@ -233,7 +233,7 @@ impl VerticalPerspectiveProjection {
     /// The plane (as ax + by + cz + d) that separates the part of the
     /// sea-level sphere the camera sees from the back of the globe.
     #[must_use]
-    pub fn clipping_plane(view: &View, radius: f64) -> DVec4 {
+    pub(crate) fn clipping_plane(view: &View, radius: f64) -> DVec4 {
         let pitch = view.pitch();
         let distance_camera_to_b = view.camera_to_center_distance() / radius;
         let distance_camera_to_a = pitch.sin() * distance_camera_to_b;
@@ -256,7 +256,7 @@ impl VerticalPerspectiveProjection {
     /// Camera position in unit-sphere space, back from the center at its
     /// altitude.
     #[must_use]
-    pub fn camera_position(view: &View, radius: f64) -> DVec3 {
+    pub(crate) fn camera_position(view: &View, radius: f64) -> DVec3 {
         let center = view.center(WrapMode::Unwrapped);
         let mut position = DVec3::new(0.0, 0.0, view.camera_to_center_distance() / radius);
         position = rotate_z(position, -view.roll());
@@ -268,7 +268,7 @@ impl VerticalPerspectiveProjection {
     }
 
     #[must_use]
-    pub fn surface_vector(lat_lng: &LatLng) -> DVec3 {
+    pub(crate) fn surface_vector(lat_lng: &LatLng) -> DVec3 {
         let lng = mln_style::math::deg2rad(lat_lng.longitude());
         let lat = mln_style::math::deg2rad(lat_lng.latitude());
         let len = lat.cos();
@@ -349,7 +349,7 @@ impl VerticalPerspectiveProjection {
     /// Whether a screen pixel (y up) looks at the sphere `height` meters
     /// above sea level rather than past it, from a camera outside it.
     #[must_use]
-    pub fn screen_coordinate_hits_globe(view: &View, point: &ScreenCoordinate, height: f64) -> bool {
+    pub(crate) fn screen_coordinate_hits_globe(view: &View, point: &ScreenCoordinate, height: f64) -> bool {
         let direction = ray_direction_from_pixel(view, point, &view.inverse_globe_view_projection_matrix());
         ray_sphere_intersection(camera_over_sphere(view, height), direction).is_some()
     }
@@ -369,7 +369,11 @@ impl VerticalPerspectiveProjection {
     /// The screen point (y up) of a location `height` meters above sea level
     /// on the globe, raised along its vertical, and its clip-space position.
     #[must_use]
-    pub fn lat_lng_to_screen_coordinate(view: &View, lat_lng: &LatLng, height: f64) -> (ScreenCoordinate, DVec4) {
+    pub(crate) fn lat_lng_to_screen_coordinate(
+        view: &View,
+        lat_lng: &LatLng,
+        height: f64,
+    ) -> (ScreenCoordinate, DVec4) {
         let sphere = Self::surface_vector(lat_lng) * (1.0 + height / Self::GLOBE_RADIUS_METERS);
         let clip = view.globe_view_projection_matrix() * sphere.extend(1.0);
         let size = view.size();
@@ -467,7 +471,7 @@ impl VerticalPerspectiveProjection {
     /// the heuristic part moves the center along the great circle towards
     /// it. `zoom_location` stands on the sphere `height` meters above sea
     /// level, which the exact part solves on.
-    pub fn zoom_around_point(
+    pub(crate) fn zoom_around_point(
         state: &mut TransformState,
         anchor: &ScreenCoordinate,
         zoom_location: &LatLng,
@@ -563,7 +567,7 @@ impl VerticalPerspectiveProjection {
     /// Zoom change that keeps the globe the same apparent size when the
     /// center moves between latitudes.
     #[must_use]
-    pub fn zoom_adjustment(from_latitude: f64, to_latitude: f64) -> f64 {
+    pub(crate) fn zoom_adjustment(from_latitude: f64, to_latitude: f64) -> f64 {
         (Self::planet_scale(to_latitude) / Self::planet_scale(from_latitude)).log2()
     }
 
@@ -587,7 +591,7 @@ impl VerticalPerspectiveProjection {
     /// latitude. The longitude is unwrapped and the latitude clamped to the
     /// poles.
     #[must_use]
-    pub fn pan_center(view: &View, offset: &ScreenCoordinate) -> LatLng {
+    pub(crate) fn pan_center(view: &View, offset: &ScreenCoordinate) -> LatLng {
         // GL JS turns the pan by its bearing, which is the view's angle with the
         // sign flipped.
         let bearing = -view.angle();
@@ -620,7 +624,7 @@ impl VerticalPerspectiveProjection {
     /// longitude stays unwrapped around the current center, the latitude is
     /// not yet constrained.
     #[must_use]
-    pub fn drag_camera(
+    pub(crate) fn drag_camera(
         view: &View,
         point: &ScreenCoordinate,
         pan_delta: &ScreenCoordinate,
@@ -642,7 +646,7 @@ impl VerticalPerspectiveProjection {
     /// latitude and short of half a turn, the orientation carried along. Its
     /// axis is the sea-level sphere's, as its pace is.
     #[must_use]
-    pub fn fling_camera(view: &View, center: &ScreenCoordinate, offset: &ScreenCoordinate) -> CenterAndBearing {
+    pub(crate) fn fling_camera(view: &View, center: &ScreenCoordinate, offset: &ScreenCoordinate) -> CenterAndBearing {
         let lat_lng = view.center(WrapMode::Unwrapped);
         let pixels = offset.x.hypot(offset.y);
         if pixels == 0.0 {
@@ -663,7 +667,7 @@ impl VerticalPerspectiveProjection {
     /// The camera `t` of the way from one camera to another, the planet
     /// turning about one axis.
     #[must_use]
-    pub fn interpolate_camera(from: &CenterAndBearing, to: &CenterAndBearing, t: f64) -> CenterAndBearing {
+    pub(crate) fn interpolate_camera(from: &CenterAndBearing, to: &CenterAndBearing, t: f64) -> CenterAndBearing {
         center_and_bearing(
             orientation_from_lat_lng_bearing(&from.center, from.bearing)
                 .slerp(orientation_from_lat_lng_bearing(&to.center, to.bearing), t),
@@ -679,7 +683,12 @@ impl VerticalPerspectiveProjection {
     /// on it. The longitude stays unwrapped around the current center, the
     /// latitude is not yet constrained.
     #[must_use]
-    pub fn drag_center(view: &View, point: &ScreenCoordinate, pan_delta: &ScreenCoordinate, height: f64) -> LatLng {
+    pub(crate) fn drag_center(
+        view: &View,
+        point: &ScreenCoordinate,
+        pan_delta: &ScreenCoordinate,
+        height: f64,
+    ) -> LatLng {
         let center = view.center(WrapMode::Unwrapped);
         // GL JS's bearing is the view's angle with the sign flipped.
         let bearing = -mln_style::math::rad2deg(view.angle());
@@ -745,7 +754,7 @@ impl VerticalPerspectiveProjection {
     /// adjusted zoom. The longitude stays unwrapped around the current
     /// center, the latitude is not yet constrained.
     #[must_use]
-    pub fn drag_center_holding(
+    pub(crate) fn drag_center_holding(
         view: &View,
         location: &LatLng,
         point: &ScreenCoordinate,
@@ -776,7 +785,7 @@ impl VerticalPerspectiveProjection {
 
     /// The shorter signed way around from one angle to the other, in degrees.
     #[must_use]
-    pub fn difference_of_angles_degrees(from: f64, to: f64) -> f64 {
+    pub(crate) fn difference_of_angles_degrees(from: f64, to: f64) -> f64 {
         let a = mln_style::math::wrap(from, 0.0, 360.0);
         let b = mln_style::math::wrap(to, 0.0, 360.0);
         let direct = b - a;
@@ -787,7 +796,7 @@ impl VerticalPerspectiveProjection {
     /// Distance between two locations along the surface, in pixels at the
     /// given world size and center latitude.
     #[must_use]
-    pub fn surface_distance_pixels(world_size: f64, center_latitude: f64, a: &LatLng, b: &LatLng) -> f64 {
+    pub(crate) fn surface_distance_pixels(world_size: f64, center_latitude: f64, a: &LatLng, b: &LatLng) -> f64 {
         let radians = Self::surface_vector(a).dot(Self::surface_vector(b)).clamp(-1.0, 1.0).acos();
         radians * Self::globe_radius_pixels(world_size, center_latitude)
     }
@@ -797,7 +806,7 @@ impl VerticalPerspectiveProjection {
     /// steady rate. The pace grows without bound towards the poles, so past
     /// the Mercator range it keeps its value at the edge.
     #[must_use]
-    pub fn interpolate_lat_lng(start: &LatLng, delta_latitude: f64, delta_longitude: f64, t: f64) -> LatLng {
+    pub(crate) fn interpolate_lat_lng(start: &LatLng, delta_latitude: f64, delta_longitude: f64, t: f64) -> LatLng {
         let latitude = (start.latitude() + delta_latitude * t).clamp(-90.0, 90.0);
         let start_latitude = start.latitude().clamp(-LATITUDE_MAX, LATITUDE_MAX);
         let end_latitude = (start.latitude() + delta_latitude).clamp(-LATITUDE_MAX, LATITUDE_MAX);

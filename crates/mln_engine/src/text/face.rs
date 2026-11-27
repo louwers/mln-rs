@@ -76,16 +76,18 @@ impl Face {
 }
 
 /// A font file, opened to find which characters the map can draw from it.
+#[cfg(all(feature = "system-fonts", not(target_family = "wasm")))]
 #[derive(Clone)]
-pub struct FontFile {
+pub(crate) struct FontFile {
     face: Face,
 }
 
+#[cfg(all(feature = "system-fonts", not(target_family = "wasm")))]
 impl FontFile {
     /// The font in `data`, as a font face reads it: `None` when it isn't a
     /// font the map can draw.
     #[must_use]
-    pub fn new(data: FontData) -> Option<Self> {
+    pub(crate) fn new(data: FontData) -> Option<Self> {
         // Which characters a font draws doesn't depend on its weight.
         let face = Face::new(data, crate::text::weight::REGULAR_WEIGHT);
         face.is_valid().then_some(FontFile { face })
@@ -95,11 +97,12 @@ impl FontFile {
     /// glyph whose outline the map reads. A font whose outlines are in a
     /// format the map doesn't read has none.
     #[must_use]
-    pub fn has_char(&self, c: char) -> bool {
+    pub(crate) fn has_char(&self, c: char) -> bool {
         self.face.glyph_of(c).is_some()
     }
 }
 
+#[cfg(all(feature = "system-fonts", not(target_family = "wasm")))]
 impl std::fmt::Debug for FontFile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FontFile").finish_non_exhaustive()

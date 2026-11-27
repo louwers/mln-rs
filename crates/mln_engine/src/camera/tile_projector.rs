@@ -37,7 +37,8 @@ impl<'a> TileProjector<'a> {
     }
 
     #[must_use]
-    pub fn circle_radius_correction(&self) -> f64 {
+    #[cfg(test)]
+    pub(crate) fn circle_radius_correction(&self) -> f64 {
         self.view.projection().circle_radius_correction(self.view)
     }
 

@@ -2,7 +2,7 @@ const TOKEN_RESERVED_CHARS: &[u8] = b"{}";
 
 /// Replaces `{tokens}` in `source` by calling `lookup`; unknown tokens stay
 /// as they are.
-pub fn replace_tokens(source: &str, lookup: impl Fn(&str) -> Option<String>) -> String {
+pub(crate) fn replace_tokens(source: &str, lookup: impl Fn(&str) -> Option<String>) -> String {
     let bytes = source.as_bytes();
     let end = bytes.len();
     // Every index the loop slices at is an ASCII brace or the end.

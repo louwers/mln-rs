@@ -51,7 +51,7 @@ impl Transform {
     /// Moves the camera relative to where it is, as a gesture does
     /// (the C API's `mln_map_apply_camera_delta`). See
     /// [`CameraDelta`].
-    pub fn apply_camera_delta(&mut self, delta: &CameraDelta) -> Result<CameraCommandId, CameraError> {
+    pub(crate) fn apply_camera_delta(&mut self, delta: &CameraDelta) -> Result<CameraCommandId, CameraError> {
         delta.validate()?;
         Ok(self.command(|transform| transform.apply_camera_delta_now(delta)))
     }
@@ -117,7 +117,7 @@ impl Transform {
 
     /// Moves the camera to absolute values, as a command or a gesture
     /// (the C API's `mln_map_update_camera`). See [`CameraUpdate`].
-    pub fn update_camera(&mut self, update: &CameraUpdate) -> CameraCommandId {
+    pub(crate) fn update_camera(&mut self, update: &CameraUpdate) -> CameraCommandId {
         self.command(|transform| transform.update_camera_now(update))
     }
 
@@ -198,7 +198,7 @@ impl Transform {
     }
 
     #[must_use]
-    pub fn is_gesture_in_progress(&self) -> bool {
+    pub(crate) fn is_gesture_in_progress(&self) -> bool {
         self.gesture_in_progress
     }
 }

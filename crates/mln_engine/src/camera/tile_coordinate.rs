@@ -7,7 +7,7 @@ use crate::geo::ScreenCoordinate;
 use crate::geo::projection::Projection;
 use crate::tile::UnwrappedTileID;
 
-pub type TileCoordinatePoint = Point<f64>;
+pub(crate) type TileCoordinatePoint = Point<f64>;
 
 /// Has floating point x/y coordinates. Used for computing the tiles that
 /// need to be visible in the viewport. In mapbox-gl-js, this is named
@@ -15,7 +15,7 @@ pub type TileCoordinatePoint = Point<f64>;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TileCoordinate {
     pub p: TileCoordinatePoint,
-    pub z: f64,
+    pub(crate) z: f64,
 }
 
 impl TileCoordinate {
@@ -27,12 +27,16 @@ impl TileCoordinate {
     }
 
     #[must_use]
-    pub fn from_screen_coordinate(view: &View, zoom: u8, screen_coordinate: &ScreenCoordinate) -> TileCoordinate {
+    pub(crate) fn from_screen_coordinate(
+        view: &View,
+        zoom: u8,
+        screen_coordinate: &ScreenCoordinate,
+    ) -> TileCoordinate {
         view.screen_coordinate_to_tile_coordinate(screen_coordinate, zoom)
     }
 
     #[must_use]
-    pub fn zoom_to(&self, zoom: f64) -> TileCoordinate {
+    pub(crate) fn zoom_to(&self, zoom: f64) -> TileCoordinate {
         let scale_diff = 2.0f64.powf(zoom - self.z);
         TileCoordinate { p: Point::new(self.p.x * scale_diff, self.p.y * scale_diff), z: zoom }
     }

@@ -94,12 +94,6 @@ impl<'a> TileMut<'a> {
         self.source.tile_key(self.tile)
     }
 
-    /// Whether the tile's jobs run on the render thread as soon as they're
-    /// ready.
-    pub(crate) fn is_synchronous(&self) -> bool {
-        self.source.synchronous
-    }
-
     /// Runs `f` with the origin's state of the tile, out of the tile for
     /// it; nothing for a tile without one.
     pub(crate) fn with_state(&mut self, f: impl FnOnce(&mut dyn Any, &mut Self)) {

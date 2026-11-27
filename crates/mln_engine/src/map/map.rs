@@ -21,8 +21,8 @@ use mln_style::{Edit, Source, Style};
 
 use crate::camera::transform::{CameraCommandId, CommandEnd, FrameClock, TerrainGround, Transform, TransformEvent};
 use crate::camera::{
-    AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraLimits, CameraOptions, CameraUpdate, Elevation,
-    ProjectionMode, TransformState, VerticalPerspectiveProjection, Viewport,
+    BoundOptions, CameraDelta, CameraError, CameraLimits, CameraOptions, CameraUpdate, Elevation, ProjectionMode,
+    TransformState, VerticalPerspectiveProjection, Viewport,
 };
 use crate::exec::event_queue::{EventQueue, Waker};
 use crate::exec::pool::Pool;
@@ -1082,7 +1082,8 @@ impl Map {
     /// The last error of a sprite or a source of the style since its load
     /// began, which fails still images.
     #[must_use]
-    pub fn last_style_error(&self) -> Option<&Error> {
+    #[cfg(test)]
+    pub(crate) fn last_style_error(&self) -> Option<&Error> {
         self.loader.last_error()
     }
 
@@ -1150,7 +1151,8 @@ impl Map {
     /// Sets whether drags and zooms on the globe turn the bearing
     /// ([`Viewport::globe_free_bearing`]), as
     /// [`set_viewport`](Self::set_viewport) does.
-    pub fn set_globe_free_bearing(&mut self, free_bearing: bool) {
+    #[cfg(test)]
+    pub(crate) fn set_globe_free_bearing(&mut self, free_bearing: bool) {
         if free_bearing != self.transform.is_globe_free_bearing() {
             self.transform.set_globe_free_bearing(free_bearing);
             self.changed();
@@ -1212,15 +1214,6 @@ impl Map {
                 WrapMode::Wrapped,
             )?,
         ))
-    }
-
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a NaN or infinite
-    /// point.
-    pub fn move_by(&mut self, point: &ScreenCoordinate, animation: &AnimationOptions) -> Result<(), Error> {
-        self.camera_mutated = true;
-        self.transform.move_by(point, animation)?;
-        self.on_update();
-        Ok(())
     }
 
     // gtests-core: cameraForLatLngBounds, cameraForLatLngs,
@@ -1557,7 +1550,7 @@ impl Map {
 
     /// Whether the center stands on the terrain.
     #[must_use]
-    pub fn center_clamped_to_ground(&self) -> bool {
+    pub(crate) fn center_clamped_to_ground(&self) -> bool {
         self.transform.view().center_clamped_to_ground()
     }
 

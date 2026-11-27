@@ -12,7 +12,7 @@ use parking_lot::Mutex;
 use crate::text::glyph::{Glyph, GlyphID};
 
 /// The glyphs parsed from one glyph range.
-pub type GlyphCacheRange = BTreeMap<GlyphID, Arc<Glyph>>;
+pub(crate) type GlyphCacheRange = BTreeMap<GlyphID, Arc<Glyph>>;
 
 /// The table sizes below which expired entries are left in place.
 const MIN_SWEEP: usize = 4096;
@@ -100,13 +100,14 @@ fn same_range(a: &GlyphCacheRange, b: &GlyphCacheRange) -> bool {
 
 impl GlyphCache {
     #[must_use]
-    pub fn new() -> Self {
+    #[cfg(test)]
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
     /// `intern(Glyph&&)`: the cached glyph equal to `glyph`, or `glyph`
     /// cached.
-    pub fn intern_glyph(&self, glyph: Glyph) -> Arc<Glyph> {
+    pub(crate) fn intern_glyph(&self, glyph: Glyph) -> Arc<Glyph> {
         let hash = hash_glyph(&glyph);
         self.inner.lock().glyphs.intern(hash, glyph, |a, b| a == b)
     }
@@ -114,7 +115,7 @@ impl GlyphCache {
     /// `intern(Range&&)`: the cached range that points to the same glyphs as
     /// `range`, or `range` cached. Ranges are matched by the glyphs they
     /// point to: intern the glyphs first.
-    pub fn intern_range(&self, range: GlyphCacheRange) -> Arc<GlyphCacheRange> {
+    pub(crate) fn intern_range(&self, range: GlyphCacheRange) -> Arc<GlyphCacheRange> {
         let mut hasher = DefaultHasher::new();
         for (id, glyph) in &range {
             GlyphID::hash(*id).hash(&mut hasher);
@@ -126,7 +127,8 @@ impl GlyphCache {
 
     /// The number of glyphs alive, not counting ranges. Walks the whole
     /// table.
-    pub fn size(&self) -> usize {
+    #[cfg(test)]
+    pub(crate) fn size(&self) -> usize {
         let inner = self.inner.lock();
         inner.glyphs.buckets.values().flatten().filter(|weak| weak.strong_count() > 0).count()
     }

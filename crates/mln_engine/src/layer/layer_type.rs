@@ -63,27 +63,7 @@ impl<T: StyleLayerType> EvaluatedLayer<T> {
     }
 }
 
-impl<T: StyleLayerType> EvaluatedLayer<T> {
-    /// The layer's style.
-    #[must_use]
-    pub fn style(&self) -> &Arc<LayerStyle<T>> {
-        &self.style
-    }
-
-    /// The layer's paint values for the frame, of which a data-driven one
-    /// can still differ by feature.
-    #[must_use]
-    pub fn paint(&self) -> &<T::PaintProperties as PaintSet>::Evaluated {
-        &self.paint
-    }
-
-    /// The frame's cross-fade of the layer's cross-faded properties, the
-    /// default for a type without them ([`Layer::CROSSFADES`]).
-    #[must_use]
-    pub fn crossfade(&self) -> CrossfadeParameters {
-        self.crossfade
-    }
-}
+impl<T: StyleLayerType> EvaluatedLayer<T> {}
 
 #[cfg(test)]
 impl<T: StyleLayerType> EvaluatedLayer<T> {

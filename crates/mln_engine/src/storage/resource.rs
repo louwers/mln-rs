@@ -80,7 +80,7 @@ impl RequestOrder {
         self.0.load(Ordering::Relaxed)
     }
 
-    pub fn set(&self, order: u32) {
+    pub(crate) fn set(&self, order: u32) {
         self.0.store(order, Ordering::Relaxed);
     }
 }
@@ -102,7 +102,7 @@ pub enum StoragePolicy {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TileData {
     pub url_template: String,
-    pub pixel_ratio: u8,
+    pub(crate) pixel_ratio: u8,
     pub x: i32,
     pub y: i32,
     pub z: i8,
@@ -278,11 +278,13 @@ impl Resource {
         response
     }
 
-    pub fn set_priority(&mut self, p: Priority) {
+    #[cfg(any(test, feature = "sqlite"))]
+    pub(crate) fn set_priority(&mut self, p: Priority) {
         self.priority = p;
     }
 
-    pub fn set_usage(&mut self, u: Usage) {
+    #[cfg(feature = "sqlite")]
+    pub(crate) fn set_usage(&mut self, u: Usage) {
         self.usage = u;
     }
 
@@ -333,7 +335,7 @@ impl Resource {
     }
 
     #[must_use]
-    pub fn font_face(url: &str) -> Resource {
+    pub(crate) fn font_face(url: &str) -> Resource {
         Resource::new(Kind::Glyphs, url)
     }
 

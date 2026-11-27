@@ -22,7 +22,7 @@ use parking_lot::{Condvar, Mutex};
 type Task<S> = Box<dyn FnOnce(&mut S) + Send>;
 
 /// What a queue calls, on the posting thread, when work arrives.
-pub type Waker = Arc<dyn Fn() + Send + Sync>;
+pub(crate) type Waker = Arc<dyn Fn() + Send + Sync>;
 
 /// How many cancelled deadlines the heap keeps, beyond one per waiting timed
 /// task, before it drops them all.
@@ -230,7 +230,7 @@ impl<S> Queue<S> {
     /// simulated network, whose deadlines it gives by that clock too.
     #[cfg(any(test, feature = "bench"))]
     #[doc(hidden)]
-    pub fn run_once_at(&self, state: &mut S, now: Instant) -> bool {
+    pub(crate) fn run_once_at(&self, state: &mut S, now: Instant) -> bool {
         self.run_once_by(state, now)
     }
 

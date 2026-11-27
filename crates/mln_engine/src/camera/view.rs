@@ -254,24 +254,24 @@ impl View {
 
     /// Insets that move the vanishing point off the center of the view.
     #[must_use]
-    pub fn frustum_offset(&self) -> EdgeInsets {
+    pub(crate) fn frustum_offset(&self) -> EdgeInsets {
         self.params.frustum_offset
     }
 
     /// Insets from the view's edges. The camera centers within the rest.
     #[must_use]
-    pub fn padding(&self) -> EdgeInsets {
+    pub(crate) fn padding(&self) -> EdgeInsets {
         self.params.padding
     }
 
     #[must_use]
-    pub fn north_orientation(&self) -> NorthOrientation {
+    pub(crate) fn north_orientation(&self) -> NorthOrientation {
         self.params.north_orientation
     }
 
     /// The rotation that the north orientation adds, in radians.
     #[must_use]
-    pub fn north_orientation_angle(&self) -> f64 {
+    pub(crate) fn north_orientation_angle(&self) -> f64 {
         match self.params.north_orientation {
             NorthOrientation::Upwards => 0.0,
             NorthOrientation::Rightwards => PI / 2.0,
@@ -281,21 +281,21 @@ impl View {
     }
 
     #[must_use]
-    pub fn viewport_mode(&self) -> ViewportMode {
+    pub(crate) fn viewport_mode(&self) -> ViewportMode {
         self.params.viewport_mode
     }
 
     /// Whether the map's center stands on its terrain
     /// ([`Viewport::center_clamped_to_ground`]).
     #[must_use]
-    pub fn center_clamped_to_ground(&self) -> bool {
+    pub(crate) fn center_clamped_to_ground(&self) -> bool {
         self.params.center_clamped_to_ground
     }
 
     /// Whether drags and zooms on the globe turn the bearing
     /// ([`Viewport::globe_free_bearing`]).
     #[must_use]
-    pub fn globe_free_bearing(&self) -> bool {
+    pub(crate) fn globe_free_bearing(&self) -> bool {
         self.params.globe_free_bearing
     }
 
@@ -371,26 +371,27 @@ impl View {
 
     /// The zoom's fractional part.
     #[must_use]
-    pub fn zoom_fraction(&self) -> f64 {
+    #[cfg(test)]
+    pub(crate) fn zoom_fraction(&self) -> f64 {
         self.zoom() - f64::from(self.integer_zoom())
     }
 
     /// 2 to the power of the zoom.
     #[must_use]
-    pub fn scale(&self) -> f64 {
+    pub(crate) fn scale(&self) -> f64 {
         self.params.scale
     }
 
     /// The map's offset from the world's center along x, in pixels at the
     /// scale: the negated center.
     #[must_use]
-    pub fn x(&self) -> f64 {
+    pub(crate) fn x(&self) -> f64 {
         self.params.x
     }
 
     /// The map's offset from the world's center along y.
     #[must_use]
-    pub fn y(&self) -> f64 {
+    pub(crate) fn y(&self) -> f64 {
         self.params.y
     }
 
@@ -413,7 +414,7 @@ impl View {
 
     /// The vertical field of view.
     #[must_use]
-    pub fn fov(&self) -> f64 {
+    pub(crate) fn fov(&self) -> f64 {
         self.params.fov
     }
 
@@ -438,14 +439,14 @@ impl View {
     /// the flat map's geometric horizon, and never past 89.25 degrees from
     /// straight down; at a pitch past that it is negative.
     #[must_use]
-    pub fn mercator_horizon(&self) -> f64 {
+    pub(crate) fn mercator_horizon(&self) -> f64 {
         let pitch = self.params.pitch;
         self.camera_to_center_distance()
             * f64::min((PI / 2.0 - pitch).tan() * 0.85, (max_mercator_horizon_angle() - pitch).tan())
     }
 
     #[must_use]
-    pub fn projection_mode(&self) -> ProjectionMode {
+    pub(crate) fn projection_mode(&self) -> ProjectionMode {
         ProjectionMode {
             axonometric: Some(AxonometricMode::from(self.params.axonometric)),
             x_skew: Some(self.params.x_skew),
@@ -455,7 +456,7 @@ impl View {
 
     /// The camera, in degrees, as the map reports it.
     #[must_use]
-    pub fn camera(&self) -> Camera {
+    pub(crate) fn camera(&self) -> Camera {
         Camera {
             center: self.center(self.params.center_wrap),
             center_altitude: self.center_altitude(),
@@ -490,7 +491,7 @@ impl View {
 
     /// Whether the view shows anything: it has a size and a scale.
     #[must_use]
-    pub fn is_valid(&self) -> bool {
+    pub(crate) fn is_valid(&self) -> bool {
         !self.params.size.is_empty() && self.params.scale.is_finite() && self.params.scale > 0.0
     }
 
@@ -517,7 +518,7 @@ impl View {
 
     /// The camera's position and orientation.
     #[must_use]
-    pub fn free_camera_options(&self) -> FreeCameraOptions {
+    pub(crate) fn free_camera_options(&self) -> FreeCameraOptions {
         let camera = self.camera_pose();
         FreeCameraOptions { position: Some(camera.position), orientation: Some(camera.orientation) }
     }
@@ -529,7 +530,7 @@ impl View {
     /// the center, with y past 0 or 1 over a polar cap, and the eye's height
     /// above the sea-level sphere.
     #[must_use]
-    pub fn eye_position(&self) -> DVec3 {
+    pub(crate) fn eye_position(&self) -> DVec3 {
         if self.is_globe() && self.is_valid() {
             let eye = self.matrices.globe_camera_position;
             return VerticalPerspectiveProjection::sphere_point_to_world(self, eye).unwrap_or(eye);
@@ -546,7 +547,7 @@ impl View {
     /// it is the globe matrix's near plane. All are the eye while the view
     /// shows nothing.
     #[must_use]
-    pub fn near_plane_points(&self) -> [DVec3; 9] {
+    pub(crate) fn near_plane_points(&self) -> [DVec3; 9] {
         let eye = self.eye_position();
         if self.matrices.projection == DMat4::ZERO {
             return [eye; 9];
@@ -568,14 +569,9 @@ impl View {
 
     // MARK: - Projection
 
-    #[must_use]
-    pub fn projection_definition(&self) -> ProjectionDefinition {
-        self.params.projection_definition
-    }
-
     /// 0 is Mercator, 1 is the globe, in between is the transition.
     #[must_use]
-    pub fn projection_transition(&self) -> f64 {
+    pub(crate) fn projection_transition(&self) -> f64 {
         self.params.projection_transition
     }
 
@@ -599,7 +595,7 @@ impl View {
     /// The same camera, size and center altitude on Mercator: the view at a
     /// projection transition of 0. A view on Mercator is its own.
     #[must_use]
-    pub fn mercator(&self) -> View {
+    pub(crate) fn mercator(&self) -> View {
         if !self.is_globe() {
             return self.clone();
         }
@@ -608,13 +604,13 @@ impl View {
 
     /// The tile-to-world matrix of a tile at the view's scale.
     #[must_use]
-    pub fn tile_matrix(&self, tile_id: &UnwrappedTileID) -> DMat4 {
+    pub(crate) fn tile_matrix(&self, tile_id: &UnwrappedTileID) -> DMat4 {
         mercator_tile_matrix(tile_id, self.params.scale)
     }
 
     /// The projection of a tile, through `proj_matrix`.
     #[must_use]
-    pub fn projection_data_with(&self, tile_id: &UnwrappedTileID, proj_matrix: &DMat4) -> ProjectionData {
+    pub(crate) fn projection_data_with(&self, tile_id: &UnwrappedTileID, proj_matrix: &DMat4) -> ProjectionData {
         let mercator_matrix = *proj_matrix * self.tile_matrix(tile_id);
         self.projection().projection_data(self, tile_id, &mercator_matrix)
     }
@@ -628,15 +624,17 @@ impl View {
     /// The projection of a tile whose Mercator tile-to-clip matrix is
     /// `mercator_matrix`.
     #[must_use]
-    pub fn projection_data_for_matrix(&self, tile_id: &UnwrappedTileID, mercator_matrix: &DMat4) -> ProjectionData {
+    pub(crate) fn projection_data_for_matrix(
+        &self,
+        tile_id: &UnwrappedTileID,
+        mercator_matrix: &DMat4,
+    ) -> ProjectionData {
         self.projection().projection_data(self, tile_id, mercator_matrix)
     }
 
     /// The lowest ground near the center while terrain draws, in meters,
     /// exaggerated; `None` without terrain
-    /// ([`TransformState::set_terrain_min_elevation`]).
-    ///
-    /// [`TransformState::set_terrain_min_elevation`]: crate::camera::TransformState::set_terrain_min_elevation
+    /// (`TransformState::set_terrain_min_elevation`).
     #[must_use]
     pub fn terrain_min_elevation(&self) -> Option<f64> {
         self.params.terrain_min_elevation
@@ -647,7 +645,7 @@ impl View {
     /// terrain draws, as in GL JS, for the depth precision raised ground
     /// needs. The globe's matrix takes it while terrain draws too.
     #[must_use]
-    pub fn near_z(&self) -> f64 {
+    pub(crate) fn near_z(&self) -> f64 {
         match self.params.terrain_min_elevation {
             Some(_) => f64::from(self.params.size.height) / 50.0,
             None => 1.0,
@@ -659,7 +657,7 @@ impl View {
     /// that the view shows, down to the terrain's lowest ground while it
     /// draws.
     #[must_use]
-    pub fn far_z(&self) -> f64 {
+    pub(crate) fn far_z(&self) -> f64 {
         match self.params.terrain_min_elevation {
             Some(min_elevation) => self.terrain_far_z(min_elevation),
             None => self.flat_far_z(),
@@ -689,7 +687,7 @@ impl View {
     /// altitude, at the pitch up to the horizon's limit, and at least half
     /// the distance to the center.
     #[must_use]
-    pub fn camera_to_sea_level_distance(&self) -> f64 {
+    pub(crate) fn camera_to_sea_level_distance(&self) -> f64 {
         let camera_to_center_distance = self.camera_to_center_distance();
         let limited_pitch = self.params.pitch.min(max_mercator_horizon_angle());
         f64::max(
@@ -782,7 +780,7 @@ impl View {
     /// The projection matrix with its near plane at `near_z` pixels, aligned
     /// to the pixel grid if `aligned`; zero while the size is empty.
     #[must_use]
-    pub fn projection_matrix_with(&self, near_z: f64, aligned: bool) -> DMat4 {
+    pub(crate) fn projection_matrix_with(&self, near_z: f64, aligned: bool) -> DMat4 {
         let params = &self.params;
         if params.size.is_empty() {
             return DMat4::ZERO;
@@ -844,32 +842,33 @@ impl View {
 
     /// The projection matrix: from world pixels at the scale, z in meters, to
     /// clip space.
+    #[cfg(any(test, feature = "bench"))]
     #[must_use]
-    pub fn projection_matrix(&self) -> DMat4 {
+    pub(crate) fn projection_matrix(&self) -> DMat4 {
         self.matrices.projection
     }
 
     #[must_use]
-    pub fn inverse_projection_matrix(&self) -> DMat4 {
+    pub(crate) fn inverse_projection_matrix(&self) -> DMat4 {
         self.matrices.inv_projection
     }
 
     /// The globe's view projection, from unit-sphere space to clip space,
     /// while [`is_globe`](Self::is_globe).
     #[must_use]
-    pub fn globe_view_projection_matrix(&self) -> DMat4 {
+    pub(crate) fn globe_view_projection_matrix(&self) -> DMat4 {
         self.matrices.globe_view_projection
     }
 
     #[must_use]
-    pub fn inverse_globe_view_projection_matrix(&self) -> DMat4 {
+    pub(crate) fn inverse_globe_view_projection_matrix(&self) -> DMat4 {
         self.matrices.inv_globe_view_projection
     }
 
     /// The plane, as `ax + by + cz + d`, that separates the globe's visible
     /// hemisphere from its back.
     #[must_use]
-    pub fn globe_clipping_plane(&self) -> DVec4 {
+    pub(crate) fn globe_clipping_plane(&self) -> DVec4 {
         self.matrices.globe_clipping_plane
     }
 
@@ -911,14 +910,15 @@ impl View {
     /// measured from the bottom edge (y up). The globe raises it along its
     /// vertical.
     #[must_use]
-    pub fn lat_lng_to_screen_coordinate_at(&self, lat_lng: &LatLng, height: f64) -> ScreenCoordinate {
+    pub(crate) fn lat_lng_to_screen_coordinate_at(&self, lat_lng: &LatLng, height: f64) -> ScreenCoordinate {
         self.clip_point_at(lat_lng, height).0
     }
 
     /// The screen point of a location and its clip-space position, whose w
     /// is negative behind the camera. Both are zero while the size is empty.
     #[must_use]
-    pub fn lat_lng_to_screen_coordinate_with_clip(&self, lat_lng: &LatLng) -> (ScreenCoordinate, DVec4) {
+    #[cfg(test)]
+    pub(crate) fn lat_lng_to_screen_coordinate_with_clip(&self, lat_lng: &LatLng) -> (ScreenCoordinate, DVec4) {
         self.clip_point_at(lat_lng, 0.0)
     }
 
@@ -943,7 +943,7 @@ impl View {
     /// Whether the globe hides a location from the camera; a Mercator view
     /// hides nothing.
     #[must_use]
-    pub fn is_location_occluded(&self, lat_lng: &LatLng) -> bool {
+    pub(crate) fn is_location_occluded(&self, lat_lng: &LatLng) -> bool {
         if self.params.size.is_empty() || !self.is_globe() {
             return false;
         }
@@ -954,7 +954,7 @@ impl View {
     /// The tile coordinate under a screen point (y up) at `at_zoom`, as GL
     /// JS's `pointCoordinate`.
     #[must_use]
-    pub fn screen_coordinate_to_tile_coordinate(&self, point: &ScreenCoordinate, at_zoom: u8) -> TileCoordinate {
+    pub(crate) fn screen_coordinate_to_tile_coordinate(&self, point: &ScreenCoordinate, at_zoom: u8) -> TileCoordinate {
         if self.params.size.is_empty() {
             return TileCoordinate { p: Point::new(0.0, 0.0), z: 0.0 };
         }
@@ -1009,7 +1009,11 @@ impl View {
     /// The location under `point`, measured from the bottom edge (y up).
     /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a
     /// NaN or infinite point.
-    pub fn screen_coordinate_to_lat_lng(&self, point: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {
+    pub(crate) fn screen_coordinate_to_lat_lng(
+        &self,
+        point: &ScreenCoordinate,
+        wrap_mode: WrapMode,
+    ) -> Result<LatLng, Error> {
         self.screen_coordinate_to_lat_lng_at(point, 0.0, wrap_mode)
     }
 
@@ -1019,9 +1023,7 @@ impl View {
     /// passes a little way from the camera. The globe meets the sphere
     /// `height` meters above sea level, and a line that misses it the
     /// nearest point of that sphere's horizon. Fails as
-    /// [`screen_coordinate_to_lat_lng`].
-    ///
-    /// [`screen_coordinate_to_lat_lng`]: Self::screen_coordinate_to_lat_lng
+    /// `screen_coordinate_to_lat_lng`.
     pub fn screen_coordinate_to_lat_lng_at(
         &self,
         point: &ScreenCoordinate,
@@ -1075,7 +1077,7 @@ impl View {
     /// camera than the center, by which queries pad what they look for; 0
     /// while the size is empty.
     #[must_use]
-    pub fn max_pitch_scale_factor(&self) -> f64 {
+    pub(crate) fn max_pitch_scale_factor(&self) -> f64 {
         if self.params.size.is_empty() {
             return 0.0;
         }

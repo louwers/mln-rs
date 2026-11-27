@@ -22,17 +22,17 @@ use parking_lot::{Condvar, Mutex};
 use crate::exec::thread::Joined;
 
 /// A task that runs on a pool.
-pub type Task = Box<dyn FnOnce() + Send + 'static>;
+pub(crate) type Task = Box<dyn FnOnce() + Send + 'static>;
 
 /// What a pool calls when work arrives while it had none.
-pub type Waker = Arc<dyn Fn() + Send + Sync>;
+pub(crate) type Waker = Arc<dyn Fn() + Send + Sync>;
 
 /// What a pool calls with the message of a task's panic.
-pub type PanicHandler = Arc<dyn Fn(String) + Send + Sync>;
+pub(crate) type PanicHandler = Arc<dyn Fn(String) + Send + Sync>;
 
 /// Where a job hands its result: called at most once, from any thread,
 /// while the job runs or later. Dropping it uncalled drops the result.
-pub type Respond<R> = Box<dyn FnOnce(R) + Send>;
+pub(crate) type Respond<R> = Box<dyn FnOnce(R) + Send>;
 
 /// Runs background work on worker threads, or, without threads, on the
 /// thread that runs it. Cheap to clone: clones share the pool. A worker
@@ -47,7 +47,7 @@ pub struct Pool {
 }
 
 /// A lane of tasks of one pool, which an owner waits for with
-/// [`wait`](Self::wait). Cheap to clone: clones share the lane. Dropping it
+/// `wait`. Cheap to clone: clones share the lane. Dropping it
 /// leaves its queued tasks to run.
 ///
 /// A [`serial`](Self::serial) group runs at most one of its tasks at a time,
@@ -143,7 +143,7 @@ impl Pool {
     /// The most worker threads the pool runs: none for a
     /// [`local`](Self::local) pool.
     #[must_use]
-    pub fn threads(&self) -> usize {
+    pub(crate) fn threads(&self) -> usize {
         self.workers.shared.max_threads
     }
 
@@ -227,7 +227,7 @@ impl TaskGroup {
 
     /// The pool the group's tasks run on.
     #[must_use]
-    pub fn pool(&self) -> &Pool {
+    pub(crate) fn pool(&self) -> &Pool {
         &self.pool
     }
 
@@ -250,7 +250,7 @@ impl TaskGroup {
     ///
     /// On one of the pool's workers, which a running task could be waiting
     /// for.
-    pub fn wait(&self) {
+    pub(crate) fn wait(&self) {
         assert!(!self.pool.is_worker(), "a task group was waited on from a task of its pool");
         let shared = &self.pool.workers.shared;
         let waits = self.pool.threads() > 0;

@@ -35,7 +35,7 @@ impl Transform {
     /// Change any combination of center, zoom, bearing, pitch and edgeInsets,
     /// with a smooth animation between old and new values. Omitted options
     /// keep their current animations and timing.
-    pub fn ease_to(&mut self, camera: &CameraOptions, animation: &AnimationOptions) -> CameraCommandId {
+    pub(crate) fn ease_to(&mut self, camera: &CameraOptions, animation: &AnimationOptions) -> CameraCommandId {
         self.command(|transform| transform.ease(camera, animation))
     }
 

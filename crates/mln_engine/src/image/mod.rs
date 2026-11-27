@@ -13,15 +13,15 @@
 
 #[cfg(target_family = "wasm")]
 mod browser_decoder;
-pub mod decoder;
+pub(crate) mod decoder;
 #[expect(clippy::module_inception, reason = "`image::image` holds `decode_image`")]
 mod image;
 pub(crate) mod image_store;
 #[cfg(not(target_family = "wasm"))]
 mod jpeg_reader;
 mod png_reader;
-pub mod png_writer;
-pub mod premultiply;
+pub(crate) mod png_writer;
+pub(crate) mod premultiply;
 pub mod sprite;
 mod webp_reader;
 

@@ -16,9 +16,9 @@ pub struct MomentumEasing {
 
 impl MomentumEasing {
     /// The curve that camera animations ease along by default.
-    pub const DEFAULT: MomentumEasing = MomentumEasing { x1: 0.0, y1: 0.0, x2: 0.25, y2: 1.0 };
+    pub(crate) const DEFAULT: MomentumEasing = MomentumEasing { x1: 0.0, y1: 0.0, x2: 0.25, y2: 1.0 };
     /// The curve that Android's scroll fling follows.
-    pub const ANDROID_FLING: MomentumEasing = MomentumEasing { x1: 0.175, y1: 0.5, x2: 0.35, y2: 1.0 };
+    pub(crate) const ANDROID_FLING: MomentumEasing = MomentumEasing { x1: 0.175, y1: 0.5, x2: 0.35, y2: 1.0 };
 }
 
 impl Default for MomentumEasing {
@@ -63,7 +63,7 @@ pub struct MomentumDecay {
 impl MomentumDecay {
     /// Friction with a 140 ms half-life, stopping at 1 unit per second, with
     /// no limits.
-    pub const DEFAULT: MomentumDecay = MomentumDecay {
+    pub(crate) const DEFAULT: MomentumDecay = MomentumDecay {
         model: MomentumDecayModel::Friction { half_life: Duration::from_millis(140), stop_speed: 1.0 },
         min_speed: 0.0,
         max_speed: f64::INFINITY,
@@ -191,21 +191,21 @@ impl MomentumSnap {
 /// `decay`. A pan's decay applies to its speed.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MomentumGlide<T> {
-    pub velocity: T,
-    pub decay: MomentumDecay,
+    pub(crate) velocity: T,
+    pub(crate) decay: MomentumDecay,
 }
 
 /// How a gesture's zoom, bearing or pitch keeps changing after release.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct AnchoredMomentum {
     /// Without one, the part stops where the gesture leaves it.
-    pub glide: Option<MomentumGlide<f64>>,
+    pub(crate) glide: Option<MomentumGlide<f64>>,
     /// The screen point that the change keeps in place; without one, the
     /// center of the view.
-    pub anchor: Option<ScreenCoordinate>,
+    pub(crate) anchor: Option<ScreenCoordinate>,
     /// Where the part settles; without one, it stays where the gesture and
     /// its glide leave it.
-    pub snap: Option<MomentumSnap>,
+    pub(crate) snap: Option<MomentumSnap>,
 }
 
 /// Camera motion that continues a gesture after its last contact lifts.
@@ -222,8 +222,8 @@ pub struct AnchoredMomentum {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct CameraMomentum {
     /// Without one, the pan stops where the gesture leaves it.
-    pub pan: Option<MomentumGlide<ScreenCoordinate>>,
-    pub zoom: AnchoredMomentum,
-    pub bearing: AnchoredMomentum,
-    pub pitch: AnchoredMomentum,
+    pub(crate) pan: Option<MomentumGlide<ScreenCoordinate>>,
+    pub(crate) zoom: AnchoredMomentum,
+    pub(crate) bearing: AnchoredMomentum,
+    pub(crate) pitch: AnchoredMomentum,
 }

@@ -21,4 +21,4 @@ pub(crate) mod terrain;
 pub(crate) mod tile;
 pub(crate) mod tile_matrix;
 pub(crate) mod update_parameters;
-pub mod update_slot;
+pub(crate) mod update_slot;

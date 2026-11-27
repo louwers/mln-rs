@@ -8,7 +8,7 @@ use skrifa::Font;
 /// regular (the variable Noto Sans CJK defaults to Thin, 100) still draws as
 /// body text. A device font loads at its face's `weight` instead
 /// ([`FontFace::device`](crate::text::glyph::FontFace::device)).
-pub const REGULAR_WEIGHT: f32 = 400.0;
+pub(crate) const REGULAR_WEIGHT: f32 = 400.0;
 
 /// `font` at `weight`, clamped to its `wght` axis: `font` itself when it has
 /// no such axis or that is its default.

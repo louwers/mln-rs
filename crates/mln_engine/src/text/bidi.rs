@@ -71,8 +71,8 @@ fn write_run(src: &[char], rtl: bool, out: &mut Vec<char>) {
 /// A run of text in one direction, in logical order.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BiDiRun {
-    pub text: Vec<char>,
-    pub rtl: bool,
+    pub(crate) text: Vec<char>,
+    pub(crate) rtl: bool,
 }
 
 /// The bidi analysis of text given as characters. unicode-bidi reads text

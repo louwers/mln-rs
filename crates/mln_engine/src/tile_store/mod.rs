@@ -11,6 +11,7 @@ pub(crate) mod source_tiles;
 pub(crate) mod store;
 pub(crate) mod tile;
 pub mod tile_cover;
+#[cfg(any(test, feature = "sqlite"))]
 pub(crate) mod tile_cover_impl;
 pub(crate) mod tile_lod;
 pub(crate) mod tile_mask;
