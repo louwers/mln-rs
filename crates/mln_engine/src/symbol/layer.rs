@@ -10,7 +10,6 @@ use glam::dcamera::rh::proj::opengl::orthographic;
 use glam::{DMat4, DVec3};
 use mln_gfx::gpu::Gpu;
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_style::StyleValue as _;
@@ -32,7 +31,7 @@ use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeAr
 use crate::draw::vertices::{SharedVertices, TypedVertices};
 use crate::layer::bucket_geometry::{BucketGeometry, bucket_vertices, copied_indexes, paint_vertices};
 use crate::layer::layer_drawing::{
-    BucketChanges, DrawGroup, DrawList, DrawOrder, FrameDraw, LayerDrawing, LayerDraws, MeshMut, TileMap, UniformWriter,
+    BucketChanges, DrawGroup, DrawOrder, FrameDraw, LayerDrawing, LayerDraws, MeshMut, TileMap,
 };
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::paint_property_binder::PaintBinders as _;
@@ -53,11 +52,6 @@ use crate::symbol::programs;
 use crate::symbol::projection::{gl_coord_matrix, label_plane_matrix};
 use crate::symbol::ubo::{SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO};
 use crate::tile::{OverscaledTileID, UnwrappedTileID};
-
-/// The ids of the buffers that the draws bind.
-const DRAWABLE_ID: usize = programs::SYMBOL_SDF.buffer_id("drawableVector");
-const TILE_PROPS_ID: usize = programs::SYMBOL_SDF.buffer_id("tilePropsVector");
-const PROPS_ID: usize = programs::SYMBOL_SDF.buffer_id("props");
 
 /// The slots of the programs' textures that the draws bind.
 const GROUND_DEPTH_SLOT: usize = programs::SYMBOL_SDF.texture_slot("ground_depth");
@@ -375,13 +369,6 @@ impl LayerDrawing<SymbolTile> for SymbolDrawing {
     }
 }
 
-/// A draw's entries in the layer's storage buffers.
-struct SymbolUniforms {
-    draw_ubo: SymbolDrawableUBO,
-    tile_props: SymbolTilePropsUBO,
-    projection: ProjectionUBO,
-}
-
 /// The size of the texture `mesh` binds at `slot` in `context`,
 /// zero for none.
 fn texture_size(context: &Context, mesh: &Mesh, slot: usize) -> [f32; 2] {
@@ -537,8 +524,6 @@ impl LayerType for Symbol {
 }
 
 pub(crate) struct RenderSymbolLayer {
-    /// The frame's draws as the update makes them.
-    draw_list: DrawList<SymbolUniforms, usize>,
     /// The segments of the tiles the update builds draws of, as it sorts
     /// them, kept from frame to frame for their memory.
     renderable_segments: Vec<SegmentGroup>,
@@ -551,9 +536,8 @@ pub(crate) struct RenderSymbolLayer {
 }
 
 impl RenderSymbolLayer {
-    /// The entries in the layer's storage buffers of `draw`, of the tile
-    /// `tile_id` and its `bucket`, of the layer `layer_id` with the values
-    /// `layer`.
+    /// The blocks and the projection of `draw`, of the tile `tile_id` and
+    /// its `bucket`, of the layer `layer_id` with the values `layer`.
     fn uniforms(
         layer_id: &str,
         layer: &EvaluatedLayer<Symbol>,
@@ -561,7 +545,7 @@ impl RenderSymbolLayer {
         bucket: &SymbolBucket,
         draw: &SymbolDraw,
         parameters: &PaintParameters<'_>,
-    ) -> Option<SymbolUniforms> {
+    ) -> Option<((SymbolDrawableUBO, SymbolTilePropsUBO), ProjectionUBO)> {
         let state = parameters.view;
         let evaluated = &layer.paint;
         let zoom = state.zoom() as f32;
@@ -649,49 +633,42 @@ impl RenderSymbolLayer {
             )
         };
 
-        Some(SymbolUniforms {
-            draw_ubo: SymbolDrawableUBO {
-                matrix: cast_matrix(&matrix),
-                label_plane_matrix: cast_matrix(&label_plane_matrix),
-                coord_matrix: cast_matrix(&gl_coord_matrix),
-                texsize: texture_size(parameters.context, &draw.mesh, TEXTURE_SLOT),
-                texsize_icon: texture_size(parameters.context, &draw.mesh, TEXTURE_ICON_SLOT),
-                is_text_prop: i32::from(is_text),
-                rotate_symbol: i32::from(rotate_in_shader),
-                pitch_with_map: i32::from(pitch_with_map),
-                is_size_zoom_constant: i32::from(size.kind.is_zoom_constant()),
-                is_size_feature_constant: i32::from(size.kind.is_feature_constant()),
-                is_offset: i32::from(data.is_offset),
-                size_t: size.size_t,
-                size: size.size,
-                fill_color_t,
-                halo_color_t,
-                opacity_t,
-                halo_width_t,
-                halo_blur_t,
-                is_along_line: i32::from(along_line),
-                is_variable_anchor: i32::from(has_variable_placement),
-                pitched_scale: state.projection().circle_radius_correction(state) as f32,
-                translation: tile_translation,
-                gamma_scale,
-                is_halo: i32::from(data.is_halo),
-            },
-            tile_props: SymbolTilePropsUBO {
-                is_text: i32::from(is_text),
-                is_halo: i32::from(data.is_halo),
-                pad1: 0.0,
-                pad2: 0.0,
-            },
-            projection: to_projection_ubo(&projection),
-        })
+        let drawable = SymbolDrawableUBO {
+            matrix: cast_matrix(&matrix),
+            label_plane_matrix: cast_matrix(&label_plane_matrix),
+            coord_matrix: cast_matrix(&gl_coord_matrix),
+            texsize: texture_size(parameters.context, &draw.mesh, TEXTURE_SLOT),
+            texsize_icon: texture_size(parameters.context, &draw.mesh, TEXTURE_ICON_SLOT),
+            is_text_prop: i32::from(is_text),
+            rotate_symbol: i32::from(rotate_in_shader),
+            pitch_with_map: i32::from(pitch_with_map),
+            is_size_zoom_constant: i32::from(size.kind.is_zoom_constant()),
+            is_size_feature_constant: i32::from(size.kind.is_feature_constant()),
+            is_offset: i32::from(data.is_offset),
+            size_t: size.size_t,
+            size: size.size,
+            fill_color_t,
+            halo_color_t,
+            opacity_t,
+            halo_width_t,
+            halo_blur_t,
+            is_along_line: i32::from(along_line),
+            is_variable_anchor: i32::from(has_variable_placement),
+            pitched_scale: state.projection().circle_radius_correction(state) as f32,
+            translation: tile_translation,
+            gamma_scale,
+            is_halo: i32::from(data.is_halo),
+        };
+        let tile_props =
+            SymbolTilePropsUBO { is_text: i32::from(is_text), is_halo: i32::from(data.is_halo), pad1: 0.0, pad2: 0.0 };
+        Some(((drawable, tile_props), to_projection_ubo(&projection)))
     }
 
     /// Makes the frame's draws, in `cx.drawing`, of the layer's draws of
     /// `tiles` in `cx.tiles` that show any symbols, in `passes`, which hide
     /// behind the ground in front of them where they draw with a variant
-    /// that stands on terrain (`stands`), and writes the buffers they read.
+    /// that stands on terrain (`stands`).
     fn make_frame_draws(
-        &mut self,
         cx: &mut LayerCx<'_, Self>,
         gpu: &mut dyn Gpu,
         tiles: &[FrameTile<'_, Symbol>],
@@ -703,6 +680,9 @@ impl RenderSymbolLayer {
         let layer = &*cx.values.evaluated;
         let ground = paint_parameters.ground.clone().filter(|_| stands);
         let depth = ground.as_deref().and_then(FrameGround::depth);
+        let Some(frame) = &mut cx.drawing.frame else {
+            return;
+        };
         for tile in tiles {
             let tile_id = tile.id();
             let Some(cached) = cx.tiles.get_mut(&tile_id) else {
@@ -711,7 +691,7 @@ impl RenderSymbolLayer {
             let bucket = tile.data().map(|bucket| bucket.bucket);
             debug_assert!(bucket.is_some() || cached.draws.is_empty());
             for (index, draw) in cached.draws.iter_mut().enumerate().filter(|(_, draw)| draw.visible) {
-                let Some(uniforms) =
+                let Some((blocks, projection)) =
                     bucket.and_then(|bucket| Self::uniforms(layer_id, layer, &tile_id, bucket, draw, paint_parameters))
                 else {
                     continue;
@@ -720,25 +700,18 @@ impl RenderSymbolLayer {
                     draw.mesh.set_texture(GROUND_DEPTH_SLOT, Some(depth));
                 }
                 let frame_draw = FrameDraw { pass: passes, ..FrameDraw::new(Some(tile_id), draw.mesh.id()) };
-                self.draw_list.push_part(frame_draw, index, uniforms);
+                frame.push_at(frame_draw, index, &draw.mesh, &projection, blocks);
             }
         }
 
-        if let Some(frame) = &mut cx.drawing.frame {
-            self.draw_list.finish(frame, gpu, paint_parameters.context, |writer| write_uniforms(&layer.paint, writer));
-        } else {
-            self.draw_list.clear();
-        }
+        frame.block(&props(&layer.paint)).finish(gpu, paint_parameters);
     }
 }
 
-/// Writes the buffers of the frame's draws of a layer of the paint values
-/// `evaluated`.
-fn write_uniforms(
-    evaluated: &SymbolPaintProperties::PossiblyEvaluated,
-    writer: &mut UniformWriter<'_, SymbolUniforms>,
-) {
-    let props = SymbolEvaluatedPropsUBO {
+/// The block that the frame's draws of a layer of the paint values
+/// `evaluated` share.
+fn props(evaluated: &SymbolPaintProperties::PossiblyEvaluated) -> SymbolEvaluatedPropsUBO {
+    SymbolEvaluatedPropsUBO {
         text_fill_color: evaluated.text_color.uniform().to_float_array(),
         text_halo_color: evaluated.text_halo_color.uniform().to_float_array(),
         text_opacity: *evaluated.text_opacity.uniform(),
@@ -751,11 +724,7 @@ fn write_uniforms(
         icon_halo_width: *evaluated.icon_halo_width.uniform(),
         icon_halo_blur: *evaluated.icon_halo_blur.uniform(),
         pad2: 0.0,
-    };
-    writer.uniform(PROPS_ID, &props);
-    writer.storage(DRAWABLE_ID, |uniforms| uniforms.draw_ubo);
-    writer.storage(TILE_PROPS_ID, |uniforms| uniforms.tile_props);
-    writer.storage(PROJECTION_ID, |uniforms| uniforms.projection);
+    }
 }
 
 impl TypedLayer for RenderSymbolLayer {
@@ -774,7 +743,6 @@ impl TypedLayer for RenderSymbolLayer {
 
     fn new(_values: &LayerValues<Symbol>) -> Self {
         RenderSymbolLayer {
-            draw_list: DrawList::default(),
             renderable_segments: Vec::new(),
             icon_size: 1.0,
             text_size: 16.0,
@@ -1109,6 +1077,13 @@ impl TypedLayer for RenderSymbolLayer {
         }
 
         self.renderable_segments = renderable_segments;
-        self.make_frame_draws(&mut cx, gpu, render_tiles, passes, symbol_projection_variant.stands(), paint_parameters);
+        Self::make_frame_draws(
+            &mut cx,
+            gpu,
+            render_tiles,
+            passes,
+            symbol_projection_variant.stands(),
+            paint_parameters,
+        );
     }
 }
