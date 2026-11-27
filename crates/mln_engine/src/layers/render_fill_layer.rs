@@ -31,7 +31,7 @@ use crate::layer::layer_drawing::{
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer, RenderLayerBase, TypedLayer,
+    EvaluateCx, Evaluation, Hosted, LayerCx, LayerValues, OnTerrain, RenderLayer, TileCx, TypedLayer,
 };
 use crate::layer::tile_input::{Features, TileData};
 use crate::layers::fill::programs;
@@ -241,7 +241,7 @@ impl OutlineQuad {
     }
 }
 
-/// What building the draws of an update's tiles reads of the layer.
+/// What building the draws of a tile reads of the layer.
 struct TileBuilder<'a> {
     /// The programs of the fills and the outlines, with or without a
     /// pattern.
@@ -258,8 +258,8 @@ struct TileBuilder<'a> {
     /// (`RenderStaticData::wall_indexes`), where the layer draws them.
     pulled_indexes: Option<&'a SharedIndexes>,
     /// The depth mask of the fills without a pattern, which the first tile
-    /// they are built for sets.
-    fill_depth: Option<DepthMaskType>,
+    /// they are built for in an update sets.
+    fill_depth: &'a mut Option<DepthMaskType>,
 }
 
 impl TileBuilder<'_> {
@@ -427,39 +427,28 @@ impl LayerType for Fill {
     }
 
     fn render_layer(style: Arc<LayerStyle<Fill>>) -> Box<dyn RenderLayer> {
-        Box::new(RenderFillLayer::new(style))
+        Hosted::<RenderFillLayer>::boxed(style)
     }
 }
 
 pub(crate) struct RenderFillLayer {
-    base: RenderLayerBase,
-    values: LayerValues<Fill>,
-    drawing: TileDraws<FillTile>,
     /// The frame's draws as the update makes them.
     draw_list: DrawList<FillUniforms, FillPart>,
 
     /// The instanced outlines' quad (`RenderStaticData::fill_outline_vertices`),
-    /// from the first update that draws them.
+    /// from the first tile the layer builds them for.
     outline_quad: Option<OutlineQuad>,
     /// The triangles of the pulled outlines' quads
-    /// (`RenderStaticData::wall_indexes`), from the first update that draws
-    /// them.
+    /// (`RenderStaticData::wall_indexes`), from the first tile the layer
+    /// builds them for.
     pulled_indexes: Option<SharedIndexes>,
+    /// The depth mask of the fills without a pattern of the tiles the layer
+    /// builds for an update's draws, which the first sets
+    /// ([`TileBuilder::fill_depth`]); none once the update made its draws.
+    fill_depth: Option<DepthMaskType>,
 }
 
 impl RenderFillLayer {
-    pub(crate) fn new(impl_: Arc<LayerStyle<Fill>>) -> Self {
-        let (base, values) = LayerValues::new(impl_);
-        RenderFillLayer {
-            base,
-            values,
-            drawing: TileDraws::default(),
-            draw_list: DrawList::default(),
-            outline_quad: None,
-            pulled_indexes: None,
-        }
-    }
-
     /// The entries in the layer's storage buffers of `draw`, the fill or the
     /// `outline` of `tile`, with or without a `pattern`, of the layer
     /// `layer_id` with the values `layer`: its matrix and the interpolation
@@ -592,15 +581,12 @@ impl RenderFillLayer {
 
 impl TypedLayer for RenderFillLayer {
     type Type = Fill;
+    type Tile = FillTile;
     type Drawing = TileDraws<FillTile>;
     const TERRAIN: OnTerrain = OnTerrain::Drapes;
 
-    fn parts(&self) -> Parts<'_, Self> {
-        Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
-    }
-
-    fn parts_mut(&mut self) -> PartsMut<'_, Self> {
-        PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
+    fn new(_values: &LayerValues<Fill>) -> Self {
+        RenderFillLayer { draw_list: DrawList::default(), outline_quad: None, pulled_indexes: None, fill_depth: None }
     }
 
     /// An undefined outline color is the fill color. The layer draws in the
@@ -608,10 +594,10 @@ impl TypedLayer for RenderFillLayer {
     /// where it is translated in the viewport.
     fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
         let evaluated = &mut cx.evaluated.paint;
-        if self.values.unevaluated.fill_outline_color.is_undefined() {
+        if cx.values.unevaluated.fill_outline_color.is_undefined() {
             evaluated.fill_outline_color = evaluated.fill_color.clone();
         }
-        let opaque = self.values.unevaluated.fill_pattern.is_undefined()
+        let opaque = cx.values.unevaluated.fill_pattern.is_undefined()
             && evaluated.fill_color.constant_or(&Color::default()).a >= 1.0
             && evaluated.fill_opacity.constant_or(&0.0) >= 1.0;
         let shows = *evaluated.fill_layer_opacity.uniform() > 0.0;
@@ -627,16 +613,18 @@ impl TypedLayer for RenderFillLayer {
         Evaluation { drapes_by_bearing, ..evaluation }
     }
 
-    /// Makes the frame's draws of the layer, those of each of its tiles,
-    /// which it builds for a tile it keeps none of, and writes the layer's
-    /// buffers they read.
-    fn update_draws(
+    /// The draws of a tile's fill and outline, if its bucket has any to
+    /// draw.
+    fn tile(
         &mut self,
-        gpu: &mut dyn Gpu,
-        paint_parameters: &mut PaintParameters<'_>,
-        render_tiles: &[FrameTile<'_, Fill>],
-    ) {
-        let pattern = !self.values.unevaluated.fill_pattern.is_undefined();
+        cx: &mut TileCx<'_, '_, Self>,
+        tile: FrameTile<'_, Fill>,
+        _data: TileData<'_, Fill>,
+    ) -> Option<FillTile> {
+        let render_data = tile.data_for_pass(RENDER_PASS)?;
+        let binders = render_data.bucket.paint_property_binders.get(&cx.base.style.base().id)?;
+        let pattern = !cx.values.unevaluated.fill_pattern.is_undefined();
+        let paint_parameters = &mut *cx.parameters;
         let outlines = Outlines::of(paint_parameters.context, pattern);
         // The outlines draw as lines, or as quads on a device that draws no
         // `LINE_WIDTH` lines and rasterizes on the GPU.
@@ -661,80 +649,81 @@ impl TypedLayer for RenderFillLayer {
             fill_program,
             outline_program,
             pattern,
-            outline_is_fill_color: self.values.unevaluated.fill_outline_color.is_undefined(),
-            projection_variant: self.base.projection_variant,
+            outline_is_fill_color: cx.values.unevaluated.fill_outline_color.is_undefined(),
+            projection_variant: cx.base.projection_variant,
             outline_quad: self.outline_quad.as_ref().filter(|_| outlines == Outlines::Instanced),
             pulled_indexes: self.pulled_indexes.as_ref().filter(|_| outlines == Outlines::Pulled),
-            fill_depth: None,
+            fill_depth: &mut self.fill_depth,
         };
+        builder.build(paint_parameters.context, render_data, binders, &render_data.layer.paint)
+    }
 
-        let layer_id = self.base.style.base().id.as_str();
-        let layer = &*self.values.evaluated;
+    /// Makes the frame's draws of the layer, those of each of its tiles, and
+    /// writes the layer's buffers they read.
+    fn update_draws(
+        &mut self,
+        cx: LayerCx<'_, Self>,
+        gpu: &mut dyn Gpu,
+        paint_parameters: &mut PaintParameters<'_>,
+        render_tiles: &[FrameTile<'_, Fill>],
+    ) {
+        let layer_id = cx.base.style.base().id.as_str();
+        let layer = &*cx.values.evaluated;
         for &tile in render_tiles {
             let tile_id = tile.draw_id();
-            let Some(mut entry) = self.drawing.tiles_mut().entry(&tile_id) else {
-                continue;
-            };
-
-            let render_data = tile.data_for_pass(RENDER_PASS);
-            let Some(render_data) = render_data else {
-                *entry.value = None;
+            let Some(render_data) = tile.data_for_pass(RENDER_PASS) else {
                 continue;
             };
             let bucket = render_data.bucket;
             let Some(binders) = bucket.paint_property_binders.get(layer_id) else {
                 continue;
             };
-
-            // Draws built from another bucket go.
-            entry.set_bucket(render_data.id);
+            let Some(mut entry) = cx.tiles.entry(&tile_id) else {
+                continue;
+            };
 
             let evaluated = &render_data.layer.paint;
 
             // The draws' attributes read the bucket's vertices in the
             // context's store, which upload again when they change.
             let changes = entry.take_changes();
-            let context = &mut *paint_parameters.context;
-            if let Some(cached) = entry.value.as_mut() {
-                let geometry = render_data.geometry();
-                // Reads the paint attributes, and returns the vertices they
-                // read.
-                let mut refresh = |attrs: &mut VertexAttributeArray| {
-                    let buffer = &binders.interleaved_vertex_buffer;
-                    let paint = paint_vertices(context, geometry, buffer, binders.depends_on_feature_state());
-                    binders.bind(evaluated, paint.as_ref(), attrs, &mut Uniforms::default());
-                    paint
-                };
-                if let Some(fill) = &mut cached.fill {
-                    refresh_paint_attributes(&mut fill.objects, changes, |attrs| drop(refresh(attrs)));
-                }
-                if let Some(outline) = &mut cached.outline {
-                    match &cached.fill {
-                        // A pulled outline has no attributes: it reads the
-                        // paint values' vertices themselves.
-                        _ if outline.paint_layout.is_some() => {
-                            if changes.paint {
-                                let mut attrs = VertexAttributeArray::new();
-                                let paint = refresh(&mut attrs);
-                                outline.objects.read_as_storage(OUTLINE_PAINT_ID, paint);
-                                outline.paint_layout = Some(outline_paint_layout(&attrs));
-                            }
-                        }
-                        // A line outline reads the fill's attributes, and so
-                        // binds the buffers the fill uploads.
-                        Some(fill) if changes.paint && !outline.objects.has_instances() => {
-                            outline.objects.share_vertex_attributes(&fill.objects);
-                        }
-                        _ => refresh_paint_attributes(&mut outline.objects, changes, |attrs| drop(refresh(attrs))),
-                    }
-                }
-            } else if let Some(built) = builder.build(context, render_data, binders, evaluated) {
-                *entry.value = Some(built);
-            }
-
-            let Some(cached) = entry.value.as_ref() else {
+            let Some(cached) = entry.value.as_mut() else {
                 continue;
             };
+            let context = &mut *paint_parameters.context;
+            let geometry = render_data.geometry();
+            // Reads the paint attributes, and returns the vertices they
+            // read.
+            let mut refresh = |attrs: &mut VertexAttributeArray| {
+                let buffer = &binders.interleaved_vertex_buffer;
+                let paint = paint_vertices(context, geometry, buffer, binders.depends_on_feature_state());
+                binders.bind(evaluated, paint.as_ref(), attrs, &mut Uniforms::default());
+                paint
+            };
+            if let Some(fill) = &mut cached.fill {
+                refresh_paint_attributes(&mut fill.objects, changes, |attrs| drop(refresh(attrs)));
+            }
+            if let Some(outline) = &mut cached.outline {
+                match &cached.fill {
+                    // A pulled outline has no attributes: it reads the
+                    // paint values' vertices themselves.
+                    _ if outline.paint_layout.is_some() => {
+                        if changes.paint {
+                            let mut attrs = VertexAttributeArray::new();
+                            let paint = refresh(&mut attrs);
+                            outline.objects.read_as_storage(OUTLINE_PAINT_ID, paint);
+                            outline.paint_layout = Some(outline_paint_layout(&attrs));
+                        }
+                    }
+                    // A line outline reads the fill's attributes, and so
+                    // binds the buffers the fill uploads.
+                    Some(fill) if changes.paint && !outline.objects.has_instances() => {
+                        outline.objects.share_vertex_attributes(&fill.objects);
+                    }
+                    _ => refresh_paint_attributes(&mut outline.objects, changes, |attrs| drop(refresh(attrs))),
+                }
+            }
+
             let tile_draws = [(&cached.fill, FillPart::Fill), (&cached.outline, FillPart::Outline)];
             for (draw, part) in tile_draws {
                 let Some(draw) = draw else {
@@ -763,28 +752,29 @@ impl TypedLayer for RenderFillLayer {
             }
         }
 
-        let frame = self.drawing.frame_mut();
+        let frame = cx.drawing.frame_mut();
         frame.set_composite(Composite::of(
             *layer.paint.fill_layer_opacity.uniform(),
             *layer.paint.fill_layer_blend.uniform(),
         ));
         frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.draw_id().to_unwrapped()));
-        self.drawing.finish(&mut self.draw_list, gpu, paint_parameters.context, |writer| {
+        cx.drawing.finish(&mut self.draw_list, cx.tiles, gpu, paint_parameters.context, |writer| {
             Self::write_uniforms(layer, writer);
         });
+        // The next update's tiles set the depth mask of their fills again.
+        self.fill_depth = None;
     }
-}
 
-impl RenderLayer for RenderFillLayer {
     // query
     fn query_intersects_feature(
         &self,
+        values: &LayerValues<Fill>,
         region: &QueryRegion<'_>,
         _feature: &dyn mln_style::feature::GeometryTileFeature,
         geometry: &mln_style::feature::GeometryCollection,
         _feature_state: &mln_style::feature::FeatureState,
     ) -> bool {
-        let evaluated = &self.values.evaluated.paint;
+        let evaluated = &values.evaluated.paint;
         let translated_query_geometry = crate::query::feature_index::FeatureIndex::translate_query_geometry(
             region.geometry,
             *evaluated.fill_translate.uniform(),
