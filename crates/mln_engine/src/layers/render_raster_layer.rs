@@ -25,13 +25,13 @@ use crate::buckets::raster_bucket::{MaskQuads, RasterLayoutVertex};
 use crate::draw::context::Context;
 use crate::draw::identity::SimpleIdentity;
 use crate::draw::indexes::{DrawIndexes, Indexes, SharedIndexes};
-use crate::draw::objects::{DrawGeometry, DrawObjects, Textures};
+use crate::draw::objects::{DrawGeometry, Mesh, Textures};
 use crate::draw::segment::SegmentBase;
 use crate::draw::store::SharedTexture;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::SharedVertices;
 use crate::layer::bucket_geometry::copied_vertices;
-use crate::layer::layer_drawing::{DrawList, KeptDraw, TileDraws};
+use crate::layer::layer_drawing::{DrawList, FrameDraw, TileDraws};
 use crate::layer::layer_type::LayerType;
 use crate::layer::render_layer::{
     EvaluateCx, Evaluation, Hosted, LayerCx, LayerValues, OnTerrain, RenderLayer, TileCx, TypedLayer, UpdateCx,
@@ -172,7 +172,7 @@ impl RenderRasterLayer {
         let composite = Self::composite(cx.values);
         cx.drawing.frame_mut().set_composite(composite);
         let evaluated = &cx.values.evaluated.paint;
-        cx.drawing.finish(&mut self.draw_list, cx.tiles, gpu, context, |writer| {
+        cx.drawing.finish(&mut self.draw_list, gpu, context, |writer| {
             let props = RasterEvaluatedPropsUBO {
                 spin_weights: spin_weights(*evaluated.raster_hue_rotate.uniform()),
                 tl_parent: [0.0, 0.0],
@@ -200,13 +200,13 @@ impl RenderRasterLayer {
 /// Adds the frame's draw of the tile `tile_id`, from what the layer keeps of
 /// it, if anything, to `draw_list`.
 fn raster_draw(
-    kept: Option<&KeptDraw>,
+    kept: Option<&Mesh>,
     tile_id: OverscaledTileID,
     parameters: &PaintParameters<'_>,
     draw_list: &mut DrawList<(RasterDrawableUBO, ProjectionUBO)>,
 ) {
     if let Some(kept) = kept {
-        let draw = kept.frame_draw(Some(tile_id));
+        let draw = FrameDraw::new(Some(tile_id), kept.id());
         draw_list.push(draw, RenderRasterLayer::uniforms(&tile_id.to_unwrapped(), parameters));
     }
 }
@@ -227,18 +227,13 @@ fn contrast_factor(contrast: f32) -> f32 {
     if contrast > 0.0 { 1.0 / (1.0 - contrast) } else { 1.0 + contrast }
 }
 
-/// The GPU objects of a raster draw of `geometry` with `shader`, which binds
+/// The mesh of a raster draw of `geometry` with `shader`, which binds
 /// `texture` as both of its images.
-fn new_objects(
-    shader: &ShaderKey,
-    color_mode: ColorMode,
-    geometry: DrawGeometry,
-    texture: &SharedTexture,
-) -> DrawObjects {
+fn new_mesh(shader: &ShaderKey, color_mode: ColorMode, geometry: DrawGeometry, texture: &SharedTexture) -> Mesh {
     let mut textures = Textures::default();
     textures[IMAGE0_SLOT] = Some(texture.clone());
     textures[IMAGE1_SLOT] = Some(texture.clone());
-    DrawObjects::new(shader.clone(), color_mode, CullFaceMode::disabled(), geometry, textures)
+    Mesh::new(shader.clone(), color_mode, CullFaceMode::disabled(), geometry, textures)
 }
 
 /// The geometry of a raster draw of `vertex_count` vertices in `vertices`,
@@ -286,8 +281,8 @@ fn raster_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
 
 impl TypedLayer for RenderRasterLayer {
     type Type = Raster;
-    type Tile = KeptDraw;
-    type Drawing = TileDraws<KeptDraw>;
+    type Tile = Mesh;
+    type Drawing = TileDraws<Mesh>;
     const TERRAIN: OnTerrain = OnTerrain::Drapes;
 
     fn new(_values: &LayerValues<Raster>) -> Self {
@@ -313,7 +308,7 @@ impl TypedLayer for RenderRasterLayer {
         cx: &mut TileCx<'_, '_, Self>,
         tile: FrameTile<'_, Raster>,
         data: TileData<'_, Raster>,
-    ) -> Option<KeptDraw> {
+    ) -> Option<Mesh> {
         let sampler = Self::sampler_state(cx.values);
         let context = &mut *cx.parameters.context;
         let raster_shader = context.shader_key(&programs::RASTER, Uniforms::default(), cx.base.projection_variant);
@@ -357,7 +352,7 @@ impl TypedLayer for RenderRasterLayer {
         };
         let texture = Self::texture(&mut self.textures, sampler, context, data.id(), data.image());
         let color_mode = ColorMode::alpha_blended();
-        Some(KeptDraw::new(new_objects(&raster_shader, color_mode, draw_geometry, &texture)))
+        Some(new_mesh(&raster_shader, color_mode, draw_geometry, &texture))
     }
 
     /// Makes the frame's draws of the layer, one of each of its tiles, and
