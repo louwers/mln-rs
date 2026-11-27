@@ -22,8 +22,7 @@ use crate::draw::vertex_attribute::Uniforms;
 use crate::layer::layer_drawing::{DrawDepth, DrawList, DrawObjectsMut, FrameDraw, KeptDraw, TileDraws, TileObjects};
 use crate::layer::layer_type::LayerType;
 use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, LayerUpdateParameters, LayerValues, OnTerrain, Parts, PartsMut, RenderLayer,
-    RenderLayerBase, TypedLayer,
+    EvaluateCx, Evaluation, Hosted, LayerCx, LayerValues, OnTerrain, RenderLayer, TypedLayer, UpdateCx,
 };
 use crate::layer::tile_input::NoTiles;
 use crate::layers::background::pattern_atlas::PatternAtlas;
@@ -50,7 +49,7 @@ impl LayerType for Background {
     const CROSSFADES: bool = true;
 
     fn render_layer(style: Arc<LayerStyle<Background>>) -> Box<dyn RenderLayer> {
-        Box::new(RenderBackgroundLayer::new(style))
+        Hosted::<RenderBackgroundLayer>::boxed(style)
     }
 }
 
@@ -74,9 +73,6 @@ impl TileObjects for BackgroundTile {
 }
 
 pub(crate) struct RenderBackgroundLayer {
-    base: RenderLayerBase,
-    values: LayerValues<Background>,
-    drawing: TileDraws<BackgroundTile>,
     /// The frame's draws as the update makes them, with their uniform blocks
     /// and projections.
     draw_list: DrawList<(BackgroundDrawableUnionUBO, ProjectionUBO)>,
@@ -85,15 +81,12 @@ pub(crate) struct RenderBackgroundLayer {
 }
 
 impl RenderBackgroundLayer {
-    pub(crate) fn new(impl_: Arc<LayerStyle<Background>>) -> Self {
-        let (base, values) = LayerValues::new(impl_);
-        RenderBackgroundLayer {
-            base,
-            values,
-            drawing: TileDraws::default(),
-            draw_list: DrawList::default(),
-            patterns: PatternAtlas::new(),
-        }
+    /// The passes a tile's draw draws in with the layer's `values`, and
+    /// whether it draws a pattern.
+    fn built_for(values: &LayerValues<Background>) -> (RenderPass, bool) {
+        let layer = &*values.evaluated;
+        let has_pattern = !layer.paint.background_pattern.faded().to.empty();
+        (RenderPass(layer.render_passes), has_pattern)
     }
 
     /// The GPU objects of the draw of the tile `tile_id`, with `shader` and
@@ -164,33 +157,37 @@ impl RenderBackgroundLayer {
 
 impl TypedLayer for RenderBackgroundLayer {
     type Type = Background;
+    type Tile = BackgroundTile;
     type Drawing = TileDraws<BackgroundTile>;
     const TERRAIN: OnTerrain = OnTerrain::Drapes;
+    const PICKS_TILES: bool = true;
 
-    fn parts(&self) -> Parts<'_, Self> {
-        Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
+    fn new(_values: &LayerValues<Background>) -> Self {
+        RenderBackgroundLayer { draw_list: DrawList::default(), patterns: PatternAtlas::new() }
     }
 
-    fn parts_mut(&mut self) -> PartsMut<'_, Self> {
-        PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
+    /// Keeps a tile's draw built for the passes and pattern the layer draws
+    /// with `values`.
+    fn keeps(&self, values: &LayerValues<Background>, tile: &BackgroundTile) -> bool {
+        tile.built_for == Self::built_for(values)
     }
 
-    /// Makes the frame's draws of the layer, one of each tile it keeps: the
+    /// Makes the frame's draws of the layer, one of each tile it picked: the
     /// tiles that cover the view, or a drape's tile. It builds the draw of a
-    /// tile it keeps none of or whose draw was built for other passes or
-    /// patterns, and writes the layer's buffers the draws read.
+    /// tile it keeps none of, and writes the layer's buffers the draws read.
     fn update_draws(
         &mut self,
+        cx: LayerCx<'_, Self>,
         gpu: &mut dyn Gpu,
         paint_parameters: &mut PaintParameters<'_>,
         _tiles: &[FrameTile<'_, Background>],
     ) {
-        let RenderBackgroundLayer { base, values, drawing, draw_list, patterns } = self;
+        let RenderBackgroundLayer { draw_list, patterns } = self;
+        let LayerCx { base, values, tiles, drawing } = cx;
         let layer = &*values.evaluated;
         let evaluated = &layer.paint;
-        let has_pattern = !evaluated.background_pattern.faded().to.empty();
-        let draw_passes = RenderPass(layer.render_passes);
-        let built_for = (draw_passes, has_pattern);
+        let built_for = Self::built_for(values);
+        let (draw_passes, has_pattern) = built_for;
 
         let program = if has_pattern { &programs::BACKGROUND_PATTERN } else { &programs::BACKGROUND };
         let shader = paint_parameters.context.shader_key(program, Uniforms::default(), base.projection_variant);
@@ -221,10 +218,7 @@ impl TypedLayer for RenderBackgroundLayer {
         let variant = base.projection_variant;
         let color_mode =
             if draw_passes == RenderPass::Translucent { ColorMode::alpha_blended() } else { ColorMode::unblended() };
-        for (tile_id, entry) in drawing.tiles_mut().entries() {
-            if entry.value.as_ref().is_some_and(|cached| cached.built_for != built_for) {
-                *entry.value = None;
-            }
+        for (tile_id, entry) in tiles.entries() {
             let cached = entry.value.get_or_insert_with(|| BackgroundTile {
                 draw: KeptDraw::new(Self::build_tile(&tile_id, shader.clone(), color_mode, variant)),
                 built_for,
@@ -244,7 +238,7 @@ impl TypedLayer for RenderBackgroundLayer {
         }
 
         let texsize = patterns.pixel_size();
-        drawing.finish(draw_list, gpu, paint_parameters.context, |writer| {
+        drawing.finish(draw_list, tiles, gpu, paint_parameters.context, |writer| {
             let opacity = *evaluated.background_opacity.uniform();
             if let Some((from, to)) = pattern_positions {
                 let crossfade = &layer.crossfade;
@@ -288,7 +282,7 @@ impl TypedLayer for RenderBackgroundLayer {
         let color = *evaluated.background_color.uniform();
         let evaluation = if opacity == 0.0 {
             Evaluation::NONE
-        } else if !self.values.unevaluated.background_pattern.is_undefined() || opacity < 1.0 || color.a < 1.0 {
+        } else if !cx.values.unevaluated.background_pattern.is_undefined() || opacity < 1.0 || color.a < 1.0 {
             Evaluation::TRANSLUCENT
         } else {
             Evaluation::OPAQUE
@@ -301,8 +295,9 @@ impl TypedLayer for RenderBackgroundLayer {
     /// Picks the tiles that cover the view, which the layer draws, having no
     /// source, and packs its patterns, again those whose images the style
     /// replaced.
-    fn update(&mut self, parameters: &mut LayerUpdateParameters<'_>, _tiles: &[FrameTile<'_, Background>]) {
-        let (state, update_parameters) = (parameters.view, parameters.update_parameters);
+    fn update(&mut self, mut cx: UpdateCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Background>]) {
+        let (state, update_parameters, images) =
+            (cx.parameters.view, cx.parameters.update_parameters, cx.parameters.images);
         let zoom = state.integer_zoom();
         let tiles = tile_cover(
             &TileCoverParameters {
@@ -319,17 +314,15 @@ impl TypedLayer for RenderBackgroundLayer {
             Range::new(0u8, zoom),
             None,
         );
-        self.drawing.tiles_mut().set_tiles(tiles);
+        cx.pick_tiles(tiles);
 
-        let evaluated = &self.values.evaluated.paint;
+        let evaluated = &cx.values.evaluated.paint;
         let faded = evaluated.background_pattern.faded();
         if !faded.to.empty() {
             // The encode uploads the atlas image with the patterns.
-            self.patterns.remove_stale(parameters.images);
-            self.patterns.add(faded.from.id(), parameters.images);
-            self.patterns.add(faded.to.id(), parameters.images);
+            self.patterns.remove_stale(images);
+            self.patterns.add(faded.from.id(), images);
+            self.patterns.add(faded.to.id(), images);
         }
     }
 }
-
-impl RenderLayer for RenderBackgroundLayer {}
