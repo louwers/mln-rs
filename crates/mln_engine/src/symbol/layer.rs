@@ -39,8 +39,8 @@ use crate::layer::layer_drawing::{
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
-    BucketKey, BucketPlacementData, EvaluateCx, Evaluation, LayerUpdateParameters, LayerValues, OnTerrain, Parts,
-    PartsMut, PlacedTile, RenderLayer, RenderLayerBase, SymbolTranslate, TypedLayer,
+    BucketKey, BucketPlacementData, EvaluateCx, Evaluation, Hosted, LayerCx, LayerValues, OnTerrain, PlacedTile,
+    RenderLayer, SymbolTranslate, TypedLayer, UpdateCx,
 };
 use crate::layer::tile_input::Features;
 use crate::layers::cast_matrix;
@@ -316,11 +316,10 @@ pub(crate) struct SymbolTile {
     draws: Vec<SymbolDraw>,
 }
 
-/// The layer's drawing: what it keeps of each tile, and its draws of the
-/// frame, each of the draw at its index among its tile's.
+/// The layer's draws of the frame, each of the draw at its index among
+/// those of its tile's value.
 #[derive(Default)]
 pub(crate) struct SymbolDrawing {
-    tiles: TileMap<SymbolTile>,
     frame: Option<LayerDraws<usize>>,
 }
 
@@ -332,31 +331,27 @@ impl SymbolDrawing {
         Some(DrawObjectsMut { objects: &mut draw.objects, atlases: Some(&draw.atlases) })
     }
 
-    /// Draws the pass's draws of the layer's draw group, if it has it.
-    fn render_frame(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
+    /// Draws the pass's draws of the layer's draw group, if it has it, with
+    /// their objects in `tiles`.
+    fn render_frame(
+        &mut self,
+        tiles: &mut TileMap<SymbolTile>,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+        order: DrawOrder,
+    ) {
         if let Some(frame) = &self.frame {
-            frame.render(&mut self.tiles, Self::objects, gpu, parameters);
+            frame.render(tiles, Self::objects, gpu, parameters);
             order.step(parameters);
         }
     }
 }
 
-impl LayerDrawing for SymbolDrawing {
-    type Tile = SymbolTile;
-
-    fn tiles(&mut self) -> Option<&mut TileMap<SymbolTile>> {
-        Some(&mut self.tiles)
-    }
-
+impl LayerDrawing<SymbolTile> for SymbolDrawing {
     fn visit_groups<'a>(&'a self, visit: &mut dyn FnMut(DrawGroup<'a>)) {
         if let Some(frame) = &self.frame {
             visit(DrawGroup::Draws(frame.frame()));
         }
-    }
-
-    fn clear(&mut self) {
-        self.tiles.clear();
-        self.clear_frame();
     }
 
     fn begin_frame(&mut self) {
@@ -369,14 +364,20 @@ impl LayerDrawing for SymbolDrawing {
         }
     }
 
-    fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+    fn upload(&mut self, tiles: &mut TileMap<SymbolTile>, gpu: &mut dyn Gpu, context: &mut Context) {
         if let Some(frame) = &self.frame {
-            frame.upload(gpu, &mut self.tiles, Self::objects, context);
+            frame.upload(gpu, tiles, Self::objects, context);
         }
     }
 
-    fn render(&mut self, gpu: &mut dyn Gpu, parameters: &mut PaintParameters<'_>, order: DrawOrder) {
-        self.render_frame(gpu, parameters, order);
+    fn render(
+        &mut self,
+        tiles: &mut TileMap<SymbolTile>,
+        gpu: &mut dyn Gpu,
+        parameters: &mut PaintParameters<'_>,
+        order: DrawOrder,
+    ) {
+        self.render_frame(tiles, gpu, parameters, order);
     }
 }
 
@@ -537,14 +538,11 @@ impl LayerType for Symbol {
     type Input = Features<SymbolLayout>;
 
     fn render_layer(style: Arc<LayerStyle<Symbol>>) -> Box<dyn RenderLayer> {
-        Box::new(RenderSymbolLayer::new(style))
+        Hosted::<RenderSymbolLayer>::boxed(style)
     }
 }
 
 pub(crate) struct RenderSymbolLayer {
-    base: RenderLayerBase,
-    values: LayerValues<Symbol>,
-    drawing: SymbolDrawing,
     /// The frame's draws as the update makes them.
     draw_list: DrawList<SymbolUniforms, usize>,
     /// The segments of the tiles the update builds draws of, as it sorts
@@ -577,10 +575,10 @@ impl Drop for RenderSymbolLayer {
 }
 
 impl RenderSymbolLayer {
-    /// The translations of the layer's text and of its icons, as its
-    /// evaluated paint properties set them.
-    pub(crate) fn symbol_translates(&self) -> (SymbolTranslate, SymbolTranslate) {
-        let evaluated = &self.values.evaluated.paint;
+    /// The translations of the text and of the icons of the layer of
+    /// `values`, as its evaluated paint properties set them.
+    pub(crate) fn symbol_translates(values: &LayerValues<Symbol>) -> (SymbolTranslate, SymbolTranslate) {
+        let evaluated = &values.evaluated.paint;
         let text_translate = SymbolTranslate {
             offset: *evaluated.text_translate.uniform(),
             anchor: *evaluated.text_translate_anchor.uniform(),
@@ -592,18 +590,20 @@ impl RenderSymbolLayer {
         (text_translate, icon_translate)
     }
 
-    /// Adds `bucket`, `key`'s, of `tile`, to what the layer places: when the
-    /// layer leads the bucket, to its placement data, with the tile's feature
-    /// index, in order of sort key; otherwise to its follower data.
+    /// Adds `bucket`, `key`'s, of `tile`, to what the layer of `values`
+    /// places: when the layer leads the bucket, to its placement data, with
+    /// the tile's feature index, in order of sort key; otherwise to its
+    /// follower data.
     pub(crate) fn add_bucket(
         &mut self,
+        values: &LayerValues<Symbol>,
         tile: &PlacedTile,
         key: BucketKey,
         bucket: &SymbolBucket,
         feature_index: impl FnOnce() -> Option<Arc<FeatureIndex>>,
         (text_translate, icon_translate): (SymbolTranslate, SymbolTranslate),
     ) {
-        let source = &self.base.style.base().source;
+        let source = &values.style.base().source;
         if *self.source_id != **source {
             self.source_id = Arc::from(source.as_str());
         }
@@ -617,7 +617,7 @@ impl RenderSymbolLayer {
             text_translate,
             icon_translate,
         };
-        if *bucket.bucket_leader_id != *self.base.style.base().id {
+        if *bucket.bucket_leader_id != *values.style.base().id {
             let data = data(None, None);
             self.follower_data.push(data);
             return;
@@ -658,6 +658,7 @@ impl RenderSymbolLayer {
     #[cfg(feature = "bench")]
     pub(crate) fn add_placement_data(
         &mut self,
+        values: &LayerValues<Symbol>,
         tiles: &[RenderTile],
         tile_index: usize,
         bucket: usize,
@@ -677,7 +678,7 @@ impl RenderSymbolLayer {
         };
         let held = HeldBuckets::take();
         if let Some(bucket) = held.get(&key) {
-            self.add_bucket(&PlacedTile::new(tile), key, bucket, feature_index, translates);
+            self.add_bucket(values, &PlacedTile::new(tile), key, bucket, feature_index, translates);
         }
         held.restore();
     }
@@ -686,25 +687,6 @@ impl RenderSymbolLayer {
     #[cfg(feature = "bench")]
     pub(crate) fn has_placement_data(&self) -> bool {
         !self.placement_data.is_empty() || !self.follower_data.is_empty()
-    }
-
-    pub(crate) fn new(impl_: Arc<LayerStyle<Symbol>>) -> Self {
-        let (base, values) = LayerValues::new(impl_);
-        RenderSymbolLayer {
-            base,
-            values,
-            drawing: SymbolDrawing::default(),
-            draw_list: DrawList::default(),
-            renderable_segments: Vec::new(),
-            placement_data: Vec::new(),
-            follower_data: Vec::new(),
-            source_id: Arc::from(""),
-            icon_size: 1.0,
-            text_size: 16.0,
-            draws_passes: RenderPass::None,
-            #[cfg(feature = "bench")]
-            held: Vec::new(),
-        }
     }
 
     /// The entries in the layer's storage buffers of `draw`, of the tile
@@ -842,25 +824,26 @@ impl RenderSymbolLayer {
         })
     }
 
-    /// Makes the frame's draws of the layer's draws of `tiles` that show any
-    /// symbols, in `passes`, which hide behind the ground in front of them
-    /// where they draw with a variant that stands on terrain (`stands`), and
-    /// writes the buffers they read.
+    /// Makes the frame's draws, in `cx.drawing`, of the layer's draws of
+    /// `tiles` in `cx.tiles` that show any symbols, in `passes`, which hide
+    /// behind the ground in front of them where they draw with a variant
+    /// that stands on terrain (`stands`), and writes the buffers they read.
     fn make_frame_draws(
         &mut self,
+        cx: &mut LayerCx<'_, Self>,
         gpu: &mut dyn Gpu,
         tiles: &[FrameTile<'_, Symbol>],
         passes: RenderPass,
         stands: bool,
         paint_parameters: &mut PaintParameters<'_>,
     ) {
-        let layer_id = self.base.style.base().id.as_str();
-        let layer = &*self.values.evaluated;
+        let layer_id = cx.base.style.base().id.as_str();
+        let layer = &*cx.values.evaluated;
         let ground = paint_parameters.ground.clone().filter(|_| stands);
         let depth = ground.as_deref().and_then(FrameGround::depth);
         for tile in tiles {
             let tile_id = tile.id();
-            let Some(cached) = self.drawing.tiles.get_mut(&tile_id) else {
+            let Some(cached) = cx.tiles.get_mut(&tile_id) else {
                 continue;
             };
             let bucket = tile.data().map(|bucket| bucket.bucket);
@@ -879,12 +862,12 @@ impl RenderSymbolLayer {
             }
         }
 
-        if let Some(frame) = &mut self.drawing.frame {
+        if let Some(frame) = &mut cx.drawing.frame {
             if self
                 .draw_list
                 .finish(frame, gpu, paint_parameters.context, |writer| write_uniforms(&layer.paint, writer))
             {
-                for draw in self.drawing.tiles.values_mut().flat_map(|tile| &mut tile.draws) {
+                for draw in cx.tiles.values_mut().flat_map(|tile| &mut tile.draws) {
                     draw.objects.drop_bindings();
                 }
             }
@@ -922,6 +905,7 @@ fn write_uniforms(
 
 impl TypedLayer for RenderSymbolLayer {
     type Type = Symbol;
+    type Tile = SymbolTile;
     type Drawing = SymbolDrawing;
 
     /// Symbols draw the lower of two tiles' overlapping symbols over the
@@ -933,21 +917,28 @@ impl TypedLayer for RenderSymbolLayer {
     /// behind the ground in front.
     const TERRAIN: OnTerrain = OnTerrain::Stands { hides_behind_ground: true };
 
-    fn parts(&self) -> Parts<'_, Self> {
-        Parts { base: &self.base, values: &self.values, drawing: &self.drawing }
-    }
-
-    fn parts_mut(&mut self) -> PartsMut<'_, Self> {
-        PartsMut { base: &mut self.base, values: &mut self.values, drawing: &mut self.drawing }
+    fn new(_values: &LayerValues<Symbol>) -> Self {
+        RenderSymbolLayer {
+            draw_list: DrawList::default(),
+            renderable_segments: Vec::new(),
+            placement_data: Vec::new(),
+            follower_data: Vec::new(),
+            source_id: Arc::from(""),
+            icon_size: 1.0,
+            text_size: 16.0,
+            draws_passes: RenderPass::None,
+            #[cfg(feature = "bench")]
+            held: Vec::new(),
+        }
     }
 
     fn evaluate(&mut self, cx: EvaluateCx<'_, Self>) -> Evaluation {
         let parameters = cx.parameters;
-        if SymbolLayerPaintPropertyOverrides::has_overrides(&self.values.style.layout.text_field) {
+        if SymbolLayerPaintPropertyOverrides::has_overrides(&cx.values.style.layout.text_field) {
             mln_style::layers::symbol_layer::set_overrides(
-                &self.values.style.layout,
+                &cx.values.style.layout,
                 &mut cx.evaluated.paint,
-                &self.values.unevaluated,
+                &cx.values.unevaluated,
                 &parameters.global_state,
             );
         }
@@ -968,9 +959,13 @@ impl TypedLayer for RenderSymbolLayer {
 
     /// Makes the frame's draws of the layer: those of each of its tiles,
     /// which it builds for a tile it keeps none of and refreshes where the
-    /// tile's bucket changed, and writes the buffers they read.
+    /// tile's bucket changed, and writes the buffers they read. It builds
+    /// them here rather than in [`tile`](TypedLayer::tile): their ids, which
+    /// order the frame's draws, are made in the order of the segments
+    /// sorted across the tiles.
     fn update_draws(
         &mut self,
+        mut cx: LayerCx<'_, Self>,
         gpu: &mut dyn Gpu,
         paint_parameters: &mut PaintParameters<'_>,
         render_tiles: &[FrameTile<'_, Symbol>],
@@ -983,13 +978,14 @@ impl TypedLayer for RenderSymbolLayer {
         }
 
         let transform = paint_parameters.view;
-        let passes = self.base.passes;
+        let passes = cx.base.passes;
         if passes != self.draws_passes {
-            self.drawing.clear();
+            cx.tiles.clear();
+            cx.drawing.clear();
             self.draws_passes = passes;
         }
 
-        let layout = &self.values.style.layout;
+        let layout = &cx.values.style.layout;
         let sort_features_by_key = layout.symbol_sort_key.is_expression();
         let constant_sort_key = layout.symbol_sort_key.is_constant();
         // Screen-space symbols are drawn over the view, not projected onto
@@ -1000,7 +996,7 @@ impl TypedLayer for RenderSymbolLayer {
             .copied()
             .unwrap_or_else(SymbolLayoutProperties::Defaults::symbol_screen_space);
         let symbol_projection_variant =
-            if is_screen_space { ProjectionVariant::Mercator } else { self.base.projection_variant };
+            if is_screen_space { ProjectionVariant::Mercator } else { cx.base.projection_variant };
         let is_offset = !layout.icon_offset.is_undefined();
 
         let current_zoom = transform.zoom() as f32;
@@ -1011,7 +1007,7 @@ impl TypedLayer for RenderSymbolLayer {
         for (tile_index, tile) in render_tiles.iter().enumerate() {
             let tile_id = tile.id();
 
-            let Some(mut entry) = self.drawing.tiles.entry(&tile_id) else {
+            let Some(mut entry) = cx.tiles.entry(&tile_id) else {
                 continue;
             };
             let render_data = tile.data_for_pass(passes);
@@ -1022,8 +1018,6 @@ impl TypedLayer for RenderSymbolLayer {
             let bucket = render_data.bucket;
             let layer_id = render_data.layer.style.base().id.as_str();
 
-            // Draws built from another bucket go.
-            entry.set_bucket(render_data.id);
             // What changed since the draws were built or last refreshed.
             let refresh = entry.take_changes();
 
@@ -1259,41 +1253,39 @@ impl TypedLayer for RenderSymbolLayer {
                     visible,
                     atlases: draw_atlases.clone(),
                 };
-                if let Some(entry) = self.drawing.tiles.entry(&tile_id) {
+                if let Some(entry) = cx.tiles.entry(&tile_id) {
                     entry.value.get_or_insert_with(SymbolTile::default).draws.push(draw);
                 }
             }
         }
 
         self.renderable_segments = renderable_segments;
-        self.make_frame_draws(gpu, render_tiles, passes, symbol_projection_variant.stands(), paint_parameters);
+        self.make_frame_draws(&mut cx, gpu, render_tiles, passes, symbol_projection_variant.stands(), paint_parameters);
     }
 
     /// Collects the symbol buckets of the tiles the layer places, and of
     /// those whose buckets another layer places and this one draws.
-    fn update(&mut self, params: &mut LayerUpdateParameters<'_>, tiles: &[FrameTile<'_, Symbol>]) {
+    fn update(&mut self, cx: UpdateCx<'_, '_, Self>, tiles: &[FrameTile<'_, Symbol>]) {
         self.placement_data.clear();
         self.follower_data.clear();
-        let Some(source) = params.source.and_then(RenderSource::tiles) else {
+        let Some(source) = cx.parameters.source.and_then(RenderSource::tiles) else {
             return;
         };
-        let translates = self.symbol_translates();
+        let translates = Self::symbol_translates(cx.values);
         for tile in tiles {
             let Some(bucket) = tile.data() else {
                 continue;
             };
             let key = BucketKey { source, tile: tile.id(), slot: tile.tile.slot(), bucket: bucket.bucket_index };
             let feature_index = || Some(Arc::clone(bucket.feature_index()));
-            self.add_bucket(&PlacedTile::new(tile.tile), key, bucket.bucket, feature_index, translates);
+            self.add_bucket(cx.values, &PlacedTile::new(tile.tile), key, bucket.bucket, feature_index, translates);
         }
     }
 
     fn release(&mut self) {
         self.placement_data.clear();
     }
-}
 
-impl RenderLayer for RenderSymbolLayer {
     fn placement_data(&self) -> &[BucketPlacementData] {
         &self.placement_data
     }
