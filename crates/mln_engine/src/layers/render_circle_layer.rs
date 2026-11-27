@@ -1,5 +1,4 @@
 use std::mem::offset_of;
-use std::sync::Arc;
 
 use geometry::Point;
 use glam::Vec2;
@@ -8,7 +7,6 @@ use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_style::color::Color;
 use mln_style::expression::EvaluationContext;
 use mln_style::geo::WrapMode;
-use mln_style::layer::LayerStyle;
 use mln_style::layers::Circle;
 use mln_style::types::{AlignmentType, CirclePitchScaleType};
 
@@ -20,11 +18,9 @@ use crate::draw::objects::{DrawGeometry, Textures};
 use crate::draw::segment::SegmentBase;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::layer::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
-use crate::layer::layer_type::{EvaluatedLayer, LayerType};
+use crate::layer::layer_type::EvaluatedLayer;
 use crate::layer::paint_property_binder::PaintBinders as _;
-use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, Hosted, LayerValues, OnTerrain, PrepareCx, RenderLayer, TileCx, TypedLayer,
-};
+use crate::layer::render_layer::{EvaluateCx, Evaluation, Layer, LayerValues, OnTerrain, PrepareCx, TileCx};
 use crate::layer::tile_input::{Features, TileData};
 use crate::layers::circle::programs;
 use crate::layers::circle::ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
@@ -107,18 +103,6 @@ fn plane_geometry(
         .collect()
 }
 
-impl LayerType for Circle {
-    type Input = Features<CircleLayout>;
-
-    fn query_radius(data: TileData<'_, Circle>, layer: &EvaluatedLayer<Circle>) -> f32 {
-        data.bucket.query_radius(layer)
-    }
-
-    fn render_layer(style: Arc<LayerStyle<Circle>>) -> Box<dyn RenderLayer> {
-        Hosted::<RenderCircleLayer>::boxed(style)
-    }
-}
-
 pub(crate) struct RenderCircleLayer;
 
 impl RenderCircleLayer {
@@ -190,8 +174,13 @@ impl RenderCircleLayer {
     }
 }
 
-impl TypedLayer for RenderCircleLayer {
-    type Type = Circle;
+impl Layer for RenderCircleLayer {
+    type Style = Circle;
+    type Input = Features<CircleLayout>;
+
+    fn query_radius(data: TileData<'_, RenderCircleLayer>, layer: &EvaluatedLayer<Circle>) -> f32 {
+        data.bucket.query_radius(layer)
+    }
     type Tile = StandingDraw;
 
     const TERRAIN: OnTerrain = OnTerrain::Stands { hides_behind_ground: true };
@@ -218,8 +207,8 @@ impl TypedLayer for RenderCircleLayer {
     fn tile(
         &mut self,
         cx: &mut TileCx<'_, '_, Self>,
-        tile: FrameTile<'_, Circle>,
-        _data: TileData<'_, Circle>,
+        tile: FrameTile<'_, RenderCircleLayer>,
+        _data: TileData<'_, RenderCircleLayer>,
         _previous: Option<StandingDraw>,
     ) -> Option<StandingDraw> {
         let render_data = tile.data_for_pass(RENDER_PASS)?;
@@ -266,7 +255,12 @@ impl TypedLayer for RenderCircleLayer {
     }
 
     /// Pushes the frame's draws of the layer, one of each of its tiles.
-    fn prepare(&mut self, cx: &mut PrepareCx<'_, '_, Self>, render_tiles: &[FrameTile<'_, Circle>], out: &mut Draws) {
+    fn prepare(
+        &mut self,
+        cx: &mut PrepareCx<'_, '_, Self>,
+        render_tiles: &[FrameTile<'_, RenderCircleLayer>],
+        out: &mut Draws,
+    ) {
         let layer_id = cx.base.style.base().id.as_str();
         let layer = &*cx.values.evaluated;
         let evaluated = &layer.paint;
@@ -308,7 +302,7 @@ impl TypedLayer for RenderCircleLayer {
     }
 
     // query
-    fn query_intersects_feature(
+    fn hit(
         &self,
         values: &LayerValues<Circle>,
         region: &QueryRegion<'_>,
