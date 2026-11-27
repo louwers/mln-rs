@@ -29,6 +29,7 @@ use mln_style::types::ResamplingType;
 use super::cast_matrix;
 use crate::buckets::raster_bucket::{MaskQuads, RasterLayoutVertex};
 use crate::draw::context::Context;
+use crate::draw::draws::{Draw, Draws};
 use crate::draw::identity::SimpleIdentity;
 use crate::draw::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::draw::objects::{DrawGeometry, Mesh, Textures};
@@ -37,16 +38,14 @@ use crate::draw::store::SharedTexture;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::SharedVertices;
 use crate::layer::bucket_geometry::copied_vertices;
-use crate::layer::layer_drawing::{FrameDraw, MeshMut, TileDraws, TileObjects};
 use crate::layer::layer_type::LayerType;
 use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, Hosted, LayerCx, LayerValues, OnTerrain, RenderLayer, TileCx, TypedLayer, UpdateCx,
+    EvaluateCx, Evaluation, Hosted, LayerValues, OnTerrain, PrepareCx, RenderLayer, TileCx, TypedLayer, UpdateCx,
 };
 use crate::layer::tile_input::TileData;
 use crate::layers::color_relief::programs;
 use crate::layers::color_relief::ubo::{ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO};
 use crate::render::globe::globe_tile_mesh::GlobeTileMeshCache;
-use crate::render::paint_parameters::PaintParameters;
 use crate::render::static_data::RenderStaticData;
 use crate::render::tile::FrameTile;
 use crate::render::tile_matrix::to_projection_ubo;
@@ -64,14 +63,6 @@ const IMAGE_SLOT: usize = programs::COLOR_RELIEF.texture_slot("image");
 pub(crate) struct ReliefTile {
     mesh: Mesh,
     tile_props: ColorReliefTilePropsUBO,
-}
-
-impl TileObjects for ReliefTile {
-    type Part = ();
-
-    fn objects(&mut self, (): ()) -> Option<MeshMut<'_>> {
-        Some((&mut self.mesh).into())
-    }
 }
 
 impl LayerType for ColorRelief {
@@ -298,7 +289,6 @@ fn color_relief_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeA
 impl TypedLayer for RenderColorReliefLayer {
     type Type = ColorRelief;
     type Tile = ReliefTile;
-    type Drawing = TileDraws<ReliefTile>;
     const TERRAIN: OnTerrain = OnTerrain::Drapes;
 
     fn new(values: &LayerValues<ColorRelief>) -> Self {
@@ -363,7 +353,7 @@ impl TypedLayer for RenderColorReliefLayer {
         if !dem.has_data() {
             return None;
         }
-        let context = &mut *cx.parameters.context;
+        let context = &mut *cx.context;
         self.update_ramp_textures(cx.gpu, context);
         let RenderColorReliefLayer {
             color_ramp_size,
@@ -442,6 +432,7 @@ impl TypedLayer for RenderColorReliefLayer {
         draw_textures[ELEVATION_STOPS_SLOT] = Some(elevation_stops_texture.clone());
         draw_textures[COLOR_STOPS_SLOT] = Some(color_stops_texture.clone());
         let mesh = Mesh::new(
+            context,
             color_relief_shader,
             ColorMode::alpha_blended(),
             CullFaceMode::disabled(),
@@ -451,19 +442,17 @@ impl TypedLayer for RenderColorReliefLayer {
         Some(ReliefTile { mesh, tile_props })
     }
 
-    /// Makes the frame's draws of the layer, one of each of its tiles, and
-    /// writes the layer's buffers they read.
-    fn update_draws(
+    /// Pushes the frame's draws of the layer, one of each of its tiles.
+    fn prepare(
         &mut self,
-        cx: LayerCx<'_, Self>,
-        gpu: &mut dyn Gpu,
-        paint_parameters: &mut PaintParameters<'_>,
+        cx: &mut PrepareCx<'_, '_, Self>,
         render_tiles: &[FrameTile<'_, ColorRelief>],
+        out: &mut Draws,
     ) {
         if cx.base.projection_variant == ProjectionVariant::Mercator {
             self.globe_meshes.clear();
         }
-        self.update_ramp_textures(gpu, paint_parameters.context);
+        self.update_ramp_textures(cx.gpu, cx.context);
         let RenderColorReliefLayer { elevation_stops_texture, color_stops_texture, dem_textures, .. } = self;
 
         // Skip rendering if color ramp textures aren't ready
@@ -492,7 +481,7 @@ impl TypedLayer for RenderColorReliefLayer {
             let Some(entry) = cx.tiles.entry(&tile_id) else {
                 continue;
             };
-            let context = &mut *paint_parameters.context;
+            let context = &mut *cx.context;
             let dem_texture = dem_texture(dem_textures, context, dem);
             if let Some(mut texture) = context.texture_mut(dem_texture) {
                 texture.set_sampler(dem_sampler);
@@ -508,19 +497,18 @@ impl TypedLayer for RenderColorReliefLayer {
                 (COLOR_STOPS_SLOT, color_stops_texture),
             ];
             for (slot, texture) in textures {
-                cached.mesh.set_texture(slot, Some(texture));
+                cached.mesh.set_texture(context, slot, Some(texture));
             }
-            let projection = paint_parameters.projection_data_for_tile(&tile_id.to_unwrapped(), false);
+            let projection = cx.frame.projection_data_for_tile(&tile_id.to_unwrapped(), false);
             let drawable = ColorReliefDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) };
-            let draw = FrameDraw::new(Some(tile_id), cached.mesh.id());
+            let draw = Draw { order: cached.mesh.seq(), ..Draw::DEFAULT };
             let projection = to_projection_ubo(&projection);
-            cx.drawing.frame_mut().push_at(draw, (), &cached.mesh, &projection, (drawable, cached.tile_props));
+            out.main().push_at(&cached.mesh, tile_id, &projection, draw, (drawable, cached.tile_props));
         }
 
         let opacity = *cx.values.evaluated.paint.color_relief_opacity.uniform();
         let props = ColorReliefEvaluatedPropsUBO { opacity, pad_eval0: 0.0, pad_eval1: 0.0, pad_eval2: 0.0 };
-        cx.drawing.frame_mut().block(&props);
-        cx.drawing.finish(gpu, paint_parameters);
+        out.main().block(&props);
     }
 
     /// Drops the DEM textures and quads of the tiles the frame doesn't draw,
