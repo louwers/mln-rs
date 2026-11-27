@@ -817,8 +817,11 @@ pub fn vertex_layouts(gpu: &mut impl Gpu) -> Result<(), GpuError> {
     let frame = solid(gpu, TextureFormat::Rgba8Unorm, [0.0, 0.0, 0.0, 0.0])?;
     let shader = gpu.create_shader(&ShaderKey::new(&FILL, []))?;
     let projection = [ProjectionUBO { matrix: tile_matrix(1.0), ..ProjectionUBO::default() }];
-    let mut drawable = [FillDrawableUnionUBO::default()];
-    drawable[0].set_fill(&FillDrawableUBO { matrix: tile_matrix(1.0), ..FillDrawableUBO::default() });
+    // One element of the buffer of the layer's draws, as large as any of
+    // its programs' blocks.
+    let mut drawable = [0u8; size_of::<FillDrawableUnionUBO>()];
+    let fill = FillDrawableUBO { matrix: tile_matrix(1.0), ..FillDrawableUBO::default() };
+    drawable[..size_of::<FillDrawableUBO>()].copy_from_slice(bytemuck::bytes_of(&fill));
     let props = FillEvaluatedPropsUBO { opacity: 1.0, ..FillEvaluatedPropsUBO::default() };
     let (projection, drawable) = (bytemuck::cast_slice(&projection), bytemuck::cast_slice(&drawable));
     let props = bytemuck::bytes_of(&props);

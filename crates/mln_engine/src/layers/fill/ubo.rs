@@ -95,40 +95,18 @@ uniform_block! {
     }
 }
 
-/// Any fill per-draw uniform block, for consolidated UBOs: the bytes of one of
-/// them, the size of the largest, 112 bytes. Members are written with the
-/// `from_*` constructors; the rest stays zero.
-#[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
+/// Any fill per-draw uniform block, as large as the largest, 112 bytes: the
+/// element of the buffer that the draws of a layer's programs write.
+#[derive(Clone, Copy, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct FillDrawableUnionUBO {
     bytes: [u8; 112],
 }
 const _: () = assert!(size_of::<FillDrawableUnionUBO>() == 7 * 16);
 
-impl Default for FillDrawableUnionUBO {
-    fn default() -> Self {
-        Self::zeroed()
-    }
-}
-
-impl FillDrawableUnionUBO {
-    fn write<T: Pod>(&mut self, member: &T) {
-        let src = bytemuck::bytes_of(member);
-        self.bytes[..src.len()].copy_from_slice(src);
-    }
-    pub fn set_fill(&mut self, ubo: &FillDrawableUBO) {
-        self.write(ubo);
-    }
-    pub fn set_fill_outline(&mut self, ubo: &FillOutlineDrawableUBO) {
-        self.write(ubo);
-    }
-    pub fn set_fill_pattern(&mut self, ubo: &FillPatternDrawableUBO) {
-        self.write(ubo);
-    }
-}
-
-/// Any fill per-tile uniform block, for consolidated UBOs (48 bytes).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+/// Any fill per-tile uniform block, 48 bytes: the element of the buffer
+/// that the draws of a layer's programs write.
+#[derive(Clone, Copy, Pod, Zeroable)]
 #[repr(C, align(16))]
 pub struct FillTilePropsUnionUBO {
     pub fill_pattern_tile_props_ubo: FillPatternTilePropsUBO,

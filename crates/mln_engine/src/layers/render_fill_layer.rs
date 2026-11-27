@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use mln_gfx::gpu::{Caps, Gpu, ShaderKey};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::shaders::bindings::PROJECTION_ID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program::Program;
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
@@ -24,7 +23,7 @@ use crate::draw::segment::SegmentBase;
 use crate::draw::texture2d::Texture2D;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::layer::bucket_geometry::{bucket_indexes, bucket_vertices, copied_vertices, paint_vertices};
-use crate::layer::layer_drawing::{DrawDepth, DrawList, FrameDraw, MeshMut, TileDraws, TileObjects, UniformWriter};
+use crate::layer::layer_drawing::{DrawDepth, FrameDraw, LayerDraws, MeshMut, TileDraws, TileObjects};
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
@@ -33,8 +32,7 @@ use crate::layer::render_layer::{
 use crate::layer::tile_input::{Features, TileData};
 use crate::layers::fill::programs;
 use crate::layers::fill::ubo::{
-    FillDrawableUBO, FillDrawableUnionUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO,
-    FillPatternTilePropsUBO, FillTilePropsUnionUBO,
+    FillDrawableUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO, FillPatternTilePropsUBO,
 };
 use crate::layout::pattern_layout::{FillLayoutSpec, PatternLayout};
 use crate::query::feature_index::QueryRegion;
@@ -46,9 +44,6 @@ use crate::render::tile::FrameTile;
 use crate::render::tile_matrix::{projection_data, to_projection_ubo};
 
 /// The ids of the buffers that the draws bind.
-const DRAWABLE_ID: usize = programs::FILL.buffer_id("drawableVector");
-const TILE_PROPS_ID: usize = programs::FILL_PATTERN.buffer_id("tilePropsVector");
-const PROPS_ID: usize = programs::FILL.buffer_id("props");
 const OUTLINE_VERTICES_ID: usize = programs::FILL_OUTLINE_PULLED.buffer_id("outlineVertices");
 const OUTLINE_ENDS_ID: usize = programs::FILL_OUTLINE_PULLED.buffer_id("outlineEnds");
 const OUTLINE_PAINT_ID: usize = programs::FILL_OUTLINE_PULLED.buffer_id("outlinePaint");
@@ -199,11 +194,31 @@ impl TileObjects for FillTile {
     }
 }
 
-/// A draw's entries in the layer's storage buffers.
-struct FillUniforms {
-    draw_ubo: FillDrawableUnionUBO,
-    tile_props: FillTilePropsUnionUBO,
-    projection: ProjectionUBO,
+/// The blocks of a draw, of the program of a fill, an outline, or either
+/// with a pattern.
+enum FillBlocks {
+    Fill(FillDrawableUBO),
+    Outline(FillOutlineDrawableUBO),
+    Pattern(FillPatternDrawableUBO, FillPatternTilePropsUBO),
+}
+
+impl FillBlocks {
+    /// Pushes `draw` of `mesh`, the tile's mesh `part`, with the blocks and
+    /// `projection`, into `frame`.
+    fn push(
+        self,
+        frame: &mut LayerDraws<FillPart>,
+        draw: FrameDraw,
+        part: FillPart,
+        mesh: &Mesh,
+        projection: &ProjectionUBO,
+    ) {
+        match self {
+            FillBlocks::Fill(drawable) => frame.push_at(draw, part, mesh, projection, drawable),
+            FillBlocks::Outline(drawable) => frame.push_at(draw, part, mesh, projection, drawable),
+            FillBlocks::Pattern(drawable, tile) => frame.push_at(draw, part, mesh, projection, (drawable, tile)),
+        }
+    }
 }
 
 /// The instanced outlines' quad: its vertices and indexes, and the vertex
@@ -421,9 +436,6 @@ impl LayerType for Fill {
 }
 
 pub(crate) struct RenderFillLayer {
-    /// The frame's draws as the update makes them.
-    draw_list: DrawList<FillUniforms, FillPart>,
-
     /// The instanced outlines' quad (`RenderStaticData::fill_outline_vertices`),
     /// from the first tile the layer builds them for.
     outline_quad: Option<OutlineQuad>,
@@ -438,7 +450,7 @@ pub(crate) struct RenderFillLayer {
 }
 
 impl RenderFillLayer {
-    /// The entries in the layer's storage buffers of `draw`, the fill or the
+    /// The blocks and the projection of `draw`, the fill or the
     /// `outline` of `tile`, with or without a `pattern`, of the layer
     /// `layer_id` with the values `layer`: its matrix and the interpolation
     /// of the layer's values, and for a pattern, where the pattern is in the
@@ -457,7 +469,7 @@ impl RenderFillLayer {
         draw: &FillDraw,
         outline: bool,
         parameters: &PaintParameters<'_>,
-    ) -> Option<FillUniforms> {
+    ) -> Option<(FillBlocks, ProjectionUBO)> {
         const IN_VIEWPORT_PIXEL_UNITS: bool = false;
         const NEAR_CLIPPED: bool = false;
         let evaluated = &layer.paint;
@@ -475,31 +487,27 @@ impl RenderFillLayer {
             false,
         );
         let matrix = cast_matrix(&projection.fallback_matrix);
-        let mut uniforms = FillUniforms {
-            draw_ubo: FillDrawableUnionUBO::default(),
-            tile_props: FillTilePropsUnionUBO::default(),
-            projection: to_projection_ubo(&projection),
-        };
+        let projection = to_projection_ubo(&projection);
 
         if !pattern {
-            if outline {
-                uniforms.draw_ubo.set_fill_outline(&FillOutlineDrawableUBO {
+            let blocks = if outline {
+                FillBlocks::Outline(FillOutlineDrawableUBO {
                     matrix,
                     outline_color_t: binders.fill_outline_color.interpolation_factor(zoom),
                     opacity_t: binders.fill_opacity.interpolation_factor(zoom),
                     paint_layout: draw.paint_layout.unwrap_or(0),
                     pad2: 0.0,
-                });
+                })
             } else {
-                uniforms.draw_ubo.set_fill(&FillDrawableUBO {
+                FillBlocks::Fill(FillDrawableUBO {
                     matrix,
                     color_t: binders.fill_color.interpolation_factor(zoom),
                     opacity_t: binders.fill_opacity.interpolation_factor(zoom),
                     pad1: 0.0,
                     pad2: 0.0,
-                });
-            }
-            return Some(uniforms);
+                })
+            };
+            return Some((blocks, projection));
         }
 
         // Where the tile is in pixels at the nearest integer zoom, which the
@@ -514,7 +522,7 @@ impl RenderFillLayer {
                 + f64::from(tile_id.wrap) * crate::camera::zoom_scale(f64::from(tile_id.canonical.z))))
             as i32;
         let pixel_y = tile_size_at_nearest_zoom.wrapping_mul(tile_id.canonical.y as i32);
-        uniforms.draw_ubo.set_fill_pattern(&FillPatternDrawableUBO {
+        let drawable = FillPatternDrawableUBO {
             matrix,
             pixel_coord_upper: [(pixel_x >> 16) as f32, (pixel_y >> 16) as f32],
             pixel_coord_lower: [(pixel_x & 0xFFFF) as f32, (pixel_y & 0xFFFF) as f32],
@@ -526,7 +534,7 @@ impl RenderFillLayer {
             pad1: 0.0,
             pad2: 0.0,
             pad3: 0.0,
-        });
+        };
 
         let faded = evaluated.fill_pattern.faded();
         let tlbr = |id: &str| tile_bucket.pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
@@ -537,20 +545,20 @@ impl RenderFillLayer {
         if texture_size.width == 0 || texture_size.height == 0 {
             return None;
         }
-        uniforms.tile_props.fill_pattern_tile_props_ubo = FillPatternTilePropsUBO {
+        let tile_props = FillPatternTilePropsUBO {
             pattern_from: tlbr(faded.from.id()),
             pattern_to: tlbr(faded.to.id()),
             texsize: [texture_size.width as f32, texture_size.height as f32],
             sdf: if tile_bucket.bucket.is_sdf_pattern(layer_id) { 1.0 } else { 0.0 },
             pad2: 0.0,
         };
-        Some(uniforms)
+        Some((FillBlocks::Pattern(drawable, tile_props), projection))
     }
 
-    /// Writes the layer's buffers of the frame's draws.
-    fn write_uniforms(layer: &EvaluatedLayer<Fill>, writer: &mut UniformWriter<'_, FillUniforms>) {
+    /// The block of the layer's values that its draws share.
+    fn props(layer: &EvaluatedLayer<Fill>) -> FillEvaluatedPropsUBO {
         let evaluated = &layer.paint;
-        let props = FillEvaluatedPropsUBO {
+        FillEvaluatedPropsUBO {
             color: evaluated.fill_color.constant_or(&FillPaintProperties::Defaults::fill_color()).to_float_array(),
             outline_color: evaluated
                 .fill_outline_color
@@ -560,11 +568,7 @@ impl RenderFillLayer {
             fade: layer.crossfade.t,
             from_scale: layer.crossfade.from_scale,
             to_scale: layer.crossfade.to_scale,
-        };
-        writer.uniform(PROPS_ID, &props);
-        writer.storage(DRAWABLE_ID, |uniforms| uniforms.draw_ubo);
-        writer.storage(TILE_PROPS_ID, |uniforms| uniforms.tile_props);
-        writer.storage(PROJECTION_ID, |uniforms| uniforms.projection);
+        }
     }
 }
 
@@ -575,7 +579,7 @@ impl TypedLayer for RenderFillLayer {
     const TERRAIN: OnTerrain = OnTerrain::Drapes;
 
     fn new(_values: &LayerValues<Fill>) -> Self {
-        RenderFillLayer { draw_list: DrawList::default(), outline_quad: None, pulled_indexes: None, fill_depth: None }
+        RenderFillLayer { outline_quad: None, pulled_indexes: None, fill_depth: None }
     }
 
     /// An undefined outline color is the fill color. The layer draws in the
@@ -647,8 +651,7 @@ impl TypedLayer for RenderFillLayer {
         builder.build(paint_parameters.context, render_data, binders, &render_data.layer.paint)
     }
 
-    /// Makes the frame's draws of the layer, those of each of its tiles, and
-    /// writes the layer's buffers they read.
+    /// Makes the frame's draws of the layer, those of each of its tiles.
     fn update_draws(
         &mut self,
         cx: LayerCx<'_, Self>,
@@ -718,7 +721,7 @@ impl TypedLayer for RenderFillLayer {
                 let Some(draw) = draw else {
                     continue;
                 };
-                let Some(uniforms) = Self::uniforms(
+                let Some((blocks, projection)) = Self::uniforms(
                     layer_id,
                     layer,
                     tile,
@@ -737,7 +740,7 @@ impl TypedLayer for RenderFillLayer {
                     clip: true,
                     ..FrameDraw::new(Some(tile_id), draw.mesh.id())
                 };
-                self.draw_list.push_part(tile_draw, part, uniforms);
+                blocks.push(cx.drawing.frame_mut(), tile_draw, part, &draw.mesh, &projection);
             }
         }
 
@@ -747,9 +750,8 @@ impl TypedLayer for RenderFillLayer {
             *layer.paint.fill_layer_blend.uniform(),
         ));
         frame.set_stencil_tiles(render_tiles.iter().map(|tile| tile.draw_id().to_unwrapped()));
-        cx.drawing.finish(&mut self.draw_list, gpu, paint_parameters.context, |writer| {
-            Self::write_uniforms(layer, writer);
-        });
+        frame.block(&Self::props(layer));
+        cx.drawing.finish(gpu, paint_parameters);
         // The next update's tiles set the depth mask of their fills again.
         self.fill_depth = None;
     }
