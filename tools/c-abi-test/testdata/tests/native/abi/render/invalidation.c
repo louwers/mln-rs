@@ -433,10 +433,11 @@ typedef struct update_row {
 //
 // The map fence after each row orders the updates that its command publishes
 // before the count, which is what lets a row assert none. That holds only while
-// no row starts work that finishes on a worker: the style's GeoJSON is inline,
-// the added GeoJSON source has no data, and the image source takes pixels, so
-// nothing loads and publishes an update into a later row. A row that fetched
-// or parsed data asynchronously would need its own fence.
+// no work that finishes on a worker is in flight. The style's GeoJSON indexes
+// in the background, so the case renders until the map settles before the
+// first row. The added GeoJSON source has no data, and the image source takes
+// pixels, so no row starts such work. A row that fetched or parsed data
+// asynchronously would need its own fence.
 static const update_row update_rows[] = {
   {"a GeoJSON source added", add_empty_geojson, true},
   {"a source removed", remove_geojson, true},
@@ -467,7 +468,9 @@ static void each_mutation_publishes_a_render_update_only_when_it_changes(void) {
            "\"layers\":[{\"id\":\"background\",\"type\":\"background\"}]}"
          )
   ));
-  MLN_TEST_OK(mln_test_map_fence(map));
+  mln_test_render_fixture fixture = {0};
+  TEST_ASSERT_TRUE(mln_test_render_fixture_create_offscreen(map, &fixture));
+  mln_test_render_until_idle(runtime, map, &fixture);
   update_state state = {0};
   mln_map_snapshot snapshot = {.size = sizeof(mln_map_snapshot)};
   MLN_TEST_OK(mln_map_get_snapshot(map, &snapshot, NULL));
@@ -491,6 +494,7 @@ static void each_mutation_publishes_a_render_update_only_when_it_changes(void) {
     }
   }
 
+  mln_test_render_fixture_destroy(&fixture);
   mln_test_destroy_map(map);
   mln_test_destroy_runtime(runtime);
 }

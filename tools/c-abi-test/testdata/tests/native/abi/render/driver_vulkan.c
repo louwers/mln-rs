@@ -348,7 +348,8 @@ typedef struct host_queue_lock {
   // Calls the session made to its callbacks.
   atomic_uint locks;
   atomic_uint unlocks;
-  atomic_uint releases;
+  // Counted as an int, for mln_test_wait_for_count().
+  atomic_int releases;
   // The status of a C API call from inside the lock callback.
   atomic_int reentry_status;
 } host_queue_lock;
@@ -385,6 +386,7 @@ static void session_gives_queue_lock(void* user_data) {
 static void queue_lock_released(void* user_data) {
   host_queue_lock* lock = user_data;
   atomic_fetch_add(&lock->releases, 1);
+  mln_test_pulse();
 }
 
 // A host thread that submits empty batches on the shared queue under the lock
@@ -488,11 +490,14 @@ static void a_session_takes_the_host_queue_lock_around_its_queue_calls(void) {
   TEST_ASSERT_EQUAL_INT(
     MLN_STATUS_INVALID_STATE, atomic_load(&shared_lock.reentry_status)
   );
-  // The device releases the lock once it and its last session are gone.
-  TEST_ASSERT_LESS_OR_EQUAL_UINT(1, atomic_load(&shared_lock.releases));
+  // The device releases the lock once it and its last session are gone. The
+  // session's render thread may let go of the device after its release
+  // returns.
+  TEST_ASSERT_LESS_OR_EQUAL_INT(1, atomic_load(&shared_lock.releases));
 
   mln_test_render_fixture_destroy(&fixture);
-  TEST_ASSERT_EQUAL_UINT(1, atomic_load(&shared_lock.releases));
+  TEST_ASSERT_TRUE(mln_test_wait_for_count(&shared_lock.releases, 1));
+  TEST_ASSERT_EQUAL_INT(1, atomic_load(&shared_lock.releases));
   mln_test_destroy_map(map);
   mln_test_destroy_runtime(runtime);
 }
@@ -884,10 +889,10 @@ static void abandon_drains_under_the_host_queue_lock_and_releases_it(void) {
   TEST_ASSERT_EQUAL_UINT(
     atomic_load(&shared_lock.locks), atomic_load(&shared_lock.unlocks)
   );
-  TEST_ASSERT_EQUAL_UINT(1, atomic_load(&shared_lock.releases));
+  TEST_ASSERT_EQUAL_INT(1, atomic_load(&shared_lock.releases));
 
   mln_test_render_fixture_destroy(&fixture);
-  TEST_ASSERT_EQUAL_UINT(1, atomic_load(&shared_lock.releases));
+  TEST_ASSERT_EQUAL_INT(1, atomic_load(&shared_lock.releases));
   mln_test_destroy_map(map);
   mln_test_destroy_runtime(runtime);
 }
