@@ -7,39 +7,16 @@ use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 use mln_style::types::{
     AlignmentType, IconTextFitType, SymbolPlacementType, SymbolZOrderType, TextRotationAlignmentType,
 };
-use mln_vec_map::VecMap;
 
+use super::collision::{CollisionBoundaries, PartCollision, icon_overlap, text_overlap};
+use super::{BucketPlacementData, PlacedTile, SymbolTranslate};
 use crate::camera::{ProjectionData, TileProjector, View};
-use crate::layer::render_layer::{BucketPlacementData, PlacedTile, SymbolTranslate};
-use crate::placement::collision_index::{CollisionBoundaries, OverlapMode, PartCollision};
+use crate::placement::{CollisionGroup, Overlap};
 use crate::render::terrain::TerrainElevation;
 use crate::render::tile::RenderTile;
 use crate::symbol::bucket::{SymbolBucket, ZoomEvaluatedSize, symbols_by_viewport_y};
 use crate::symbol::projection::{LabelPlaneProjector, SymbolHeights};
 use crate::tile::UnwrappedTileID;
-
-/// The collision groups of the sources: with cross-source collisions, every
-/// symbol collides with every other; without, only with its own source's.
-pub(crate) struct CollisionGroups {
-    ids: VecMap<String, u16>,
-    cross_source_collisions: bool,
-}
-
-impl CollisionGroups {
-    pub(crate) fn new(cross_source_collisions: bool) -> Self {
-        CollisionGroups { ids: VecMap::new(), cross_source_collisions }
-    }
-
-    /// The group of `source_id`'s symbols, which they collide with alone;
-    /// `None` where they collide with all, as group 0.
-    pub(crate) fn get(&mut self, source_id: &str) -> Option<u16> {
-        if self.cross_source_collisions {
-            return None;
-        }
-        let next = self.ids.len() as u16 + 1;
-        Some(*self.ids.get_or_insert_with(source_id, || next))
-    }
-}
 
 /// A symbol layer's `*-translate` in the tile's units.
 pub(crate) fn translation(
@@ -67,10 +44,12 @@ fn without_horizon(mut data: ProjectionData) -> ProjectionData {
 pub(crate) struct BucketOptions {
     /// The bucket's symbols skip their fade in.
     pub(crate) just_reloaded: bool,
-    pub(crate) collision_group: Option<u16>,
+    pub(crate) collision_group: CollisionGroup,
     /// The tile's borders, in tile mode.
     pub(crate) tile_borders: Option<CollisionBoundaries>,
     pub(crate) avoid_edges: Option<CollisionBoundaries>,
+    /// The view's pitch factor ([`PartCollision::pitch_factor`]).
+    pub(crate) pitch_factor: f32,
 }
 
 /// What placing the symbols of one bucket reads.
@@ -99,13 +78,14 @@ pub(crate) struct PlacementContext<'a> {
     // included.
     text_translation: Vec2,
     icon_translation: Vec2,
-    /// The group the bucket's symbols collide with alone, and their id in
-    /// the grid; `None` for every group, as group 0.
-    pub(crate) collision_group: Option<u16>,
+    /// The group the bucket's symbols collide with, and are in.
+    pub(crate) collision_group: CollisionGroup,
+    /// The view's pitch factor ([`PartCollision::pitch_factor`]).
+    pitch_factor: f32,
     pub(crate) text_size: ZoomEvaluatedSize,
     pub(crate) icon_size: ZoomEvaluatedSize,
-    pub(crate) text_overlap_mode: OverlapMode,
-    pub(crate) icon_overlap_mode: OverlapMode,
+    pub(crate) text_overlap_mode: Overlap,
+    pub(crate) icon_overlap_mode: Overlap,
     /// A symbol whose parts always overlap shows even where placement left
     /// it out of the grid, as outside it. A part that always overlaps beside
     /// one that doesn't waits for placement, as it may hide with it.
@@ -129,7 +109,7 @@ impl<'a> PlacementContext<'a> {
         placement_zoom: f32,
         options: BucketOptions,
     ) -> Self {
-        let BucketOptions { just_reloaded, collision_group, tile_borders, avoid_edges } = options;
+        let BucketOptions { just_reloaded, collision_group, tile_borders, avoid_edges, pitch_factor } = options;
         let tile = &data.tile;
         let overscaled_id = tile.overscaled_id;
         let pixels_to_tile_units = tile.id.pixels_to_tile_units(1.0, placement_zoom);
@@ -152,10 +132,10 @@ impl<'a> PlacementContext<'a> {
             LabelPlaneProjector::new(&tile_projector, heights, pitch, rotate, pixels_to_tile_units, translation)
         };
 
-        let text_overlap_mode = OverlapMode::text(layout);
-        let icon_overlap_mode = OverlapMode::icon(layout);
-        let text_always = text_overlap_mode == OverlapMode::Always;
-        let icon_always = icon_overlap_mode == OverlapMode::Always;
+        let text_overlap_mode = text_overlap(layout);
+        let icon_overlap_mode = icon_overlap(layout);
+        let text_always = text_overlap_mode == Overlap::Always;
+        let icon_always = icon_overlap_mode == Overlap::Always;
         let has_icons = bucket.has_icon_data() || bucket.has_sdf_icon_data();
         PlacementContext {
             bucket,
@@ -174,6 +154,7 @@ impl<'a> PlacementContext<'a> {
             text_translation,
             icon_translation,
             collision_group,
+            pitch_factor,
             text_size: bucket.text_size_binder.evaluate_for_zoom(placement_zoom),
             icon_size: bucket.icon_size_binder.evaluate_for_zoom(placement_zoom),
             text_overlap_mode,
@@ -210,7 +191,7 @@ impl<'a> PlacementContext<'a> {
         &'s self,
         label_plane: &'s LabelPlaneProjector<'a>,
         translation: Vec2,
-        overlap_mode: OverlapMode,
+        overlap_mode: Overlap,
     ) -> PartCollision<'s> {
         PartCollision {
             tile_projector: &self.tile_projector,
@@ -219,6 +200,7 @@ impl<'a> PlacementContext<'a> {
             translation,
             pixel_ratio: self.pixel_ratio,
             scale: self.scale,
+            pitch_factor: self.pitch_factor,
             overlap_mode,
             pitch_with_map: self.pitch_text_with_map,
             rotate_with_map: self.rotate_text_with_map,

@@ -1,5 +1,5 @@
 //! A uniform grid of boxes and circles, which placement fills with the
-//! symbols it places and tests each new symbol against.
+//! shapes it places and tests each new shape against.
 
 use glam::Vec2;
 

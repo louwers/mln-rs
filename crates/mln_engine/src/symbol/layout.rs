@@ -36,8 +36,7 @@ use crate::layer::layer_type::EvaluatedLayer;
 use crate::layer::layout::{BuildCx, Layout, LayoutCx, layers_by_id};
 use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::map::MapMode;
-use crate::placement::collision_feature::{AlongLine, BoxLayout, CollisionBox, CollisionFeature};
-use crate::placement::collision_index::OverlapMode;
+use crate::placement::Overlap;
 use crate::query::feature_index::IndexedSubfeature;
 use crate::symbol::anchor::Anchor;
 use crate::symbol::bucket::{
@@ -52,6 +51,8 @@ use crate::symbol::instance::{
     TextPart, TextRuns, WritingMode,
 };
 use crate::symbol::merge_lines::merge_lines;
+use crate::symbol::placement::collision::{icon_overlap, text_overlap};
+use crate::symbol::placement::collision_feature::{AlongLine, BoxLayout, CollisionBox, CollisionFeature};
 use crate::symbol::quads::{SymbolQuad, SymbolQuads, glyph_quads, icon_quads};
 use crate::text::atlas::ImagePositions;
 use crate::text::constants::ONE_EM;
@@ -534,8 +535,8 @@ impl SymbolLayout {
         let z_order_by_viewport_y = *symbol_z_order.uniform() == SymbolZOrderType::ViewportY
             || (*symbol_z_order.uniform() == SymbolZOrderType::Auto && !this.sort_features_by_key);
         this.sort_features_by_y = z_order_by_viewport_y
-            && (OverlapMode::text(&layout) != OverlapMode::Never
-                || OverlapMode::icon(&layout) != OverlapMode::Never
+            && (text_overlap(&layout) != Overlap::Never
+                || icon_overlap(&layout) != Overlap::Never
                 || *layout.text_ignore_placement.uniform()
                 || *layout.icon_ignore_placement.uniform());
         let sort_features = this.sort_features_by_key && !layout.symbol_sort_key.is_constant();
@@ -942,7 +943,7 @@ impl SymbolLayout {
                 sort_index: self.symbols.len(),
                 bucket_instance_id: 0,
                 collision_group_id: 0,
-                overlap_mode: OverlapMode::Never,
+                overlap_mode: Overlap::Never,
             },
             key: &key,
             feature_index,

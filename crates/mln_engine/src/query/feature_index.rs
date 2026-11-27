@@ -23,7 +23,7 @@ use mln_vec_map::VecMap;
 use crate::camera::{TileProjector, VerticalPerspectiveProjection, View};
 use crate::geo::ScreenCoordinate;
 use crate::layer::render_layer::RenderLayer;
-use crate::placement::collision_index::OverlapMode;
+use crate::placement::Overlap;
 use crate::query::RenderedQueryOptions;
 use crate::source::source_state::SourceFeatureState;
 use crate::tile::feature::{Feature, feature_id_to_string};
@@ -131,7 +131,7 @@ pub(crate) struct IndexedSubfeature {
     /// The overlap mode the symbol was placed with. It's set only in a
     /// collision index, so the worker codec doesn't carry it.
     #[wire(skip)]
-    pub(crate) overlap_mode: OverlapMode,
+    pub(crate) overlap_mode: Overlap,
 }
 
 /// A shared order of feature indices that queries sort symbol features by.

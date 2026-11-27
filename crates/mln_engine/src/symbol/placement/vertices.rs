@@ -9,11 +9,12 @@ use geometry::Point;
 use glam::Vec2;
 use mln_style::types::{AlignmentType, IconTextFitType, TextRotationAlignmentType, TextWritingModeType};
 
+use super::collision::{icon_overlap, text_overlap};
 use super::context::translation;
-use super::{JointOpacityState, Placement, VariableOffset};
+use super::{BucketPlacementData, JointOpacityState, Symbols, VariableOffset};
 use crate::camera::{TileProjector, View};
-use crate::layer::render_layer::BucketPlacementData;
-use crate::placement::collision_index::OverlapMode;
+use crate::placement::Overlap;
+use crate::render::terrain::TerrainElevation;
 use crate::symbol::bucket::{Buffer, SymbolBucket, SymbolBucketState};
 use crate::symbol::instance::{Justification, SymbolInstance, TextPart};
 use crate::symbol::projection::{
@@ -27,14 +28,21 @@ fn extend<T: Copy>(v: &mut Vec<T>, n: usize, value: T) {
     v.extend(std::iter::repeat_n(value, n));
 }
 
-impl Placement {
+/// What the current placement shows of the symbols, on the ground its
+/// symbols stand on, where terrain draws.
+pub(super) struct Shown<'a> {
+    pub(super) symbols: &'a Symbols,
+    pub(super) ground: Option<&'a TerrainElevation>,
+}
+
+impl Shown<'_> {
     /// The orientation the symbol `id` shows in, where its bucket places
     /// either.
     fn orientation_of(&self, allow_vertical: bool, id: Option<NonZeroU32>) -> Option<TextWritingModeType> {
         if !allow_vertical {
             return None;
         }
-        self.placed_orientations.get(&id?).copied()
+        self.symbols.placed_orientations.get(&id?).copied()
     }
 
     /// Whether the text run `run` of `text`, `vertical` or not, is the one
@@ -53,7 +61,7 @@ impl Placement {
         if allow_vertical && shown != Some(orientation) {
             return false;
         }
-        let Some(offset) = id.and_then(|id| self.variable_offsets.get(&id)) else {
+        let Some(offset) = id.and_then(|id| self.symbols.variable_offsets.get(&id)) else {
             return false;
         };
         orientation == TextWritingModeType::Vertical
@@ -73,8 +81,8 @@ impl Placement {
         seen_cross_tile_ids: &mut BTreeSet<NonZeroU32>,
     ) -> bool {
         let layout = &*bucket.layout;
-        let text_always = OverlapMode::text(layout) == OverlapMode::Always;
-        let icon_always = OverlapMode::icon(layout) == OverlapMode::Always;
+        let text_always = text_overlap(layout) == Overlap::Always;
+        let icon_always = icon_overlap(layout) == Overlap::Always;
         let has_text = bucket.has_text_data();
         let has_icons = bucket.has_icon_data() || bucket.has_sdf_icon_data();
 
@@ -94,14 +102,14 @@ impl Placement {
             buffer.opacity_attribute_data.clear();
             buffer.elevation_attribute_data.clear();
         }
-        let heights = SymbolHeights::new(self.ground(), data.tile.id, layout);
+        let heights = SymbolHeights::new(self.ground, data.tile.id, layout);
 
         let symbols = std::mem::take(&mut state.symbol_instances);
         for symbol in &symbols {
             let id = symbol.cross_tile_id;
             let opacity = match id {
                 Some(id) if seen_cross_tile_ids.insert(id) => {
-                    self.opacities.get(&id).copied().unwrap_or(default_opacity)
+                    self.symbols.opacities.get(&id).copied().unwrap_or(default_opacity)
                 }
                 _ => duplicate_opacity,
             };
@@ -161,7 +169,7 @@ impl Placement {
         }
 
         let tile_projector = TileProjector::with_data(view, &tile.id, tile.projection);
-        let heights = SymbolHeights::new(self.ground(), tile.id, layout);
+        let heights = SymbolHeights::new(self.ground, tile.id, layout);
         if along_line {
             let mut laid_out = false;
             if *layout.icon_rotation_alignment.uniform() == AlignmentType::Map {
@@ -241,7 +249,7 @@ impl Placement {
             && (bucket.has_icon_data() || bucket.has_sdf_icon_data());
         // The shader leaves the translation to us for variable anchors, so
         // the shifted anchor carries it.
-        let heights = SymbolHeights::new(self.ground(), tile.id, layout);
+        let heights = SymbolHeights::new(self.ground, tile.id, layout);
         let label_plane = LabelPlaneProjector::new(
             tile_projector,
             heights,
@@ -314,7 +322,7 @@ impl Placement {
                 continue;
             };
             let id = symbol.cross_tile_id;
-            let offset = id.and_then(|id| self.variable_offsets.get(&id));
+            let offset = id.and_then(|id| self.symbols.variable_offsets.get(&id));
             for (run_index, orientation) in text.runs.all() {
                 let run = &runs[run_index];
                 let glyphs = run.glyph_offsets.len();

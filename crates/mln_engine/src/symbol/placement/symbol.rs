@@ -6,10 +6,11 @@ use std::num::NonZeroU32;
 use glam::Vec2;
 use mln_style::types::{SymbolAnchorType, TextWritingModeType};
 
+use super::collision::{self, LabelRun, PartCollision, PlacedFeatureResult};
+use super::collision_feature::CollisionFeature;
 use super::context::PlacementContext;
-use super::{JointPlacement, Placement, VariableOffset};
-use crate::placement::collision_feature::CollisionFeature;
-use crate::placement::collision_index::{LabelRun, OverlapMode, PlacedFeatureResult};
+use super::{JointPlacement, Placer, VariableOffset};
+use crate::placement::Overlap;
 use crate::symbol::instance::{IconPart, SymbolInstance, TextPart};
 use crate::symbol::projection::evaluate_size_for_feature;
 use crate::text::anchor_alignment;
@@ -66,7 +67,7 @@ fn orientation(vertical: bool) -> TextWritingModeType {
     if vertical { TextWritingModeType::Vertical } else { TextWritingModeType::Horizontal }
 }
 
-impl Placement {
+impl Placer<'_> {
     /// Places `symbol`, a symbol of `ctx`'s bucket, and records where.
     pub(super) fn place_symbol(&mut self, symbol: &SymbolInstance, ctx: &PlacementContext<'_>) -> JointPlacement {
         let Some(id) = symbol.cross_tile_id else {
@@ -77,8 +78,8 @@ impl Placement {
         if ctx.tile().hold_for_fade {
             return JointPlacement::UNPLACED;
         }
-        self.text_boxes.clear();
-        self.icon_boxes.clear();
+        self.run.text_boxes.clear();
+        self.run.icon_boxes.clear();
 
         let text = symbol.text.as_ref().and_then(|text| self.place_text(id, symbol, text, ctx));
         let icon = symbol.icon.as_ref().map(|icon| self.place_icon(icon, text, ctx));
@@ -103,11 +104,12 @@ impl Placement {
         }
 
         let bucket_instance_id = ctx.bucket.bucket_instance_id;
-        let group = ctx.collision_group.unwrap_or(0);
+        let group = ctx.collision_group;
         if place_text && let Some(text) = &symbol.text {
-            self.collision_index.insert_feature(
+            collision::insert_feature(
+                self.index,
                 text.collision(text_vertical),
-                &self.text_boxes,
+                &self.run.text_boxes,
                 ctx.text_overlap_mode,
                 *layout.text_ignore_placement.uniform(),
                 bucket_instance_id,
@@ -115,9 +117,10 @@ impl Placement {
             );
         }
         if place_icon && let Some(icon) = &symbol.icon {
-            self.collision_index.insert_feature(
+            collision::insert_feature(
+                self.index,
                 icon.collision(icon_vertical),
-                &self.icon_boxes,
+                &self.run.icon_boxes,
                 ctx.icon_overlap_mode,
                 *layout.icon_ignore_placement.uniform(),
                 bucket_instance_id,
@@ -133,7 +136,7 @@ impl Placement {
             icon: (place_icon || ctx.always_show_icon) && !icon_result.occluded,
             skip_fade: offscreen || ctx.just_reloaded,
         };
-        self.placements.insert(id, placement);
+        self.run.next.placements.insert(id, placement);
         self.symbol_placed(symbol, ctx, placement);
         placement
     }
@@ -162,17 +165,18 @@ impl Placement {
                 }
                 let feature = text.collision(vertical);
                 let boxes = state.symbol_instance_pools.boxes(feature);
-                this.text_boxes.clear();
-                let result = this.collision_index.place_feature(
+                this.run.text_boxes.clear();
+                let result = collision::place_feature(
+                    &*this.index,
                     &ctx.text_collision(),
                     feature,
                     boxes,
                     &label,
                     None,
-                    &mut this.text_boxes,
+                    &mut this.run.text_boxes,
                 );
                 if result.placed {
-                    this.placed_orientations.entry(id).or_insert(orientation(vertical));
+                    this.run.next.placed_orientations.entry(id).or_insert(orientation(vertical));
                 }
                 PlacedText { result, vertical, shift: None }
             })
@@ -186,16 +190,16 @@ impl Placement {
                 let icon_feature = symbol
                     .icon
                     .as_ref()
-                    .filter(|_| ctx.has_icon_text_fit && ctx.icon_overlap_mode == OverlapMode::Never)
+                    .filter(|_| ctx.has_icon_text_fit && ctx.icon_overlap_mode == Overlap::Never)
                     .map(|icon| icon.collision(vertical));
                 let label = VariableLabel { id, text, icon_feature, anchors: &anchors, run: &label };
                 this.place_at_variable_anchors(&label, vertical, ctx)
             });
             // A label that didn't place fades from where it was.
             if !placed.result.placed
-                && let Some(offset) = self.prev_placement().and_then(|prev| prev.variable_offsets.get(&id)).copied()
+                && let Some(offset) = self.run.prev.as_ref().and_then(|prev| prev.variable_offsets.get(&id)).copied()
             {
-                self.variable_offsets.insert(id, offset);
+                self.run.next.variable_offsets.insert(id, offset);
             }
             placed
         } else {
@@ -203,9 +207,9 @@ impl Placement {
         };
         if ctx.bucket.allow_vertical_placement
             && !placed.result.placed
-            && let Some(prev) = self.prev_placement().and_then(|prev| prev.placed_orientations.get(&id)).copied()
+            && let Some(prev) = self.run.prev.as_ref().and_then(|prev| prev.placed_orientations.get(&id)).copied()
         {
-            self.placed_orientations.insert(id, prev);
+            self.run.next.placed_orientations.insert(id, prev);
         }
         Some(placed)
     }
@@ -241,7 +245,8 @@ impl Placement {
         anchors: Vec<SymbolAnchorType>,
         ctx: &PlacementContext<'_>,
     ) -> Vec<SymbolAnchorType> {
-        let Some(prev_anchor) = self.prev_placement().and_then(|prev| prev.variable_offsets.get(&id)).map(|o| o.anchor)
+        let Some(prev_anchor) =
+            self.run.prev.as_ref().and_then(|prev| prev.variable_offsets.get(&id)).map(|o| o.anchor)
         else {
             return anchors;
         };
@@ -271,10 +276,10 @@ impl Placement {
         };
         // The first pass tries each anchor where the text overlaps nothing,
         // and a second, unless it never overlaps, where its mode lets it.
-        let passes: &[OverlapMode] = if ctx.text_overlap_mode == OverlapMode::Never {
-            &[OverlapMode::Never]
+        let passes: &[Overlap] = if ctx.text_overlap_mode == Overlap::Never {
+            &[Overlap::Never]
         } else {
-            &[OverlapMode::Never, ctx.text_overlap_mode]
+            &[Overlap::Never, ctx.text_overlap_mode]
         };
         let text_collision = ctx.text_collision();
         let icon_collision = ctx.icon_collision();
@@ -292,38 +297,40 @@ impl Placement {
                 };
                 let shift = offset.layout_shift();
                 let screen_shift = offset.screen_shift(ctx.rotate_text_with_map, ctx.pitch_text_with_map, ctx.bearing);
-                self.text_boxes.clear();
+                self.run.text_boxes.clear();
                 if !self.can_place_at_variable_anchor(text_box, anchor, screen_shift, anchors, ctx) {
                     continue;
                 }
-                let part = crate::placement::collision_index::PartCollision { overlap_mode, ..text_collision };
-                let result = self.collision_index.place_feature(
+                let part = PartCollision { overlap_mode, ..text_collision };
+                let result = collision::place_feature(
+                    &*self.index,
                     &part,
                     feature,
                     pools.boxes(feature),
                     label,
                     Some(shift),
-                    &mut self.text_boxes,
+                    &mut self.run.text_boxes,
                 );
                 last = PlacedFeatureResult { placed: false, ..result };
                 if let Some(icon_feature) = icon_feature {
-                    let icon = self.collision_index.place_feature(
+                    let icon = collision::place_feature(
+                        &*self.index,
                         &icon_collision,
                         icon_feature,
                         pools.boxes(icon_feature),
                         label,
                         Some(shift),
-                        &mut self.icon_boxes,
+                        &mut self.run.icon_boxes,
                     );
-                    self.icon_boxes.clear();
+                    self.run.icon_boxes.clear();
                     if !icon.placed {
                         continue;
                     }
                 }
                 if result.placed {
-                    self.variable_offsets.entry(id).or_insert(offset);
+                    self.run.next.variable_offsets.entry(id).or_insert(offset);
                     if ctx.bucket.allow_vertical_placement {
-                        self.placed_orientations.entry(id).or_insert(orientation(vertical));
+                        self.run.next.placed_orientations.entry(id).or_insert(orientation(vertical));
                     }
                     return PlacedText { result, vertical, shift: Some(shift) };
                 }
@@ -349,13 +356,14 @@ impl Placement {
             LabelRun { symbol: run, pools: &buffer.pools, font_size: evaluate_size_for_feature(&ctx.icon_size, run) };
         let vertical = text.is_some_and(|text| text.vertical) && icon.vertical_collision.is_some();
         let feature = icon.collision(vertical);
-        let result = self.collision_index.place_feature(
+        let result = collision::place_feature(
+            &*self.index,
             &ctx.icon_collision(),
             feature,
             state.symbol_instance_pools.boxes(feature),
             &label,
             shift,
-            &mut self.icon_boxes,
+            &mut self.run.icon_boxes,
         );
         (result, vertical)
     }

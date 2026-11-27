@@ -9,7 +9,6 @@
 "crates/mln_style/src/expression/dsl.rs" = 1
 "crates/mln_style/src/expression/forms/match_.rs" = 2
 "crates/mln_engine/src/image/png_writer.rs" = 1
-"crates/mln_engine/src/symbol/layer.rs" = 1
 "crates/mln_engine/src/symbol/layout.rs" = 2
 "crates/mln_engine/src/image/sprite/sprite_parser.rs" = 1
 "crates/mln_engine/src/storage/offline_database.rs" = 1

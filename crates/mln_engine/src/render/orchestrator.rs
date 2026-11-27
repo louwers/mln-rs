@@ -30,7 +30,7 @@ use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::layer::render_layer::{FrameSourceTiles, LayerUpdateParameters, OnTerrain, RenderLayer};
 use crate::layers::custom::EndedHosts;
 use crate::map::MapMode;
-use crate::placement::{Placement, PlacementInputs};
+use crate::placement::Placements;
 use crate::render::events::RendererEvent;
 use crate::render::frame::{Frame, FrameLayer};
 use crate::render::globe::depth_pass::GlobeDepthPass;
@@ -100,16 +100,6 @@ fn create_render_layer(registry: &Registry, style: &Arc<dyn ErasedLayerStyle>) -
     render_layer
 }
 
-/// The layers of a frame that take part in symbol placement, by their index
-/// in the drawing order.
-#[derive(Default)]
-struct PlacementLayers {
-    /// The layers that place their symbol buckets.
-    leaders: Vec<usize>,
-    /// The layers that draw symbol buckets another layer places.
-    followers: Vec<usize>,
-}
-
 /// How an update evaluates and transitions the layers, the light and the
 /// sky.
 struct FrameClock {
@@ -163,10 +153,9 @@ pub(crate) struct RenderOrchestrator {
     render_light: crate::render::light::RenderLight,
     render_sky: Option<crate::render::sky::RenderSky>,
 
-    cross_tile_symbol_index: crate::symbol::cross_tile_index::CrossTileSymbolIndex,
-    placement_controller: crate::placement::PlacementController,
+    /// The placements of the layers that place, such as symbols.
+    placements: Placements,
     background_layer_as_color: bool,
-    placed_symbol_data_collected: bool,
     /// The center's longitude at the last update, which tells a wrap jump.
     longitude: f32,
     tile_cache_enabled: bool,
@@ -218,6 +207,7 @@ impl RenderOrchestrator {
         let pool_workers = PoolWorkers::new(thread_pool.clone(), jobs);
         let tile_store =
             TileStore::new(Box::new(pool_workers), glyph_store, ImageStore::default(), thread_pool.clone(), waker);
+        let placements = Placements::new(&registry);
         RenderOrchestrator {
             registry,
             events: Vec::new(),
@@ -225,8 +215,7 @@ impl RenderOrchestrator {
             still_image_request_id: 0,
             view: View::default(),
             tile_store,
-            cross_tile_symbol_index: crate::symbol::cross_tile_index::CrossTileSymbolIndex::default(),
-            placement_controller: crate::placement::PlacementController::new(),
+            placements,
             found_tiles: Vec::new(),
             style: None,
             sources_by_id: Vec::new(),
@@ -236,7 +225,6 @@ impl RenderOrchestrator {
             render_light: crate::render::light::RenderLight::new(Arc::default()),
             render_sky: None,
             background_layer_as_color,
-            placed_symbol_data_collected: false,
             longitude: 0.0,
             tile_cache_enabled: true,
             remake_render_layers: false,
@@ -401,10 +389,10 @@ impl RenderOrchestrator {
         // placement change, which the draws that copied it copy again.
         let mut changed_buckets = ChangedBuckets::default();
         self.update_render_tiles(&frame, &mut changed_buckets);
-        let placed = self.update_layer_tiles(update_parameters, &frame);
+        self.update_layer_tiles(update_parameters, &frame);
 
         frame.symbols_started = Instant::now();
-        let update_symbol_opacities = self.place_symbols(update_parameters, &placed.leaders, &mut frame);
+        let placed = self.place(update_parameters, &mut frame);
 
         if !frame.needs_repaint && frame.loaded {
             // Ask the app to remove the unused images it added once the map
@@ -416,26 +404,15 @@ impl RenderOrchestrator {
             }
         }
 
-        // The symbol buckets of the layers that need placement, then the
-        // positions of the layers that draw buckets other layers place.
-        let placement = self.placement_controller.placement_mut();
-        for &index in placed.leaders.iter().rev() {
-            placement.update_layer_buckets(
-                &*self.layers[index],
-                &frame.transform.view,
-                update_symbol_opacities,
-                &mut changed_buckets,
-                &mut self.tile_store,
-            );
-        }
-        for &index in &placed.followers {
-            placement.update_follower_buckets(
-                &*self.layers[index],
-                &frame.transform.view,
-                &mut changed_buckets,
-                &mut self.tile_store,
-            );
-        }
+        // The buckets of the layers that place, and of those that draw
+        // buckets other layers place, follow the placement.
+        self.placements.update(
+            &frame.transform.view,
+            update_parameters.mode,
+            placed,
+            &mut self.tile_store,
+            &mut changed_buckets,
+        );
         if !changed_buckets.is_empty() {
             for layer in &mut self.layers {
                 layer.mark_changed(&changed_buckets);
@@ -479,13 +456,12 @@ impl RenderOrchestrator {
         }
     }
 
-    /// Gives each layer of the frame its tiles, in the order it draws them.
-    /// Returns the layers that place symbols and those that draw symbols
-    /// another layer places.
-    fn update_layer_tiles(&mut self, update_parameters: &UpdateParameters, frame: &Frame) -> PlacementLayers {
-        let mut placed = PlacementLayers::default();
+    /// Gives each layer of the frame its tiles, in the order it draws them,
+    /// and the layers of the types that place to their participants.
+    fn update_layer_tiles(&mut self, update_parameters: &UpdateParameters, frame: &Frame) {
         let mut contents = SourceContents::default();
         self.found_tiles.clear();
+        self.placements.begin_frame();
         for (&index, frame_layer) in &frame.layers {
             let index = index as usize;
             let render_layer = &mut self.layers[index];
@@ -501,14 +477,10 @@ impl RenderOrchestrator {
                 images: self.tile_store.images(),
                 found: &mut self.found_tiles,
             });
-            if render_layer.needs_placement() {
-                placed.leaders.push(index);
-            }
-            if !render_layer.follower_data().is_empty() {
-                placed.followers.push(index);
-            }
+            let tiles =
+                source.map(|source| FrameSourceTiles::new(source.render_tiles(), source_contents, &self.found_tiles));
+            self.placements.collect(index, &**render_layer, tiles, source.and_then(RenderSource::tiles));
         }
-        placed
     }
 
     /// Advances the zoom history and the global state to the update's, and
@@ -836,7 +808,7 @@ impl RenderOrchestrator {
             is_update_synchronous: false,
             font_faces: update_parameters.font_faces.clone(),
             glyph_pbfs: !update_parameters.style.get_glyph_url().is_empty(),
-            placement_commits: self.placement_controller.commits(),
+            placement_commits: self.placements.commits(),
             terrain: self.terrain.cover(),
         };
 
@@ -962,114 +934,22 @@ impl RenderOrchestrator {
         will_render
     }
 
-    /// Places the frame's symbols: across tiles for a continuous map, when
-    /// the last placement isn't recent, or all at once for a still image.
-    /// Sets the frame's fade and repaint parameters, and returns whether the
-    /// symbol buckets' opacities change.
-    fn place_symbols(
-        &mut self,
-        update_parameters: &Arc<UpdateParameters>,
-        layers_need_placement: &[usize],
-        frame: &mut Frame,
-    ) -> bool {
-        let layers_need_placement: Vec<&dyn RenderLayer> =
-            layers_need_placement.iter().map(|&index| &*self.layers[index]).collect();
-        let continuous = update_parameters.mode == MapMode::Continuous;
-        let mut symbol_buckets_changed = false;
-        let mut symbol_buckets_added = false;
-        let mut used_symbol_layers: VecSet<String> = VecSet::new();
-        let longitude = update_parameters.view.center(mln_style::geo::WrapMode::Unwrapped).longitude() as f32;
-        for layer in layers_need_placement.iter().rev() {
-            let result = self.cross_tile_symbol_index.index_layer(
-                *layer,
-                longitude,
-                &update_parameters.view,
-                self.terrain.ground().map(|ground| &**ground),
-                &mut self.tile_store,
-            );
-            if continuous {
-                used_symbol_layers.insert(layer.id().to_owned());
-                symbol_buckets_added |= result.buckets_added;
-                symbol_buckets_changed |= result.buckets_added || result.buckets_removed;
-            }
+    /// The frame's placement step: places across tiles for a continuous
+    /// map, when the last placement isn't recent, or all at once for a still
+    /// image. Sets the frame's fade and repaint parameters, and returns
+    /// whether the frame placed, or dropped the placement.
+    fn place(&mut self, update_parameters: &Arc<UpdateParameters>, frame: &mut Frame) -> bool {
+        let fading_tiles = self.tile_store.has_fading_tiles();
+        let placed =
+            self.placements.place(update_parameters, self.terrain.ground(), &mut self.tile_store, fading_tiles);
+        frame.placement_changed = placed.changed;
+        frame.symbol_fade_change = placed.fade;
+        if placed.repaint_at.is_some() {
+            frame.repaint_at = placed.repaint_at;
         }
-
-        if continuous && layers_need_placement.is_empty() {
-            // Discard deferred placement and query data when no symbol buckets remain.
-            frame.placement_changed = self.placement_controller.reset();
-            self.cross_tile_symbol_index.reset();
-            frame.symbol_fade_change = 1.0;
-            frame.needs_repaint = self.has_transitions(update_parameters.time_point);
-        } else if continuous {
-            let tilted_view = update_parameters.view.pitch() != 0.0;
-            let mut placement_update_period_override: Option<Duration> = None;
-            if symbol_buckets_added && !tilted_view {
-                // In a flat view, new symbols show soon: placement runs
-                // within a short period rather than at once, since new
-                // buckets usually come from several tiles in a row, and the
-                // short period places them together. A tilted view places
-                // less often, for speed: its new symbols are mostly far
-                // away.
-                placement_update_period_override = Some(Duration::from_millis(30));
-            }
-
-            // Placement runs again, at most once per update period, when it
-            // would place differently, and while the sources hold tiles
-            // that wait for placements to fade their symbols out. Until it
-            // may, the frame says when, rather than asking for frames that
-            // would show the same.
-            let inputs = PlacementInputs::new(
-                update_parameters,
-                self.terrain.ground(),
-                &layers_need_placement,
-                &self.tile_store,
-            );
-            let stale = self.placement_controller.is_stale(&inputs) || self.tile_store.has_fading_tiles();
-            let next_placement_at = self
-                .placement_controller
-                .next_placement_at(update_parameters.view.zoom() as f32, placement_update_period_override);
-            let due = match (next_placement_at, update_parameters.time_point) {
-                (Some(at), Some(now)) => now >= at,
-                _ => true,
-            };
-            frame.placement_changed = stale && due;
-            symbol_buckets_changed |= frame.placement_changed;
-            if frame.placement_changed {
-                let prev = self.placement_controller.take_placement();
-                let mut placement = Placement::create(Arc::new(inputs), update_parameters.time_point, Some(prev));
-                placement.place(&mut self.tile_store);
-                self.placement_controller.set_placement(placement);
-                self.cross_tile_symbol_index.prune_unused_layers(&used_symbol_layers);
-            } else if stale {
-                frame.repaint_at = next_placement_at;
-            }
-            frame.symbol_fade_change =
-                self.placement_controller.placement().symbol_fade_change(update_parameters.time_point);
-            frame.needs_repaint = self.has_transitions(update_parameters.time_point);
-        } else {
-            if layers_need_placement.is_empty() {
-                // Nothing to place: drop the earlier image's placement, so
-                // queries don't find its symbols.
-                frame.placement_changed = self.placement_controller.reset();
-            } else {
-                let inputs = PlacementInputs::new(
-                    update_parameters,
-                    self.terrain.ground(),
-                    &layers_need_placement,
-                    &self.tile_store,
-                );
-                let mut placement = Placement::create(Arc::new(inputs), update_parameters.time_point, None);
-                placement.collect_placed_symbol_data(self.placed_symbol_data_collected);
-                placement.place(&mut self.tile_store);
-                self.placement_controller.set_placement(placement);
-                frame.placement_changed = true;
-            }
-            symbol_buckets_changed = frame.placement_changed;
-            self.cross_tile_symbol_index.reset();
-            frame.symbol_fade_change = 1.0;
-            frame.needs_repaint = false;
-        }
-        symbol_buckets_changed
+        frame.needs_repaint =
+            update_parameters.mode == MapMode::Continuous && self.has_transitions(update_parameters.time_point);
+        placed.changed
     }
 
     pub(crate) fn has_transitions(&self, time_point: Option<Instant>) -> bool {
@@ -1085,7 +965,7 @@ impl RenderOrchestrator {
             return true;
         }
 
-        if self.placement_controller.has_transitions(time_point) {
+        if self.placements.has_transitions(time_point) {
             return true;
         }
 
@@ -1120,7 +1000,7 @@ impl RenderOrchestrator {
         self.leave_layers();
         self.layer_indexes.clear();
 
-        self.cross_tile_symbol_index.reset();
+        self.placements.forget_buckets();
 
         self.tile_store.images_mut().clear();
         self.tile_store.glyphs().evict(&VecSet::new());
@@ -1459,11 +1339,11 @@ impl RenderOrchestrator {
         if cross_tile_symbol_index_layers.is_empty() {
             return Ok(());
         }
-        let placement = self.placement_controller.placement();
-        let mut rendered_symbols = placement.collision_index().query_rendered_symbols(&geometry.to_vec());
+        let index = self.placements.index();
+        let mut rendered_symbols = index.query_rendered(&geometry.to_vec());
         let mut bucket_query_data = Vec::with_capacity(rendered_symbols.len());
         for bucket_instance_id in rendered_symbols.keys() {
-            bucket_query_data.push(placement.query_data(*bucket_instance_id).map_err(Error::native)?);
+            bucket_query_data.push(index.query_data(*bucket_instance_id).map_err(Error::native)?);
         }
         // Symbols sort only within their bucket, so the buckets go in the
         // order of their tiles for a predictable order of all of them.
@@ -1592,7 +1472,7 @@ impl RenderOrchestrator {
 
     /// A copy of the placed symbols' data (the placement is shared).
     pub(crate) fn placed_symbols_data(&self) -> Vec<crate::placement::PlacedSymbolData> {
-        self.placement_controller.placement().placed_symbols_data().to_vec()
+        self.placements.placed_symbols_data().to_vec()
     }
 
     /// Queries the features of the source `source_id`. `Err`: as
@@ -1670,7 +1550,7 @@ impl RenderOrchestrator {
     }
 
     pub(crate) fn collect_placed_symbol_data(&mut self, enable: bool) {
-        self.placed_symbol_data_collected = enable;
+        self.placements.collect_placed_symbol_data(enable);
     }
 
     pub(crate) fn set_tile_cache_enabled(&mut self, enable: bool) {

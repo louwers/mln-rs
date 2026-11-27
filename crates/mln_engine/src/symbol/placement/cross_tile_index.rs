@@ -19,8 +19,8 @@
 //! match takes a new id. In an overscaled tile, symbols outside the viewport
 //! take no id until the bucket is added again with them in view.
 //!
-//! The index runs in the frame's update, which has the buckets mutably
-//! ([`SymbolBuckets`]).
+//! The index runs in the frame's placement step, which has the buckets
+//! mutably ([`PlacementBuckets`]).
 
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -30,10 +30,11 @@ use glam::{I64Vec2, Vec2};
 use mln_style::constants::EXTENT;
 use mln_style::hash::HashSet;
 use mln_style::tile_id::CanonicalTileID;
-use mln_vec_map::{VecMap, VecSet};
+use mln_vec_map::VecMap;
 
+use super::BucketPlacementData;
 use crate::camera::{TileProjector, View};
-use crate::layer::render_layer::{RenderLayer, SymbolBuckets};
+use crate::placement::PlacementBuckets;
 use crate::render::terrain::TerrainElevation;
 use crate::symbol::bucket::SymbolBucket;
 use crate::symbol::instance::{SymbolInstance, SymbolInstancePools};
@@ -62,25 +63,26 @@ pub(crate) struct CrossTileSymbolIndex {
 }
 
 impl CrossTileSymbolIndex {
-    /// Gives the symbols of the buckets `layer` places, in `buckets`, their
-    /// cross-tile ids, and forgets the buckets of the layer it no longer
-    /// places. `lng` is the view's unwrapped longitude, and `ground` the
-    /// ground the symbols stand on, where terrain draws.
+    /// Gives the symbols of the buckets the layer `id` places, `placed`, of
+    /// `buckets`, their cross-tile ids, and forgets the buckets of the layer
+    /// it no longer places. `lng` is the view's unwrapped longitude, and
+    /// `ground` the ground the symbols stand on, where terrain draws.
     pub(crate) fn index_layer(
         &mut self,
-        layer: &dyn RenderLayer,
+        id: &str,
+        placed: &[BucketPlacementData],
         lng: f32,
         view: &View,
         ground: Option<&TerrainElevation>,
-        buckets: &mut (impl SymbolBuckets + ?Sized),
+        buckets: &mut PlacementBuckets<'_>,
     ) -> AddLayerResult {
-        let index = self.layers.get_or_insert_with(layer.id(), LayerIndex::default);
+        let index = self.layers.get_or_insert_with(id, LayerIndex::default);
         index.follow_wrap_jump(lng);
 
         self.current_bucket_ids.clear();
         let mut buckets_added = false;
-        for item in layer.placement_data() {
-            let Some(bucket) = buckets.get_mut(&item.bucket) else {
+        for item in placed {
+            let Some(bucket) = buckets.get_mut::<SymbolBucket>(&item.bucket) else {
                 continue;
             };
             if bucket.bucket_instance_id == 0 {
@@ -97,19 +99,9 @@ impl CrossTileSymbolIndex {
         AddLayerResult { buckets_added, buckets_removed }
     }
 
-    /// [`index_layer`](Self::index_layer) of the buckets that
-    /// `HeldBuckets` holds, for the benchmarks.
-    #[cfg(feature = "bench")]
-    pub(crate) fn add_layer(&mut self, layer: &dyn RenderLayer, lng: f32, view: &View) -> AddLayerResult {
-        let mut buckets = crate::layer::render_layer::HeldBuckets::take();
-        let result = self.index_layer(layer, lng, view, None, &mut buckets);
-        buckets.restore();
-        result
-    }
-
-    /// Forgets the layers not in `used_layers`.
-    pub(crate) fn prune_unused_layers(&mut self, used_layers: &VecSet<String>) {
-        self.layers.retain(|id, _| used_layers.contains(id));
+    /// Forgets the layers whose ids `keep` refuses.
+    pub(crate) fn retain_layers(&mut self, mut keep: impl FnMut(&str) -> bool) {
+        self.layers.retain(|id, _| keep(id));
     }
 
     /// Forgets every layer.

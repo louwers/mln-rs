@@ -1286,12 +1286,12 @@ fn assert_glyphs_draw_in_circles(dem: fn() -> Response, pitch_with_map: bool) {
     use mln_style::layers::symbol_layer_properties::SymbolLayoutProperties;
 
     use crate::camera::TileProjector;
-    use crate::placement::collision_feature::{CollisionBox, CollisionFeature};
-    use crate::placement::collision_grid::Shape;
-    use crate::placement::collision_index::{CollisionIndex, LabelRun, OverlapMode, PartCollision};
+    use crate::placement::{CollisionGroup, CollisionIndex, Overlap, Shape};
     use crate::query::feature_index::IndexedSubfeature;
     use crate::symbol::bucket::{PlacedSymbol, PlacedSymbolPools, SymbolSizeBinder};
     use crate::symbol::instance::WritingMode;
+    use crate::symbol::placement::collision::{self, LabelRun, PartCollision};
+    use crate::symbol::placement::collision_feature::{CollisionBox, CollisionFeature};
     use crate::symbol::projection::{LabelPlaneProjector, LineLabelAlignment, SymbolHeights, reproject_line_labels};
     use crate::util::pool::PoolRange;
 
@@ -1389,11 +1389,12 @@ fn assert_glyphs_draw_in_circles(dem: fn() -> Response, pitch_with_map: bool) {
         translation: Vec2::ZERO,
         pixel_ratio,
         scale: (f64::from(zoom) - f64::from(tile.overscaled_z)).exp2() as f32,
-        overlap_mode: OverlapMode::Always,
+        pitch_factor: (view.pitch().cos() * view.camera_to_center_distance()) as f32,
+        overlap_mode: Overlap::Always,
         pitch_with_map,
         rotate_with_map: true,
         avoid_edges: None,
-        collision_group: None,
+        collision_group: CollisionGroup::ALL,
     };
     let feature = CollisionFeature {
         boxes: PoolRange::default(),
@@ -1404,13 +1405,13 @@ fn assert_glyphs_draw_in_circles(dem: fn() -> Response, pitch_with_map: bool) {
             sort_index: 0,
             bucket_instance_id: 0,
             collision_group_id: 0,
-            overlap_mode: OverlapMode::Always,
+            overlap_mode: Overlap::Always,
         },
         along_line: true,
     };
     let run = LabelRun { symbol: &symbol, pools: &pools, font_size: 24.0 };
     let mut shapes = Vec::new();
-    index.place_feature(&part, &feature, &circles, &run, None, &mut shapes);
+    collision::place_feature(&index, &part, &feature, &circles, &run, None, &mut shapes);
     let placed: Vec<(Vec2, f32)> = shapes
         .iter()
         .filter_map(|shape| match shape {

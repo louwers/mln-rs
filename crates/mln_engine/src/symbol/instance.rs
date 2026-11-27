@@ -8,8 +8,8 @@ use mln_style::feature::GeometryCoordinates;
 use mln_style::types::{SymbolAnchorType, TextJustifyType, TextWritingModeType, VariableAnchorOffsetCollection};
 use mln_wire::payload::pod;
 
-use crate::placement::collision_feature::{CollisionBox, CollisionFeature};
 use crate::symbol::anchor::Anchor;
+use crate::symbol::placement::collision_feature::{CollisionBox, CollisionFeature};
 use crate::symbol::quads::SymbolQuads;
 use crate::text::anchor_justification;
 use crate::text::glyph::Shaping;

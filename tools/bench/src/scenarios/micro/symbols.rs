@@ -117,7 +117,7 @@ fn place(bench: &mut Bench, tile: StreetTile) {
     let fixtures = Fixtures::open(bench);
     let style = loaded_liberty(&fixtures);
     let symbols = lay_out(&fixtures, &style, tile, ZOOM);
-    let view = view(&style, &symbols, tile, ZOOM);
+    let mut view = view(&style, &symbols, tile, ZOOM);
     view.index(&mut SymbolIndex::default()).unwrap_or_else(|error| panic!("{error}"));
     // The first placement marks the buckets as placed, once.
     let shown = view.place();

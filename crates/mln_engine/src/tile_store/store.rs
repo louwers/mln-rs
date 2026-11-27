@@ -21,8 +21,9 @@ use crate::draw::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::draw::identity::SimpleIdentity;
 use crate::exec::pool::TaskGroup;
 use crate::image::image_store::ImageStore;
-use crate::layer::render_layer::{BucketKey, SymbolBuckets};
+use crate::layer::bucket::ErasedBucket;
 use crate::layer::tile_layout::{LayoutParams, Resolved};
+use crate::placement::{BucketKey, LaidBuckets};
 use crate::render::events::RendererEvent;
 use crate::render::orchestrator::drop_on_workers;
 use crate::render::tile::RenderTile;
@@ -30,7 +31,6 @@ use crate::source::Cover;
 use crate::source::erased::ErasedOrigin;
 use crate::source::source_state::SourceFeatureState;
 use crate::storage::FileSource;
-use crate::symbol::bucket::SymbolBucket;
 use crate::text::glyph_store::GlyphStore;
 use crate::tile::OverscaledTileID;
 use crate::tile_store::contents::{Answer, TileAtlases};
@@ -522,20 +522,19 @@ impl TileStore {
     }
 }
 
-/// The symbol buckets of the tiles' layouts.
-impl SymbolBuckets for TileStore {
+/// The buckets of the tiles' layouts.
+impl LaidBuckets for TileStore {
     fn id(&self, key: &BucketKey) -> Option<SimpleIdentity> {
-        let contents = self.sources.get(&key.source)?.contents_at(&key.tile, key.slot)?.geometry()?;
-        Some(contents.result.layer_render_data.bucket(key.bucket)?.id())
+        Some(self.bucket(key)?.id())
     }
 
-    fn get(&self, key: &BucketKey) -> Option<&SymbolBucket> {
+    fn bucket(&self, key: &BucketKey) -> Option<&dyn ErasedBucket> {
         let contents = self.sources.get(&key.source)?.contents_at(&key.tile, key.slot)?.geometry()?;
-        contents.result.layer_render_data.bucket(key.bucket)?.downcast_ref()
+        contents.result.layer_render_data.bucket(key.bucket)
     }
 
-    fn get_mut(&mut self, key: &BucketKey) -> Option<&mut SymbolBucket> {
+    fn bucket_mut(&mut self, key: &BucketKey) -> Option<&mut dyn ErasedBucket> {
         let contents = self.sources.get_mut(&key.source)?.contents_at_mut(&key.tile, key.slot)?.geometry_mut()?;
-        contents.result.layer_render_data.bucket_mut(key.bucket)?.downcast_mut()
+        contents.result.layer_render_data.bucket_mut(key.bucket)
     }
 }

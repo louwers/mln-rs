@@ -6,7 +6,6 @@
 //! stages' internals can change without changing what the benchmarks call.
 
 use std::collections::BTreeSet;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -29,13 +28,17 @@ use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::layer::render_layer::{Hosted, RenderLayer};
 use crate::layer::tile_layout::{Dependencies, LayoutParams, Resolved};
 use crate::map::MapMode;
-use crate::placement::{Placement, PlacementInputs};
+use crate::placement::{
+    BucketKey, LaidBuckets, Participant, PlacementBuckets, PlacingLayer, place_alone, placing_layers,
+};
 use crate::render::paint_parameters::TransformParameters;
 use crate::render::tile::RenderTile;
 use crate::render::update_parameters::UpdateParameters;
 use crate::storage::Resource;
-use crate::symbol::cross_tile_index::CrossTileSymbolIndex;
+use crate::symbol::bucket::SymbolBucket;
 use crate::symbol::layer::RenderSymbolLayer;
+use crate::symbol::placement::cross_tile_index::CrossTileSymbolIndex;
+use crate::symbol::placement::{HeldBuckets, PlacedTile, SymbolLayer, SymbolPlacement, symbol_translates};
 use crate::text::glyph::{GlyphMap, get_glyph_range, style_font_faces};
 use crate::text::glyph_pbf::parse_glyph_pbf;
 use crate::text::glyph_store::ShapeResults;
@@ -200,13 +203,27 @@ impl LaidOut {
 }
 
 /// The symbols of laid-out tiles in a view, as a renderer finds which to
-/// show: their render layers, each tile's matrices for the view, and the
-/// view's update.
+/// show: the buckets its symbol layers place and draw, each tile's matrices
+/// for the view, and the view's update.
 pub struct SymbolView {
     update: Arc<UpdateParameters>,
-    /// The style's symbol layers that lead a bucket of the tiles, in the
-    /// style's order.
-    layers: Vec<Hosted<RenderSymbolLayer>>,
+    /// The style's symbol layers that lead or draw a bucket of the tiles,
+    /// in the style's order.
+    layers: Vec<SymbolLayer>,
+    /// Those that lead a bucket, as placement gets them.
+    placing: Vec<PlacingLayer>,
+    /// The participant that places them.
+    placement: Participant<SymbolPlacement>,
+    /// The indexes of the buckets `HeldBuckets` holds for the view.
+    held: Vec<usize>,
+}
+
+impl Drop for SymbolView {
+    fn drop(&mut self) {
+        for &index in &self.held {
+            HeldBuckets::release(index);
+        }
+    }
 }
 
 impl SymbolView {
@@ -219,19 +236,18 @@ impl SymbolView {
     /// whose updates have other fields.
     pub fn new(source: &str, tiles: &[&LaidOut], update: UpdateParameters) -> Result<SymbolView, Error> {
         let transform = TransformParameters::new(&update.view);
-        let render_tiles: Rc<Vec<RenderTile>> = Rc::new(
-            tiles
-                .iter()
-                .map(|laid_out| {
-                    let mut render_tile = RenderTile::of_tile_id(laid_out.id.to_unwrapped(), laid_out.id, false);
-                    render_tile.set_projection(&transform);
-                    render_tile
-                })
-                .collect(),
-        );
+        let render_tiles: Vec<RenderTile> = tiles
+            .iter()
+            .map(|laid_out| {
+                let mut render_tile = RenderTile::of_tile_id(laid_out.id.to_unwrapped(), laid_out.id, false);
+                render_tile.set_projection(&transform);
+                render_tile
+            })
+            .collect();
 
         let parameters = PropertyEvaluationParameters::new(update.view.zoom() as f32);
         let mut layers = Vec::new();
+        let mut held = Vec::new();
         for layer in update.style.get_layers() {
             let base = layer.style().base();
             if base.source != source || base.visibility == VisibilityType::None || layer.info().name != "symbol" {
@@ -241,21 +257,37 @@ impl SymbolView {
                 .ok_or_else(|| Error::invalid_argument(format!("no render layer for {}", layer.get_id())))?;
             let mut render_layer = Hosted::<RenderSymbolLayer>::new(style);
             render_layer.evaluate(&parameters);
-            // As the layer's update adds its tiles' buckets.
-            let (symbol_layer, values) = render_layer.layer_mut();
-            let translates = RenderSymbolLayer::symbol_translates(values);
-            for (tile_index, laid_out) in tiles.iter().enumerate() {
+            // As the participant collects the layer's tiles' buckets.
+            let (_, values) = render_layer.layer_mut();
+            let values = &*values.evaluated;
+            let translates = symbol_translates(values);
+            let mut symbol_layer = SymbolLayer::new(layers.len(), Arc::clone(&values.style));
+            let mut buckets = HeldBuckets::take();
+            for (laid_out, tile) in tiles.iter().zip(&render_tiles) {
                 let Some(render_data) = laid_out.result.layer_render_data.get(layer.get_id()) else { continue };
-                let Some(bucket) = crate::layer::bucket::recover(&render_data.bucket) else { continue };
+                let Some(index) = buckets.hold(render_data.bucket) else { continue };
+                held.push(index);
+                let key = BucketKey {
+                    bucket: index,
+                    slot: tile.slot(),
+                    tile: *tile.overscaled_tile_id(),
+                    source: SourceKey(0),
+                };
+                let held: &dyn LaidBuckets = &buckets;
+                let Some(bucket) = held.get::<SymbolBucket>(&key) else { continue };
                 let feature_index = || Some(Arc::clone(&laid_out.result.feature_index));
-                symbol_layer.add_placement_data(values, &render_tiles, tile_index, bucket, feature_index, translates);
+                symbol_layer.add_bucket(values, &PlacedTile::new(tile), key, bucket, feature_index, translates);
             }
-            if symbol_layer.has_placement_data() {
-                layers.push(render_layer);
+            buckets.restore();
+            if !symbol_layer.is_empty() {
+                layers.push(symbol_layer);
             }
         }
 
-        Ok(SymbolView { update: Arc::new(update), layers })
+        let placing: Vec<_> = layers.iter().filter(|layer| layer.places()).map(SymbolLayer::placing).collect();
+        let placing = placing_layers(&placing, update.cross_source_collisions);
+        let placement = Participant(SymbolPlacement::with_layers(layers.clone()));
+        Ok(SymbolView { update: Arc::new(update), layers, placing, placement, held })
     }
 
     /// Adds the view's symbol buckets to `index`, as a renderer does before
@@ -266,12 +298,15 @@ impl SymbolView {
     pub fn index(&self, index: &mut SymbolIndex) -> Result<usize, Error> {
         let longitude = self.update.view.center(mln_style::geo::WrapMode::Unwrapped).longitude() as f32;
         let mut added = 0;
+        let mut buckets = HeldBuckets::take();
         for layer in self.layers.iter().rev() {
-            let result = index.0.add_layer(layer, longitude, &self.update.view);
+            let mut buckets = PlacementBuckets::new(&mut buckets);
+            let result = layer.index(&mut index.0, longitude, &self.update.view, &mut buckets);
             if result.buckets_added {
                 added += 1;
             }
         }
+        buckets.restore();
         Ok(added)
     }
 
@@ -281,15 +316,12 @@ impl SymbolView {
     /// symbols it shows. Their ids come from [`SymbolView::index`]: a symbol
     /// without one shows nowhere.
     #[must_use]
-    pub fn place(&self) -> usize {
-        let previous = Placement::new_default();
-        let layers: Vec<&dyn RenderLayer> = self.layers.iter().map(|layer| -> &dyn RenderLayer { layer }).collect();
-        let mut buckets = crate::layer::render_layer::HeldBuckets::take();
-        let inputs = PlacementInputs::new(&self.update, None, &layers, &buckets);
-        let mut placement = Placement::create(Arc::new(inputs), self.update.time_point, Some(previous));
-        placement.place(&mut buckets);
+    pub fn place(&mut self) -> usize {
+        let mut buckets = HeldBuckets::take();
+        self.placement.0.prepare_alone(&self.placing, &buckets);
+        let shown = place_alone(&mut self.placement, &self.placing, &self.update, &mut buckets);
         buckets.restore();
-        placement.shown()
+        shown
     }
 }
 
@@ -709,7 +741,7 @@ mod tests {
         };
         let (before, after) = (symbols(0), symbols(1));
         let zoomed_out = SymbolView::new("s", &[&before], update(&style, 0.0, (512, 512))).unwrap();
-        let zoomed_in = SymbolView::new("s", &[&after], update(&style, 1.0, (1024, 1024))).unwrap();
+        let mut zoomed_in = SymbolView::new("s", &[&after], update(&style, 1.0, (1024, 1024))).unwrap();
 
         // Unindexed symbols show nowhere.
         assert_eq!(zoomed_in.place(), 0);

@@ -37,18 +37,16 @@ use crate::layer::layer_drawing::{
 use crate::layer::layer_type::{EvaluatedLayer, LayerType};
 use crate::layer::paint_property_binder::PaintBinders as _;
 use crate::layer::render_layer::{
-    BucketKey, BucketPlacementData, EvaluateCx, Evaluation, Hosted, LayerCx, LayerValues, OnTerrain, PlacedTile,
-    RenderLayer, SymbolTranslate, TypedLayer, UpdateCx,
+    EvaluateCx, Evaluation, Hosted, LayerCx, LayerValues, OnTerrain, RenderLayer, TypedLayer,
 };
 use crate::layer::tile_input::Features;
 use crate::layers::cast_matrix;
-use crate::query::feature_index::FeatureIndex;
 use crate::render::paint_parameters::PaintParameters;
 use crate::render::pass::RenderPass;
 use crate::render::terrain::FrameGround;
 use crate::render::tile::{FrameTile, RenderTile};
 use crate::render::tile_matrix::{projection_data, to_projection_ubo};
-use crate::source::render_source::{RenderSource, TileOrder};
+use crate::source::render_source::TileOrder;
 use crate::symbol::bucket::{Buffer, PaintProperties, SymbolBucket, SymbolDynamicLayoutVertex, SymbolOpacityVertex};
 use crate::symbol::layout::SymbolLayout;
 use crate::symbol::programs;
@@ -544,147 +542,15 @@ pub(crate) struct RenderSymbolLayer {
     /// The segments of the tiles the update builds draws of, as it sorts
     /// them, kept from frame to frame for their memory.
     renderable_segments: Vec<SegmentGroup>,
-    /// The buckets the layer places, in placement order.
-    placement_data: Vec<BucketPlacementData>,
-    /// The buckets another layer places and this layer draws.
-    follower_data: Vec<BucketPlacementData>,
-    /// The layer's source, which its buckets' placement data shares.
-    source_id: Arc<str>,
 
     icon_size: f32,
     text_size: f32,
 
     /// The passes the layer's draws were built for.
     draws_passes: RenderPass,
-    /// The indexes of the buckets `HeldBuckets` holds for the layer.
-    #[cfg(feature = "bench")]
-    held: Vec<usize>,
-}
-
-#[cfg(feature = "bench")]
-impl Drop for RenderSymbolLayer {
-    fn drop(&mut self) {
-        for &index in &self.held {
-            crate::layer::render_layer::HeldBuckets::release(index);
-        }
-    }
 }
 
 impl RenderSymbolLayer {
-    /// The translations of the text and of the icons of the layer of
-    /// `values`, as its evaluated paint properties set them.
-    pub(crate) fn symbol_translates(values: &LayerValues<Symbol>) -> (SymbolTranslate, SymbolTranslate) {
-        let evaluated = &values.evaluated.paint;
-        let text_translate = SymbolTranslate {
-            offset: *evaluated.text_translate.uniform(),
-            anchor: *evaluated.text_translate_anchor.uniform(),
-        };
-        let icon_translate = SymbolTranslate {
-            offset: *evaluated.icon_translate.uniform(),
-            anchor: *evaluated.icon_translate_anchor.uniform(),
-        };
-        (text_translate, icon_translate)
-    }
-
-    /// Adds `bucket`, `key`'s, of `tile`, to what the layer of `values`
-    /// places: when the layer leads the bucket, to its placement data, with
-    /// the tile's feature index, in order of sort key; otherwise to its
-    /// follower data.
-    pub(crate) fn add_bucket(
-        &mut self,
-        values: &LayerValues<Symbol>,
-        tile: &PlacedTile,
-        key: BucketKey,
-        bucket: &SymbolBucket,
-        feature_index: impl FnOnce() -> Option<Arc<FeatureIndex>>,
-        (text_translate, icon_translate): (SymbolTranslate, SymbolTranslate),
-    ) {
-        let source = &values.style.base().source;
-        if *self.source_id != **source {
-            self.source_id = Arc::from(source.as_str());
-        }
-        let source_id = &self.source_id;
-        let data = |feature_index, sort_key_range| BucketPlacementData {
-            bucket: key,
-            tile: *tile,
-            feature_index,
-            source_id: Arc::clone(source_id),
-            sort_key_range,
-            text_translate,
-            icon_translate,
-        };
-        if *bucket.bucket_leader_id != *values.style.base().id {
-            let data = data(None, None);
-            self.follower_data.push(data);
-            return;
-        }
-        // Only place this layer if it's the "group leader" for the bucket
-        let feature_index = feature_index();
-
-        if bucket.sort_key_ranges.is_empty() {
-            let data = data(feature_index, None);
-            self.placement_data.push(data);
-            return;
-        }
-        for sort_key_range in &bucket.sort_key_ranges {
-            let layer_data = data(feature_index.clone(), Some(*sort_key_range));
-            if self
-                .placement_data
-                .last()
-                .is_none_or(|last| last.sort_key_range.is_some_and(|last| last.sort_key <= sort_key_range.sort_key))
-            {
-                // Already in order, as ranges with a constant sort key always are.
-                self.placement_data.push(layer_data);
-                continue;
-            }
-            // After every range of a sort key no greater, as ranges of
-            // equal keys keep their order.
-            let sort_position = self.placement_data.partition_point(|lhs| {
-                let key = lhs.sort_key_range.expect("sort key range").sort_key;
-                sort_key_range.sort_key.partial_cmp(&key) != Some(std::cmp::Ordering::Less)
-            });
-            self.placement_data.insert(sort_position, layer_data);
-        }
-    }
-
-    /// [`add_bucket`](Self::add_bucket) of the bucket that
-    /// `HeldBuckets` holds at `bucket` ([`crate::layer::bucket::recover`]), of the
-    /// tile at `tile_index` of `tiles`. The layer frees the bucket when it
-    /// drops.
-    #[cfg(feature = "bench")]
-    pub(crate) fn add_placement_data(
-        &mut self,
-        values: &LayerValues<Symbol>,
-        tiles: &[RenderTile],
-        tile_index: usize,
-        bucket: usize,
-        feature_index: impl FnOnce() -> Option<Arc<FeatureIndex>>,
-        translates: (SymbolTranslate, SymbolTranslate),
-    ) {
-        use crate::layer::render_layer::{HeldBuckets, SymbolBuckets as _};
-        self.held.push(bucket);
-        let Some(tile) = tiles.get(tile_index) else {
-            return;
-        };
-        let key = BucketKey {
-            bucket,
-            slot: tile.slot(),
-            tile: *tile.overscaled_tile_id(),
-            source: crate::worker::job::SourceKey(0),
-        };
-        let held = HeldBuckets::take();
-        if let Some(bucket) = held.get(&key) {
-            self.add_bucket(values, &PlacedTile::new(tile), key, bucket, feature_index, translates);
-        }
-        held.restore();
-    }
-
-    /// Whether the layer places or draws any bucket.
-    #[cfg(feature = "bench")]
-    pub(crate) fn has_placement_data(&self) -> bool {
-        !self.placement_data.is_empty() || !self.follower_data.is_empty()
-    }
-
     /// The entries in the layer's storage buffers of `draw`, of the tile
     /// `tile_id` and its `bucket`, of the layer `layer_id` with the values
     /// `layer`.
@@ -910,14 +776,9 @@ impl TypedLayer for RenderSymbolLayer {
         RenderSymbolLayer {
             draw_list: DrawList::default(),
             renderable_segments: Vec::new(),
-            placement_data: Vec::new(),
-            follower_data: Vec::new(),
-            source_id: Arc::from(""),
             icon_size: 1.0,
             text_size: 16.0,
             draws_passes: RenderPass::None,
-            #[cfg(feature = "bench")]
-            held: Vec::new(),
         }
     }
 
@@ -1249,36 +1110,5 @@ impl TypedLayer for RenderSymbolLayer {
 
         self.renderable_segments = renderable_segments;
         self.make_frame_draws(&mut cx, gpu, render_tiles, passes, symbol_projection_variant.stands(), paint_parameters);
-    }
-
-    /// Collects the symbol buckets of the tiles the layer places, and of
-    /// those whose buckets another layer places and this one draws.
-    fn update(&mut self, cx: UpdateCx<'_, '_, Self>, tiles: &[FrameTile<'_, Symbol>]) {
-        self.placement_data.clear();
-        self.follower_data.clear();
-        let Some(source) = cx.parameters.source.and_then(RenderSource::tiles) else {
-            return;
-        };
-        let translates = Self::symbol_translates(cx.values);
-        for tile in tiles {
-            let Some(bucket) = tile.data() else {
-                continue;
-            };
-            let key = BucketKey { source, tile: tile.id(), slot: tile.tile.slot(), bucket: bucket.bucket_index };
-            let feature_index = || Some(Arc::clone(bucket.feature_index()));
-            self.add_bucket(cx.values, &PlacedTile::new(tile.tile), key, bucket.bucket, feature_index, translates);
-        }
-    }
-
-    fn release(&mut self) {
-        self.placement_data.clear();
-    }
-
-    fn placement_data(&self) -> &[BucketPlacementData] {
-        &self.placement_data
-    }
-
-    fn follower_data(&self) -> &[BucketPlacementData] {
-        &self.follower_data
     }
 }

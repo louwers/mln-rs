@@ -228,8 +228,3 @@ impl dyn ErasedBucket {
         Some(&mut any.downcast_mut::<Stored<B>>()?.bucket)
     }
 }
-
-// The benchmarks (`bench.rs`) hold the bucket a benchmark's layer places
-// through this path, which they take in every commit they compare.
-#[cfg(feature = "bench")]
-pub(crate) use crate::layer::render_layer::hold_symbol_bucket as recover;

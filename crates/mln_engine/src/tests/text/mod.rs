@@ -2,7 +2,8 @@
 // layout (GlyphStore, SymbolLayout), mln_style's Formatted, or the text
 // fixtures (GlyphCache), one module per C++ file. The others are ported next
 // to their code: bidi, tagged_string, glyph_pbf and shaping in crate::text;
-// quads, get_anchors and cross_tile_index in crate::symbol;
+// quads and get_anchors in crate::symbol, cross_tile_index in
+// crate::symbol::placement;
 // local_glyph_rasterizer in render_test (it renders a map).
 
 mod calculate_tile_distances;

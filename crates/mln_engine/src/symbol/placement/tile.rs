@@ -7,15 +7,13 @@ use std::num::NonZeroU32;
 
 use glam::{DMat4, Vec2};
 use mln_style::constants::EXTENT;
-use mln_style::hash::HashSet;
 use mln_style::types::{SymbolAnchorType, SymbolPlacementType};
 
+use super::collision::{self, CollisionBoundaries, IntersectStatus};
+use super::collision_feature::CollisionBox;
 use super::context::PlacementContext;
-use super::{JointPlacement, PlacedSymbolData, Placement, PlacementInputs, PlacementKind, VariableOffset};
-use crate::layer::render_layer::{BucketKey, SymbolBuckets};
-use crate::placement::collision_feature::CollisionBox;
-use crate::placement::collision_grid::Shape;
-use crate::placement::collision_index::{CollisionBoundaries, IntersectStatus, OverlapMode};
+use super::{JointPlacement, PlacedBucket, Placer, SymbolPlacement, VariableOffset};
+use crate::placement::{LaidBuckets, Overlap, PlacedSymbolData, PlacingLayer, Shape};
 use crate::symbol::bucket::SymbolBucket;
 use crate::symbol::instance::SymbolInstance;
 use crate::tile::UnwrappedTileID;
@@ -23,12 +21,10 @@ use crate::tile::UnwrappedTileID;
 /// What a tile placement keeps besides the placement's own state.
 #[derive(Default)]
 pub(crate) struct TilePlacementState {
-    pub(super) placed_symbols_data: Vec<PlacedSymbolData>,
     /// Placing the symbols that cross the borders, before the rest.
     populate_intersections: bool,
     /// The priority of the bucket whose crossing symbols place: lower first.
     current_intersection_priority: usize,
-    pub(super) collect_data: bool,
 }
 
 /// A symbol that crosses its tile's borders, or a neighbor's.
@@ -50,12 +46,9 @@ struct Neighbor {
     borders: CollisionBoundaries,
 }
 
-impl Placement {
+impl Placer<'_> {
     fn tile_state(&mut self) -> Option<&mut TilePlacementState> {
-        match &mut self.kind {
-            PlacementKind::Tile(tile) => Some(tile),
-            _ => None,
-        }
+        self.run.tile.as_mut()
     }
 
     /// The borders of the tile whose matrix is `matrix`, in tile mode,
@@ -66,10 +59,10 @@ impl Placement {
         bucket: &SymbolBucket,
         matrix: &DMat4,
     ) -> (Option<CollisionBoundaries>, Option<CollisionBoundaries>) {
-        if !matches!(self.kind, PlacementKind::Tile(_)) {
+        if self.run.tile.is_none() {
             return (None, None);
         }
-        let borders = self.collision_index.project_tile_boundaries(matrix);
+        let borders = collision::project_tile_boundaries(self.index, matrix);
         let layout = &*bucket.layout;
         let avoided =
             *layout.symbol_avoid_edges.uniform() || *layout.symbol_placement.uniform() == SymbolPlacementType::Line;
@@ -89,15 +82,14 @@ impl Placement {
         anchors: &[SymbolAnchorType],
         ctx: &PlacementContext<'_>,
     ) -> bool {
-        let PlacementKind::Tile(tile) = &self.kind else {
+        let Some(tile) = &self.run.tile else {
             return true;
         };
         let Some(borders) = &ctx.tile_borders else {
             return true;
         };
         let intersects = |shift| {
-            self.collision_index
-                .intersects_tile_edges(text_box, shift, &ctx.tile().matrix, ctx.pixel_ratio, borders)
+            collision::intersects_tile_edges(self.index, text_box, shift, &ctx.tile().matrix, ctx.pixel_ratio, borders)
                 .flags
                 != IntersectStatus::NONE
         };
@@ -117,7 +109,7 @@ impl Placement {
     /// Whether a symbol crossing the borders that didn't place places again
     /// with the rest, to try its other variable anchors.
     fn should_retry_placement(&self, placement: JointPlacement, ctx: &PlacementContext<'_>) -> bool {
-        matches!(&self.kind, PlacementKind::Tile(tile) if tile.populate_intersections)
+        self.run.tile.as_ref().is_some_and(|tile| tile.populate_intersections)
             && !placement.placed()
             && ctx.bucket.has_variable_text_anchors()
     }
@@ -131,12 +123,15 @@ impl Placement {
         ctx: &PlacementContext<'_>,
         placement: JointPlacement,
     ) {
-        let viewport_padding = self.collision_index.viewport_padding();
+        let viewport_padding = self.index.viewport_padding();
         let should_retry = self.should_retry_placement(placement, ctx);
-        let PlacementKind::Tile(tile) = &mut self.kind else {
+        let Some(tile) = &self.run.tile else {
             return;
         };
-        if !tile.collect_data || ctx.along_line() || should_retry {
+        let Some(records) = self.records.as_deref_mut() else {
+            return;
+        };
+        if ctx.along_line() || should_retry {
             return;
         }
         // A point symbol's part has one box.
@@ -147,9 +142,9 @@ impl Placement {
                 _ => None,
             }
         };
-        let text_collision_box = first_box(&self.text_boxes);
-        let icon_collision_box = first_box(&self.icon_boxes);
-        tile.placed_symbols_data.push(PlacedSymbolData {
+        let text_collision_box = first_box(&self.run.text_boxes);
+        let icon_collision_box = first_box(&self.run.icon_boxes);
+        records.push(PlacedSymbolData {
             key: String::from_utf8_lossy(ctx.bucket.state.symbol_instance_pools.key(symbol)).into_owned(),
             text_collision_box,
             icon_collision_box,
@@ -161,31 +156,33 @@ impl Placement {
         });
     }
 
-    /// Places `inputs`' buckets of `buckets` for a tile: the symbols that
-    /// cross the borders first, by bucket and then by how they cross, and
-    /// then the rest.
-    pub(super) fn tile_place_buckets<B: SymbolBuckets + ?Sized>(
+    /// Tile mode's first round: places the symbols of `buckets`, those of
+    /// `layers` in `store`, that cross the borders, by bucket and then by
+    /// how they cross. The rest place in the second round, with the
+    /// symbols this round placed seen.
+    pub(super) fn place_crossing(
         &mut self,
-        inputs: &PlacementInputs,
-        buckets: &B,
-        reloaded_placed: &mut HashSet<BucketKey>,
+        layers: &[PlacingLayer],
+        buckets: &[PlacedBucket],
+        store: &dyn LaidBuckets,
     ) {
         let Some(tile) = self.tile_state() else {
             return;
         };
-        tile.placed_symbols_data.clear();
         tile.current_intersection_priority = 0;
         tile.populate_intersections = true;
 
         let mut contexts = Vec::new();
         let mut intersections = Vec::new();
-        for data in inputs.buckets() {
-            if let Some(bucket) = buckets.get(&data.bucket) {
-                let ctx = self.context(inputs, data, bucket, reloaded_placed);
-                let found = self.intersections(&ctx, contexts.len());
-                if !found.is_empty() {
-                    contexts.push(ctx);
-                    intersections.extend(found);
+        for layer in layers.iter().rev() {
+            for placed in SymbolPlacement::layer_buckets(buckets, layer.position) {
+                if let Some(bucket) = store.get::<SymbolBucket>(&placed.data.bucket) {
+                    let ctx = self.context(&placed.data, bucket, layer.group);
+                    let found = self.intersections(&ctx, contexts.len());
+                    if !found.is_empty() {
+                        contexts.push(ctx);
+                        intersections.extend(found);
+                    }
                 }
             }
         }
@@ -201,7 +198,7 @@ impl Placement {
                 .then(a.anchor_point.x.total_cmp(&b.anchor_point.x))
         });
 
-        let mut seen_cross_tile_ids: BTreeSet<NonZeroU32> = BTreeSet::new();
+        let mut seen_cross_tile_ids: BTreeSet<NonZeroU32> = std::mem::take(&mut self.run.seen_cross_tile_ids);
         for intersection in &intersections {
             let ctx = &contexts[intersection.ctx];
             if let Some(tile) = self.tile_state() {
@@ -219,15 +216,10 @@ impl Placement {
             }
         }
         drop(contexts);
+        self.run.seen_cross_tile_ids = seen_cross_tile_ids;
 
         if let Some(tile) = self.tile_state() {
             tile.populate_intersections = false;
-        }
-        for data in inputs.buckets() {
-            if let Some(bucket) = buckets.get(&data.bucket) {
-                let ctx = self.context(inputs, data, bucket, reloaded_placed);
-                self.place_bucket(&ctx, &mut seen_cross_tile_ids, reloaded_placed);
-            }
         }
     }
 
@@ -247,7 +239,7 @@ impl Placement {
         let Some(tile_borders) = ctx.tile_borders else {
             return Vec::new();
         };
-        let index = &self.collision_index;
+        let index = &*self.index;
         let render_tile = ctx.tile();
         let canonical = render_tile.id.canonical;
         let neighbor = |dx: i64, dy: i64| {
@@ -256,16 +248,23 @@ impl Placement {
             Neighbor {
                 shift: Vec2::new(-dx as f32, -dy as f32) * EXTENT as f32,
                 matrix,
-                borders: index.project_tile_boundaries(&matrix),
+                borders: collision::project_tile_boundaries(index, &matrix),
             }
         };
         let neighbors = [neighbor(0, -1), neighbor(0, 1), neighbor(-1, 0), neighbor(1, 0)];
         let crossing = |collision_box: &CollisionBox, shift: Vec2| {
-            let own =
-                index.intersects_tile_edges(collision_box, shift, &render_tile.matrix, ctx.pixel_ratio, &tile_borders);
+            let own = collision::intersects_tile_edges(
+                index,
+                collision_box,
+                shift,
+                &render_tile.matrix,
+                ctx.pixel_ratio,
+                &tile_borders,
+            );
             std::iter::once(own)
                 .chain(neighbors.iter().map(|neighbor| {
-                    index.intersects_tile_edges(
+                    collision::intersects_tile_edges(
+                        index,
                         collision_box,
                         shift + neighbor.shift,
                         &neighbor.matrix,
@@ -278,7 +277,7 @@ impl Placement {
         };
 
         let pools = &ctx.bucket.state.symbol_instance_pools;
-        let variable_icon = ctx.has_icon_text_fit && ctx.icon_overlap_mode == OverlapMode::Never;
+        let variable_icon = ctx.has_icon_text_fit && ctx.icon_overlap_mode == Overlap::Never;
         let symbol_crossing = |symbol: &SymbolInstance| {
             let text = symbol.text.as_ref();
             let first_anchor = text.and_then(|text| text.variable_anchors.as_ref()).and_then(|offsets| {
