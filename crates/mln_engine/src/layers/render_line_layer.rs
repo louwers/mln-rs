@@ -11,7 +11,7 @@ use mln_style::StyleValue as _;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::color::Color;
 use mln_style::expression::{Dependency, EvaluationContext, GlobalStateMap, global_state_refs_intersect};
-use mln_style::layer::{ErasedLayerStyle as _, LayerStyle};
+use mln_style::layer::ErasedLayerStyle as _;
 use mln_style::layers::Line;
 use mln_style::layers::line_layer_properties::LinePaintProperties;
 use mln_style::size::Size;
@@ -30,11 +30,9 @@ use crate::draw::texture2d::Texture2D;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::gfx::line_mesh::LineLayoutVertex;
 use crate::layer::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
-use crate::layer::layer_type::{EvaluatedLayer, LayerType};
+use crate::layer::layer_type::EvaluatedLayer;
 use crate::layer::paint_property_binder::PaintBinders as _;
-use crate::layer::render_layer::{
-    EvaluateCx, Evaluation, Hosted, LayerValues, OnTerrain, PrepareCx, RenderLayer, TileCx, TypedLayer, UpdateCx,
-};
+use crate::layer::render_layer::{EvaluateCx, Evaluation, Layer, LayerValues, OnTerrain, PrepareCx, TileCx, UpdateCx};
 use crate::layer::tile_input::{Features, TileData};
 use crate::layers::line::dashes::{LineAtlas, LinePatternCap};
 use crate::layers::line::programs;
@@ -184,19 +182,6 @@ fn dash_atlas_texture(gpu: &mut dyn Gpu, context: &mut Context, binders: &LineBi
     Some(texture)
 }
 
-impl LayerType for Line {
-    type Input = Features<PatternLayout<LineLayoutSpec>>;
-    const CROSSFADES: bool = true;
-
-    fn query_radius(data: TileData<'_, Line>, layer: &EvaluatedLayer<Line>) -> f32 {
-        data.bucket.query_radius(layer)
-    }
-
-    fn render_layer(style: Arc<LayerStyle<Line>>) -> Box<dyn RenderLayer> {
-        Hosted::<RenderLineLayer>::boxed(style)
-    }
-}
-
 pub(crate) struct RenderLineLayer {
     color_ramp: Rc<PremultipliedImage>,
     /// The global-state snapshot used to generate the cached color ramp and
@@ -286,8 +271,14 @@ fn offset_line(
     new_rings
 }
 
-impl TypedLayer for RenderLineLayer {
-    type Type = Line;
+impl Layer for RenderLineLayer {
+    type Style = Line;
+    type Input = Features<PatternLayout<LineLayoutSpec>>;
+    const CROSSFADES: bool = true;
+
+    fn query_radius(data: TileData<'_, RenderLineLayer>, layer: &EvaluatedLayer<Line>) -> f32 {
+        data.bucket.query_radius(layer)
+    }
     type Tile = LineTile;
     const TERRAIN: OnTerrain = OnTerrain::Drapes;
 
@@ -350,8 +341,8 @@ impl TypedLayer for RenderLineLayer {
     fn tile(
         &mut self,
         cx: &mut TileCx<'_, '_, Self>,
-        tile: FrameTile<'_, Line>,
-        _data: TileData<'_, Line>,
+        tile: FrameTile<'_, RenderLineLayer>,
+        _data: TileData<'_, RenderLineLayer>,
         _previous: Option<LineTile>,
     ) -> Option<LineTile> {
         let render_pass = render_pass(cx.values);
@@ -365,7 +356,12 @@ impl TypedLayer for RenderLineLayer {
     }
 
     /// Pushes the frame's draws of the layer, those of each of its tiles.
-    fn prepare(&mut self, cx: &mut PrepareCx<'_, '_, Self>, render_tiles: &[FrameTile<'_, Line>], out: &mut Draws) {
+    fn prepare(
+        &mut self,
+        cx: &mut PrepareCx<'_, '_, Self>,
+        render_tiles: &[FrameTile<'_, RenderLineLayer>],
+        out: &mut Draws,
+    ) {
         self.dashes.upload(cx.res.gpu, cx.res.context);
         let paint = &cx.values.evaluated.paint;
         out.main().composite(Composite::of(*paint.line_layer_opacity.uniform(), *paint.line_layer_blend.uniform()));
@@ -425,7 +421,7 @@ impl TypedLayer for RenderLineLayer {
     /// Adds the dash patterns of the tiles' buckets to the layer's dash
     /// textures, then the layer's own, which the encode draws a dashed tile
     /// with when its bucket has no per-feature patterns.
-    fn update(&mut self, cx: UpdateCx<'_, '_, Self>, tiles: &[FrameTile<'_, Line>]) {
+    fn update(&mut self, cx: UpdateCx<'_, '_, Self>, tiles: &[FrameTile<'_, RenderLineLayer>]) {
         for tile in tiles {
             let Some(bucket) = tile.data() else {
                 continue;
@@ -458,7 +454,7 @@ impl TypedLayer for RenderLineLayer {
     }
 
     // query
-    fn query_intersects_feature(
+    fn hit(
         &self,
         values: &LayerValues<Line>,
         region: &QueryRegion<'_>,
@@ -508,7 +504,7 @@ impl RenderLineLayer {
     fn build_tile(
         &mut self,
         cx: &mut TileCx<'_, '_, Self>,
-        tile_bucket: TileData<'_, Line>,
+        tile_bucket: TileData<'_, RenderLineLayer>,
         binders: &LineBinders,
         evaluated: &LinePaintProperties::PossiblyEvaluated,
         pass: RenderPass,
@@ -631,7 +627,7 @@ impl RenderLineLayer {
     fn uniforms(
         layer: &EvaluatedLayer<Line>,
         tile_id: UnwrappedTileID,
-        tile_bucket: TileData<'_, Line>,
+        tile_bucket: TileData<'_, RenderLineLayer>,
         binders: &LineBinders,
         cached: &LineTile,
         frame: &LayerFrame<'_>,
