@@ -1,0 +1,24 @@
+# A layer type written on mln-rs's `layer` module alone, registered beside
+# `mln_ngon`'s; never released.
+[package]
+name = "mln-rs-example-custom-layer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+include.workspace = true
+publish = false
+
+[[bin]]
+name = "custom-layer"
+path = "src/main.rs"
+doc = false
+
+[dependencies]
+mln-rs = { path = "../.." }
+mln_ngon.workspace = true
+
+[lints]
+workspace = true

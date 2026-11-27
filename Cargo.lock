@@ -2734,6 +2734,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mln-rs-example-custom-layer"
+version = "0.0.18"
+dependencies = [
+ "mln-rs",
+ "mln-rs-ngon",
+]
+
+[[package]]
 name = "mln-rs-expression-test"
 version = "0.0.18"
 dependencies = [

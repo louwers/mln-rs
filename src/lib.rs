@@ -17,6 +17,11 @@
 //! `mln_vulkan::render`. The offline database's errors carry their SQLite or
 //! I/O error code as a `code` key-value.
 //!
+//! A crate that adds a layer type or a source type writes it with what
+//! [`layer`] and [`source`] gather from those crates, and registers it in
+//! the [`RegistryBuilder`](layer::RegistryBuilder) of the map's
+//! [`Registry`](layer::Registry) ([`Runtime::with_registry`]).
+//!
 //! GeoJSON is the `geojson` crate's and feature geometry is `geo_types`'.
 //! Both crates are re-exported.
 //!
@@ -30,6 +35,7 @@ pub use geo_types;
 pub use geojson;
 pub use geometry;
 pub use glam;
+pub mod layer;
 pub use mln_builtins;
 /// Empty except on Windows.
 #[cfg(feature = "d3d12")]
@@ -54,3 +60,4 @@ pub use mln_web_host;
 #[cfg(feature = "webgpu")]
 pub use mln_webgpu;
 pub use polylabel;
+pub mod source;
