@@ -7,6 +7,7 @@
 //! reporting path without a map, with each test's expected image as the
 //! rendered one.
 
+pub mod coverage;
 pub mod file_source;
 mod filesystem;
 mod jobs;

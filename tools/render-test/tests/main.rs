@@ -3,6 +3,9 @@
 
 mod suite;
 
+// A query finds a layer where it draws.
+mod query_coverage;
+
 // --jobs against a run in one process.
 mod jobs;
 // Every test style's layers cross to the worker codec as they went in.
