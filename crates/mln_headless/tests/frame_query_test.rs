@@ -1,5 +1,5 @@
 // A rendered-feature query of a layer of the tests' own type, which draws
-// without a source: it answers from the frame, its hits take the query's
+// without a source: it answers for the view, its hits take the query's
 // filter, `within` included, and they come in the layers' order with a
 // circle layer's.
 

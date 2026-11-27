@@ -1351,9 +1351,9 @@ impl RenderOrchestrator {
         Ok(())
     }
 
-    /// Adds what `geometry` hits of the last frame's drawing of `layers`
-    /// other than their tiles' features ([`Layer::hit_frame`]), over
-    /// `ground` where the frame has terrain, that the query's filter takes,
+    /// Adds what `geometry` hits of what `layers` show other than their
+    /// tiles' features ([`Layer::hit_frame`]), as of the last update, over
+    /// `ground` where the map has terrain, that the query's filter takes,
     /// placed in a tile that holds each feature's geometry.
     ///
     /// [`Layer::hit_frame`]: crate::layer::Layer::hit_frame

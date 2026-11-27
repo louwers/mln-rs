@@ -123,18 +123,24 @@ pub(crate) type QueryResults = HashMap<String, Vec<Feature>>;
 /// query's filter places a feature that has no tile, as `within` and
 /// `distance` need. The geometry's coordinates in the zoom-0 tile, 2^13
 /// units wide, choose the tile exactly down to there, where a unit of the
-/// tile is under a metre.
+/// tile is under a metre. A geometry that reaches past the Mercator world,
+/// as past 85.05° or across the antimeridian, is in the zoom-0 tile, the
+/// only one whose units hold it.
 pub(crate) fn tile_holding(geometry: &geo_types::Geometry<f64>) -> CanonicalTileID {
     const DEEPEST: u8 = 13;
-    let points = convert_geometry_to_tile(geometry, &CanonicalTileID::new(0, 0, 0));
-    let unit = |v: i16| u32::from(v.clamp(0, (constants::EXTENT - 1) as i16).unsigned_abs());
+    let world = CanonicalTileID::new(0, 0, 0);
+    let points = convert_geometry_to_tile(geometry, &world);
+    let inside = 0..constants::EXTENT as i16;
     let (mut min, mut max) = ((u32::MAX, u32::MAX), (0, 0));
     for point in points.iter().flatten() {
-        let (x, y) = (unit(point.x), unit(point.y));
+        if !inside.contains(&point.x) || !inside.contains(&point.y) {
+            return world;
+        }
+        let (x, y) = (u32::from(point.x.unsigned_abs()), u32::from(point.y.unsigned_abs()));
         (min, max) = ((min.0.min(x), min.1.min(y)), (max.0.max(x), max.1.max(y)));
     }
     if min.0 > max.0 {
-        return CanonicalTileID::new(0, 0, 0);
+        return world;
     }
     let tile = |z: u8| (min.0 >> (DEEPEST - z), min.1 >> (DEEPEST - z));
     let holds = |z: u8| tile(z) == (max.0 >> (DEEPEST - z), max.1 >> (DEEPEST - z));
@@ -717,6 +723,10 @@ mod tests {
             |a: (f64, f64), b: (f64, f64)| geo_types::Geometry::LineString(geo_types::LineString::from(vec![a, b]));
         assert_eq!(tile_holding(&line((-1.0, 1.0), (1.0, 1.0))), CanonicalTileID::new(0, 0, 0));
         assert_eq!(tile_holding(&line((-170.0, 80.0), (-100.0, 10.0))), CanonicalTileID::new(1, 0, 0));
+        // Past the Mercator world, near a pole or a world copy away, only the
+        // world's tile holds the coordinates.
+        assert_eq!(tile_holding(&point(0.0, 86.0)), CanonicalTileID::new(0, 0, 0));
+        assert_eq!(tile_holding(&point(190.0, 10.0)), CanonicalTileID::new(0, 0, 0));
         // An empty geometry is placed in the world's tile.
         let empty = geo_types::Geometry::MultiPoint(geo_types::MultiPoint::new(Vec::new()));
         assert_eq!(tile_holding(&empty), CanonicalTileID::new(0, 0, 0));

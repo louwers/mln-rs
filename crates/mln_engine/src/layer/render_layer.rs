@@ -443,7 +443,7 @@ pub struct PrepareCx<'a, 'f, L: Layer> {
 }
 
 impl<'a, L: Layer> PrepareCx<'a, '_, L> {
-    /// The layer's values of the frame.
+    /// The layer's values of the last update.
     #[must_use]
     pub fn values(&self) -> &LayerValues<L::Style> {
         self.values
@@ -486,7 +486,7 @@ pub struct TileCx<'a, 'f, L: Layer> {
 }
 
 impl<'a, L: Layer> TileCx<'a, '_, L> {
-    /// The layer's values of the frame.
+    /// The layer's values of the last update.
     #[must_use]
     pub fn values(&self) -> &LayerValues<L::Style> {
         self.values
@@ -519,7 +519,7 @@ impl<L: Layer> UpdateCx<'_, '_, L> {
         self.parameters.source.and_then(RenderSource::max_zoom)
     }
 
-    /// The layer's values of the frame.
+    /// The layer's values of the last update.
     #[must_use]
     pub fn values(&self) -> &LayerValues<L::Style> {
         self.values
@@ -726,15 +726,18 @@ pub trait Layer: Sized + 'static {
     }
 
     /// Adds to `hits` the features that `query`'s geometry hits of what the
-    /// layer drew in the last frame other than its tiles' features, such as
-    /// a mark it places itself, topmost first. The engine asks a layer that
-    /// the last frame drew, names the features' layer and source, and keeps
+    /// layer shows other than its tiles' features, such as a mark it places
+    /// itself, topmost first. As for tiles' features, a query answers for
+    /// the last update: the engine asks a layer that the update would draw,
+    /// with its view and values, which may come before a frame draws them,
+    /// so a layer answers from `query` rather than from what it kept from
+    /// drawing. The engine names the features' layer and source and keeps
     /// those that the query's filter takes.
     fn hit_frame(&self, _query: &FrameQuery<'_, Self>, _hits: &mut Vec<Feature>) {}
 }
 
-/// A rendered-feature query of a layer `L`, for what it drew in the last
-/// frame other than its tiles' features ([`Layer::hit_frame`]).
+/// A rendered-feature query of a layer `L`, for what it shows other than
+/// its tiles' features, as of the last update ([`Layer::hit_frame`]).
 pub struct FrameQuery<'a, L: Layer> {
     values: &'a LayerValues<L::Style>,
     view: &'a View,
@@ -743,13 +746,13 @@ pub struct FrameQuery<'a, L: Layer> {
 }
 
 impl<'a, L: Layer> FrameQuery<'a, L> {
-    /// The layer's values of the frame.
+    /// The layer's values of the last update.
     #[must_use]
     pub fn values(&self) -> &'a LayerValues<L::Style> {
         self.values
     }
 
-    /// The frame's camera and projection.
+    /// The last update's camera and projection.
     #[must_use]
     pub fn view(&self) -> &'a View {
         self.view
@@ -1083,9 +1086,8 @@ pub trait RenderLayer {
     ) -> bool;
 
     /// See [`Layer::hit_frame`]: what `geometry`, in `view`'s logical pixels,
-    /// hits of the last frame's drawing of the layer, over the frame's
-    /// `ground` where it has terrain. Nothing for a layer the frame didn't
-    /// draw.
+    /// hits of what the layer shows, over `ground` where the map has
+    /// terrain. Nothing for a layer the last update wouldn't draw.
     fn hit_frame(
         &self,
         view: &View,
