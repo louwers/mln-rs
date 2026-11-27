@@ -35,6 +35,7 @@ use crate::draw::draws::{Draw, Draws, LayerFrame};
 use crate::draw::identity::SimpleIdentity;
 use crate::draw::indexes::{DrawIndexes, Indexes, SharedIndexes};
 use crate::draw::objects::{DrawGeometry, Mesh, Textures};
+use crate::draw::resources::Resources;
 use crate::draw::segment::SegmentBase;
 use crate::draw::store::SharedTexture;
 use crate::draw::target::Target;
@@ -245,7 +246,7 @@ fn static_quad<'a>(
 /// ([`static_quad`]).
 fn dem_target(
     previous: Option<DemTarget>,
-    context: &mut Context,
+    res: &mut Resources<'_>,
     dem: &DemContents,
     tile_id: &UnwrappedTileID,
     maxzoom: u8,
@@ -255,9 +256,9 @@ fn dem_target(
         Some(previous) if previous.id == dem.id() && previous.generation == dem.generation() => previous,
         _ => {
             let shader =
-                context.shader_key(&programs::HILLSHADE_PREPARE, Uniforms::default(), ProjectionVariant::Mercator);
+                res.context.shader_key(&programs::HILLSHADE_PREPARE, Uniforms::default(), ProjectionVariant::Mercator);
             let attrs = hillshade_vertex_attributes(vertices);
-            DemTarget::new(context, dem, tile_id, maxzoom, &shader, attrs, indexes)
+            DemTarget::new(res, dem, tile_id, maxzoom, &shader, attrs, indexes)
         }
     }
 }
@@ -330,14 +331,15 @@ impl TypedLayer for RenderHillshadeLayer {
             return None;
         }
         let RenderHillshadeLayer { maxzoom, static_data_shared_vertices, static_data_indices, globe_meshes, .. } = self;
-        let context = &mut *cx.context;
+        let context = &mut *cx.res.context;
         let hillshade_shader =
             context.shader_key(&programs::HILLSHADE, Uniforms::default(), cx.base.projection_variant);
         let quad = static_quad(static_data_shared_vertices, static_data_indices, context);
         let tile_id = tile.draw_id();
         let previous = previous.map(|previous| previous.dem);
-        let target = dem_target(previous, context, dem, &tile_id.to_unwrapped(), *maxzoom, quad);
+        let target = dem_target(previous, &mut cx.res, dem, &tile_id.to_unwrapped(), *maxzoom, quad);
         let target_texture = target.target.texture();
+        let context = &mut *cx.res.context;
 
         let masking = &dem.masking;
         // The tile's geometry: the globe's mesh of its mask, the mask's
@@ -372,14 +374,8 @@ impl TypedLayer for RenderHillshadeLayer {
         };
         let mut textures = Textures::default();
         textures[IMAGE_SLOT] = Some(target_texture.clone());
-        let mesh = Mesh::new(
-            context,
-            hillshade_shader,
-            ColorMode::alpha_blended(),
-            CullFaceMode::disabled(),
-            geometry,
-            textures,
-        );
+        let mesh =
+            cx.res.mesh(hillshade_shader, ColorMode::alpha_blended(), CullFaceMode::disabled(), geometry, textures);
         Some(HillshadeTile { mesh, dem: target })
     }
 
@@ -416,10 +412,10 @@ impl TypedLayer for RenderHillshadeLayer {
             let Some(HillshadeTile { mesh: kept, dem: target }) = cx.tiles.get_mut(&tile.id()) else {
                 continue;
             };
-            let context = &mut *cx.context;
-            if !target.target.holds(context) {
+            if !target.target.holds(&cx.res) {
                 out.target(&target.target).push(&target.prepare, Draw::DEFAULT, target.blocks);
             }
+            let context = &mut *cx.res.context;
             let target_texture = target.target.texture();
             if let Some(mut texture) = context.texture_mut(target_texture) {
                 texture.set_sampler(SamplerState {
@@ -458,7 +454,7 @@ impl DemTarget {
     /// static data, with the uniforms of `tile_id`, the tile it is made for,
     /// of a source of `maxzoom`.
     fn new(
-        context: &mut Context,
+        res: &mut Resources<'_>,
         dem: &DemContents,
         tile_id: &UnwrappedTileID,
         maxzoom: u8,
@@ -471,14 +467,11 @@ impl DemTarget {
             let dem = dem.dem();
             (dem.dim as u16, dem.stride, dem.encoding, dem.image().clone())
         };
-        let target = Target::new(
-            context,
-            Size::new(u32::from(tilesize), u32::from(tilesize)),
-            TextureChannelDataType::UnsignedByte,
-        );
+        let target =
+            res.target(Size::new(u32::from(tilesize), u32::from(tilesize)), TextureChannelDataType::UnsignedByte);
 
         // Nearest, as the Sobel kernel samples exact texel values.
-        let dem = context.add_texture_with(|texture| {
+        let dem = res.context.add_texture_with(|texture| {
             texture.set_image(Some(Rc::new(dem_image)));
             texture.set_sampler(SamplerState {
                 filter: TextureFilterType::Nearest,
@@ -497,8 +490,7 @@ impl DemTarget {
         };
         let mut textures = Textures::default();
         textures[IMAGE_SLOT] = Some(dem.clone());
-        let prepare =
-            Mesh::new(context, shader.clone(), ColorMode::unblended(), CullFaceMode::disabled(), geometry, textures);
+        let prepare = res.mesh(shader.clone(), ColorMode::unblended(), CullFaceMode::disabled(), geometry, textures);
         let extent = f64::from(EXTENT);
         let m =
             orthographic(0.0, extent, -extent, 0.0, -1.0, 1.0) * DMat4::from_translation(DVec3::new(0.0, -extent, 0.0));
