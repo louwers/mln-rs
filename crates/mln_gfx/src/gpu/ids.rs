@@ -48,14 +48,11 @@ ids! {
     ShaderId;
     /// A render pipeline a [`Gpu`](super::Gpu) owns.
     PipelineId;
-    /// The buffers and textures a shader's draws bind, which a
-    /// [`Gpu`](super::Gpu) owns.
+    /// The buffers and textures a shader's draws bind, which a [`Gpu`](super::Gpu) owns.
     BindingsId;
-    /// The vertex and index buffers draws read, which a
-    /// [`Gpu`](super::Gpu) owns.
+    /// The vertex and index buffers draws read, which a [`Gpu`](super::Gpu) owns.
     GeometryId;
-    /// A copy of a texture's texels out of a [`Gpu`](super::Gpu), which
-    /// [`take_readback`](super::Gpu::take_readback) reads.
+    /// A copy of a texture's texels out of a [`Gpu`](super::Gpu), which [`take_readback`](super::Gpu::take_readback) reads.
     ReadbackId;
 }
 
@@ -93,14 +90,10 @@ resource_ids! {
     Readback(ReadbackId),
 }
 
-/// The tag of the next map. 0 is no map's, so a default id names nothing.
-static NEXT_MAP: AtomicU32 = AtomicU32::new(1);
-
-/// A slot map whose ids no other map takes: each map tags its ids, and
-/// looking up an id of another map finds nothing, as looking up one it
-/// removed does. A [`Gpu`](super::Gpu) keeps each kind of resource in one,
-/// so an id of another backend fails with
-/// [`UnknownId`](super::GpuError::UnknownId).
+/// A [`slotmap::SlotMap`] wrapper that tags keys with a per-map identifier.
+///
+/// Lookups using a key from a different `SlotMap` instance return `None`, behaving the same as removed keys.
+/// [`Gpu`](super::Gpu) stores each resource type in its own `SlotMap` so that passing an ID from another backend fails with [`GpuError::UnknownId`](super::GpuError::UnknownId).
 pub struct SlotMap<K, V> {
     map: slotmap::SlotMap<DefaultKey, V>,
     tag: u32,
@@ -111,11 +104,13 @@ impl<K: Id, V> SlotMap<K, V> {
     /// An empty map, with a tag of its own.
     #[must_use]
     pub fn with_key() -> SlotMap<K, V> {
-        let mut tag = 0;
-        while tag == 0 {
-            tag = NEXT_MAP.fetch_add(1, Ordering::Relaxed);
+        static NEXT_MAP: AtomicU32 = AtomicU32::new(0);
+        
+        SlotMap {
+            map: slotmap::SlotMap::with_key(),
+            tag: NEXT_MAP.fetch_add(1, Ordering::Relaxed),
+            key: PhantomData
         }
-        SlotMap { map: slotmap::SlotMap::with_key(), tag, key: PhantomData }
     }
 
     /// The slot of `key`, if this map made it.
