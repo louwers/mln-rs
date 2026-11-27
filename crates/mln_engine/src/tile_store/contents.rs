@@ -560,8 +560,8 @@ impl Contents {
             (Contents::Geometry(contents), ViewPlace::Laid(index)) => {
                 Some((contents.result.layer_render_data.laid(index)?.bucket.id(), [0, 0]))
             }
-            (Contents::Raster(raster), ViewPlace::Own) => Some((raster.id(), [raster.masking.generation(), 0])),
-            (Contents::Dem(dem), ViewPlace::Own) => Some((dem.id(), [dem.masking.generation(), dem.generation()])),
+            (Contents::Raster(raster), ViewPlace::Own) => Some(raster.stamp()),
+            (Contents::Dem(dem), ViewPlace::Own) => Some(dem.stamp()),
             _ => None,
         }
     }

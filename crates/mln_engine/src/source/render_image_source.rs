@@ -18,6 +18,7 @@ use crate::camera::tile_coordinate::TileCoordinatePoint;
 use crate::draw::context::Context;
 use crate::draw::identity::SimpleIdentity;
 use crate::draw::segment::SegmentBase;
+use crate::layer::layer_drawing::MadeFrom;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::log_target;
 use crate::render::tile::{RenderTile, TileContent};
@@ -241,10 +242,11 @@ impl ImageTile {
         self.id
     }
 
-    /// The number of times the mesh changed.
+    /// What a layer's value of the tile is made from: its identity, with
+    /// the number of times its mesh changed.
     #[must_use]
-    pub(crate) fn generation(&self) -> u64 {
-        self.generation
+    pub(crate) fn stamp(&self) -> MadeFrom {
+        (self.id, [self.generation, 0])
     }
 
     /// Whether the tile has a mesh.

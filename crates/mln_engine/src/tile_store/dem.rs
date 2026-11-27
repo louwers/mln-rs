@@ -5,6 +5,7 @@
 //! its border and theirs.
 
 use crate::draw::identity::SimpleIdentity;
+use crate::layer::layer_drawing::MadeFrom;
 use crate::tile::OverscaledTileID;
 use crate::tile::dem_data::DEMData;
 use crate::tile_store::contents::Contents;
@@ -44,6 +45,14 @@ impl DemContents {
     #[must_use]
     pub(crate) fn generation(&self) -> u64 {
         self.generation
+    }
+
+    /// What a layer's value of a tile of these contents is made from: their
+    /// identity, with the generations of their mask and of their DEM's
+    /// border.
+    #[must_use]
+    pub(crate) fn stamp(&self) -> MadeFrom {
+        (self.id, [self.masking.generation(), self.generation])
     }
 
     /// Whether there is a DEM to draw.

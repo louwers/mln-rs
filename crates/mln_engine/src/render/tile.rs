@@ -115,7 +115,7 @@ impl TileContent<'_> {
     pub(crate) fn stamp(self, place: ViewPlace) -> Option<(SimpleIdentity, [u64; 2])> {
         match (self, place) {
             (TileContent::Tile(contents), place) => contents.stamp(place),
-            (TileContent::Image(image), ViewPlace::Own) => Some((image.id(), [image.generation(), 0])),
+            (TileContent::Image(image), ViewPlace::Own) => Some(image.stamp()),
             (TileContent::Image(_), ViewPlace::Laid(_)) => None,
         }
     }
@@ -199,10 +199,6 @@ pub(crate) struct FrameTile<'a, T: LayerType> {
     /// one by the drape's.
     wrap: i16,
     data: Option<TileData<'a, T>>,
-    /// What `data` is made of, which the layer's value of the tile is made
-    /// from ([`TileContent::stamp`]); `None` in the frame's update, which
-    /// makes no values ([`find`](Self::find)).
-    made_from: Option<MadeFrom>,
 }
 
 impl<T: LayerType> Clone for FrameTile<'_, T> {
@@ -223,7 +219,7 @@ impl<'a, T: LayerType> FrameTile<'a, T> {
         layer_id: &str,
     ) -> (Self, Option<ViewPlace>) {
         let found = content.and_then(|content| T::Input::find(content, layer_id));
-        let frame_tile = FrameTile { tile, wrap: tile.id.wrap, data: found.map(|(data, _)| data), made_from: None };
+        let frame_tile = FrameTile { tile, wrap: tile.id.wrap, data: found.map(|(data, _)| data) };
         (frame_tile, found.map(|(_, place)| place))
     }
 
@@ -240,8 +236,7 @@ impl<'a, T: LayerType> FrameTile<'a, T> {
         let data = content.zip(view).and_then(|(content, place)| T::Input::at(content, place));
         debug_assert_eq!(data.is_some(), view.is_some(), "a tile's contents changed since the frame's update");
         debug_assert!(data.is_none_or(|data| T::Input::is_for(data, layer_id)), "a layer found at another's place");
-        let made_from = content.zip(view).and_then(|(content, place)| content.stamp(place));
-        FrameTile { tile, wrap: tile.id.wrap, data, made_from }
+        FrameTile { tile, wrap: tile.id.wrap, data }
     }
 
     /// The tile, drawn in the world copy `wrap`.
@@ -251,10 +246,9 @@ impl<'a, T: LayerType> FrameTile<'a, T> {
     }
 
     /// What the layer's value of the tile is made from, if the tile holds
-    /// anything for the layer, for a tile of the encode
-    /// ([`at`](Self::at)).
+    /// anything for the layer ([`TileContent::stamp`]).
     pub(crate) fn made_from(self) -> Option<MadeFrom> {
-        self.made_from.filter(|_| self.data.is_some())
+        self.data.map(T::Input::made_from)
     }
 
     /// What the tile holds for the layer, if anything.

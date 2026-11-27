@@ -8,6 +8,7 @@ use mln_style::bitmap::PremultipliedImage;
 use mln_style::tile_id::CanonicalTileID;
 
 use crate::draw::identity::SimpleIdentity;
+use crate::layer::layer_drawing::MadeFrom;
 use crate::tile_store::tile_mask::{TileMask, is_whole};
 
 /// The mask that keeps a tile's whole extent.
@@ -94,6 +95,13 @@ impl RasterContents {
     #[must_use]
     pub(crate) fn id(&self) -> SimpleIdentity {
         self.id
+    }
+
+    /// What a layer's value of a tile of these contents is made from: their
+    /// identity, with the generation of their mask.
+    #[must_use]
+    pub(crate) fn stamp(&self) -> MadeFrom {
+        (self.id, [self.masking.generation(), 0])
     }
 }
 
