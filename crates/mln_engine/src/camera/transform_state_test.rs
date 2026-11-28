@@ -338,26 +338,26 @@ fn matrices_without_terrain_are_unchanged() {
         ),
         (
             alpine(true),
-            11_984.201_437_014_68,
+            8_664.047_339_519_044,
             [
                 1.784_059_983_608_735_4,
                 0.661_384_306_806_117_8,
-                0.326_244_849_466_331_03,
+                0.326_265_714_345_566_5,
                 0.326_190_408_187_028_27,
                 0.833_051_235_020_185_3,
                 -0.450_162_381_905_947_7,
-                -0.896_350_357_122_117,
+                -0.896_407_682_906_675_9,
                 -0.896_200_780_936_546_3,
                 -0.024_527_372_501_201_117,
                 0.261_315_976_530_130_6,
-                -0.027_190_411_128_499_33,
+                -0.027_192_150_082_065_91,
                 -0.027_185_873_797_813_42,
                 -3_057_312.553_228_450_5,
                 -463_638.868_611_956_83,
-                366_399.688_152_04,
+                366_423.121_184_385_4,
                 366_340.545_969_311_15,
             ],
-            [0.327_772_902_950_878_3, -0.900_548_649_566_629_4, -0.027_317_764_564_236_752, 368_059.686_218_946_76],
+            [0.328_381_368_228_238_8, -0.902_220_394_176_699_6, -0.027_368_476_233_941, 368_742.992_198_596_5],
         ),
     ];
     for (mut state, far_z, projection, clipped_z) in expected {
@@ -372,7 +372,7 @@ fn matrices_without_terrain_are_unchanged() {
             assert_same(&clipped_z, &clipped);
 
             let before = view.clone();
-            state.set_terrain_min_elevation(Some(-120.0));
+            state.set_terrain_min_elevation(Some(-2000.0));
             assert_ne!(before.far_z(), state.view().far_z());
             state.set_terrain_min_elevation(None);
             assert_eq!(before, *state.view());
@@ -610,6 +610,44 @@ fn terrain_planes_are_gl_js_planes() {
         let far_z = view.far_z();
         assert!((far_z - case.far_z).abs() <= case.far_z * 1e-12, "{far_z} vs {}", case.far_z);
         assert_eq!(view.projection_matrix_with(view.near_z(), false), view.projection_matrix());
+    }
+}
+
+/// Without terrain the far plane is GL JS's too, with the ground at sea
+/// level: from a camera less than 100 m up it reaches the plane 100 m below
+/// the camera, and from higher up, sea level. The numbers come from GL JS's
+/// function run on the same cameras, with the WGS84 radius for the pixels
+/// per meter.
+#[test]
+fn flat_far_planes_are_gl_js_planes() {
+    // Each view's size, latitude, zoom and pitch, and GL JS's far plane.
+    let cases = [
+        // A street at pitch 85, the camera 12.6 m up.
+        (Size::new(400, 600), 40.7265, 18.5, 85.0, 48_092.474_873_440_81),
+        // The fill extrusion render tests' view, the camera 57 m up.
+        (Size::new(512, 256), 0.0, 18.0, 60.0, 1_600.688_938_664_939_8),
+        // A camera 631 m up, over sea level.
+        (Size::new(512, 512), 46.5, 15.0, 60.0, 1_835.278_585_207_511_7),
+    ];
+    for (size, latitude, zoom, pitch, expected) in cases {
+        let state = MapView {
+            camera: Camera {
+                center: LatLng::new(latitude, -73.99).unwrap(),
+                zoom,
+                bearing: 20.0,
+                pitch,
+                fov: mln_style::math::rad2deg(DEFAULT_FOV),
+                ..Camera::default()
+            },
+            extent: LogicalExtent::new(size, 1.0),
+            projection_mode: ProjectionMode::default(),
+            viewport: Viewport::default(),
+            projection: ProjectionDefinition::default(),
+        }
+        .to_state()
+        .unwrap();
+        let far_z = state.view().far_z();
+        assert!((far_z - expected).abs() <= expected * 1e-12, "zoom {zoom}, pitch {pitch}: {far_z} vs {expected}");
     }
 }
 

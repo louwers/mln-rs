@@ -652,36 +652,6 @@ impl View {
         }
     }
 
-    /// The distance from the camera to the far plane of the projection
-    /// matrix, in pixels at the zoom: past the farthest point of the ground
-    /// that the view shows, down to the terrain's lowest ground while it
-    /// draws.
-    #[must_use]
-    pub(crate) fn far_z(&self) -> f64 {
-        match self.params.terrain_min_elevation {
-            Some(min_elevation) => self.terrain_far_z(min_elevation),
-            None => self.flat_far_z(),
-        }
-    }
-
-    /// The far plane over a flat map, with the center at its altitude.
-    fn flat_far_z(&self) -> f64 {
-        let camera_to_center_distance = self.camera_to_center_distance();
-
-        let limited_pitch = mln_style::math::clamp_f64(self.params.pitch, 0.0, max_mercator_horizon_angle());
-        let camera_to_sea_level_distance =
-            camera_to_center_distance + self.center_altitude_pixels().abs() / limited_pitch.cos();
-
-        let tan_multiple = mln_style::math::clamp_f64(self.tan_fov_above_center() * limited_pitch.tan(), 0.0, 0.99);
-        let horizon_multiple =
-            mln_style::math::clamp_f64(self.fov_center_to_horizon().tan() * limited_pitch.tan(), 0.0, 0.99);
-
-        // The distance to the farthest fragment that is drawn, and a little
-        // more, for the precision of a fragment exactly there.
-        let furthest_distance = camera_to_sea_level_distance / (1.0 - tan_multiple.min(horizon_multiple));
-        furthest_distance * 1.01
-    }
-
     /// GL JS's `cameraToSeaLevelDistance`, in pixels at the zoom: how far
     /// the camera is from sea level along the view, past the center by its
     /// altitude, at the pitch up to the horizon's limit, and at least half
@@ -696,22 +666,25 @@ impl View {
         )
     }
 
-    /// GL JS's far plane (`calculateNearFarZ`) over ground that reaches down
-    /// to `min_elevation` meters: it fits the lowest of that, the center and
-    /// 100 meters below the camera. The frustum offset shortens it as it
-    /// does the flat map's.
-    fn terrain_far_z(&self, min_elevation: f64) -> f64 {
+    /// The distance from the camera to the far plane of the projection
+    /// matrix, in pixels at the zoom, as GL JS's `calculateNearFarZ` places
+    /// it: where the top of the view or the horizon, whichever is nearer,
+    /// meets the plane of the lowest of the center, the ground and 100 m
+    /// below the camera. The ground is sea level, or the terrain's lowest
+    /// ground while terrain draws. The frustum offset shortens it.
+    #[must_use]
+    pub(crate) fn far_z(&self) -> f64 {
         let params = &self.params;
         let camera_to_center_distance = self.camera_to_center_distance();
         let pixels_per_meter = 1.0 / self.meters_per_pixel();
 
         // Heights in pixels at the zoom.
+        let ground = params.terrain_min_elevation.unwrap_or(0.0) * pixels_per_meter;
         let center_altitude = self.center_altitude_pixels();
         let limited_pitch = params.pitch.min(max_mercator_horizon_angle());
         let camera_to_sea_level_distance = self.camera_to_sea_level_distance();
         let camera_altitude = params.pitch.cos() * camera_to_center_distance + center_altitude;
-        let lowest =
-            center_altitude.min(min_elevation * pixels_per_meter).min(camera_altitude - 100.0 * pixels_per_meter);
+        let lowest = center_altitude.min(ground).min(camera_altitude - 100.0 * pixels_per_meter);
         let lowest_plane = if lowest < 0.0 {
             camera_to_sea_level_distance - lowest / limited_pitch.cos()
         } else {
