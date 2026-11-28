@@ -3,9 +3,13 @@
 
 mod support;
 
+// Where the projection puts places with the camera past the antimeridian.
+mod antimeridian;
 mod camera;
 // The limits on the camera, and the areas that cameras show.
 mod camera_bounds;
+// The cameras that fit bounds, coordinates and geometries.
+mod camera_fit;
 mod commands;
 // Image sources whose corners make a concave quad.
 mod concave_image;
@@ -33,6 +37,8 @@ mod globe;
 mod globe_precision;
 // Hillshades over DEM tiles that the tests make.
 mod hillshade;
+// Image sources: where they draw, and those without an image yet.
+mod image_sources;
 // Layers that change after they drew.
 mod layer_updates;
 // A layer that draws with the backend's own commands, which the frame lends it.
@@ -40,6 +46,10 @@ mod lent_commands;
 // Maps whose scale factor changes.
 mod pixel_ratio;
 mod placement;
+// Rendered and source queries through filters, global state and zoom.
+mod queries;
+// The images that layers ask for, and the names that are no image.
+mod requested_images;
 // Maps whose size changes.
 mod resize;
 mod resources;
@@ -53,6 +63,8 @@ mod stencil_overflow;
 mod style;
 // The style's images, as icons and patterns.
 mod style_images;
+// Styles from the cache and the network, and what they report and request.
+mod style_loading;
 mod surfaces;
 mod surfaces_win32;
 mod surfaces_window;
@@ -65,6 +77,8 @@ mod terrain_globe;
 mod terrain_hillshade;
 // Layers that stand on terrain.
 mod terrain_standing;
+// The tiles that a map loads for its view, and what it draws meanwhile.
+mod tile_loading;
 // The order in which a frame stacks overlapping tiles.
 mod tile_order;
 // What layers hold and draw as they leave their zoom range.
