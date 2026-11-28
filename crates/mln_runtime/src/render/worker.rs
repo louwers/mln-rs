@@ -111,6 +111,9 @@ pub(crate) struct Init {
     pub(crate) registry: Arc<Registry>,
     /// Whether the renderer keeps tiles that left the view.
     pub(crate) tile_cache_enabled: bool,
+    /// How many worker instances behind the worker codec the renderer's
+    /// tile workers run in, or 0 for `pool`.
+    pub(crate) tile_worker_instances: usize,
     /// How the renderer draws glyphs from local fonts.
     pub(crate) local_glyphs: LocalGlyphs,
     /// Why the session's device couldn't be made before the build: in the
@@ -243,6 +246,8 @@ struct Gfx {
     local_glyphs: LocalGlyphs,
     /// Where the renderer's background work runs (`Init`).
     pool: Pool,
+    /// The worker instances of the renderer's tile workers (`Init`).
+    tile_worker_instances: usize,
 }
 
 impl Gfx {
@@ -261,6 +266,7 @@ impl Gfx {
             font_face_engine,
             registry,
             tile_cache_enabled,
+            tile_worker_instances,
             local_glyphs,
             failure,
             pool,
@@ -278,7 +284,8 @@ impl Gfx {
                 LocalTarget::exported(device, &ring, kind, size, producer)?
             }
         };
-        let mut gfx = Gfx { target, glyph_cache, font_face_engine, registry, local_glyphs, pool };
+        let mut gfx =
+            Gfx { target, glyph_cache, font_face_engine, registry, local_glyphs, pool, tile_worker_instances };
         gfx.make_renderer(events, pixel_ratio, tile_cache_enabled);
         Ok(gfx)
     }
@@ -287,7 +294,7 @@ impl Gfx {
     /// `events`, draws at `pixel_ratio` and keeps tiles that left the view
     /// when `tile_cache_enabled` says so.
     fn make_renderer(&mut self, events: &RendererEvents, pixel_ratio: f32, tile_cache_enabled: bool) {
-        let Gfx { target, glyph_cache, font_face_engine, registry, local_glyphs, pool } = self;
+        let Gfx { target, glyph_cache, font_face_engine, registry, local_glyphs, pool, tile_worker_instances } = self;
         target.renderer_or(|gpu| {
             let mut renderer = Renderer::with_fonts(
                 gpu,
@@ -301,7 +308,7 @@ impl Gfx {
             );
             renderer.set_tile_cache_enabled(tile_cache_enabled);
             renderer.set_event_queue(Some(events.clone()));
-            set_tile_workers(&mut renderer, registry);
+            set_tile_workers(&mut renderer, registry, *tile_worker_instances);
             renderer
         });
     }
@@ -316,14 +323,24 @@ fn invalidate(events: &RendererEvents) -> Waker {
 
 /// In the browser, puts the renderer's tile workers in the instance's Web
 /// Workers, which lay out with `registry`. Elsewhere they stay on the
-/// background threads.
-fn set_tile_workers(renderer: &mut Renderer, registry: &Arc<Registry>) {
+/// background threads, unless `instances` puts them in that many worker
+/// instances behind the worker codec, as the browser's are.
+fn set_tile_workers(renderer: &mut Renderer, registry: &Arc<Registry>, instances: usize) {
     #[cfg(target_family = "wasm")]
-    if let Some(workers) = crate::web::tile_workers(registry) {
-        renderer.set_tile_workers(workers);
+    {
+        let _ = instances;
+        if let Some(workers) = crate::web::tile_workers(registry) {
+            renderer.set_tile_workers(workers);
+        }
     }
     #[cfg(not(target_family = "wasm"))]
-    let _ = (renderer, registry);
+    if instances > 0 {
+        use mln_engine::worker::worker_codec::{RemoteWorkers, ThreadWorkerInstances};
+        let layout = Arc::clone(registry);
+        renderer.set_tile_workers(RemoteWorkers::new(Arc::clone(registry), move |replies| {
+            Box::new(ThreadWorkerInstances::new(instances, layout, &replies))
+        }));
+    }
 }
 
 /// A host's frame demand on its way, and the last command sent before it.
