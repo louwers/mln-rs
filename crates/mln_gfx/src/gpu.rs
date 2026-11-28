@@ -540,10 +540,14 @@ pub struct DynamicState {
     pub line_width: f32,
 }
 
+/// The largest [`Draw::base_vertex`]. Apple's paravirtual GPU, that of macOS
+/// virtual machines, draws nothing at a base vertex past it.
+pub const MAX_BASE_VERTEX: i32 = u16::MAX as i32;
+
 /// A draw of `index_count` of the geometry's indices from `first_index`,
-/// offset by `base_vertex`, for each of `instance_count` instances from
-/// `first_instance`. A vertex's index, as a shader reads it, includes
-/// `base_vertex`.
+/// offset by `base_vertex`, from 0 to [`MAX_BASE_VERTEX`], for each of
+/// `instance_count` instances from `first_instance`. A vertex's index, as a
+/// shader reads it, includes `base_vertex`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Draw {
     pub pipeline: PipelineId,

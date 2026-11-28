@@ -114,6 +114,57 @@ impl Entries {
     }
 }
 
+/// The vertex that the geometry of a segment from `vertex_offset` starts its
+/// vertex buffers at, and the base vertex the segment draws at. A mesh with
+/// per-vertex attributes starts them at the segment and draws at base vertex
+/// 0, since a bucket's later segments start past [`MAX_BASE_VERTEX`]. One
+/// without, whose shader reads vertices by index, draws at the segment's
+/// vertex offset.
+///
+/// [`MAX_BASE_VERTEX`]: mln_gfx::gpu::MAX_BASE_VERTEX
+fn segment_start(slots: &[VertexSlot], vertex_offset: usize) -> (usize, i32) {
+    if slots.iter().any(|slot| slot.layout.step == VertexStep::Vertex) {
+        (vertex_offset, 0)
+    } else {
+        (0, vertex_offset as i32)
+    }
+}
+
+/// The vertex a mesh's segments start at ([`segment_start`]), and the
+/// geometry whose per-vertex buffers start there ([`segment_geometry`]).
+type SegmentGeometry = (usize, Owned<GeometryId>);
+
+/// The geometry of `slots`, with `index_buffer`, whose per-vertex buffers
+/// start `start` vertices into theirs, holding what it is made of.
+#[expect(clippy::too_many_arguments, reason = "the parts of a mesh that its geometry is made of")]
+fn segment_geometry(
+    gpu: &mut dyn Gpu,
+    context: &Context,
+    shader: ShaderId,
+    layouts: &[VertexBufferLayout],
+    slots: &[VertexSlot],
+    index_buffer: BufferId,
+    index_held: Option<Held>,
+    start: usize,
+) -> Result<Owned<GeometryId>, GpuError> {
+    // On the stack: the geometry's handles take the allocation.
+    let mut buffers = [(BufferId::default(), 0); MAX_VERTEX_BUFFERS];
+    for (buffer, slot) in buffers.iter_mut().zip(slots) {
+        let skipped = match slot.layout.step {
+            VertexStep::Vertex => start as u64 * u64::from(slot.layout.stride),
+            VertexStep::Instance => 0,
+        };
+        *buffer = (slot.buffer, slot.offset + skipped);
+    }
+    let geometry =
+        gpu.create_geometry(&GeometryDesc { shader, layouts, vertex_buffers: &buffers[..slots.len()], index_buffer })?;
+    // Of the exact length: geometry is made as tiles come.
+    let len = slots.iter().filter(|slot| slot.held.is_some()).count() + usize::from(index_held.is_some());
+    let mut held = Vec::with_capacity(len);
+    held.extend(slots.iter().filter_map(|slot| slot.held.clone()).chain(index_held));
+    Ok(context.own(geometry, held))
+}
+
 /// A vertex buffer a draw binds, what keeps it where others share it, and
 /// how its pipeline reads it.
 struct VertexSlot {
@@ -345,9 +396,9 @@ pub(crate) struct DrawObjects {
     /// The vertex buffer layouts of the vertex slots the pipelines were made
     /// for.
     pipeline_layouts: Vec<VertexBufferLayout>,
-    /// The geometry of its vertex slots and the index buffer it was made
-    /// with.
-    geometry: Option<(Owned<GeometryId>, BufferId)>,
+    /// The index buffer its geometry was made with, and the geometry of its
+    /// vertex slots from each vertex its segments start at.
+    geometry: Option<(BufferId, Vec<SegmentGeometry>)>,
     /// Gives it the textures of its tile's atlases before each draw.
     atlases: Option<AtlasBinding>,
 }
@@ -549,31 +600,10 @@ impl DrawObjects {
             }
             self.vertex_slots.insert(slots)
         };
-        let geometry = match &self.geometry {
-            Some((geometry, indices)) if *indices == index_buffer => geometry.id(),
-            _ => {
-                self.geometry = None;
-                // On the stack: the geometry's handles take the allocation.
-                let mut buffers = [(BufferId::default(), 0); MAX_VERTEX_BUFFERS];
-                for (buffer, slot) in buffers.iter_mut().zip(slots) {
-                    *buffer = (slot.buffer, slot.offset);
-                }
-                let geometry = gpu.create_geometry(&GeometryDesc {
-                    shader: shader_id,
-                    layouts: &self.pipeline_layouts,
-                    vertex_buffers: &buffers[..slots.len()],
-                    index_buffer,
-                })?;
-                let index_held = self.indexes.held();
-                // Of the exact length: geometry is made as tiles come.
-                let len = slots.iter().filter(|slot| slot.held.is_some()).count() + usize::from(index_held.is_some());
-                let mut held = Vec::with_capacity(len);
-                held.extend(slots.iter().filter_map(|slot| slot.held.clone()).chain(index_held));
-                self.geometry = Some((context.own(geometry, held), index_buffer));
-                geometry
-            }
+        let geometries = match &mut self.geometry {
+            Some((indices, geometries)) if *indices == index_buffer => geometries,
+            geometry => &mut geometry.insert((index_buffer, Vec::new())).1,
         };
-
         let full = Scissor { x: 0, y: 0, width: size.width, height: size.height };
         let dynamic = DynamicState {
             depth_range: depth_mode.range,
@@ -605,13 +635,31 @@ impl DrawObjects {
                 id
             };
             let line_width = if mode.primitive_type() == PrimitiveType::Line { mode.size } else { 1.0 };
+            let (start, base_vertex) = segment_start(slots, segment.vertex_offset);
+            let geometry = if let Some((_, geometry)) = geometries.iter().find(|(at, _)| *at == start) {
+                geometry.id()
+            } else {
+                let geometry = segment_geometry(
+                    gpu,
+                    context,
+                    shader_id,
+                    &self.pipeline_layouts,
+                    slots,
+                    index_buffer,
+                    self.indexes.held(),
+                    start,
+                )?;
+                let id = geometry.id();
+                geometries.push((start, geometry));
+                id
+            };
             gpu.draw(&Draw {
                 pipeline,
                 bindings,
                 geometry,
                 first_index: segment.index_offset as u32,
                 index_count: segment.index_length as u32,
-                base_vertex: segment.vertex_offset as i32,
+                base_vertex,
                 first_instance: segment.base_instance as u32,
                 instance_count: segment.instance_count as u32,
                 global_index,

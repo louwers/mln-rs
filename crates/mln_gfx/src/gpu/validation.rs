@@ -13,8 +13,8 @@
 
 use super::{
     BindGroupEntry, BindingsDesc, BindingsId, BufferId, BufferUsage, Draw, GeometryDesc, GeometryId, GpuError,
-    PassDesc, PipelineId, ResourceId, SamplerId, ShaderId, TargetFormats, TextureDesc, TextureFormat, TextureId,
-    TextureRegion, TextureUsage, VertexBufferLayout, VertexStep,
+    MAX_BASE_VERTEX, PassDesc, PipelineId, ResourceId, SamplerId, ShaderId, TargetFormats, TextureDesc, TextureFormat,
+    TextureId, TextureRegion, TextureUsage, VertexBufferLayout, VertexStep,
 };
 use crate::size::Size;
 use crate::util_hash::HashMap;
@@ -386,8 +386,9 @@ pub struct GeometryTags {
 /// Checks `draw`, into a pass over attachments of `targets` (`None` where
 /// one has a format with no [`TextureFormat`]), of a pipeline, bindings and
 /// geometry of these tags: they were made for one shader and layout, the
-/// pipeline for the attachments, and the draw's indices, instances and
-/// global index are inside them.
+/// pipeline for the attachments, the draw's indices, instances and global
+/// index are inside them, and its base vertex is from 0 to
+/// [`MAX_BASE_VERTEX`].
 pub fn check_draw(
     draw: &Draw,
     targets: Option<TargetFormats>,
@@ -403,6 +404,9 @@ pub fn check_draw(
     }
     if geometry.layout != pipeline.layout {
         return Err(GpuError::Invalid("geometry of other vertex layouts than the pipeline's".to_owned()));
+    }
+    if !(0..=MAX_BASE_VERTEX).contains(&draw.base_vertex) {
+        return Err(GpuError::Invalid(format!("a base vertex of {}", draw.base_vertex)));
     }
     let past = |first: u32, count: u32, limit: u32| u64::from(first) + u64::from(count) > u64::from(limit);
     if draw.index_count > 0 && past(draw.first_index, draw.index_count, geometry.ranges.indices) {
@@ -636,6 +640,9 @@ mod tests {
         assert!(check(draw, geometry).is_ok());
         assert!(check(Draw { first_index: 1, ..draw }, geometry).is_err(), "past the indices");
         assert!(check(Draw { global_index: 2, ..draw }, geometry).is_err(), "past the elements");
+        assert!(check(Draw { base_vertex: MAX_BASE_VERTEX, ..draw }, geometry).is_ok());
+        assert!(check(Draw { base_vertex: MAX_BASE_VERTEX + 1, ..draw }, geometry).is_err(), "past the base vertices");
+        assert!(check(Draw { base_vertex: -1, ..draw }, geometry).is_err(), "a negative base vertex");
         assert!(check(draw, GeometryTags { layout: 1, ..geometry }).is_err(), "another layout");
         let srgb = TargetFormats { color: Some(TextureFormat::Rgba8UnormSrgb), ..targets };
         assert!(check_draw(&draw, Some(srgb), &pipeline, &bindings, &geometry).is_err(), "other targets");

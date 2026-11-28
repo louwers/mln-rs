@@ -1,9 +1,9 @@
 use std::mem::offset_of;
 
 use mln_engine::draw::{
-    AtlasBinding, Composite, Context, Depth, Draw, DrawGeometry, DrawIndexes, Draws, Group, Indexes, LayerFrame, Mesh,
-    RenderPass, RenderStaticData, SegmentBase, SharedAttribute, SharedIndexes, Texture2D, Uniforms,
-    VertexAttributeArray, cast_matrix, copy_shared_attributes, projection_data, refresh_paint_attributes,
+    AtlasBinding, Composite, Context, Depth, Draw, DrawGeometry, DrawIndexes, Draws, Group, Indexes, LayerFrame,
+    MAX_INDEXED_QUADS, Mesh, RenderPass, RenderStaticData, SegmentBase, SharedAttribute, SharedIndexes, Texture2D,
+    Uniforms, VertexAttributeArray, cast_matrix, copy_shared_attributes, projection_data, refresh_paint_attributes,
     to_projection_ubo,
 };
 use mln_engine::layer::binders::PaintBinders as _;
@@ -73,11 +73,13 @@ enum Outlines {
 }
 
 impl Outlines {
-    /// How the outlines of a layer draw on `context`'s device.
-    fn of(context: &Context, pattern: bool) -> Outlines {
+    /// How the outlines of a layer's tile of `vertices` fill vertices draw
+    /// on `context`'s device. Pulled outlines of more than
+    /// [`MAX_INDEXED_QUADS`] would draw past the largest base vertex.
+    fn of(context: &Context, pattern: bool, vertices: usize) -> Outlines {
         if !draws_outline_quads(context.caps()) {
             Outlines::Lines
-        } else if context.caps().binds_vertex_buffers && !pattern {
+        } else if context.caps().binds_vertex_buffers && !pattern && vertices <= MAX_INDEXED_QUADS {
             Outlines::Pulled
         } else {
             Outlines::Instanced
@@ -578,7 +580,7 @@ impl Layer for RenderFillLayer {
         let render_data = tile.data_for_pass(RENDER_PASS)?;
         let binders = render_data.bucket.paint_property_binders.get(&cx.base.style.base().id)?;
         let pattern = !cx.values.unevaluated.fill_pattern.is_undefined();
-        let outlines = Outlines::of(cx.res.context, pattern);
+        let outlines = Outlines::of(cx.res.context, pattern, render_data.bucket.vertices.len());
         // The outlines draw as lines, or as quads on a device that draws no
         // `LINE_WIDTH` lines and rasterizes on the GPU.
         let (fill_program, outline_program) = match (pattern, outlines) {

@@ -34,6 +34,8 @@ mod gtest_symbol_rendering;
 mod gtest_tile_lod;
 // A hillshade's shading of a plane slope.
 mod hillshade_test;
+// Buckets of more vertices than a draw's base vertex reaches.
+mod large_bucket_test;
 // A layer that draws with the backend's own commands, which the frame lends it.
 mod lent_commands_test;
 // gtests-data: test/text/local_glyph_rasterizer.test.cpp (renders a map

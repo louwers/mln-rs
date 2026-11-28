@@ -35,9 +35,10 @@ use std::mem::offset_of;
 use mln_engine::camera::View;
 use mln_engine::draw::ground::{FrameGround, GroundHeights, height_attribute};
 use mln_engine::draw::{
-    AtlasBinding, Composite, Context, Depth, Draw, DrawGeometry, Draws, EvaluatedLight, Indexes, LayerFrame, Mesh,
-    RenderPass, RenderStaticData, SegmentBase, SharedAttribute, SharedIndexes, SharedVertices, Texture2D, Uniforms,
-    VertexAttributeArray, cast_matrix, copy_shared_attributes, projection_data, to_projection_ubo, zero_to_one_clip_z,
+    AtlasBinding, Composite, Context, Depth, Draw, DrawGeometry, Draws, EvaluatedLight, Indexes, LayerFrame,
+    MAX_INDEXED_QUADS, Mesh, RenderPass, RenderStaticData, SegmentBase, SharedAttribute, SharedIndexes, SharedVertices,
+    Texture2D, Uniforms, VertexAttributeArray, cast_matrix, copy_shared_attributes, projection_data, to_projection_ubo,
+    zero_to_one_clip_z,
 };
 use mln_engine::layer::binders::PaintBinders as _;
 use mln_engine::layer::{
@@ -205,16 +206,24 @@ enum Walls {
 }
 
 impl Walls {
-    /// How the walls of a layer draw on `context`'s device.
-    fn of(context: &Context, has_pattern: bool) -> Walls {
+    /// How the walls of a layer's tile of `vertices` bucket vertices draw on
+    /// `context`'s device. Pulled walls of more than [`MAX_INDEXED_QUADS`]
+    /// would draw past the largest base vertex.
+    fn of(context: &Context, has_pattern: bool, vertices: usize) -> Walls {
         if !instanced_walls(context.caps()) {
             Walls::Quads
-        } else if context.caps().binds_vertex_buffers && !has_pattern {
+        } else if context.caps().binds_vertex_buffers && !has_pattern && wall_count(vertices) <= MAX_INDEXED_QUADS {
             Walls::Pulled
         } else {
             Walls::Instanced
         }
     }
+}
+
+/// The walls of a bucket of `vertices` vertices: one from each vertex to the
+/// next, but from the last, which ends a ring.
+fn wall_count(vertices: usize) -> usize {
+    vertices.saturating_sub(1)
 }
 
 /// Where the shader of the pulled walls finds a vertex's paint values in
@@ -379,7 +388,7 @@ impl Layer for RenderFillExtrusionLayer {
         let render_data = tile.data_for_pass(RENDER_PASS)?;
         let binders = render_data.bucket.paint_property_binders.get(cx.base.style.base().id.as_str())?;
         let has_pattern = !cx.values.unevaluated.fill_extrusion_pattern.is_undefined();
-        let walls = Walls::of(cx.res.context, has_pattern);
+        let walls = Walls::of(cx.res.context, has_pattern, render_data.bucket.vertices.len());
         let (program, wall_program) = match (has_pattern, walls) {
             (false, Walls::Instanced) => (&programs::FILL_EXTRUSION, &programs::FILL_EXTRUSION_INSTANCED),
             (false, Walls::Quads) => (&programs::FILL_EXTRUSION, &programs::FILL_EXTRUSION_WALL),
@@ -428,7 +437,6 @@ impl Layer for RenderFillExtrusionLayer {
         out: &mut Draws,
     ) {
         let has_pattern = !cx.values.unevaluated.fill_extrusion_pattern.is_undefined();
-        let walls = Walls::of(cx.res.context, has_pattern);
         let layer = &*cx.values.evaluated;
         let opacity = opacity(layer);
         let composite = composite(layer, has_pattern, cx.frame);
@@ -455,6 +463,7 @@ impl Layer for RenderFillExtrusionLayer {
                 continue;
             };
             let context = &mut *cx.res.context;
+            let walls = Walls::of(context, has_pattern, bucket.vertices.len());
             if changes.paint {
                 cached.refresh_paint(context, walls, render_data, binders, &layer.paint);
             }
@@ -553,9 +562,7 @@ impl TileBuilder<'_> {
             };
         };
         let vertex_count = bucket.vertices.len();
-        // A wall from each vertex to the next, but from the last, which
-        // ends a ring.
-        let walls = vertex_count.saturating_sub(1);
+        let walls = wall_count(vertex_count);
         let buffer = &binders.interleaved_vertex_buffer;
         let depends_on_feature_state = binders.depends_on_feature_state();
         // The walls' own quads, which the bucket's upload made of its
