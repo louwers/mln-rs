@@ -1,0 +1,47 @@
+name: blacksmith-testbox-macos
+
+on:
+  # A push registers the workflow on this branch so that it can be dispatched.
+  push:
+    branches: [repro-1071]
+  workflow_dispatch:
+    inputs:
+      testbox_id:
+        description: Blacksmith Testbox session ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  MISE_LOCKED: "1"
+
+jobs:
+  macos:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: blacksmith-6vcpu-macos-26
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: useblacksmith/begin-testbox@d5b883fecd6a7581c3f7467543b819abf8b80bbf # v2
+        with:
+          testbox_id: ${{ inputs.testbox_id }}
+
+      - uses: ./.github/actions/setup-ci-deps
+
+      - name: Preserve the environment for Testbox SSH commands
+        run: |
+          tools/ci/preserve-testbox-env.sh 2>/dev/null || true
+          for rc in ~/.bashrc ~/.bash_profile ~/.zshenv; do
+            echo '[ -f ~/.testbox-env ] && . ~/.testbox-env' >> "$rc"
+          done
+
+      - uses: useblacksmith/run-testbox@9b976c32aa3bcbffb348889673585a5deee1b2f3 # v2
