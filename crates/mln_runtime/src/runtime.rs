@@ -453,7 +453,7 @@ struct NetworkOptions {
 
 impl RuntimeCore {
     fn new(
-        resource_options: ResourceOptions,
+        (resource_options, loader): (ResourceOptions, Option<Arc<dyn FileSource>>),
         network_options: NetworkOptions,
         queue: CoreQueue,
         queued: Arc<AtomicUsize>,
@@ -466,7 +466,7 @@ impl RuntimeCore {
             event_handler: None,
             hooks: Arc::new(ResourceHooks::default()),
             resource_options,
-            loader: OnceCell::new(),
+            loader: loader.map_or_else(OnceCell::new, OnceCell::from),
             #[cfg(not(target_family = "wasm"))]
             database: OnceCell::new(),
             online: OnceCell::new(),
@@ -654,6 +654,18 @@ impl Runtime {
     ///
     /// Fails as [`new`](Self::new) does.
     pub fn with_registry(options: &RuntimeOptions, registry: Arc<Registry>) -> Result<Runtime, Error> {
+        Self::with_parts(options, registry, runtime_pool(), None)
+    }
+
+    /// Starts a runtime as [`with_registry`](Self::with_registry) does,
+    /// whose background work runs on `pool`, and whose maps load through
+    /// `loader` when it is set.
+    pub(crate) fn with_parts(
+        options: &RuntimeOptions,
+        registry: Arc<Registry>,
+        pool: Pool,
+        loader: Option<Arc<dyn FileSource>>,
+    ) -> Result<Runtime, Error> {
         let resource_options = resource_options(options)?;
         let network_options = NetworkOptions {
             status: options.network_status.clone().unwrap_or_default(),
@@ -663,7 +675,6 @@ impl Runtime {
         let queued = Arc::new(AtomicUsize::new(0));
         let failure = Arc::new(OnceLock::new());
         let queue = CoreQueue::default();
-        let pool = runtime_pool();
         // A panic in a task of the runtime's maps or their sessions stops the
         // runtime, as one on its thread does.
         let failing = queue.downgrade();
@@ -673,7 +684,7 @@ impl Runtime {
             }
         })));
         let (thread, thread_end) = Self::start(
-            resource_options,
+            (resource_options, loader),
             network_options,
             queue.clone(),
             Arc::clone(&queued),
@@ -703,7 +714,7 @@ impl Runtime {
     /// runs `queue` until the runtime shuts down.
     #[cfg(not(target_family = "wasm"))]
     fn start(
-        resource_options: ResourceOptions,
+        (resource_options, loader): (ResourceOptions, Option<Arc<dyn FileSource>>),
         network_options: NetworkOptions,
         queue: CoreQueue,
         queued: Arc<AtomicUsize>,
@@ -714,7 +725,7 @@ impl Runtime {
         let thread = mln_engine::exec::thread::spawn("Runtime", move || {
             let own_pool = pool.clone();
             let mut core = Some(RuntimeCore::new(
-                resource_options,
+                (resource_options, loader),
                 network_options,
                 queue.clone(),
                 queued,
@@ -743,7 +754,7 @@ impl Runtime {
     #[cfg(target_family = "wasm")]
     #[expect(clippy::unnecessary_wraps, reason = "the threads of other builds can fail to start")]
     fn start(
-        resource_options: ResourceOptions,
+        (resource_options, loader): (ResourceOptions, Option<Arc<dyn FileSource>>),
         network_options: NetworkOptions,
         queue: CoreQueue,
         queued: Arc<AtomicUsize>,
@@ -751,7 +762,15 @@ impl Runtime {
         registry: Arc<Registry>,
         pool: Pool,
     ) -> Result<(ThreadId, Option<Joined>), Error> {
-        let core = RuntimeCore::new(resource_options, network_options, queue.clone(), queued, failure, registry, pool);
+        let core = RuntimeCore::new(
+            (resource_options, loader),
+            network_options,
+            queue.clone(),
+            queued,
+            failure,
+            registry,
+            pool,
+        );
         let pool = core.pool.clone();
         crate::web::drive(&pool, queue, Some(core));
         Ok((std::thread::current().id(), None))

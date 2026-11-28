@@ -1117,7 +1117,7 @@ impl RenderSession {
     /// resizes included, and completes with its result. A session that lost
     /// its graphics objects before the task runs completes it with
     /// [`ErrorKind::TargetLost`](mln_style::error::ErrorKind).
-    fn operation<T: Send + 'static>(
+    pub(crate) fn operation<T: Send + 'static>(
         &self,
         task: impl FnOnce(&mut Worker, &mut Outbox) -> Result<T, Error> + Send + 'static,
     ) -> Result<Completion<T>, Error> {
