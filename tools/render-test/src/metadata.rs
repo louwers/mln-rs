@@ -237,8 +237,6 @@ pub struct TestMetadata {
     pub(crate) metrics_failed: u32,
     pub(crate) render_errored: u32,
     pub(crate) render_failed: u32,
-    pub(crate) label_cut_off_found: u32,
-    pub(crate) duplications_count: u32,
 
     pub error_message: String,
     pub(crate) difference: f64,
@@ -283,8 +281,6 @@ impl Default for TestMetadata {
             metrics_failed: 0,
             render_errored: 0,
             render_failed: 0,
-            label_cut_off_found: 0,
-            duplications_count: 0,
             error_message: String::new(),
             difference: 0.0,
         }

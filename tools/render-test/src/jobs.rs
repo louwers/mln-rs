@@ -292,7 +292,6 @@ struct ResultHeader {
     metrics_failed: u32,
     render_errored: u32,
     render_failed: u32,
-    label_cut_off_found: u32,
     error_message: String,
     /// The image difference as its `f64` bits: exact, and JSON has no NaN.
     difference: u64,
@@ -316,7 +315,6 @@ fn write_result(dir: &Path, index: usize, metadata: Option<&TestMetadata>) -> io
         metrics_failed: m.metrics_failed,
         render_errored: m.render_errored,
         render_failed: m.render_failed,
-        label_cut_off_found: m.label_cut_off_found,
         error_message: m.error_message.clone(),
         difference: m.difference.to_bits(),
         actual_len: m.actual.len(),
@@ -381,7 +379,6 @@ fn read_result(dir: &Path, index: usize, test_path: &TestPaths) -> io::Result<Wo
         metrics_failed: header.metrics_failed,
         render_errored: header.render_errored,
         render_failed: header.render_failed,
-        label_cut_off_found: header.label_cut_off_found,
         error_message: header.error_message,
         difference: f64::from_bits(header.difference),
         actual: actual.to_vec(),
