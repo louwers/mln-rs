@@ -29,10 +29,11 @@ use mln_style::types::{HillshadeIlluminationAnchorType, TranslateAnchorType};
 use crate::RegistryBuilder;
 use crate::draw::draws::{Depth, Draw, Draws, LayerFrame};
 use crate::draw::indexes::DrawIndexes;
-use crate::draw::objects::{DrawGeometry, Mesh, Textures, raw_vertices};
+use crate::draw::objects::{DrawGeometry, Mesh, MeshDesc, Textures, raw_vertices};
 use crate::draw::projection::{TileTransform, tile_projection};
 use crate::draw::range::DrawRange;
-use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
+use crate::draw::vertex::VertexBinding;
+use crate::draw::vertex_attribute::Uniforms;
 use crate::image::image_store::ImageType;
 use crate::layer::bucket::{Bucket, Upload};
 use crate::layer::bucket_geometry::{GeometryVec, bucket_indexes, bucket_vertices};
@@ -125,17 +126,23 @@ fn push_draws<L: Layer<Tile = Mesh>>(cx: &mut PrepareCx<'_, '_, L>, ids: &[Overs
 /// The square of a tile, of the test program.
 fn square(cx: &mut TileCx<'_, '_, impl Layer>) -> Mesh {
     let vertices = RenderStaticData::tile_vertices();
-    let count = vertices.len();
-    let geometry = DrawGeometry {
-        vertices: raw_vertices("pos", bytemuck::cast_slice(&vertices).to_vec(), count, AttributeDataType::Short2),
-        vertex_count: count,
+    let vertices: Vec<TestVertex> = vertices.into_iter().map(|pos| TestVertex { pos }).collect();
+    let res = &mut cx.res;
+    let shader = res.shader_key(&TEST, Uniforms::default(), cx.base.projection_variant);
+    let buffer = res.vertices(&vertices);
+    let indexes = res.indexes(&RenderStaticData::quad_triangle_indices());
+    res.mesh(MeshDesc {
+        shader,
+        color_mode: ColorMode::alpha_blended(),
+        cull_face_mode: CullFaceMode::disabled(),
         mode: DrawMode::Triangles(),
-        indexes: DrawIndexes::new(RenderStaticData::quad_triangle_indices()),
-        ranges: vec![DrawRange::indexes(6)],
+        vertices: vec![VertexBinding::of::<TestVertex>(&buffer)],
+        vertex_count: vertices.len(),
         instances: None,
-    };
-    let shader = cx.res.context.shader_key(&TEST, Uniforms::default(), cx.base.projection_variant);
-    cx.res.mesh(shader, ColorMode::alpha_blended(), CullFaceMode::disabled(), geometry, Textures::default())
+        indexes,
+        ranges: vec![DrawRange::indexes(6)],
+        textures: Textures::default(),
+    })
 }
 
 /// A geometry layer type whose render half the tests give: how its layers
@@ -297,6 +304,8 @@ pub(crate) struct TestVertex {
     pos: [i16; 2],
 }
 
+crate::vertex_attributes!(TestVertex { pos => "pos": Short2 });
+
 /// A tile's quads, one at each point of its features, and their paint
 /// values. The tests' tiles have fewer points than 16-bit indexes reach.
 #[derive(Clone, mln_wire::Wire)]
@@ -401,21 +410,19 @@ impl<S: TestGeometry> Layer for TestFeatures<S> {
         let geometry = data.geometry();
         let (vertices, indexes) =
             (bucket_vertices(geometry, &bucket.vertices)?, bucket_indexes(geometry, &bucket.triangles)?);
-        let mut attrs = VertexAttributeArray::new();
-        attrs.set_shared(
-            "pos",
-            SharedAttribute::new(vertices, AttributeDataType::Short2, 0, size_of::<TestVertex>() as u32),
-        );
-        let geometry = DrawGeometry {
-            vertices: attrs,
-            vertex_count: bucket.vertices.len(),
+        let shader = cx.res.shader_key(&TEST, Uniforms::default(), cx.base.projection_variant);
+        Some(cx.res.mesh(MeshDesc {
+            shader,
+            color_mode: ColorMode::alpha_blended(),
+            cull_face_mode: CullFaceMode::disabled(),
             mode: DrawMode::Triangles(),
-            indexes: indexes.into(),
-            ranges: vec![DrawRange::indexes(bucket.triangles.len())],
+            vertices: vec![VertexBinding::of::<TestVertex>(&vertices)],
+            vertex_count: bucket.vertices.len(),
             instances: None,
-        };
-        let shader = cx.res.context.shader_key(&TEST, Uniforms::default(), cx.base.projection_variant);
-        Some(cx.res.mesh(shader, ColorMode::alpha_blended(), CullFaceMode::disabled(), geometry, Textures::default()))
+            indexes,
+            ranges: vec![DrawRange::indexes(bucket.triangles.len())],
+            textures: Textures::default(),
+        }))
     }
 
     fn prepare(&mut self, cx: &mut PrepareCx<'_, '_, Self>, tiles: &[FrameTile<'_, Self>], out: &mut Draws) {

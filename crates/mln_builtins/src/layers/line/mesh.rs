@@ -44,6 +44,8 @@ pub(crate) struct LineLayoutVertex {
     pub(crate) a2: [u8; 4],
 }
 
+mln_engine::vertex_attributes!(LineLayoutVertex { a1 => "pos_normal": Short2, a2 => "data": UByte4 });
+
 impl LineLayoutVertex {
     /// The vertex at `at` that the shader moves by `extrude` times half the
     /// line's width. `round` marks a round cap or join, `side` distinguishes

@@ -1,5 +1,5 @@
 use crate::draw::dynamic_texture_atlas::{DynamicTextureAtlas, PageId};
-use crate::draw::store::SharedTexture;
+use crate::draw::store::Texture;
 
 /// The glyph and icon (+ pattern) atlas textures of a tile's layout: the
 /// pages its glyphs and images are on, and their GPU textures, which the
@@ -8,8 +8,8 @@ use crate::draw::store::SharedTexture;
 pub struct TileAtlasTextures {
     glyph_page: Option<PageId>,
     icon_page: Option<PageId>,
-    glyph: Option<SharedTexture>,
-    icon: Option<SharedTexture>,
+    glyph: Option<Texture>,
+    icon: Option<Texture>,
 }
 
 impl TileAtlasTextures {
@@ -30,13 +30,13 @@ impl TileAtlasTextures {
 
     /// The glyph page's texture, once uploaded.
     #[must_use]
-    pub fn glyph(&self) -> Option<&SharedTexture> {
+    pub fn glyph(&self) -> Option<&Texture> {
         self.glyph.as_ref()
     }
 
     /// The icon and pattern page's texture, once uploaded.
     #[must_use]
-    pub fn icon(&self) -> Option<&SharedTexture> {
+    pub fn icon(&self) -> Option<&Texture> {
         self.icon.as_ref()
     }
 }

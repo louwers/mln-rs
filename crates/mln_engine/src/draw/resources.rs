@@ -5,28 +5,37 @@
 
 use std::rc::Rc;
 
-use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::gpu::{
-    BufferDesc, BufferUsage, Gpu, GpuError, ShaderKey, TextureDesc, TextureFormat, TextureId, TextureUsage,
+    BufferDesc, BufferUsage, Caps, Gpu, GpuError, ShaderKey, TextureDesc, TextureFormat, TextureId, TextureUsage,
 };
+use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::rendering_stats::RenderingStats;
+use mln_gfx::shaders::program::Program;
+use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::TextureChannelDataType;
-use mln_gfx::{ColorMode, Rgba, Size};
+use mln_gfx::{Rgba, Size};
+use mln_style::bitmap::PremultipliedImage;
 
 use crate::draw::buffer::{self, Buffer};
 use crate::draw::context::Context;
-use crate::draw::objects::{DrawGeometry, Mesh, Textures};
+use crate::draw::indexes::Indexes;
+use crate::draw::objects::{Mesh, MeshDesc};
 use crate::draw::release::{Release, ReleaseQueue};
+use crate::draw::store::{IndexBuffer, Texture};
 use crate::draw::target::Target;
+use crate::draw::texture2d::Texture2D;
+use crate::draw::vertex_attribute::Uniforms;
+use crate::draw::vertices::VertexBuffer;
 use crate::log_target;
 
 /// The renderer's GPU resources, as a layer's hooks make and read them: the
-/// meshes it draws (`mesh`) and the targets its draws draw
-/// into ([`target`](Self::target)). What it makes stays while the layer
-/// keeps its handle.
+/// vertex and index buffers and the textures of its meshes, the meshes it
+/// draws ([`mesh`](Self::mesh)), and the targets its draws draw into
+/// ([`target`](Self::target)). What it makes stays while the layer keeps a
+/// handle to it, and the buffers and textures while a mesh reads them.
 pub struct Resources<'a> {
-    pub gpu: &'a mut dyn Gpu,
-    pub context: &'a mut Context,
+    pub(crate) gpu: &'a mut dyn Gpu,
+    pub(crate) context: &'a mut Context,
 }
 
 impl<'a> Resources<'a> {
@@ -34,18 +43,10 @@ impl<'a> Resources<'a> {
         Resources { gpu, context }
     }
 
-    /// The mesh of `geometry`, drawn with `shader` in `color_mode` and
-    /// `cull_face_mode`, binding `textures`.
+    /// The mesh that `desc` describes.
     #[must_use]
-    pub fn mesh(
-        &mut self,
-        shader: ShaderKey,
-        color_mode: ColorMode,
-        cull_face_mode: CullFaceMode,
-        geometry: DrawGeometry,
-        textures: Textures,
-    ) -> Mesh {
-        Mesh::new(self.context, shader, color_mode, cull_face_mode, geometry, textures)
+    pub fn mesh(&mut self, desc: MeshDesc) -> Mesh {
+        Mesh::of(self.context, desc)
     }
 
     /// A target of `size`, whose texture's channels are of `type_`, or of
@@ -55,6 +56,115 @@ impl<'a> Resources<'a> {
     #[must_use]
     pub fn target(&mut self, size: Size, type_: TextureChannelDataType, clear: Rgba) -> Target {
         Target::new(self.context, size, type_, clear)
+    }
+
+    /// A buffer of a copy of `vertices`, which the first draw that reads it
+    /// uploads.
+    #[must_use]
+    pub fn vertices<V: bytemuck::Pod>(&mut self, vertices: &[V]) -> VertexBuffer {
+        self.context.add_vertices(vertices.to_vec())
+    }
+
+    /// A buffer of a copy of `vertices`, as [`vertices`](Self::vertices)
+    /// makes it, that [`update_vertices`](Self::update_vertices) replaces
+    /// often: it keeps the vertices' storage for the next update.
+    #[must_use]
+    pub fn dynamic_vertices<V: bytemuck::Pod>(&mut self, vertices: &[V]) -> VertexBuffer {
+        self.context.add_dynamic_vertices(vertices)
+    }
+
+    /// Replaces the vertices of `buffer`, of the type `V`, with a copy of
+    /// `vertices`, as many, which the next draw that reads them uploads.
+    /// Returns false, leaving them be, for another number of vertices.
+    pub fn update_vertices<V: bytemuck::Pod>(&mut self, buffer: &VertexBuffer, vertices: &[V]) -> bool {
+        self.context.update_vertices(buffer, vertices)
+    }
+
+    /// A buffer of a copy of `indexes`, which the first draw that reads it
+    /// uploads.
+    #[must_use]
+    pub fn indexes(&mut self, indexes: &[u16]) -> IndexBuffer {
+        self.context.add_indexes(Indexes::new(indexes.to_vec()))
+    }
+
+    /// The indexes of as many quads as 16-bit indexes reach, four vertices
+    /// apart, two triangles each, which every mesh that draws such quads
+    /// shares.
+    #[must_use]
+    pub fn quad_indexes(&mut self) -> IndexBuffer {
+        self.context.quad_indexes()
+    }
+
+    /// A texture of `format`, sampled as `sampler` says, which
+    /// [`write_texture`](Self::write_texture) makes and fills.
+    #[must_use]
+    pub fn texture(&mut self, format: TextureFormat, sampler: SamplerState) -> Texture {
+        self.context.add_texture_with(|texture| {
+            texture.set_format(format);
+            texture.set_sampler(sampler);
+        })
+    }
+
+    /// A texture of `image`, sampled as `sampler` says, which the first draw
+    /// that binds it uploads.
+    #[must_use]
+    pub fn image_texture(&mut self, image: Rc<PremultipliedImage>, sampler: SamplerState) -> Texture {
+        self.context.add_texture_with(|texture| {
+            texture.set_image(Some(image));
+            texture.set_sampler(sampler);
+        })
+    }
+
+    /// Makes `image` what `texture` holds, which the next draw that binds it
+    /// uploads.
+    pub fn set_image(&mut self, texture: &Texture, image: Rc<PremultipliedImage>) {
+        if let Some(mut texture) = self.context.texture_mut(texture) {
+            texture.set_image(Some(image));
+        }
+    }
+
+    /// Writes `data`, the texels of an image of `size` in rows from the top,
+    /// to the whole of `texture`, first making it of that size.
+    pub fn write_texture(&mut self, texture: &Texture, data: &[u8], size: Size) -> Result<(), GpuError> {
+        self.context.upload_texture_data(self.gpu, texture, data, size)
+    }
+
+    /// Samples `texture` as `sampler` says, where a mesh doesn't say
+    /// otherwise ([`Mesh::set_sampler`]).
+    pub fn set_sampler(&mut self, texture: &Texture, sampler: SamplerState) {
+        if let Some(mut texture) = self.context.texture_mut(texture) {
+            texture.set_sampler(sampler);
+        }
+    }
+
+    /// The size of `texture`, empty before it has one.
+    #[must_use]
+    pub fn texture_size(&self, texture: &Texture) -> Size {
+        self.context.texture(texture).map(Texture2D::size).unwrap_or_default()
+    }
+
+    /// The key of the variant of `program` that reads its properties of
+    /// `uniforms` from their uniforms, for `projection`, at the frame's
+    /// pixel ratio.
+    pub fn shader_key(
+        &mut self,
+        program: &'static Program,
+        uniforms: Uniforms,
+        projection: ProjectionVariant,
+    ) -> ShaderKey {
+        self.context.shader_key(program, uniforms, projection)
+    }
+
+    /// What the backend's device allows.
+    #[must_use]
+    pub fn caps(&self) -> &Caps {
+        self.context.caps()
+    }
+
+    /// Fails the frame being encoded with `message`, for a GPU operation of
+    /// a layer that failed.
+    pub fn fail(&mut self, message: String) {
+        self.context.fail(message);
     }
 }
 
@@ -263,5 +373,63 @@ fn write_bytes(gpu: &mut dyn Gpu, buffer: &Buffer, data: &[u8]) -> Result<(), Gp
         let mut padded = data.to_vec();
         padded.resize(data.len().next_multiple_of(4), 0);
         gpu.write_buffer(buffer.id(), 0, &padded)
+    }
+}
+
+/// What the tests of a crate of layer types read of the resources: not
+/// API.
+#[doc(hidden)]
+impl Resources<'_> {
+    /// Runs `f` with resources over `gpu`, at a pixel ratio of 1, which it
+    /// then tears down.
+    pub fn with_test_resources<R>(gpu: &mut dyn Gpu, f: impl FnOnce(&mut Resources<'_>) -> R) -> R {
+        let mut context = Context::new(*gpu.caps(), 1.0);
+        let result = f(&mut Resources::new(gpu, &mut context));
+        context.tear_down(gpu);
+        result
+    }
+
+    /// The bytes of `vertices` that the next upload writes, empty once the
+    /// upload wrote and freed them.
+    #[must_use]
+    pub fn test_vertex_bytes(&self, vertices: &VertexBuffer) -> Option<&[u8]> {
+        self.context.vertices(vertices).map(crate::draw::vertices::Vertices::bytes)
+    }
+
+    /// Whether the next upload writes `vertices`.
+    #[must_use]
+    pub fn test_vertices_need_upload(&self, vertices: &VertexBuffer) -> bool {
+        self.context.vertices(vertices).is_some_and(crate::draw::vertices::Vertices::needs_upload)
+    }
+
+    /// The buffer of `vertices`, which this uploads.
+    pub fn test_upload_vertices(&mut self, vertices: &VertexBuffer) -> Option<mln_gfx::gpu::BufferId> {
+        self.context.upload_vertices(self.gpu, vertices).ok().flatten()
+    }
+
+    /// The buffer of `indexes`, which this uploads, and whether their data
+    /// stays after, with their count.
+    pub fn test_upload_indexes(&mut self, indexes: &IndexBuffer) -> (Option<mln_gfx::gpu::BufferId>, bool, usize) {
+        let mut draw = crate::draw::indexes::DrawIndexes::Shared(indexes.clone());
+        let uploaded = draw.upload(self.gpu, self.context).ok().and_then(|()| draw.buffer(self.context));
+        (uploaded, draw.has_data(self.context), draw.len(self.context))
+    }
+
+    /// Uploads `mesh`, as a frame that draws it does.
+    pub fn test_upload_mesh(&mut self, mesh: &Mesh) {
+        mesh.upload(self.gpu, self.context);
+    }
+
+    /// The buffer `mesh` binds as its storage buffer `id`, as of its last
+    /// upload.
+    #[must_use]
+    pub fn test_storage_buffer(&self, mesh: &Mesh, id: usize) -> Option<mln_gfx::gpu::BufferId> {
+        mesh.storage_buffer(self.context, id)
+    }
+
+    /// The rendering stats so far.
+    #[must_use]
+    pub fn test_rendering_stats(&mut self) -> RenderingStats {
+        self.context.rendering_stats().clone()
     }
 }

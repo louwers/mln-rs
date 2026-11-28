@@ -14,10 +14,10 @@ use mln_gfx::{AttributeDataType, Rgba, Size};
 use super::{TerrainElevation, TileGround};
 use crate::draw::context::Context;
 use crate::draw::objects::Mesh;
-use crate::draw::resources::GpuTexture;
-use crate::draw::store::SharedTexture;
-use crate::draw::vertex_attribute::SharedAttribute;
-use crate::draw::vertices::{SharedVertices, TypedVertices};
+use crate::draw::resources::{GpuTexture, Resources};
+use crate::draw::store::Texture;
+use crate::draw::vertex::{VertexAttribute, VertexBinding};
+use crate::draw::vertices::VertexBuffer;
 use crate::render::paint_parameters::OpenPass;
 use crate::tile::UnwrappedTileID;
 
@@ -34,13 +34,13 @@ const DEPTH_STENCIL: TextureFormat = TextureFormat::Depth24PlusStencil8;
 /// hides behind it, the texture of its depth.
 pub struct FrameGround {
     elevation: Arc<TerrainElevation>,
-    depth: Option<SharedTexture>,
+    depth: Option<Texture>,
 }
 
 impl FrameGround {
     /// The ground `elevation`, whose depth draws into `depth` where a layer
     /// hides behind it.
-    pub(crate) fn new(elevation: Arc<TerrainElevation>, depth: Option<SharedTexture>) -> FrameGround {
+    pub(crate) fn new(elevation: Arc<TerrainElevation>, depth: Option<Texture>) -> FrameGround {
         FrameGround { elevation, depth }
     }
 
@@ -59,7 +59,7 @@ impl FrameGround {
     /// each pixel's eye distance, an `f32`'s bits, least significant byte
     /// first, 0 where no ground drew.
     #[must_use]
-    pub fn depth(&self) -> Option<&SharedTexture> {
+    pub fn depth(&self) -> Option<&Texture> {
         self.depth.as_ref()
     }
 }
@@ -74,7 +74,7 @@ pub fn point_center(a1: [i16; 2]) -> [i16; 2] {
 /// The heights of the ground under a draw's vertices, which an attribute or
 /// storage buffer of its reads, and the ground they are of.
 #[derive(Default)]
-pub struct GroundHeights(Option<(Weak<TerrainElevation>, TypedVertices<f32>)>);
+pub struct GroundHeights(Option<(Weak<TerrainElevation>, VertexBuffer)>);
 
 impl GroundHeights {
     /// Whether they are of `ground`, which stays the frame's ground while
@@ -84,29 +84,29 @@ impl GroundHeights {
         self.0.as_ref().is_some_and(|(of, _)| Weak::ptr_eq(of, &Arc::downgrade(ground.elevation())))
     }
 
-    /// Makes them `heights`, of `ground`, through `context`: written over
-    /// those they were where they fit, which their readers read still, else
-    /// in new vertices, which it returns for the readers to read.
-    pub fn write(&mut self, context: &mut Context, ground: &FrameGround, heights: &[f32]) -> Option<SharedVertices> {
+    /// Makes them `heights`, of `ground`, through `res`: written over those
+    /// they were where they fit, which their readers read still, else in a
+    /// new buffer, which it returns for the readers to read.
+    pub fn write(&mut self, res: &mut Resources<'_>, ground: &FrameGround, heights: &[f32]) -> Option<VertexBuffer> {
         let of = Arc::downgrade(ground.elevation());
         if let Some((_, vertices)) = &self.0
-            && context.update_vertices(vertices, heights)
+            && res.update_vertices(vertices, heights)
         {
             self.0 = Some((of, vertices.clone()));
             return None;
         }
-        let vertices = context.add_dynamic_vertices(heights);
-        let shared = vertices.shared().clone();
-        self.0 = Some((of, vertices));
-        Some(shared)
+        let vertices = res.dynamic_vertices(heights);
+        self.0 = Some((of, vertices.clone()));
+        Some(vertices)
     }
 }
 
-/// The attribute of a vertex that reads its height from `heights`, an `f32`
-/// a vertex.
+/// The attribute `name` of each vertex, which reads its height from
+/// `heights`, an `f32` a vertex.
 #[must_use]
-pub fn height_attribute(heights: &SharedVertices) -> SharedAttribute {
-    SharedAttribute::new(heights.clone(), AttributeDataType::Float, 0, size_of::<f32>() as u32)
+pub fn height_binding(heights: &VertexBuffer, name: &'static str) -> VertexBinding {
+    let attribute = VertexAttribute { name, format: AttributeDataType::Float, offset: 0 };
+    VertexBinding::new(heights, size_of::<f32>() as u32, vec![attribute])
 }
 
 /// A tile's draw whose points stand on the ground: its mesh, and the
@@ -127,10 +127,10 @@ impl StandingDraw {
     /// Over `ground`, has the attribute `name` of the draw's vertices read the
     /// heights of the ground under `centers`, the center of each vertex's
     /// point in `tile`: those of the ground they were of while it stays the
-    /// frame's, else written again, through `context`.
+    /// frame's, else written again, through `res`.
     pub fn stand(
         &mut self,
-        context: &mut Context,
+        res: &mut Resources<'_>,
         ground: Option<&FrameGround>,
         tile: UnwrappedTileID,
         name: &'static str,
@@ -142,10 +142,10 @@ impl StandingDraw {
         let tile_ground = ground.tile(tile);
         let heights: Vec<f32> =
             centers.iter().map(|&[x, y]| tile_ground.height(glam::Vec2::new(f32::from(x), f32::from(y)))).collect();
-        if let Some(vertices) = self.heights.write(context, ground, &heights)
-            && let Some(attrs) = self.mesh.vertex_attributes_mut(context)
+        if let Some(vertices) = self.heights.write(res, ground, &heights)
+            && let Some(attrs) = self.mesh.vertex_attributes_mut(res.context)
         {
-            attrs.set_shared(name, height_attribute(&vertices));
+            height_binding(&vertices, name).bind(attrs);
         }
     }
 }
@@ -156,7 +156,7 @@ impl StandingDraw {
 /// can't share with other textures.
 #[derive(Default)]
 pub(crate) struct GroundDepth {
-    texture: Option<(SharedTexture, Size)>,
+    texture: Option<(Texture, Size)>,
     /// The depth the pass tests, made with it, of the texture's size.
     depth: Option<GpuTexture>,
 }
@@ -164,7 +164,7 @@ pub(crate) struct GroundDepth {
 impl GroundDepth {
     /// The texture of a frame of `size` device pixels, made in `context`'s
     /// store when the frame's size changes.
-    pub(crate) fn texture(&mut self, context: &mut Context, size: Size) -> SharedTexture {
+    pub(crate) fn texture(&mut self, context: &mut Context, size: Size) -> Texture {
         match &self.texture {
             Some((texture, made)) if *made == size => texture.clone(),
             _ => {

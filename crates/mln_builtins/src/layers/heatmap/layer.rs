@@ -2,7 +2,6 @@
 // target of the layer's own; the layer's draw on the frame colors that
 // texture through the color ramp.
 
-use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -10,20 +9,20 @@ use glam::dcamera::rh::proj::opengl::orthographic;
 use mln_engine::draw::ground::StandingDraw;
 use mln_engine::draw::projection::{TileTransform, globe_extrude_scale, tile_projection};
 use mln_engine::draw::{
-    Depth, Draw, DrawGeometry, DrawIndexes, Draws, Group, LayerFrame, Mesh, RenderPass, SharedAttribute, SharedTexture,
-    SharedVertices, Target, Textures, Uniforms, VertexAttributeArray, refresh_paint_attributes,
+    Depth, Draw, Draws, Group, IndexBuffer, LayerFrame, Mesh, MeshDesc, RenderPass, Target, Texture, Textures,
+    Uniforms, VertexBinding, VertexBuffer, refresh_paint_attributes,
 };
 use mln_engine::layer::binders::PaintBinders as _;
 use mln_engine::layer::{
     EvaluateCx, Evaluation, Features, FrameTile, Layer, LayerValues, OnTerrain, PrepareCx, TileCx, TileData,
-    bucket_indexes, bucket_vertices, copied_vertices, paint_vertices,
+    bucket_indexes, bucket_vertices, paint_vertices,
 };
 use mln_engine::tile::OverscaledTileID;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, Rgba};
+use mln_gfx::{ColorMode, CullFaceMode, DrawMode, Rgba};
 use mln_style::StyleValue as _;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_intersect};
@@ -57,12 +56,12 @@ pub(crate) struct RenderHeatmapLayer {
     /// colors onto the frame.
     target: Option<Target>,
 
-    shared_texture_vertices: Option<SharedVertices>,
+    shared_texture_vertices: Option<VertexBuffer>,
     /// The mesh of the layer's draw of the frame, built on its first frame.
     texture: Option<Mesh>,
     /// The texture of the color ramp image that `texture` samples, made
     /// again for a new image.
-    color_ramp_texture: Option<(Rc<PremultipliedImage>, SharedTexture)>,
+    color_ramp_texture: Option<(Rc<PremultipliedImage>, Texture)>,
 }
 
 impl RenderHeatmapLayer {
@@ -140,31 +139,23 @@ impl Layer for RenderHeatmapLayer {
         }
         let (vertices, indexes) =
             (bucket_vertices(geometry, &bucket.vertices)?, bucket_indexes(geometry, &bucket.triangles)?);
-        let context = &mut *cx.res.context;
-        let paint =
-            paint_vertices(context, geometry, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state());
-        let mut uniforms = Uniforms::default();
-        let mut attrs = VertexAttributeArray::new();
-        binders.bind(&cx.values.evaluated.paint, paint.as_ref(), &mut attrs, &mut uniforms);
-        let shader = context.shader_key(&programs::HEATMAP, uniforms, cx.base.projection_variant);
-        attrs.set_shared(
-            "pos",
-            SharedAttribute::new(
-                vertices,
-                AttributeDataType::Short2,
-                offset_of!(HeatmapLayoutVertex, a1) as u32,
-                size_of::<HeatmapLayoutVertex>() as u32,
-            ),
-        );
-        let geometry = DrawGeometry {
-            vertices: attrs,
-            vertex_count: if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() },
+        let res = &mut cx.res;
+        let buffer = &binders.interleaved_vertex_buffer;
+        let paint = paint_vertices(res, geometry, buffer, binders.depends_on_feature_state());
+        let paint = binders.paint(&cx.values.evaluated.paint, paint.as_ref());
+        let shader = res.shader_key(&programs::HEATMAP, paint.uniforms, cx.base.projection_variant);
+        let mesh = res.mesh(MeshDesc {
+            shader,
+            color_mode: ColorMode::additive(),
+            cull_face_mode: CullFaceMode::disabled(),
             mode: DrawMode::Triangles(),
-            indexes: indexes.into(),
-            ranges: bucket.segments.iter().map(SegmentBase::range).collect(),
+            vertices: [VertexBinding::of::<HeatmapLayoutVertex>(&vertices)].into_iter().chain(paint.vertices).collect(),
+            vertex_count: if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() },
             instances: None,
-        };
-        let mesh = cx.res.mesh(shader, ColorMode::additive(), CullFaceMode::disabled(), geometry, Textures::default());
+            indexes,
+            ranges: bucket.segments.iter().map(SegmentBase::range).collect(),
+            textures: Textures::default(),
+        });
         Some(StandingDraw::new(mesh))
     }
 
@@ -219,19 +210,18 @@ impl RenderHeatmapLayer {
             let Some(draw) = entry.value.as_mut() else {
                 continue;
             };
-            let context = &mut *res.context;
-            refresh_paint_attributes(&draw.mesh, context, changes, |context, attrs| {
+            refresh_paint_attributes(&draw.mesh, res, changes, |res| {
                 let geometry = render_data.geometry();
                 let buffer = &binders.interleaved_vertex_buffer;
-                let paint = paint_vertices(context, geometry, buffer, binders.depends_on_feature_state());
-                binders.bind(evaluated, paint.as_ref(), attrs, &mut Uniforms::default());
+                let paint = paint_vertices(res, geometry, buffer, binders.depends_on_feature_state());
+                binders.paint(evaluated, paint.as_ref()).vertices
             });
             // Over terrain, the kernels stand on the frame's ground. They
             // don't hide behind it: their density adds up on the screen, as
             // GL JS's does.
             let ground = frame.ground.as_deref();
             let centers = &bucket.centers;
-            draw.stand(context, ground, tile_id.to_unwrapped(), "ground_height", centers);
+            draw.stand(res, ground, tile_id.to_unwrapped(), "ground_height", centers);
             let (drawable, projection) = Self::tile_uniforms(&tile_id, binders, frame);
             // The draws keep the order they're pushed in, the tiles'.
             let target_draw = Draw { depth: Depth::Off, ..Draw::DEFAULT };
@@ -281,56 +271,42 @@ impl RenderHeatmapLayer {
         let Some(target) = target.as_ref() else {
             return;
         };
-        let context = &mut *cx.res.context;
+        let res = &mut cx.res;
         let heatmap_texture_shader =
-            context.shader_key(&programs::HEATMAP_TEXTURE, Uniforms::default(), ProjectionVariant::Mercator);
+            res.shader_key(&programs::HEATMAP_TEXTURE, Uniforms::default(), ProjectionVariant::Mercator);
         if !color_ramp_texture.as_ref().is_some_and(|(image, _)| Rc::ptr_eq(image, color_ramp)) {
-            let texture = context.add_texture_with(|texture| {
-                texture.set_image(Some(Rc::clone(color_ramp)));
-                texture.set_sampler(SamplerState {
-                    filter: TextureFilterType::Linear,
-                    wrap_u: TextureWrapType::Clamp,
-                    wrap_v: TextureWrapType::Clamp,
-                    ..Default::default()
-                });
-            });
+            let sampler = SamplerState {
+                filter: TextureFilterType::Linear,
+                wrap_u: TextureWrapType::Clamp,
+                wrap_v: TextureWrapType::Clamp,
+                ..Default::default()
+            };
+            let texture = res.image_texture(Rc::clone(color_ramp), sampler);
             *color_ramp_texture = Some((Rc::clone(color_ramp), texture));
         }
         let color_ramp = color_ramp_texture.as_ref().map(|(_, texture)| texture);
         if let Some(draw) = texture {
-            draw.set_texture(context, COLOR_RAMP_SLOT, color_ramp);
+            draw.set_texture(res, COLOR_RAMP_SLOT, color_ramp);
         } else {
             let vertices = shared_texture_vertices
-                .get_or_insert_with(|| copied_vertices(context, &crate::layers::heatmap::heatmap_texture_vertices()))
+                .get_or_insert_with(|| res.vertices(&crate::layers::heatmap::heatmap_texture_vertices()))
                 .clone();
-            let mut attrs = VertexAttributeArray::new();
-            attrs.set_shared(
-                "pos",
-                SharedAttribute::new(
-                    vertices,
-                    AttributeDataType::Short2,
-                    offset_of!(HeatmapLayoutVertex, a1) as u32,
-                    size_of::<HeatmapLayoutVertex>() as u32,
-                ),
-            );
-            let geometry = DrawGeometry {
-                vertices: attrs,
-                vertex_count: 4,
-                mode: DrawMode::Triangles(),
-                indexes: DrawIndexes::new(quad_triangle_indices()),
-                ranges: vec![QUAD_RANGE],
-                instances: None,
-            };
             let mut textures = Textures::default();
             textures[IMAGE_SLOT] = Some(target.texture().clone());
             textures[COLOR_RAMP_SLOT] = color_ramp.cloned();
-            let mesh = cx.res.mesh(
-                heatmap_texture_shader,
-                ColorMode::alpha_blended(),
-                CullFaceMode::disabled(),
-                geometry,
+            let indexes: IndexBuffer = res.indexes(&quad_triangle_indices());
+            let mesh = res.mesh(MeshDesc {
+                shader: heatmap_texture_shader,
+                color_mode: ColorMode::alpha_blended(),
+                cull_face_mode: CullFaceMode::disabled(),
+                mode: DrawMode::Triangles(),
+                vertices: vec![VertexBinding::of::<HeatmapLayoutVertex>(&vertices)],
+                vertex_count: 4,
+                instances: None,
+                indexes,
+                ranges: vec![QUAD_RANGE],
                 textures,
-            );
+            });
             *texture = Some(mesh);
         }
         let Some(draw) = texture.as_ref() else {

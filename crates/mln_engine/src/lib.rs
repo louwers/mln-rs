@@ -48,6 +48,7 @@ pub use render::update_slot::{Update, UpdateReader, UpdateSlot};
 /// so that a crate that invokes them needn't depend on it.
 #[doc(hidden)]
 pub mod __private {
+    pub use mln_gfx;
     pub use mln_style;
     pub use mln_wire;
 }

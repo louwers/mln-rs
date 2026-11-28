@@ -19,7 +19,7 @@ use mln_style::size::Size;
 use super::dynamic_texture::QueuedPixels;
 use super::dynamic_texture::{DynamicTexture, DynamicTextureBinId, TextureHandle};
 use crate::draw::context::Context;
-use crate::draw::store::SharedTexture;
+use crate::draw::store::Texture;
 use crate::image::image_store::{ImageMap, ImageType};
 use crate::text::atlas::{ImagePosition, ImagePositions, RectU16};
 use crate::text::glyph::{Glyph, GlyphID, GlyphMap, GlyphPosition, GlyphPositions};
@@ -507,7 +507,7 @@ impl DynamicTextureAtlas {
     }
 
     /// The GPU texture of the page `page`, once the atlas uploaded it.
-    pub(crate) fn page_texture(&self, page: PageId) -> Option<&SharedTexture> {
+    pub(crate) fn page_texture(&self, page: PageId) -> Option<&Texture> {
         self.pages.iter().chain(&self.dummies).find(|candidate| candidate.id == page)?.texture.texture()
     }
 

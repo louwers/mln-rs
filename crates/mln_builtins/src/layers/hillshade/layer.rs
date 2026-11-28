@@ -7,7 +7,6 @@
 // draws into each target until it holds them (`Target::holds`): once, unless
 // the frame that drew them failed.
 
-use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -15,12 +14,12 @@ use glam::dcamera::rh::proj::opengl::orthographic;
 use glam::{DMat4, DVec3};
 use mln_engine::draw::projection::{TileTransform, tile_projection};
 use mln_engine::draw::{
-    Context, Draw, DrawGeometry, DrawIndexes, DrawRange, Draws, Indexes, LayerFrame, Mesh, Resources, SharedAttribute,
-    SharedIndexes, SharedTexture, SharedVertices, SimpleIdentity, Target, Textures, Uniforms, VertexAttributeArray,
+    Draw, DrawRange, Draws, IndexBuffer, LayerFrame, Mesh, MeshDesc, Resources, Target, Texture, Textures, Uniforms,
+    VertexBinding, VertexBuffer,
 };
 use mln_engine::layer::{
-    DemContents, EvaluateCx, EvaluatedLayer, Evaluation, FrameTile, Layer, LayerValues, OnTerrain, PrepareCx,
-    RasterLayoutVertex, SurfaceLight, TileCx, TileData, UpdateCx, copied_vertices,
+    DemContents, EvaluateCx, EvaluatedLayer, Evaluation, FrameTile, ImageId, Layer, LayerValues, OnTerrain, PrepareCx,
+    RasterLayoutVertex, SurfaceLight, TileCx, TileData, UpdateCx,
 };
 use mln_engine::shaders::terrain::ubo::{HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO, MAX_ILLUMINATION_SOURCES};
 use mln_engine::source::DemTiles;
@@ -31,7 +30,7 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode, Rgba, Size};
+use mln_gfx::{ColorMode, CullFaceMode, DrawMode, Rgba, Size};
 use mln_style::color::Color;
 use mln_style::constants::EXTENT;
 use mln_style::layers::Hillshade;
@@ -57,10 +56,10 @@ pub(crate) struct HillshadeTile {
 /// prepared in, and the draw that prepares them.
 struct DemTarget {
     /// The id of the tile's contents.
-    id: SimpleIdentity,
+    id: ImageId,
     target: Target,
     /// The DEM, which `prepare` samples.
-    _dem: SharedTexture,
+    _dem: Texture,
     /// The mesh of the draw that prepares the slopes, and the blocks it
     /// reads.
     prepare: Mesh,
@@ -72,9 +71,9 @@ struct DemTarget {
 pub(crate) struct RenderHillshadeLayer {
     maxzoom: u8,
 
-    static_data_shared_vertices: Option<SharedVertices>,
+    static_data_shared_vertices: Option<VertexBuffer>,
     /// The triangles of the static data's quad.
-    static_data_indices: Option<SharedIndexes>,
+    static_data_indices: Option<IndexBuffer>,
     globe_meshes: GlobeTileMeshCache<RasterLayoutVertex>,
 
     /// The illumination of the evaluation the draws last drew with, before
@@ -167,42 +166,46 @@ fn method_to_int(method: HillshadeMethodType) -> i32 {
     method as i32
 }
 
-/// The vertex attributes of a hillshade (or prepare) draw over
-/// `vertices`.
-fn hillshade_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
-    let mut attrs = VertexAttributeArray::new();
-    let stride = size_of::<RasterLayoutVertex>() as u32;
-    attrs.set_shared(
-        "pos",
-        SharedAttribute::new(
-            vertices.clone(),
-            AttributeDataType::Short2,
-            offset_of!(RasterLayoutVertex, a1) as u32,
-            stride,
-        ),
-    );
-    attrs.set_shared(
-        "texture_pos",
-        SharedAttribute::new(
-            vertices.clone(),
-            AttributeDataType::Short2,
-            offset_of!(RasterLayoutVertex, a2) as u32,
-            stride,
-        ),
-    );
-    attrs
+/// The mesh of a hillshade (or prepare) draw with `shader` in `color_mode`
+/// of `vertex_count` of `vertices`, and `ranges` of `indexes`, binding
+/// `texture` as its image.
+#[expect(clippy::too_many_arguments, reason = "the mesh's program, geometry and texture")]
+fn hillshade_mesh(
+    res: &mut Resources<'_>,
+    shader: ShaderKey,
+    color_mode: ColorMode,
+    vertices: &VertexBuffer,
+    vertex_count: usize,
+    indexes: IndexBuffer,
+    ranges: Vec<DrawRange>,
+    texture: &Texture,
+) -> Mesh {
+    let mut textures = Textures::default();
+    textures[IMAGE_SLOT] = Some(texture.clone());
+    res.mesh(MeshDesc {
+        shader,
+        color_mode,
+        cull_face_mode: CullFaceMode::disabled(),
+        mode: DrawMode::Triangles(),
+        vertices: vec![VertexBinding::of::<RasterLayoutVertex>(vertices)],
+        vertex_count,
+        instances: None,
+        indexes,
+        ranges,
+        textures,
+    })
 }
 
-/// The static data's quad, its vertices and its triangles, which this adds
-/// to `context`'s stores the first time.
+/// The static data's quad, its vertices and its triangles, which this makes
+/// through `res` the first time.
 fn static_quad<'a>(
-    vertices: &'a mut Option<SharedVertices>,
-    indexes: &'a mut Option<SharedIndexes>,
-    context: &mut Context,
-) -> (&'a SharedVertices, &'a SharedIndexes) {
+    vertices: &'a mut Option<VertexBuffer>,
+    indexes: &'a mut Option<IndexBuffer>,
+    res: &mut Resources<'_>,
+) -> (&'a VertexBuffer, &'a IndexBuffer) {
     (
-        vertices.get_or_insert_with(|| copied_vertices(context, &raster_vertices())),
-        indexes.get_or_insert_with(|| context.add_indexes(Indexes::new(quad_triangle_indices()))),
+        vertices.get_or_insert_with(|| res.vertices(&raster_vertices())),
+        indexes.get_or_insert_with(|| res.indexes(&quad_triangle_indices())),
     )
 }
 
@@ -216,15 +219,13 @@ fn dem_target(
     dem: &DemContents,
     tile_id: &UnwrappedTileID,
     maxzoom: u8,
-    (vertices, indexes): (&SharedVertices, &SharedIndexes),
+    (vertices, indexes): (&VertexBuffer, &IndexBuffer),
 ) -> DemTarget {
     match previous {
         Some(previous) if previous.id == dem.id() && previous.generation == dem.generation() => previous,
         _ => {
-            let shader =
-                res.context.shader_key(&programs::HILLSHADE_PREPARE, Uniforms::default(), ProjectionVariant::Mercator);
-            let attrs = hillshade_vertex_attributes(vertices);
-            DemTarget::new(res, dem, tile_id, maxzoom, &shader, attrs, indexes)
+            let shader = res.shader_key(&programs::HILLSHADE_PREPARE, Uniforms::default(), ProjectionVariant::Mercator);
+            DemTarget::new(res, dem, tile_id, maxzoom, shader, vertices, indexes)
         }
     }
 }
@@ -298,44 +299,36 @@ impl Layer for RenderHillshadeLayer {
             return None;
         }
         let RenderHillshadeLayer { maxzoom, static_data_shared_vertices, static_data_indices, globe_meshes, .. } = self;
-        let context = &mut *cx.res.context;
-        let hillshade_shader =
-            context.shader_key(&programs::HILLSHADE, Uniforms::default(), cx.base.projection_variant);
-        let quad = static_quad(static_data_shared_vertices, static_data_indices, context);
+        let res = &mut cx.res;
+        let hillshade_shader = res.shader_key(&programs::HILLSHADE, Uniforms::default(), cx.base.projection_variant);
+        let quad = static_quad(static_data_shared_vertices, static_data_indices, res);
         let tile_id = tile.draw_id();
         let previous = previous.map(|previous| previous.dem);
-        let target = dem_target(previous, &mut cx.res, dem, &tile_id.to_unwrapped(), *maxzoom, quad);
+        let target = dem_target(previous, res, dem, &tile_id.to_unwrapped(), *maxzoom, quad);
         let target_texture = target.target.texture();
-        let context = &mut *cx.res.context;
 
         let masking = &dem.masking;
         // The tile's geometry: the globe's mesh of its mask, the mask's
         // quads, or the whole tile's quad.
-        let (vertices, vertex_count, indexes, ranges): (SharedVertices, usize, DrawIndexes, Vec<DrawRange>) = if cx
-            .base
-            .projection_variant
-            == ProjectionVariant::Globe
-        {
-            let globe_mesh = globe_meshes.get(context, &tile_id.canonical, masking.mask(), RasterLayoutVertex::new);
-            (globe_mesh.vertices.clone(), globe_mesh.vertices.count(), globe_mesh.indexes(), globe_mesh.ranges.clone())
-        } else if let Some(quads) = StoredQuads::of_mask(context, masking.mask()) {
-            (quads.vertices.clone(), quads.vertices.count(), quads.indexes.clone().into(), quads.ranges)
-        } else {
-            let (vertices, indexes) = quad;
-            (vertices.clone(), 4, indexes.clone().into(), vec![QUAD_RANGE])
-        };
-        let geometry = DrawGeometry {
-            vertices: hillshade_vertex_attributes(&vertices),
-            vertex_count: if ranges.is_empty() { 0 } else { vertex_count },
-            mode: DrawMode::Triangles(),
-            indexes,
-            ranges,
-            instances: None,
-        };
-        let mut textures = Textures::default();
-        textures[IMAGE_SLOT] = Some(target_texture.clone());
+        let (vertices, vertex_count, indexes, ranges): (VertexBuffer, usize, IndexBuffer, Vec<DrawRange>) =
+            if cx.base.projection_variant == ProjectionVariant::Globe {
+                let globe_mesh = globe_meshes.get(res, &tile_id.canonical, masking.mask(), RasterLayoutVertex::new);
+                (
+                    globe_mesh.vertices.clone(),
+                    globe_mesh.vertices.count(),
+                    globe_mesh.indexes.clone(),
+                    globe_mesh.ranges.clone(),
+                )
+            } else if let Some(quads) = StoredQuads::of_mask(res, masking.mask()) {
+                (quads.vertices.clone(), quads.vertices.count(), quads.indexes.clone(), quads.ranges)
+            } else {
+                let (vertices, indexes) = quad;
+                (vertices.clone(), 4, indexes.clone(), vec![QUAD_RANGE])
+            };
+        let vertex_count = if ranges.is_empty() { 0 } else { vertex_count };
+        let color_mode = ColorMode::alpha_blended();
         let mesh =
-            cx.res.mesh(hillshade_shader, ColorMode::alpha_blended(), CullFaceMode::disabled(), geometry, textures);
+            hillshade_mesh(res, hillshade_shader, color_mode, &vertices, vertex_count, indexes, ranges, target_texture);
         Some(HillshadeTile { mesh, dem: target })
     }
 
@@ -375,16 +368,13 @@ impl Layer for RenderHillshadeLayer {
             if !target.target.holds(&cx.res) {
                 out.target(&target.target).push(&target.prepare, Draw::DEFAULT, target.blocks);
             }
-            let context = &mut *cx.res.context;
-            let target_texture = target.target.texture();
-            if let Some(mut texture) = context.texture_mut(target_texture) {
-                texture.set_sampler(SamplerState {
-                    filter: resampling_filter,
-                    wrap_u: TextureWrapType::Clamp,
-                    wrap_v: TextureWrapType::Clamp,
-                    ..Default::default()
-                });
-            }
+            let sampler = SamplerState {
+                filter: resampling_filter,
+                wrap_u: TextureWrapType::Clamp,
+                wrap_v: TextureWrapType::Clamp,
+                ..Default::default()
+            };
+            cx.res.set_sampler(target.target.texture(), sampler);
 
             let draw = Draw { order: kept.seq(), ..Draw::DEFAULT };
             let Illumination { num_lights, .. } = *illumination
@@ -410,17 +400,17 @@ impl Layer for RenderHillshadeLayer {
 
 impl DemTarget {
     /// The target of the slopes of `dem`, which the draw of `shader`
-    /// prepares from it, drawn over `attrs` with the `quad` of the
-    /// static data, with the uniforms of `tile_id`, the tile it is made for,
+    /// prepares from it, drawn over the static data's quad, `vertices` and
+    /// `indexes`, with the uniforms of `tile_id`, the tile it is made for,
     /// of a source of `maxzoom`.
     fn new(
         res: &mut Resources<'_>,
         dem: &DemContents,
         tile_id: &UnwrappedTileID,
         maxzoom: u8,
-        shader: &ShaderKey,
-        attrs: VertexAttributeArray,
-        indexes: &SharedIndexes,
+        shader: ShaderKey,
+        vertices: &VertexBuffer,
+        indexes: &IndexBuffer,
     ) -> DemTarget {
         let (dem_contents_id, generation) = (dem.id(), dem.generation());
         let (tilesize, stride, encoding, dem_image) = {
@@ -432,26 +422,15 @@ impl DemTarget {
         let target = res.target(size, TextureChannelDataType::UnsignedByte, Rgba::TRANSPARENT);
 
         // Nearest, as the Sobel kernel samples exact texel values.
-        let dem = res.context.add_texture_with(|texture| {
-            texture.set_image(Some(Rc::new(dem_image)));
-            texture.set_sampler(SamplerState {
-                filter: TextureFilterType::Nearest,
-                wrap_u: TextureWrapType::Clamp,
-                wrap_v: TextureWrapType::Clamp,
-                ..Default::default()
-            });
-        });
-        let geometry = DrawGeometry {
-            vertices: attrs,
-            vertex_count: 4,
-            mode: DrawMode::Triangles(),
-            indexes: indexes.clone().into(),
-            ranges: vec![QUAD_RANGE],
-            instances: None,
+        let sampler = SamplerState {
+            filter: TextureFilterType::Nearest,
+            wrap_u: TextureWrapType::Clamp,
+            wrap_v: TextureWrapType::Clamp,
+            ..Default::default()
         };
-        let mut textures = Textures::default();
-        textures[IMAGE_SLOT] = Some(dem.clone());
-        let prepare = res.mesh(shader.clone(), ColorMode::unblended(), CullFaceMode::disabled(), geometry, textures);
+        let dem = res.image_texture(Rc::new(dem_image), sampler);
+        let prepare =
+            hillshade_mesh(res, shader, ColorMode::unblended(), vertices, 4, indexes.clone(), vec![QUAD_RANGE], &dem);
         let extent = f64::from(EXTENT);
         let m =
             orthographic(0.0, extent, -extent, 0.0, -1.0, 1.0) * DMat4::from_translation(DVec3::new(0.0, -extent, 0.0));

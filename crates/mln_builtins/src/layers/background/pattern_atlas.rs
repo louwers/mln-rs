@@ -4,10 +4,11 @@ use std::sync::Arc;
 
 use etagere::{AllocId, BucketedAtlasAllocator, size2};
 use geometry::Point;
-use mln_engine::draw::{Context, SharedTexture};
+use mln_engine::draw::{Resources, Texture};
 use mln_engine::image::ImageStore;
 use mln_engine::text::atlas::{ImagePosition, RectU16};
-use mln_gfx::gpu::{Gpu, TextureFormat};
+use mln_gfx::gpu::TextureFormat;
+use mln_gfx::texture2d::SamplerState;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::hash::HashMap;
 use mln_style::image::Impl as ImageImpl;
@@ -32,7 +33,7 @@ pub(crate) struct PatternAtlas {
     allocator: BucketedAtlasAllocator,
     patterns: HashMap<String, Pattern>,
     atlas_image: PremultipliedImage,
-    texture: Option<SharedTexture>,
+    texture: Option<Texture>,
     dirty: bool,
 }
 
@@ -181,30 +182,26 @@ impl PatternAtlas {
 
     /// Uploads the atlas image to its texture, which is made again when the
     /// atlas grew since.
-    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+    pub(crate) fn upload(&mut self, res: &mut Resources<'_>) {
         let texture = match &self.texture {
             None => {
-                let texture = context.add_texture_with(|texture| texture.set_format(TextureFormat::Rgba8Unorm));
+                let texture = res.texture(TextureFormat::Rgba8Unorm, SamplerState::default());
                 &*self.texture.insert(texture)
             }
             Some(texture) if self.dirty => texture,
             Some(_) => return,
         };
         let image = &self.atlas_image;
-        if let Err(error) = context.upload_texture_data(
-            gpu,
-            texture,
-            &image.data,
-            mln_gfx::Size::new(image.size.width, image.size.height),
-        ) {
-            context.fail(format!("Uploading the pattern atlas failed: {error}"));
+        let size = mln_gfx::Size::new(image.size.width, image.size.height);
+        if let Err(error) = res.write_texture(texture, &image.data, size) {
+            res.fail(format!("Uploading the pattern atlas failed: {error}"));
         }
         self.dirty = false;
     }
 
     /// The atlas's texture, once `upload` made it.
     #[must_use]
-    pub(crate) fn texture(&self) -> Option<&SharedTexture> {
+    pub(crate) fn texture(&self) -> Option<&Texture> {
         self.texture.as_ref()
     }
 

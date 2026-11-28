@@ -30,6 +30,8 @@ pub(crate) struct FillLayoutVertex {
     pub(crate) a1: [i16; 2],
 }
 
+mln_engine::vertex_attributes!(FillLayoutVertex { a1 => "pos": Short2 });
+
 impl FillLayoutVertex {
     pub(crate) fn new(p: GeometryCoordinate) -> Self {
         FillLayoutVertex { a1: [p.x, p.y] }

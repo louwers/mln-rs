@@ -60,7 +60,7 @@ pub(crate) use cover::{REMEMBERED_RANGES, TerrainTile, terrain_tile_size};
 pub(crate) use drapes::Drapes;
 pub use elevation::{TerrainElevation, TileGround};
 pub(crate) use fog::terrain_fog;
-pub use ground::{FrameGround, GroundHeights, StandingDraw, height_attribute, point_center};
+pub use ground::{FrameGround, GroundHeights, StandingDraw, height_binding, point_center};
 use mln_gfx::gpu::Gpu;
 use mln_style::hash::HashMap;
 use mln_style::layer::SourceKind;
@@ -69,7 +69,7 @@ use mln_style::tileset::RasterEncoding;
 pub(crate) use stacks::{DrapeStacks, Draped};
 
 use crate::draw::context::Context;
-use crate::draw::store::SharedTexture;
+use crate::draw::store::Texture;
 use crate::geo::constants;
 use crate::layer::layer_drawing::ChangedBuckets;
 use crate::map::{MapMode, TerrainSkirtLength};
@@ -143,21 +143,21 @@ pub struct SurfaceLight {
 /// their draws bind.
 pub(crate) struct DemBindings {
     /// The texture of each DEM tile, with its width in pixels.
-    textures: HashMap<CanonicalTileID, (SharedTexture, u32)>,
+    textures: HashMap<CanonicalTileID, (Texture, u32)>,
     /// A transparent 1×1 texture, of flat ground and of a drape that holds
     /// nothing.
-    flat: SharedTexture,
+    flat: Texture,
 }
 
 impl DemBindings {
     /// The texture of the DEM tile `dem`, with its width in pixels, if a
     /// tile reads it.
-    pub(crate) fn dem(&self, dem: &OverscaledTileID) -> Option<(&SharedTexture, u32)> {
+    pub(crate) fn dem(&self, dem: &OverscaledTileID) -> Option<(&Texture, u32)> {
         self.textures.get(&dem.canonical).map(|(texture, dim)| (texture, *dim))
     }
 
     /// A transparent 1×1 texture.
-    pub(crate) fn flat(&self) -> &SharedTexture {
+    pub(crate) fn flat(&self) -> &Texture {
         &self.flat
     }
 }

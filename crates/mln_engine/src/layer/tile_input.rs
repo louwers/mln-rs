@@ -147,14 +147,25 @@ pub enum RasterTile<'a> {
     Image(&'a ImageTile),
 }
 
+/// The identity of a raster or raster-dem tile's image, by which a layer
+/// keeps its texture: the same while the image is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ImageId(SimpleIdentity);
+
+impl ImageId {
+    pub(crate) fn new(id: SimpleIdentity) -> Self {
+        ImageId(id)
+    }
+}
+
 impl<'a> RasterTile<'a> {
     /// The identity of the image, by which a layer keeps its texture.
     #[must_use]
-    pub fn id(self) -> SimpleIdentity {
-        match self {
+    pub fn id(self) -> ImageId {
+        ImageId(match self {
             RasterTile::Tile(raster) => raster.id(),
             RasterTile::Image(image) => image.id(),
-        }
+        })
     }
 
     /// The tile's image.

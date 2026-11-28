@@ -16,19 +16,19 @@ fn stored_vertices_free_their_data_once_they_have_a_buffer() {
     });
 }
 
-// The holder of typed vertices replaces them with as many vertices of the
-// type, which the next upload writes over their buffer, counted as a buffer
-// update, and which the draws that bind them bind again.
+// Dynamic vertices take updates of as many vertices of their type, which
+// the next upload writes over their buffer, counted as a buffer update, and
+// which the draws that bind them bind again.
 #[test]
-fn typed_vertices_take_updates_of_as_many_vertices() {
+fn dynamic_vertices_take_updates_of_as_many_vertices() {
     with_context(|gpu, context| {
         let typed = context.add_dynamic_vertices(&[[1i16, 2], [3, 4]]);
-        let vertices = typed.shared().clone();
+        let vertices = typed.clone();
         let buffer = context.upload_vertices(gpu, &vertices).expect("uploads").expect("a buffer");
         assert!(context.vertices(&vertices).is_some_and(|stored| !stored.needs_upload()));
 
-        assert!(!context.update_vertices(&typed, &[[5, 6]]), "another count");
-        assert!(context.update_vertices(&typed, &[[5, 6], [7, 8]]));
+        assert!(!context.update_vertices(&typed, &[[5i16, 6]]), "another count");
+        assert!(context.update_vertices(&typed, &[[5i16, 6], [7, 8]]));
         assert!(context.vertices(&vertices).is_some_and(|stored| stored.bytes()
             == bytemuck::cast_slice::<i16, u8>(&[5, 6, 7, 8])
             && stored.needs_upload()));
@@ -64,7 +64,7 @@ fn a_draw_writes_an_update_of_the_vertices_it_binds() {
         let typed = context.add_dynamic_vertices(&[vertex(0), vertex(1), vertex(2)]);
         let stride = size_of::<RasterLayoutVertex>() as u32;
         let mut attrs = VertexAttributeArray::new();
-        attrs.set_shared("pos", SharedAttribute::new(typed.shared().clone(), AttributeDataType::Short2, 0, stride));
+        attrs.set_shared("pos", SharedAttribute::new(typed.clone(), AttributeDataType::Short2, 0, stride));
         let geometry = DrawGeometry {
             vertices: attrs,
             vertex_count: 3,
@@ -87,7 +87,7 @@ fn a_draw_writes_an_update_of_the_vertices_it_binds() {
         for x in 3..6 {
             assert!(context.update_vertices(&typed, &[vertex(x), vertex(x), vertex(x)]));
             mesh.upload(gpu, context);
-            assert!(context.vertices(typed.shared()).is_some_and(|stored| !stored.needs_upload()), "{x}");
+            assert!(context.vertices(&typed).is_some_and(|stored| !stored.needs_upload()), "{x}");
             assert_eq!(context.rendering_stats().buffer_updates, uploaded + x as usize - 2, "{x}");
         }
         // Without an update, an upload writes nothing.
@@ -104,7 +104,7 @@ fn store_entries_last_as_long_as_their_handles() {
     with_context(|gpu, context| {
         let vertices = context.add_vertices(vec![[1i16, 2]]);
         let held = vertices.clone();
-        let texture = context.add_texture();
+        let texture = context.add_texture_with(|_| {});
         let draw_texture = texture.clone();
         drop(vertices);
         drop(texture);

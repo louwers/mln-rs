@@ -1,15 +1,12 @@
-use std::mem::offset_of;
-
 use mln_engine::draw::projection::{TileTransform, tile_projection};
 use mln_engine::draw::{
-    Composite, Context, Depth, Draw, DrawGeometry, DrawIndexes, DrawRange, Draws, Group, Indexes, LayerFrame, Mesh,
-    RenderPass, SharedAttribute, SharedIndexes, Texture2D, Uniforms, VertexAttributeArray, copy_shared_attributes,
-    refresh_paint_attributes,
+    Composite, Depth, Draw, DrawRange, Draws, Group, IndexBuffer, LayerFrame, Mesh, MeshDesc, RenderPass, Resources,
+    VertexAttribute, VertexBinding, refresh_paint_attributes,
 };
 use mln_engine::layer::binders::PaintBinders as _;
 use mln_engine::layer::{
     EvaluateCx, EvaluatedLayer, Evaluation, Features, FrameTile, Layer, LayerValues, OnTerrain, PrepareCx, QueryRegion,
-    TileCx, TileData, bucket_indexes, bucket_vertices, copied_vertices, paint_vertices,
+    TileCx, TileData, bucket_indexes, bucket_vertices, paint_vertices,
 };
 use mln_engine::tile::OverscaledTileID;
 use mln_gfx::gpu::{Caps, ShaderKey};
@@ -30,7 +27,7 @@ use crate::layers::fill::ubo::{
     FillDrawableUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO, FillPatternTilePropsUBO,
 };
 use crate::layers::pattern_layout::{FillLayoutSpec, PatternLayout};
-use crate::layers::quads::quads_ranges;
+use crate::layers::quads::{positions, quads_ranges};
 use crate::layers::segments::SegmentBase;
 
 /// The ids of the buffers that the draws bind.
@@ -76,11 +73,11 @@ enum Outlines {
 }
 
 impl Outlines {
-    /// How the outlines of a layer draw on `context`'s device.
-    fn of(context: &Context, pattern: bool) -> Outlines {
-        if !draws_outline_quads(context.caps()) {
+    /// How the outlines of a layer draw on `res`'s device.
+    fn of(res: &Resources<'_>, pattern: bool) -> Outlines {
+        if !draws_outline_quads(res.caps()) {
             Outlines::Lines
-        } else if context.caps().binds_vertex_buffers && !pattern {
+        } else if res.caps().binds_vertex_buffers && !pattern {
             Outlines::Pulled
         } else {
             Outlines::Instanced
@@ -89,16 +86,24 @@ impl Outlines {
 }
 
 /// Where the shader of the pulled outlines finds a vertex's paint values in
-/// the vertices that `attrs`, the paint attributes, read
+/// the vertices that `paint`, the paint attributes, reads
 /// (`FillOutlineDrawableUBO::paint_layout`).
-pub(crate) fn outline_paint_layout(attrs: &VertexAttributeArray) -> u32 {
+pub(crate) fn outline_paint_layout(paint: Option<&VertexBinding>) -> u32 {
     let (color, opacity) = ("outline_color", "opacity");
-    let shared = |name: &str| attrs.shared(name);
+    let attribute = |name: &str| paint.and_then(|paint| paint.attribute(name));
     let words = |bytes: u32| (bytes / 4) & 0xff;
-    let offset = |name: &str| shared(name).map_or(0, |attribute| words(attribute.offset));
-    let stride = [color, opacity].into_iter().find_map(shared).map_or(0, |attribute| words(attribute.stride));
+    let offset = |name: &str| attribute(name).map_or(0, |attribute| words(attribute.offset));
+    let reads = [color, opacity].into_iter().any(|name| attribute(name).is_some());
+    let stride = paint.filter(|_| reads).map_or(0, |paint| words(paint.stride));
     stride | offset(color) << 8 | offset(opacity) << 16
 }
+
+/// The attributes of an instanced outline's ends, which read the bucket's
+/// vertices and outline ends.
+const OUTLINE_POS: &[VertexAttribute] =
+    &[VertexAttribute { name: "outline_pos", format: AttributeDataType::Short2, offset: 0 }];
+const OUTLINE_END: &[VertexAttribute] =
+    &[VertexAttribute { name: "outline_end", format: AttributeDataType::Short2, offset: 0 }];
 
 /// The pass the layer's draws draw in.
 const RENDER_PASS: RenderPass = RenderPass::Translucent;
@@ -120,38 +125,43 @@ impl FillDraw {
     /// A draw of `geometry` with `shader` and `color_mode`, without culling,
     /// which binds the textures of `atlases` before each frame draws it.
     fn new(
-        context: &mut Context,
+        res: &mut Resources<'_>,
         shader: ShaderKey,
         color_mode: ColorMode,
         sub_layer: u8,
         depth: DepthMaskType,
-        geometry: DrawGeometry,
+        geometry: FillGeometry,
         atlases: Option<&AtlasBinding>,
     ) -> FillDraw {
         let textures = atlases.map(|atlases| atlases.textures(&shader)).unwrap_or_default();
-        let mesh = Mesh::new(context, shader, color_mode, CullFaceMode::disabled(), geometry, textures);
+        let FillGeometry { vertices, vertex_count, instances, mode, indexes, ranges } = geometry;
+        let mesh = res.mesh(MeshDesc {
+            shader,
+            color_mode,
+            cull_face_mode: CullFaceMode::disabled(),
+            mode,
+            vertices,
+            // With no ranges, it draws nothing and has no vertices.
+            vertex_count: if ranges.is_empty() { 0 } else { vertex_count },
+            instances,
+            indexes,
+            ranges,
+            textures,
+        });
         FillDraw { mesh, sub_layer, depth, paint_layout: None, atlases: atlases.cloned() }
     }
 }
 
-/// The geometry of `vertex_count` vertices in `vertices`, and the `ranges`
-/// of `indexes` drawn as `mode`, without instances; with no ranges, it
-/// draws nothing and has no vertices.
-fn fill_geometry(
-    vertices: VertexAttributeArray,
+/// What a draw draws: `vertex_count` vertices that `vertices` read, of each
+/// instance that `instances` read, and the `ranges` of `indexes`, drawn as
+/// `mode`.
+struct FillGeometry {
+    vertices: Vec<VertexBinding>,
     vertex_count: usize,
+    instances: Option<Vec<VertexBinding>>,
     mode: DrawMode,
-    indexes: DrawIndexes,
+    indexes: IndexBuffer,
     ranges: Vec<DrawRange>,
-) -> DrawGeometry {
-    DrawGeometry {
-        vertices,
-        vertex_count: if ranges.is_empty() { 0 } else { vertex_count },
-        mode,
-        indexes,
-        ranges,
-        instances: None,
-    }
 }
 
 /// What the layer keeps of a tile: its fill and its outline, as they were
@@ -188,27 +198,21 @@ impl FillBlocks {
     }
 }
 
-/// The instanced outlines' quad: its vertices and indexes, and the vertex
-/// attributes every instanced outline reads of it.
+/// The instanced outlines' quad: its vertices and indexes, which every
+/// instanced outline reads.
 struct OutlineQuad {
     vertex_count: usize,
-    indexes: SharedIndexes,
-    attributes: VertexAttributeArray,
+    indexes: IndexBuffer,
+    vertices: VertexBinding,
 }
 
 impl OutlineQuad {
-    /// The quad, whose corners every instanced outline reads per vertex, in
-    /// `context`'s stores.
-    fn new(context: &mut Context) -> OutlineQuad {
-        let vertices = copied_vertices(context, &crate::layers::fill::fill_outline_vertices());
-        let indexes = context.add_indexes(Indexes::new(crate::layers::fill::quad_strip_indices()));
-        let vertex_count = vertices.count();
-        let mut attributes = VertexAttributeArray::new();
-        {
-            let stride = size_of::<[i16; 2]>() as u32;
-            attributes.set_shared("pos", SharedAttribute::new(vertices, AttributeDataType::Short2, 0, stride));
-        }
-        OutlineQuad { vertex_count, indexes, attributes }
+    /// The quad, whose corners every instanced outline reads per vertex,
+    /// made through `res`.
+    fn new(res: &mut Resources<'_>) -> OutlineQuad {
+        let vertices = res.vertices(&crate::layers::fill::fill_outline_vertices());
+        let indexes = res.indexes(&crate::layers::fill::quad_strip_indices());
+        OutlineQuad { vertex_count: vertices.count(), indexes, vertices: positions(&vertices) }
     }
 }
 
@@ -226,8 +230,8 @@ struct TileBuilder<'a> {
     /// The quad of the instanced outlines, where the layer draws them.
     outline_quad: Option<&'a OutlineQuad>,
     /// The triangles of the pulled outlines' quads
-    /// ([`Context::quad_indexes`]), where the layer draws them.
-    pulled_indexes: Option<&'a SharedIndexes>,
+    /// ([`Resources::quad_indexes`]), where the layer draws them.
+    pulled_indexes: Option<&'a IndexBuffer>,
     /// The depth mask of the fills without a pattern, which the first tile
     /// they are built for in an update sets.
     fill_depth: &'a mut Option<DepthMaskType>,
@@ -238,38 +242,31 @@ impl TileBuilder<'_> {
     /// any to draw.
     fn build(
         &mut self,
-        context: &mut Context,
+        res: &mut Resources<'_>,
         tile_bucket: TileData<'_, RenderFillLayer>,
         binders: &FillBinders,
         evaluated: &FillPaintProperties::PossiblyEvaluated,
     ) -> Option<FillTile> {
         let (bucket, geometry) = (tile_bucket.bucket, tile_bucket.geometry());
-        let mut uniforms = Uniforms::default();
         let buffer = &binders.interleaved_vertex_buffer;
-        let paint = paint_vertices(context, geometry, buffer, binders.depends_on_feature_state());
-        let mut vertex_attrs = VertexAttributeArray::new();
-        binders.bind(evaluated, paint.as_ref(), &mut vertex_attrs, &mut uniforms);
+        let paint = paint_vertices(res, geometry, buffer, binders.depends_on_feature_state());
+        let paint_attributes = binders.paint(evaluated, paint.as_ref());
+        let uniforms = paint_attributes.uniforms;
 
         let fill_vertex_count = bucket.vertices.len();
-        if let Some(vertices) = bucket_vertices(geometry, &bucket.vertices) {
-            vertex_attrs.set_shared(
-                "pos",
-                SharedAttribute::new(
-                    vertices,
-                    AttributeDataType::Short2,
-                    offset_of!(FillLayoutVertex, a1) as u32,
-                    size_of::<FillLayoutVertex>() as u32,
-                ),
-            );
-        }
+        let vertices: Vec<VertexBinding> = bucket_vertices(geometry, &bucket.vertices)
+            .map(|vertices| VertexBinding::of::<FillLayoutVertex>(&vertices))
+            .into_iter()
+            .chain(paint_attributes.vertices.clone())
+            .collect();
 
         // The outline draws in the fill color unless it has one of its own,
         // which a pattern doesn't default to.
         let do_outline = *evaluated.fill_antialias.uniform() && (!self.pattern || self.outline_is_fill_color);
         let color_mode = ColorMode::alpha_blended();
-        let fill_shader = context.shader_key(self.fill_program, uniforms, self.projection_variant);
+        let fill_shader = res.shader_key(self.fill_program, uniforms, self.projection_variant);
         let outline_shader =
-            do_outline.then(|| context.shader_key(self.outline_program, uniforms, self.projection_variant));
+            do_outline.then(|| res.shader_key(self.outline_program, uniforms, self.projection_variant));
 
         let (fill_depth, outline_sub_layer) = if self.pattern {
             (DepthMaskType::ReadWrite, 2)
@@ -301,29 +298,31 @@ impl TileBuilder<'_> {
         let fill = (!bucket.triangles.is_empty()).then(|| bucket_indexes(geometry, &bucket.triangles)).flatten();
         let fill = fill.map(|indexes| {
             // The fill and a line outline read the same attributes.
-            let fill_geometry = fill_geometry(
-                copy_shared_attributes(&vertex_attrs),
-                fill_vertex_count,
-                DrawMode::Triangles(),
-                indexes.into(),
-                bucket.triangle_segments.iter().map(SegmentBase::range).collect(),
-            );
-            FillDraw::new(context, fill_shader, color_mode, 1, fill_depth, fill_geometry, atlases.as_ref())
+            let fill_geometry = FillGeometry {
+                vertices: vertices.clone(),
+                vertex_count: fill_vertex_count,
+                instances: None,
+                mode: DrawMode::Triangles(),
+                indexes,
+                ranges: bucket.triangle_segments.iter().map(SegmentBase::range).collect(),
+            };
+            FillDraw::new(res, fill_shader, color_mode, 1, fill_depth, fill_geometry, atlases.as_ref())
         });
 
         // The bucket's lines, or a quad for each vertex, from it to its
         // outline end.
         let outline = outline_shader.filter(|_| !bucket.basic_lines.is_empty()).and_then(|shader| {
             if let Some(indexes) = self.pulled_indexes {
-                let quad_geometry = fill_geometry(
-                    VertexAttributeArray::new(),
-                    4 * fill_vertex_count,
-                    DrawMode::Triangles(),
-                    DrawIndexes::Shared(indexes.clone()),
-                    quads_ranges(fill_vertex_count),
-                );
+                let quad_geometry = FillGeometry {
+                    vertices: Vec::new(),
+                    vertex_count: 4 * fill_vertex_count,
+                    instances: None,
+                    mode: DrawMode::Triangles(),
+                    indexes: indexes.clone(),
+                    ranges: quads_ranges(fill_vertex_count),
+                };
                 let mut draw = FillDraw::new(
-                    context,
+                    res,
                     shader,
                     color_mode,
                     outline_sub_layer,
@@ -333,33 +332,29 @@ impl TileBuilder<'_> {
                 );
                 for (id, vertices) in [(OUTLINE_VERTICES_ID, &bucket.vertices), (OUTLINE_ENDS_ID, &bucket.outline_ends)]
                 {
-                    draw.mesh.read_as_storage(context, id, Some(bucket_vertices(geometry, vertices)?));
+                    draw.mesh.read_as_storage(res, id, Some(bucket_vertices(geometry, vertices)?));
                 }
-                draw.mesh.read_as_storage(context, OUTLINE_PAINT_ID, paint.clone());
-                draw.paint_layout = Some(outline_paint_layout(&vertex_attrs));
+                draw.mesh.read_as_storage(res, OUTLINE_PAINT_ID, paint.clone());
+                draw.paint_layout = Some(outline_paint_layout(paint_attributes.vertices.as_ref()));
                 Some(draw)
             } else if let Some(quad) = self.outline_quad {
                 let stride = size_of::<FillLayoutVertex>() as u32;
-                let mut instance_attrs = VertexAttributeArray::new();
-                binders.bind(evaluated, paint.as_ref(), &mut instance_attrs, &mut Uniforms::default());
-                for (name, ends) in [("outline_pos", &bucket.vertices), ("outline_end", &bucket.outline_ends)] {
+                let mut instances: Vec<VertexBinding> = paint_attributes.vertices.clone().into_iter().collect();
+                for (attributes, ends) in [(OUTLINE_POS, &bucket.vertices), (OUTLINE_END, &bucket.outline_ends)] {
                     if let Some(ends) = bucket_vertices(geometry, ends) {
-                        instance_attrs
-                            .set_shared(name, SharedAttribute::new(ends, AttributeDataType::Short2, 0, stride));
+                        instances.push(VertexBinding::new(&ends, stride, attributes));
                     }
                 }
-                let quad_geometry = DrawGeometry {
-                    instances: Some(instance_attrs),
-                    ..fill_geometry(
-                        copy_shared_attributes(&quad.attributes),
-                        quad.vertex_count,
-                        DrawMode::TriangleStrip(),
-                        DrawIndexes::Shared(quad.indexes.clone()),
-                        vec![crate::layers::fill::fill_outline_segment(fill_vertex_count).range()],
-                    )
+                let quad_geometry = FillGeometry {
+                    vertices: vec![quad.vertices.clone()],
+                    vertex_count: quad.vertex_count,
+                    instances: Some(instances),
+                    mode: DrawMode::TriangleStrip(),
+                    indexes: quad.indexes.clone(),
+                    ranges: vec![crate::layers::fill::fill_outline_segment(fill_vertex_count).range()],
                 };
                 Some(FillDraw::new(
-                    context,
+                    res,
                     shader,
                     color_mode,
                     outline_sub_layer,
@@ -368,15 +363,16 @@ impl TileBuilder<'_> {
                     atlases.as_ref(),
                 ))
             } else {
-                let line_geometry = fill_geometry(
-                    copy_shared_attributes(&vertex_attrs),
-                    fill_vertex_count,
-                    DrawMode::Lines(LINE_WIDTH),
-                    bucket_indexes(geometry, &bucket.basic_lines)?.into(),
-                    bucket.basic_line_segments.iter().map(SegmentBase::range).collect(),
-                );
+                let line_geometry = FillGeometry {
+                    vertices: vertices.clone(),
+                    vertex_count: fill_vertex_count,
+                    instances: None,
+                    mode: DrawMode::Lines(LINE_WIDTH),
+                    indexes: bucket_indexes(geometry, &bucket.basic_lines)?,
+                    ranges: bucket.basic_line_segments.iter().map(SegmentBase::range).collect(),
+                };
                 Some(FillDraw::new(
-                    context,
+                    res,
                     shader,
                     color_mode,
                     outline_sub_layer,
@@ -396,9 +392,9 @@ pub(crate) struct RenderFillLayer {
     /// from the first tile the layer builds them for.
     outline_quad: Option<OutlineQuad>,
     /// The triangles of the pulled outlines' quads
-    /// ([`Context::quad_indexes`]), from the first tile the layer builds
+    /// ([`Resources::quad_indexes`]), from the first tile the layer builds
     /// them for.
-    pulled_indexes: Option<SharedIndexes>,
+    pulled_indexes: Option<IndexBuffer>,
     /// The depth mask of the fills without a pattern of the tiles the layer
     /// builds for an update's draws, which the first sets
     /// ([`TileBuilder::fill_depth`]); none once the update made its draws.
@@ -410,11 +406,11 @@ impl RenderFillLayer {
     /// `outline` of `tile`, with or without a `pattern`, of the layer
     /// `layer_id` with the values `layer`: its matrix and the interpolation
     /// of the layer's values, and for a pattern, where the pattern is in the
-    /// tile's atlas, whose texture is in `context`. `None` for a pattern
+    /// tile's atlas, whose texture `res` has. `None` for a pattern
     /// while the tile has no atlas.
     #[expect(
         clippy::too_many_arguments,
-        reason = "the layer, the draw, its tile and bucket, the frame and the context"
+        reason = "the layer, the draw, its tile and bucket, the frame and the resources"
     )]
     fn uniforms(
         layer_id: &str,
@@ -426,7 +422,7 @@ impl RenderFillLayer {
         draw: &FillDraw,
         outline: bool,
         frame: &LayerFrame<'_>,
-        context: &Context,
+        res: &Resources<'_>,
     ) -> Option<(FillBlocks, ProjectionUBO)> {
         let evaluated = &layer.paint;
         let zoom = frame.view.zoom() as f32;
@@ -493,8 +489,8 @@ impl RenderFillLayer {
 
         let faded = evaluated.fill_pattern.faded();
         let tlbr = |id: &str| tile_bucket.pattern(id).map_or([0.0; 4], |position| position.tlbr().map(f32::from));
-        let texture = draw.mesh.texture(context, IMAGE_SLOT).and_then(|texture| context.texture(texture));
-        let texture_size = texture.map(Texture2D::size).unwrap_or_default();
+        let texture_size =
+            draw.mesh.texture(res, IMAGE_SLOT).map(|texture| res.texture_size(texture)).unwrap_or_default();
         // A pattern has nothing to sample before its tile has an atlas, and
         // the shaders divide by the atlas size.
         if texture_size.width == 0 || texture_size.height == 0 {
@@ -579,7 +575,7 @@ impl Layer for RenderFillLayer {
         let render_data = tile.data_for_pass(RENDER_PASS)?;
         let binders = render_data.bucket.paint_property_binders.get(&cx.base.style.base().id)?;
         let pattern = !cx.values.unevaluated.fill_pattern.is_undefined();
-        let outlines = Outlines::of(cx.res.context, pattern);
+        let outlines = Outlines::of(&cx.res, pattern);
         // The outlines draw as lines, or as quads on a device that draws no
         // `LINE_WIDTH` lines and rasterizes on the GPU.
         let (fill_program, outline_program) = match (pattern, outlines) {
@@ -593,10 +589,10 @@ impl Layer for RenderFillLayer {
         };
 
         if outlines == Outlines::Instanced && self.outline_quad.is_none() {
-            self.outline_quad = Some(OutlineQuad::new(cx.res.context));
+            self.outline_quad = Some(OutlineQuad::new(&mut cx.res));
         }
         if outlines == Outlines::Pulled && self.pulled_indexes.is_none() {
-            self.pulled_indexes = Some(cx.res.context.quad_indexes());
+            self.pulled_indexes = Some(cx.res.quad_indexes());
         }
 
         let mut builder = TileBuilder {
@@ -609,7 +605,7 @@ impl Layer for RenderFillLayer {
             pulled_indexes: self.pulled_indexes.as_ref().filter(|_| outlines == Outlines::Pulled),
             fill_depth: &mut self.fill_depth,
         };
-        builder.build(cx.res.context, render_data, binders, &render_data.layer.paint)
+        builder.build(&mut cx.res, render_data, binders, &render_data.layer.paint)
     }
 
     /// Pushes the frame's draws of the layer, those of each of its tiles.
@@ -642,18 +638,22 @@ impl Layer for RenderFillLayer {
             let Some(cached) = entry.value.as_mut() else {
                 continue;
             };
-            let context = &mut *cx.res.context;
+            let res = &mut cx.res;
             let geometry = render_data.geometry();
-            // Reads the paint attributes, and returns the vertices they
-            // read.
-            let refresh = |context: &mut Context, attrs: &mut VertexAttributeArray| {
+            // The vertices of the paint values, and how the draws read them.
+            let refresh = |res: &mut Resources<'_>| {
                 let buffer = &binders.interleaved_vertex_buffer;
-                let paint = paint_vertices(context, geometry, buffer, binders.depends_on_feature_state());
-                binders.bind(evaluated, paint.as_ref(), attrs, &mut Uniforms::default());
-                paint
+                let paint = paint_vertices(res, geometry, buffer, binders.depends_on_feature_state());
+                (binders.paint(evaluated, paint.as_ref()).vertices, paint)
             };
-            if let Some(fill) = &mut cached.fill {
-                refresh_paint_attributes(&fill.mesh, context, changes, |context, attrs| drop(refresh(context, attrs)));
+            let mut fill_paint = None;
+            if let Some(fill) = &mut cached.fill
+                && changes.paint
+            {
+                fill_paint = refresh(res).0;
+                if let Some(paint) = &fill_paint {
+                    fill.mesh.set_paint(res, paint);
+                }
             }
             if let Some(outline) = &mut cached.outline {
                 match &cached.fill {
@@ -661,20 +661,19 @@ impl Layer for RenderFillLayer {
                     // paint values' vertices themselves.
                     _ if outline.paint_layout.is_some() => {
                         if changes.paint {
-                            let mut attrs = VertexAttributeArray::new();
-                            let paint = refresh(context, &mut attrs);
-                            outline.mesh.read_as_storage(context, OUTLINE_PAINT_ID, paint);
-                            outline.paint_layout = Some(outline_paint_layout(&attrs));
+                            let (attributes, paint) = refresh(res);
+                            outline.mesh.read_as_storage(res, OUTLINE_PAINT_ID, paint);
+                            outline.paint_layout = Some(outline_paint_layout(attributes.as_ref()));
                         }
                     }
                     // A line outline reads the fill's attributes, and so
                     // binds the buffers the fill uploads.
-                    Some(fill) if changes.paint && !outline.mesh.has_instances(context) => {
-                        outline.mesh.share_vertex_attributes(context, &fill.mesh);
+                    Some(_) if changes.paint && !outline.mesh.has_instances(res) => {
+                        if let Some(paint) = &fill_paint {
+                            outline.mesh.set_paint(res, paint);
+                        }
                     }
-                    _ => refresh_paint_attributes(&outline.mesh, context, changes, |context, attrs| {
-                        drop(refresh(context, attrs));
-                    }),
+                    _ => refresh_paint_attributes(&outline.mesh, res, changes, |res| refresh(res).0),
                 }
             }
 
@@ -693,7 +692,7 @@ impl Layer for RenderFillLayer {
                     draw,
                     outline,
                     cx.frame,
-                    cx.res.context,
+                    &cx.res,
                 ) else {
                     continue;
                 };
@@ -705,7 +704,7 @@ impl Layer for RenderFillLayer {
                     clip: true,
                 };
                 if let Some(atlases) = &draw.atlases {
-                    atlases.bind(&draw.mesh, cx.res.context, cx.frame);
+                    atlases.bind(&draw.mesh, &mut cx.res, cx.frame);
                 }
                 blocks.push(out.main(), &draw.mesh, tile_id, &projection, tile_draw);
             }

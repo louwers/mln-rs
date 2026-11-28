@@ -20,7 +20,7 @@ use mln_gfx::{Rgba, Size};
 
 use crate::draw::context::Context;
 use crate::draw::resources::{GpuTexture, Resources};
-use crate::draw::store::{Shared, SharedTexture, TargetKey};
+use crate::draw::store::{Shared, TargetKey, Texture};
 use crate::render::paint_parameters::{OpenPass, PaintParameters};
 use crate::render::pass::RenderPass;
 
@@ -30,7 +30,7 @@ use crate::render::pass::RenderPass;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Target {
     key: Shared<TargetKey>,
-    texture: SharedTexture,
+    texture: Texture,
 }
 
 /// What the context keeps of a [`Target`].
@@ -76,7 +76,7 @@ impl Target {
     /// The texture the target's draws draw into, which draws sample. It is
     /// the same through a change of the target's size.
     #[must_use]
-    pub fn texture(&self) -> &SharedTexture {
+    pub fn texture(&self) -> &Texture {
         &self.texture
     }
 

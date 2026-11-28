@@ -27,8 +27,9 @@ use mln_wire::payload::{Payload, pod};
 
 use crate::draw::context::Context;
 use crate::draw::identity::SimpleIdentity;
-use crate::draw::indexes::{DrawIndexes, Indexes, SharedIndexes};
-use crate::draw::vertices::SharedVertices;
+use crate::draw::indexes::{IndexBuffer, Indexes};
+use crate::draw::resources::Resources;
+use crate::draw::vertices::VertexBuffer;
 use crate::layer::paint_property_binder::InterleavedVertexBuffer;
 
 /// A bucket's vertices or indices. The worker fills it through `get_mut`;
@@ -154,7 +155,7 @@ impl<T: bytemuck::Pod> GeometryVec<T> {
     }
 
     /// The data, moved out into `context`'s store.
-    fn store_vertices(&mut self, context: &mut Context) -> SharedVertices {
+    fn store_vertices(&mut self, context: &mut Context) -> VertexBuffer {
         match self.take() {
             Data::Vec(v) => context.add_vertices(v),
             #[cfg(target_family = "wasm")]
@@ -211,15 +212,15 @@ impl<T: bytemuck::Pod> mln_wire::Wire for GeometryVec<T> {
 /// so it lives as long as the buckets it was made from.
 #[derive(Clone, Default)]
 pub struct BucketGeometry {
-    vertices: Kept<SharedVertices>,
-    indexes: Kept<SharedIndexes>,
+    vertices: Kept<VertexBuffer>,
+    indexes: Kept<IndexBuffer>,
     /// The vertices a layer made of a bucket's vector.
-    derived: Kept<SharedVertices>,
+    derived: Kept<VertexBuffer>,
 }
 
 impl BucketGeometry {
     /// The vertices that `vec`, a bucket's, moved into.
-    fn vertices<V>(&self, vec: &GeometryVec<V>) -> Option<&SharedVertices> {
+    fn vertices<V>(&self, vec: &GeometryVec<V>) -> Option<&VertexBuffer> {
         self.vertices.get(vec.key)
     }
 
@@ -369,28 +370,16 @@ impl<'a> GeometryUpload<'a> {
 /// with `GeometryUpload::derive_vertices`, which its tile's `geometry`
 /// keeps.
 #[must_use]
-pub fn derived_vertices<V>(geometry: &BucketGeometry, vec: &GeometryVec<V>) -> Option<SharedVertices> {
+pub fn derived_vertices<V>(geometry: &BucketGeometry, vec: &GeometryVec<V>) -> Option<VertexBuffer> {
     let derived = geometry.derived.get(vec.key);
     debug_assert!(derived.is_some(), "vertices that the bucket's upload didn't derive");
     derived.cloned()
 }
 
-/// Vertices of `context`'s store holding a copy of `vertices`, which the
-/// draws that bind them don't change: draws replace such vertices instead.
-pub fn copied_vertices<V: bytemuck::Pod>(context: &mut Context, vertices: &[V]) -> SharedVertices {
-    context.add_vertices(vertices.to_vec())
-}
-
-/// Indexes holding a copy of `indexes`, which a draw owns.
-#[must_use]
-pub fn copied_indexes(indexes: &[u16]) -> DrawIndexes {
-    DrawIndexes::new(indexes.to_vec())
-}
-
 /// The vertices that a bucket's upload moved `vec`, one of its vectors,
 /// into, which its tile's `geometry` keeps.
 #[must_use]
-pub fn bucket_vertices<V>(geometry: &BucketGeometry, vec: &GeometryVec<V>) -> Option<SharedVertices> {
+pub fn bucket_vertices<V>(geometry: &BucketGeometry, vec: &GeometryVec<V>) -> Option<VertexBuffer> {
     let vertices = geometry.vertices(vec);
     debug_assert!(vertices.is_some(), "vertices that the bucket's upload didn't move");
     vertices.cloned()
@@ -399,24 +388,25 @@ pub fn bucket_vertices<V>(geometry: &BucketGeometry, vec: &GeometryVec<V>) -> Op
 /// The indexes that a bucket's upload moved `vec`, one of its vectors,
 /// into, which its tile's `geometry` keeps and its draws share.
 #[must_use]
-pub fn bucket_indexes(geometry: &BucketGeometry, vec: &GeometryVec<u16>) -> Option<SharedIndexes> {
+pub fn bucket_indexes(geometry: &BucketGeometry, vec: &GeometryVec<u16>) -> Option<IndexBuffer> {
     let indexes = geometry.indexes.get(vec.key);
     debug_assert!(indexes.is_some(), "indexes that the bucket's upload didn't move");
     indexes.cloned()
 }
 
 /// The vertices of a layer's data-driven paint values: those that a
-/// bucket's upload moved, which its tile's `geometry` keeps, or a copy in
-/// `context`'s store of the values that feature state rewrites, which stay
-/// in the bucket, and which the draws copy again each time they change.
+/// bucket's upload moved, which its tile's `geometry` keeps, or a copy,
+/// made through `res`, of the values that feature state rewrites, which
+/// stay in the bucket, and which the draws copy again each time they
+/// change.
 pub fn paint_vertices(
-    context: &mut Context,
+    res: &mut Resources<'_>,
     geometry: &BucketGeometry,
     buffer: &InterleavedVertexBuffer,
     depends_on_feature_state: bool,
-) -> Option<SharedVertices> {
+) -> Option<VertexBuffer> {
     if depends_on_feature_state {
-        Some(copied_vertices(context, &buffer.shared_vertex_vector.data()))
+        Some(res.vertices(&buffer.shared_vertex_vector.data()))
     } else {
         bucket_vertices(geometry, &buffer.shared_vertex_vector)
     }

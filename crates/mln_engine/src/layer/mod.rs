@@ -106,8 +106,8 @@ pub mod bucket;
 pub mod binders {
     pub use crate::layer::paint_property_binder::{
         BinderValue, CrossFadedPaintPropertyBinder, InterleavedVertexBuffer, InterleavedVertexData, LayerBinders,
-        PaintBinders, PaintPropertyBinder, PaintPropertyBinderBase, PatternDependency, PatternLayerMap,
-        bind_paint_property, shared_paint,
+        PaintAttributes, PaintBinders, PaintPropertyBinder, PaintPropertyBinderBase, PatternDependency,
+        PatternLayerMap, bind_paint_property, paint_attributes,
     };
 }
 pub(crate) mod bucket_geometry;
@@ -128,8 +128,7 @@ pub use mln_wire::{Reader, Wire, Writer};
 pub use crate::draw::tile_render_data::TileAtlasTextures;
 pub use crate::layer::bucket::{Bucket, Upload};
 pub use crate::layer::bucket_geometry::{
-    BucketGeometry, GeometryVec, bucket_indexes, bucket_vertices, copied_indexes, copied_vertices, derived_vertices,
-    paint_vertices,
+    BucketGeometry, GeometryVec, bucket_indexes, bucket_vertices, derived_vertices, paint_vertices,
 };
 pub use crate::layer::layer_drawing::BucketChanges;
 pub use crate::layer::layer_type::EvaluatedLayer;
@@ -137,7 +136,7 @@ pub use crate::layer::layout::{BuildCx, Layout, LayoutCx, layers_by_id};
 pub use crate::layer::render_layer::{
     EvaluateCx, Evaluation, FrameQuery, Layer, LayerValues, OnTerrain, PrepareCx, TileCx, UpdateCx,
 };
-pub use crate::layer::tile_input::{Features, LayerBucket, NoTiles, RasterTile, TileData, TileInput};
+pub use crate::layer::tile_input::{Features, ImageId, LayerBucket, NoTiles, RasterTile, TileData, TileInput};
 pub use crate::query::feature_index::QueryRegion;
 #[doc(hidden)]
 pub use crate::render::shared_targets::{Router, Routes};

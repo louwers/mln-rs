@@ -35,42 +35,43 @@ use crate::draw::identity::SimpleIdentity;
 use crate::draw::indexes::DrawIndexes;
 use crate::draw::owned::{Held, Owned};
 use crate::draw::range::DrawRange;
-use crate::draw::resources::Device;
-use crate::draw::store::{MeshKey, Shared, SharedTexture, WeakShared};
+use crate::draw::resources::{Device, Resources};
+use crate::draw::store::{IndexBuffer, MeshKey, Shared, Texture, WeakShared};
 use crate::draw::uniform_buffer::UniformBufferArray;
 use crate::draw::upload::{self, AttributeBindingArray, AttributeSlots};
+use crate::draw::vertex::{VertexBinding, attributes_of, replace_attributes};
 use crate::draw::vertex_attribute::VertexAttributeArray;
-use crate::draw::vertices::SharedVertices;
+use crate::draw::vertices::VertexBuffer;
 use crate::log_target;
 use crate::render::paint_parameters::{DrawTarget, PaintParameters};
 
 /// The textures a draw binds, by the slots of its program's textures.
-pub type Textures = [Option<SharedTexture>; MAX_TEXTURES];
+pub type Textures = [Option<Texture>; MAX_TEXTURES];
 
 /// The most vertex buffers a draw binds, WebGPU's default limit.
 const MAX_VERTEX_BUFFERS: usize = 8;
 
 /// What a mesh draws: its vertices, and the primitives its draw calls draw
 /// of them.
-pub struct DrawGeometry {
+pub(crate) struct DrawGeometry {
     /// The vertex attributes, by the names of the program's attributes.
-    pub vertices: VertexAttributeArray,
+    pub(crate) vertices: VertexAttributeArray,
     /// How many vertices the attributes hold, which an attribute the
     /// shader reads and the draw lacks gets default values for.
-    pub vertex_count: usize,
+    pub(crate) vertex_count: usize,
     /// The primitive the draw calls draw.
-    pub mode: DrawMode,
-    pub indexes: DrawIndexes,
+    pub(crate) mode: DrawMode,
+    pub(crate) indexes: DrawIndexes,
     /// What each draw call draws.
-    pub ranges: Vec<DrawRange>,
+    pub(crate) ranges: Vec<DrawRange>,
     /// The attributes of each instance, for a draw of instances.
-    pub instances: Option<VertexAttributeArray>,
+    pub(crate) instances: Option<VertexAttributeArray>,
 }
 
 /// `count` vertices of `data_type` in `data` as the vertex attribute `name`,
 /// none where there are no vertices.
 #[must_use]
-pub fn raw_vertices(
+pub(crate) fn raw_vertices(
     name: &'static str,
     data: Vec<u8>,
     count: usize,
@@ -325,7 +326,7 @@ pub(crate) struct DrawObjects {
     /// The vertices the shader reads as storage buffers, each with the
     /// buffer id it binds at, past the uniform buffers' ids, and its buffer
     /// as of the last upload.
-    storage_vertices: Vec<(usize, SharedVertices, Option<BufferId>)>,
+    storage_vertices: Vec<(usize, VertexBuffer, Option<BufferId>)>,
     /// How often a buffer of `storage_vertices` changed.
     storage_epoch: u64,
     color_mode: ColorMode,
@@ -652,7 +653,7 @@ impl DrawObjects {
     /// an id past the uniform buffers', on a device that binds vertex
     /// buffers; nothing with `None`. The next upload writes them, and the
     /// draws after it bind their buffer.
-    pub(crate) fn read_as_storage(&mut self, id: usize, vertices: Option<SharedVertices>) {
+    pub(crate) fn read_as_storage(&mut self, id: usize, vertices: Option<VertexBuffer>) {
         debug_assert!(id >= BUFFER_IDS, "a uniform buffer's id");
         self.storage_vertices.retain(|(at, ..)| *at != id);
         debug_assert!(vertices.is_none() || self.storage_vertices.len() < MAX_STORAGE_VERTICES);
@@ -676,13 +677,13 @@ impl DrawObjects {
 
     /// The texture it binds at its program's texture slot `slot`.
     #[must_use]
-    pub(crate) fn texture(&self, slot: usize) -> Option<&SharedTexture> {
+    pub(crate) fn texture(&self, slot: usize) -> Option<&Texture> {
         self.textures[slot].as_ref()
     }
 
     /// Makes `texture` the one it binds at its program's texture slot
     /// `slot`.
-    pub(crate) fn set_texture(&mut self, slot: usize, texture: Option<&SharedTexture>) {
+    pub(crate) fn set_texture(&mut self, slot: usize, texture: Option<&Texture>) {
         let bound = &mut self.textures[slot];
         if bound.as_ref() != texture {
             *bound = texture.cloned();
@@ -714,13 +715,34 @@ impl DrawObjects {
     }
 }
 
+/// What a mesh is made of ([`Resources::mesh`]): `vertex_count` vertices
+/// that its `vertices` bindings read, the attributes of each instance that
+/// its `instances` bindings read, for a draw of instances, and the
+/// primitives of `mode` that its `ranges` draw of `indexes`, drawn with
+/// `shader` in `color_mode` and `cull_face_mode`, binding `textures`. An
+/// attribute the shader reads that no binding has reads its default value.
+///
+/// [`Resources::mesh`]: crate::draw::Resources::mesh
+pub struct MeshDesc {
+    pub shader: ShaderKey,
+    pub color_mode: ColorMode,
+    pub cull_face_mode: CullFaceMode,
+    pub mode: DrawMode,
+    pub vertices: Vec<VertexBinding>,
+    pub vertex_count: usize,
+    pub instances: Option<Vec<VertexBinding>>,
+    pub indexes: IndexBuffer,
+    pub ranges: Vec<DrawRange>,
+    pub textures: Textures,
+}
+
 /// A handle of a mesh, the GPU objects of what a draw draws
 /// (`DrawObjects`), which the context's store keeps while a clone of the
 /// handle lasts (`Context::mesh`). A layer keeps its meshes' handles, in
 /// its tile values or its own state, and the draws it pushes name them
 /// ([`Group::push`]), so that the engine uploads and draws them after the
 /// layer made its draws. Clones of a handle are the same mesh. A mesh
-/// changes through the context, which the methods here take.
+/// changes through the [`Resources`] that the methods here take.
 ///
 /// [`Group::push`]: crate::draw::draws::Group::push
 #[derive(Clone)]
@@ -731,10 +753,36 @@ pub struct Mesh {
 }
 
 impl Mesh {
+    /// The mesh that `desc` describes, in `context`'s store.
+    #[must_use]
+    pub(crate) fn of(context: &mut Context, desc: MeshDesc) -> Self {
+        let MeshDesc {
+            shader,
+            color_mode,
+            cull_face_mode,
+            mode,
+            vertices,
+            vertex_count,
+            instances,
+            indexes,
+            ranges,
+            textures,
+        } = desc;
+        let geometry = DrawGeometry {
+            vertices: attributes_of(&vertices),
+            vertex_count,
+            mode,
+            indexes: DrawIndexes::Shared(indexes),
+            ranges,
+            instances: instances.as_deref().map(attributes_of),
+        };
+        Mesh::new(context, shader, color_mode, cull_face_mode, geometry, textures)
+    }
+
     /// The mesh of `geometry`, drawn with `shader` in `color_mode` and
     /// `cull_face_mode`, binding `textures`, in `context`'s store.
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         context: &mut Context,
         shader: ShaderKey,
         color_mode: ColorMode,
@@ -783,19 +831,8 @@ impl Mesh {
     }
 
     /// See `DrawObjects::upload`.
-    pub fn upload(&self, gpu: &mut dyn Gpu, context: &mut Context) {
+    pub(crate) fn upload(&self, gpu: &mut dyn Gpu, context: &mut Context) {
         self.update(context, |objects, context| objects.upload(gpu, context));
-    }
-
-    /// Runs `f` with the mesh's vertex attributes, to change, and the
-    /// context; `None` for a mesh whose objects went. The next upload binds
-    /// the attributes again.
-    pub fn update_vertex_attributes<R>(
-        &self,
-        context: &mut Context,
-        f: impl FnOnce(&mut VertexAttributeArray, &mut Context) -> R,
-    ) -> Option<R> {
-        self.update(context, |objects, context| f(objects.vertex_attributes_mut(), context))
     }
 
     /// See [`DrawObjects::vertex_attributes_mut`].
@@ -803,75 +840,75 @@ impl Mesh {
         context.mesh_mut(self).map(DrawObjects::vertex_attributes_mut)
     }
 
-    /// See `DrawObjects::paint_attributes_mut`.
-    pub fn paint_attributes_mut<'c>(&self, context: &'c mut Context) -> Option<&'c mut VertexAttributeArray> {
-        context.mesh_mut(self).map(DrawObjects::paint_attributes_mut)
+    /// Makes `bindings` what the mesh reads its vertices from, in place of
+    /// what it read; the next upload binds them.
+    pub fn set_vertices<'b>(&self, res: &mut Resources<'_>, bindings: impl IntoIterator<Item = &'b VertexBinding>) {
+        if let Some(attrs) = self.vertex_attributes_mut(res.context) {
+            replace_attributes(attrs, bindings);
+        }
+    }
+
+    /// Makes `paint`, the vertices of a layer's data-driven paint values
+    /// ([`PaintAttributes`](crate::layer::binders::PaintAttributes)), what
+    /// the mesh reads the attributes of its layout from: of its instances,
+    /// for a draw of instances, else of its vertices. The next upload binds
+    /// them.
+    pub fn set_paint(&self, res: &mut Resources<'_>, paint: &VertexBinding) {
+        if let Some(objects) = res.context.mesh_mut(self) {
+            paint.bind(objects.paint_attributes_mut());
+        }
     }
 
     /// See `DrawObjects::read_as_storage`.
-    pub fn read_as_storage(&self, context: &mut Context, id: usize, vertices: Option<SharedVertices>) {
-        if let Some(objects) = context.mesh_mut(self) {
+    pub fn read_as_storage(&self, res: &mut Resources<'_>, id: usize, vertices: Option<VertexBuffer>) {
+        if let Some(objects) = res.context.mesh_mut(self) {
             objects.read_as_storage(id, vertices);
         }
     }
 
     /// See `DrawObjects::storage_buffer`.
     #[must_use]
-    pub fn storage_buffer(&self, context: &Context, id: usize) -> Option<BufferId> {
+    pub(crate) fn storage_buffer(&self, context: &Context, id: usize) -> Option<BufferId> {
         context.mesh(self)?.storage_buffer(id)
     }
 
     /// See `DrawObjects::has_instances`.
     #[must_use]
-    pub fn has_instances(&self, context: &Context) -> bool {
-        context.mesh(self).is_some_and(DrawObjects::has_instances)
-    }
-
-    /// Replaces the vertex attributes with a copy of those of `other`
-    /// ([`copy_shared_attributes`]), which the next upload binds.
-    pub fn share_vertex_attributes(&self, context: &mut Context, other: &Mesh) {
-        if self.key == other.key {
-            return;
-        }
-        let Some(copy) = context.mesh(other).map(|other| copy_shared_attributes(&other.vertex_attributes)) else {
-            return;
-        };
-        if let Some(objects) = context.mesh_mut(self) {
-            *objects.vertex_attributes_mut() = copy;
-        }
+    pub fn has_instances(&self, res: &Resources<'_>) -> bool {
+        res.context.mesh(self).is_some_and(DrawObjects::has_instances)
     }
 
     /// See `DrawObjects::texture`.
     #[must_use]
-    pub fn texture<'c>(&self, context: &'c Context, slot: usize) -> Option<&'c SharedTexture> {
-        context.mesh(self)?.texture(slot)
+    pub fn texture<'r>(&self, res: &'r Resources<'_>, slot: usize) -> Option<&'r Texture> {
+        res.context.mesh(self)?.texture(slot)
     }
 
     /// See `DrawObjects::set_texture`.
-    pub fn set_texture(&self, context: &mut Context, slot: usize, texture: Option<&SharedTexture>) {
-        if let Some(objects) = context.mesh_mut(self) {
+    pub fn set_texture(&self, res: &mut Resources<'_>, slot: usize, texture: Option<&Texture>) {
+        if let Some(objects) = res.context.mesh_mut(self) {
             objects.set_texture(slot, texture);
         }
     }
 
+    /// See `DrawObjects::set_sampler`.
+    pub fn set_sampler(&self, res: &mut Resources<'_>, slot: usize, state: Option<SamplerState>) {
+        if let Some(objects) = res.context.mesh_mut(self) {
+            objects.set_sampler(slot, state);
+        }
+    }
+
     /// Replaces the mesh's indexes and the ranges drawn of them.
-    pub fn replace_indexes(&self, context: &mut Context, indexes: DrawIndexes, ranges: Vec<DrawRange>) {
-        if let Some(objects) = context.mesh_mut(self) {
-            objects.replace_indexes(indexes, ranges);
+    pub fn replace_indexes(&self, res: &mut Resources<'_>, indexes: IndexBuffer, ranges: Vec<DrawRange>) {
+        if let Some(objects) = res.context.mesh_mut(self) {
+            objects.replace_indexes(DrawIndexes::Shared(indexes), ranges);
         }
     }
 
     /// See `DrawObjects::set_cull_face_mode`.
-    pub fn set_cull_face_mode(&self, context: &mut Context, cull_face_mode: CullFaceMode) {
-        if let Some(objects) = context.mesh_mut(self) {
+    pub fn set_cull_face_mode(&self, res: &mut Resources<'_>, cull_face_mode: CullFaceMode) {
+        if let Some(objects) = res.context.mesh_mut(self) {
             objects.set_cull_face_mode(cull_face_mode);
-        }
-    }
-
-    /// See `DrawObjects::set_sampler`.
-    pub fn set_sampler(&self, context: &mut Context, slot: usize, state: Option<SamplerState>) {
-        if let Some(objects) = context.mesh_mut(self) {
-            objects.set_sampler(slot, state);
         }
     }
 }
@@ -880,21 +917,6 @@ impl Mesh {
 fn sampled_slots(program: &Program) -> impl Iterator<Item = usize> + use<> {
     let textures = program.textures;
     (0..textures.len()).filter(move |&slot| !textures[slot].is_unused())
-}
-
-/// A copy of `attrs`, all of whose attributes read vertices of the
-/// context's store: the copy reads the same vertices, so draws of either
-/// bind the same buffers.
-#[must_use]
-pub fn copy_shared_attributes(attrs: &VertexAttributeArray) -> VertexAttributeArray {
-    let mut copy = VertexAttributeArray::new();
-    for (name, attr) in attrs.iter() {
-        debug_assert!(attr.shared().is_some(), "a copied attribute has values of its own");
-        if let Some(shared) = attr.shared() {
-            copy.set_shared(name, shared.clone());
-        }
-    }
-    copy
 }
 
 fn fixed_state(variant: PipelineVariant, color_mode: &ColorMode, cull: CullFaceMode) -> FixedState {

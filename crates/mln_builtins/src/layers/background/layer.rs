@@ -1,8 +1,7 @@
 use mln_engine::draw::globe::tile_mesh;
 use mln_engine::draw::projection::{TileTransform, tile_projection};
 use mln_engine::draw::{
-    Context, Depth, Draw, DrawGeometry, DrawIndexes, DrawRange, Draws, LayerFrame, Mesh, RenderPass, Resources,
-    Textures, Uniforms, raw_vertices,
+    Depth, Draw, DrawRange, Draws, LayerFrame, Mesh, MeshDesc, RenderPass, Resources, Textures, Uniforms,
 };
 use mln_engine::layer::{
     EvaluateCx, Evaluation, FrameTile, Layer, LayerValues, NoTiles, OnTerrain, PrepareCx, UpdateCx,
@@ -14,7 +13,7 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DepthMaskType, DrawMode};
+use mln_gfx::{ColorMode, CullFaceMode, DepthMaskType, DrawMode};
 use mln_style::constants::TILE_SIZE_D;
 use mln_style::layers::Background;
 use mln_style::range::Range;
@@ -25,7 +24,7 @@ use crate::layers::background::programs;
 use crate::layers::background::ubo::{
     BackgroundDrawableUBO, BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO, BackgroundPropsUBO,
 };
-use crate::layers::quads::{QUAD_RANGE, quad_triangle_indices, tile_vertices};
+use crate::layers::quads::{QUAD_RANGE, positions, quad_triangle_indices, tile_vertices};
 
 /// What the layer keeps of a tile: its mesh, and the passes it was built
 /// for and whether with a pattern.
@@ -57,7 +56,7 @@ impl RenderBackgroundLayer {
     /// The mesh of the draw of the tile `tile_id`, with `shader` and
     /// `color_mode`, in the projection `variant`.
     fn build_tile(
-        context: &mut Context,
+        res: &mut Resources<'_>,
         tile_id: &OverscaledTileID,
         shader: ShaderKey,
         color_mode: ColorMode,
@@ -72,21 +71,20 @@ impl RenderBackgroundLayer {
         } else {
             (tile_vertices(), quad_triangle_indices(), QUAD_RANGE)
         };
-        let vertex_count = vertices.len();
-        let geometry = DrawGeometry {
-            vertices: raw_vertices(
-                "pos",
-                bytemuck::cast_slice(&vertices).to_vec(),
-                vertex_count,
-                AttributeDataType::Short2,
-            ),
-            vertex_count,
+        let buffer = res.vertices(&vertices);
+        let indexes = res.indexes(&indexes);
+        res.mesh(MeshDesc {
+            shader,
+            color_mode,
+            cull_face_mode: CullFaceMode::disabled(),
             mode: DrawMode::Triangles(),
-            indexes: DrawIndexes::new(indexes),
-            ranges: vec![range],
+            vertices: vec![positions(&buffer)],
+            vertex_count: vertices.len(),
             instances: None,
-        };
-        Mesh::new(context, shader, color_mode, CullFaceMode::disabled(), geometry, Textures::default())
+            indexes,
+            ranges: vec![range],
+            textures: Textures::default(),
+        })
     }
 
     /// The block of the draw of `tile_id`, and its projection.
@@ -151,14 +149,13 @@ impl Layer for RenderBackgroundLayer {
     ) {
         let RenderBackgroundLayer { patterns } = self;
         let PrepareCx { base, values, tiles, picked, res, frame, .. } = cx;
-        let Resources { gpu, context } = res;
         let layer = &*values.evaluated;
         let evaluated = &layer.paint;
         let built_for = Self::built_for(values);
         let (draw_passes, has_pattern) = built_for;
 
         let program = if has_pattern { &programs::BACKGROUND_PATTERN } else { &programs::BACKGROUND };
-        let shader = context.shader_key(program, Uniforms::default(), base.projection_variant);
+        let shader = res.shader_key(program, Uniforms::default(), base.projection_variant);
 
         let faded = evaluated.background_pattern.faded();
         let pattern_positions = if has_pattern {
@@ -171,16 +168,19 @@ impl Layer for RenderBackgroundLayer {
             None
         };
         if has_pattern {
-            patterns.upload(*gpu, context);
+            patterns.upload(res);
         }
         let pattern_texture = patterns.texture().filter(|_| has_pattern);
-        if let Some(mut texture) = pattern_texture.and_then(|texture| context.texture_mut(texture)) {
-            texture.set_sampler(SamplerState {
-                filter: TextureFilterType::Linear,
-                wrap_u: TextureWrapType::Clamp,
-                wrap_v: TextureWrapType::Clamp,
-                ..Default::default()
-            });
+        if let Some(texture) = pattern_texture {
+            res.set_sampler(
+                texture,
+                SamplerState {
+                    filter: TextureFilterType::Linear,
+                    wrap_u: TextureWrapType::Clamp,
+                    wrap_v: TextureWrapType::Clamp,
+                    ..Default::default()
+                },
+            );
         }
 
         let variant = base.projection_variant;
@@ -189,12 +189,12 @@ impl Layer for RenderBackgroundLayer {
         for &tile_id in *picked {
             let Some(entry) = tiles.entry(&tile_id) else { continue };
             let cached = entry.value.get_or_insert_with(|| BackgroundTile {
-                mesh: Self::build_tile(context, &tile_id, shader.clone(), color_mode, variant),
+                mesh: Self::build_tile(res, &tile_id, shader.clone(), color_mode, variant),
                 built_for,
             });
             if pattern_texture.is_some() {
                 cached.mesh.set_texture(
-                    context,
+                    res,
                     const { programs::BACKGROUND_PATTERN.texture_slot("image") },
                     pattern_texture,
                 );

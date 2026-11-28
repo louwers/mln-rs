@@ -26,6 +26,8 @@ pub(crate) struct HeatmapLayoutVertex {
     pub(crate) a1: [i16; 2],
 }
 
+mln_engine::vertex_attributes!(HeatmapLayoutVertex { a1 => "pos": Short2 });
+
 pub(crate) type HeatmapTextureLayoutVertex = HeatmapLayoutVertex;
 
 #[derive(Clone, Default, mln_wire::Wire)]

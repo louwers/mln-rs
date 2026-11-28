@@ -5,6 +5,7 @@
 //! its border and theirs.
 
 use crate::draw::identity::SimpleIdentity;
+use crate::layer::ImageId;
 use crate::layer::layer_drawing::MadeFrom;
 use crate::tile::OverscaledTileID;
 use crate::tile::dem_data::DEMData;
@@ -32,8 +33,8 @@ impl DemContents {
     /// The contents' identity, by which the layers and the terrain keep what
     /// they make of them.
     #[must_use]
-    pub fn id(&self) -> SimpleIdentity {
-        self.id
+    pub fn id(&self) -> ImageId {
+        ImageId::new(self.id)
     }
 
     #[must_use]

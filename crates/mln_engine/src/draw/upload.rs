@@ -126,10 +126,10 @@ pub(crate) fn update_attribute_bindings(
 
 /// Whether the next upload writes what one of `overrides`' attributes that
 /// the shader reads, at `slots`, reads
-/// ([`VertexAttribute::needs_upload`]), as of the last
+/// ([`AttributeSource::needs_upload`]), as of the last
 /// [`update_attribute_bindings`].
 ///
-/// [`VertexAttribute::needs_upload`]: crate::draw::vertex_attribute::VertexAttribute::needs_upload
+/// [`AttributeSource::needs_upload`]: crate::draw::vertex_attribute::AttributeSource::needs_upload
 pub(crate) fn needs_upload(context: &Context, overrides: &VertexAttributeArray, slots: &AttributeSlots) -> bool {
     slots
         .slots

@@ -1,11 +1,9 @@
 //! The vertices that draws bind from the context's store: a bucket's, which
 //! a tile's draws share, and those a layer makes for its draws. Draws hold
-//! them as [`SharedVertices`]; only the holder of a [`TypedVertices`], who
-//! made them as dynamic vertices of a type, can replace them with new
-//! vertices of it. Only the store makes either, of the entries it adds, so a
-//! handle's count and vertex type are its entry's.
+//! them as [`VertexBuffer`]s. Dynamic vertices keep their bytes' storage
+//! across uploads for the updates that replace them. Only the store makes
+//! a handle, of the entries it adds, so its count is its entry's.
 
-use std::marker::PhantomData;
 use std::rc::Rc;
 
 use mln_gfx::gpu::{BufferId, BufferUsage, Gpu, GpuError};
@@ -44,7 +42,7 @@ enum VertexData {
 /// updates, each new bytes of as many vertices, which the next upload
 /// writes over the buffer's; their uploads keep their bytes' storage for
 /// the next update to fill.
-pub struct Vertices {
+pub(crate) struct Vertices {
     /// The bytes the next upload writes; once it wrote them, `Freed`, or
     /// `Written` for dynamic vertices.
     data: VertexData,
@@ -126,7 +124,7 @@ impl Vertices {
 
     /// The bytes a vertex takes.
     #[must_use]
-    pub fn vertex_size(&self) -> usize {
+    pub(crate) fn vertex_size(&self) -> usize {
         self.vertex_size
     }
 
@@ -139,13 +137,13 @@ impl Vertices {
     /// updated since the last upload, which wrote their bytes. A draw bound
     /// before then binds them again, and its other attributes with them.
     #[must_use]
-    pub fn needs_upload(&self) -> bool {
+    pub(crate) fn needs_upload(&self) -> bool {
         !matches!(self.data, VertexData::Written(_) | VertexData::Freed)
     }
 
     /// The bytes of the vertices while they are in wasm memory.
     #[must_use]
-    pub fn bytes(&self) -> &[u8] {
+    pub(crate) fn bytes(&self) -> &[u8] {
         self.data.bytes().unwrap_or_default()
     }
 
@@ -219,35 +217,31 @@ pub(crate) struct VertexStore(Store<VerticesKey, Vertices>);
 impl VertexStore {
     /// Keeps `vertices` while a clone of the returned handle lasts, whose
     /// key goes to `queue` once the last clone drops.
-    pub(crate) fn add<V: bytemuck::Pod>(&mut self, vertices: Vec<V>, queue: &Rc<ReleaseQueue>) -> SharedVertices {
+    pub(crate) fn add<V: bytemuck::Pod>(&mut self, vertices: Vec<V>, queue: &Rc<ReleaseQueue>) -> VertexBuffer {
         self.insert(Vertices::new(vertices), queue)
     }
 
     /// Keeps a copy of `vertices` as dynamic vertices, which the holder of
     /// the returned handle updates ([`update`](Self::update)), as
     /// [`add`](Self::add) does.
-    pub(crate) fn add_dynamic<V: bytemuck::Pod>(
-        &mut self,
-        vertices: &[V],
-        queue: &Rc<ReleaseQueue>,
-    ) -> TypedVertices<V> {
-        TypedVertices { shared: self.insert(Vertices::dynamic(vertices), queue), vertex_type: PhantomData }
+    pub(crate) fn add_dynamic<V: bytemuck::Pod>(&mut self, vertices: &[V], queue: &Rc<ReleaseQueue>) -> VertexBuffer {
+        self.insert(Vertices::dynamic(vertices), queue)
     }
 
     /// Keeps the vertices of the type `V` in the JS array `bytes`, as
     /// [`add`](Self::add) does.
     #[cfg(target_family = "wasm")]
-    pub(crate) fn add_host<V: bytemuck::Pod>(&mut self, bytes: HostBytes, queue: &Rc<ReleaseQueue>) -> SharedVertices {
+    pub(crate) fn add_host<V: bytemuck::Pod>(&mut self, bytes: HostBytes, queue: &Rc<ReleaseQueue>) -> VertexBuffer {
         self.insert(Vertices::from_host(bytes, size_of::<V>()), queue)
     }
 
-    fn insert(&mut self, vertices: Vertices, queue: &Rc<ReleaseQueue>) -> SharedVertices {
+    fn insert(&mut self, vertices: Vertices, queue: &Rc<ReleaseQueue>) -> VertexBuffer {
         let count = vertices.count();
-        SharedVertices { handle: self.0.add(vertices, queue), count }
+        VertexBuffer { handle: self.0.add(vertices, queue), count }
     }
 
     /// The vertices of `shared`.
-    pub(crate) fn get(&self, shared: &SharedVertices) -> Option<&Vertices> {
+    pub(crate) fn get(&self, shared: &VertexBuffer) -> Option<&Vertices> {
         self.0.get(&shared.handle)
     }
 
@@ -257,10 +251,10 @@ impl VertexStore {
         self.0.contains(key)
     }
 
-    /// Replaces the vertices of `typed` with a copy of `data`, as many, as
-    /// [`Vertices::update`] does.
-    pub(crate) fn update<V: bytemuck::Pod>(&mut self, typed: &TypedVertices<V>, data: &[V]) -> bool {
-        let Some(entry) = self.0.get_mut(&typed.shared.handle) else {
+    /// Replaces the vertices of `buffer` with a copy of `data`, as many,
+    /// as [`Vertices::update`] does.
+    pub(crate) fn update<V: bytemuck::Pod>(&mut self, buffer: &VertexBuffer, data: &[V]) -> bool {
+        let Some(entry) = self.0.get_mut(&buffer.handle) else {
             return false;
         };
         debug_assert_eq!(entry.vertex_size(), size_of::<V>());
@@ -273,7 +267,7 @@ impl VertexStore {
         &mut self,
         gpu: &mut dyn Gpu,
         device: &mut Device,
-        shared: &SharedVertices,
+        shared: &VertexBuffer,
     ) -> Result<Option<BufferId>, GpuError> {
         self.0.get_mut(&shared.handle).ok_or(GpuError::UnknownId("vertices"))?.upload(gpu, device)
     }
@@ -289,15 +283,18 @@ impl VertexStore {
     }
 }
 
-/// Vertices of the context's store that draws bind, with their count. They
-/// are equal where they are the same entry.
-#[derive(Clone, PartialEq, Eq)]
-pub struct SharedVertices {
+/// A buffer of vertices that meshes read ([`VertexBinding`]), with their
+/// count. It stays while a clone does; clones are the same buffer, and
+/// handles are equal where they are.
+///
+/// [`VertexBinding`]: crate::draw::VertexBinding
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VertexBuffer {
     handle: Shared<VerticesKey>,
     count: usize,
 }
 
-impl SharedVertices {
+impl VertexBuffer {
     /// What geometry made of the vertices holds.
     pub(crate) fn held(&self) -> Held {
         Held::Vertices(self.handle.clone())
@@ -314,29 +311,5 @@ impl SharedVertices {
     #[must_use]
     pub fn count(&self) -> usize {
         self.count
-    }
-}
-
-/// Dynamic vertices of the context's store made of vertices of the type
-/// `V`, which their holder can replace with others of `V`
-/// ([`Context::update_vertices`]).
-///
-/// [`Context::update_vertices`]: crate::draw::context::Context::update_vertices
-pub struct TypedVertices<V> {
-    shared: SharedVertices,
-    vertex_type: PhantomData<fn() -> V>,
-}
-
-impl<V> TypedVertices<V> {
-    /// The vertices, as draws bind them.
-    #[must_use]
-    pub fn shared(&self) -> &SharedVertices {
-        &self.shared
-    }
-}
-
-impl<V> Clone for TypedVertices<V> {
-    fn clone(&self) -> Self {
-        TypedVertices { shared: self.shared.clone(), vertex_type: PhantomData }
     }
 }

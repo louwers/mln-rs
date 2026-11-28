@@ -15,7 +15,7 @@ use mln_style::hash::HashMap;
 use mln_style::size::Size;
 
 use crate::draw::context::Context;
-use crate::draw::store::SharedTexture;
+use crate::draw::store::Texture;
 use crate::draw::texture2d::texture_size;
 use crate::text::atlas::RectU16;
 use crate::text::glyph::Glyph;
@@ -105,7 +105,7 @@ pub(crate) struct DynamicTexture {
     /// The images queued for the frame's next upload, keyed by handle id.
     images_to_upload: HashMap<DynamicTextureBinId, (RectU16, QueuedPixels)>,
     /// The GPU texture, from the first upload.
-    texture: Option<SharedTexture>,
+    texture: Option<Texture>,
 }
 
 impl std::fmt::Debug for DynamicTexture {
@@ -153,7 +153,7 @@ impl DynamicTexture {
     }
 
     /// The page's texture in the context's store, from the first upload.
-    pub(crate) fn texture(&self) -> Option<&SharedTexture> {
+    pub(crate) fn texture(&self) -> Option<&Texture> {
         self.texture.as_ref()
     }
 

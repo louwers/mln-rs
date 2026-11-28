@@ -4,26 +4,25 @@
 // are the same. The elevation stops texture is made anew when the ramp
 // changes, since its size changes with the ramp.
 
-use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_engine::draw::projection::{TileTransform, tile_projection};
 use mln_engine::draw::{
-    Context, Draw, DrawGeometry, DrawIndexes, DrawRange, Draws, Indexes, Mesh, SharedAttribute, SharedIndexes,
-    SharedTexture, SharedVertices, SimpleIdentity, Textures, Uniforms, VertexAttributeArray,
+    Draw, DrawRange, Draws, IndexBuffer, Mesh, MeshDesc, Resources, Texture, Textures, Uniforms, VertexBinding,
+    VertexBuffer,
 };
 use mln_engine::layer::{
-    DemContents, EvaluateCx, Evaluation, FrameTile, Layer, LayerValues, OnTerrain, PrepareCx, RasterLayoutVertex,
-    TileCx, TileData, copied_vertices,
+    DemContents, EvaluateCx, Evaluation, FrameTile, ImageId, Layer, LayerValues, OnTerrain, PrepareCx,
+    RasterLayoutVertex, TileCx, TileData,
 };
 use mln_engine::source::DemTiles;
 use mln_engine::tile::dem::DemUnpack;
-use mln_gfx::gpu::{Gpu, TextureFormat};
+use mln_gfx::gpu::TextureFormat;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
+use mln_gfx::{ColorMode, CullFaceMode, DrawMode};
 use mln_style::StyleValue as _;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::color::Color;
@@ -56,9 +55,9 @@ pub(crate) struct ReliefTile {
 /// of the tile's contents and the generation of the DEM's border it was
 /// made at.
 struct DemTexture {
-    id: SimpleIdentity,
+    id: ImageId,
     generation: u64,
-    texture: SharedTexture,
+    texture: Texture,
 }
 
 pub(crate) struct RenderColorReliefLayer {
@@ -75,12 +74,12 @@ pub(crate) struct RenderColorReliefLayer {
     color_stops: PremultipliedImage,
 
     // GPU textures
-    elevation_stops_texture: Option<SharedTexture>,
-    color_stops_texture: Option<SharedTexture>,
+    elevation_stops_texture: Option<Texture>,
+    color_stops_texture: Option<Texture>,
 
-    static_data_shared_vertices: Option<SharedVertices>,
+    static_data_shared_vertices: Option<VertexBuffer>,
     /// The triangles of the static data's quad.
-    static_data_indices: Option<SharedIndexes>,
+    static_data_indices: Option<IndexBuffer>,
     globe_meshes: GlobeTileMeshCache<RasterLayoutVertex>,
 }
 
@@ -183,37 +182,37 @@ impl RenderColorReliefLayer {
     }
 
     /// Makes the ramps' textures again if the ramps changed since.
-    fn update_ramp_textures(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+    fn update_ramp_textures(&mut self, res: &mut Resources<'_>) {
         if !self.color_ramp_changed {
             return;
         }
         // RGBA32F rather than R32F, which llvmpipe can't sample.
-        let elevation_stops = context.add_texture_with(|texture| {
-            texture.set_format(TextureFormat::Rgba32Float);
-            texture.set_sampler(SamplerState {
-                filter: TextureFilterType::Nearest,
-                wrap_u: TextureWrapType::Clamp,
-                wrap_v: TextureWrapType::Clamp,
-                ..Default::default()
-            });
-        });
+        let nearest = SamplerState {
+            filter: TextureFilterType::Nearest,
+            wrap_u: TextureWrapType::Clamp,
+            wrap_v: TextureWrapType::Clamp,
+            ..Default::default()
+        };
+        let elevation_stops = res.texture(TextureFormat::Rgba32Float, nearest);
         let data = bytemuck::cast_slice(self.elevation_stops_data.as_slice());
-        if let Err(error) =
-            context.upload_texture_data(gpu, &elevation_stops, data, mln_gfx::Size::new(self.color_ramp_size, 1))
-        {
-            context.fail(format!("Uploading the elevation stops failed: {error}"));
+        if let Err(error) = res.write_texture(&elevation_stops, data, mln_gfx::Size::new(self.color_ramp_size, 1)) {
+            res.fail(format!("Uploading the elevation stops failed: {error}"));
         }
         self.elevation_stops_texture = Some(elevation_stops);
 
-        let texture = self.color_stops_texture.get_or_insert_with(|| context.add_texture());
-        if let Some(mut texture) = context.texture_mut(texture) {
-            texture.set_image(Some(Rc::new(self.color_stops.clone())));
-            texture.set_sampler(SamplerState {
-                filter: TextureFilterType::Linear,
-                wrap_u: TextureWrapType::Clamp,
-                wrap_v: TextureWrapType::Clamp,
-                ..Default::default()
-            });
+        let linear = SamplerState {
+            filter: TextureFilterType::Linear,
+            wrap_u: TextureWrapType::Clamp,
+            wrap_v: TextureWrapType::Clamp,
+            ..Default::default()
+        };
+        let color_stops = Rc::new(self.color_stops.clone());
+        match &self.color_stops_texture {
+            Some(texture) => {
+                res.set_image(texture, color_stops);
+                res.set_sampler(texture, linear);
+            }
+            None => self.color_stops_texture = Some(res.image_texture(color_stops, linear)),
         }
 
         self.color_ramp_changed = false;
@@ -222,42 +221,15 @@ impl RenderColorReliefLayer {
 
 /// The texture of `dem`'s image: `previous`, if that was made of the same
 /// DEM at its border's generation, or a new one.
-fn dem_texture(previous: Option<DemTexture>, context: &mut Context, dem: &DemContents) -> DemTexture {
+fn dem_texture(previous: Option<DemTexture>, res: &mut Resources<'_>, dem: &DemContents) -> DemTexture {
     let (id, generation) = (dem.id(), dem.generation());
     match previous {
         Some(previous) if previous.id == id && previous.generation == generation => previous,
         _ => {
-            let texture = context.add_texture_with(|texture| {
-                texture.set_image(Some(Rc::new(dem.dem().image().clone())));
-            });
+            let texture = res.image_texture(Rc::new(dem.dem().image().clone()), SamplerState::default());
             DemTexture { id, generation, texture }
         }
     }
-}
-
-/// The vertex attributes of a color-relief draw over `vertices`.
-fn color_relief_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
-    let mut attrs = VertexAttributeArray::new();
-    let stride = size_of::<RasterLayoutVertex>() as u32;
-    attrs.set_shared(
-        "pos",
-        SharedAttribute::new(
-            vertices.clone(),
-            AttributeDataType::Short2,
-            offset_of!(RasterLayoutVertex, a1) as u32,
-            stride,
-        ),
-    );
-    attrs.set_shared(
-        "texture_pos",
-        SharedAttribute::new(
-            vertices.clone(),
-            AttributeDataType::Short2,
-            offset_of!(RasterLayoutVertex, a2) as u32,
-            stride,
-        ),
-    );
-    attrs
 }
 
 impl Layer for RenderColorReliefLayer {
@@ -328,8 +300,8 @@ impl Layer for RenderColorReliefLayer {
         if !dem.has_data() {
             return None;
         }
-        let context = &mut *cx.res.context;
-        self.update_ramp_textures(cx.res.gpu, context);
+        let res = &mut cx.res;
+        self.update_ramp_textures(res);
         let RenderColorReliefLayer {
             color_ramp_size,
             elevation_stops_texture,
@@ -341,11 +313,10 @@ impl Layer for RenderColorReliefLayer {
         } = self;
 
         let color_relief_shader =
-            context.shader_key(&programs::COLOR_RELIEF, Uniforms::default(), cx.base.projection_variant);
+            res.shader_key(&programs::COLOR_RELIEF, Uniforms::default(), cx.base.projection_variant);
         let static_data_shared_vertices =
-            &*static_data_shared_vertices.get_or_insert_with(|| copied_vertices(context, &raster_vertices()));
-        let static_data_indices =
-            &*static_data_indices.get_or_insert_with(|| context.add_indexes(Indexes::new(quad_triangle_indices())));
+            &*static_data_shared_vertices.get_or_insert_with(|| res.vertices(&raster_vertices()));
+        let static_data_indices = &*static_data_indices.get_or_insert_with(|| res.indexes(&quad_triangle_indices()));
         let (Some(elevation_stops_texture), Some(color_stops_texture)) =
             (elevation_stops_texture.as_ref(), color_stops_texture.as_ref())
         else {
@@ -364,41 +335,40 @@ impl Layer for RenderColorReliefLayer {
             color_ramp_size: *color_ramp_size as i32,
             unpack_scale: unpack.scale,
         };
-        let dem_texture = dem_texture(previous.map(|previous| previous.dem), context, dem);
+        let dem_texture = dem_texture(previous.map(|previous| previous.dem), res, dem);
 
         // The tile's geometry: the globe's mesh of its mask, the mask's
         // quads, or the whole tile's quad.
-        let (vertices, vertex_count, indices, ranges): (SharedVertices, usize, DrawIndexes, Vec<DrawRange>) = if cx
-            .base
-            .projection_variant
-            == ProjectionVariant::Globe
-        {
-            let globe_mesh = globe_meshes.get(context, &tile_id.canonical, masking.mask(), RasterLayoutVertex::new);
-            (globe_mesh.vertices.clone(), globe_mesh.vertices.count(), globe_mesh.indexes(), globe_mesh.ranges.clone())
-        } else if let Some(quads) = StoredQuads::of_mask(context, masking.mask()) {
-            (quads.vertices.clone(), quads.vertices.count(), quads.indexes.clone().into(), quads.ranges)
-        } else {
-            (static_data_shared_vertices.clone(), 4, static_data_indices.clone().into(), vec![QUAD_RANGE])
-        };
-        let geometry = DrawGeometry {
-            vertices: color_relief_vertex_attributes(&vertices),
-            vertex_count: if ranges.is_empty() { 0 } else { vertex_count },
-            mode: DrawMode::Triangles(),
-            indexes: indices,
-            ranges,
-            instances: None,
-        };
+        let (vertices, vertex_count, indices, ranges): (VertexBuffer, usize, IndexBuffer, Vec<DrawRange>) =
+            if cx.base.projection_variant == ProjectionVariant::Globe {
+                let globe_mesh = globe_meshes.get(res, &tile_id.canonical, masking.mask(), RasterLayoutVertex::new);
+                (
+                    globe_mesh.vertices.clone(),
+                    globe_mesh.vertices.count(),
+                    globe_mesh.indexes.clone(),
+                    globe_mesh.ranges.clone(),
+                )
+            } else if let Some(quads) = StoredQuads::of_mask(res, masking.mask()) {
+                (quads.vertices.clone(), quads.vertices.count(), quads.indexes.clone(), quads.ranges)
+            } else {
+                (static_data_shared_vertices.clone(), 4, static_data_indices.clone(), vec![QUAD_RANGE])
+            };
         let mut draw_textures = Textures::default();
         draw_textures[IMAGE_SLOT] = Some(dem_texture.texture.clone());
         draw_textures[ELEVATION_STOPS_SLOT] = Some(elevation_stops_texture.clone());
         draw_textures[COLOR_STOPS_SLOT] = Some(color_stops_texture.clone());
-        let mesh = cx.res.mesh(
-            color_relief_shader,
-            ColorMode::alpha_blended(),
-            CullFaceMode::disabled(),
-            geometry,
-            draw_textures,
-        );
+        let mesh = res.mesh(MeshDesc {
+            shader: color_relief_shader,
+            color_mode: ColorMode::alpha_blended(),
+            cull_face_mode: CullFaceMode::disabled(),
+            mode: DrawMode::Triangles(),
+            vertices: vec![VertexBinding::of::<RasterLayoutVertex>(&vertices)],
+            vertex_count: if ranges.is_empty() { 0 } else { vertex_count },
+            instances: None,
+            indexes: indices,
+            ranges,
+            textures: draw_textures,
+        });
         Some(ReliefTile { mesh, tile_props, dem: dem_texture })
     }
 
@@ -412,7 +382,7 @@ impl Layer for RenderColorReliefLayer {
         if cx.base.projection_variant == ProjectionVariant::Mercator {
             self.globe_meshes.clear();
         }
-        self.update_ramp_textures(cx.res.gpu, cx.res.context);
+        self.update_ramp_textures(&mut cx.res);
         let RenderColorReliefLayer { elevation_stops_texture, color_stops_texture, .. } = self;
 
         // Skip rendering if color ramp textures aren't ready
@@ -441,11 +411,9 @@ impl Layer for RenderColorReliefLayer {
             let Some(cached) = cx.tiles.get_mut(&tile.id()) else {
                 continue;
             };
-            let context = &mut *cx.res.context;
+            let res = &mut cx.res;
             let dem_texture = &cached.dem.texture;
-            if let Some(mut texture) = context.texture_mut(dem_texture) {
-                texture.set_sampler(dem_sampler);
-            }
+            res.set_sampler(dem_texture, dem_sampler);
             // The ramps' textures change with the ramps.
             let textures = [
                 (IMAGE_SLOT, dem_texture),
@@ -453,7 +421,7 @@ impl Layer for RenderColorReliefLayer {
                 (COLOR_STOPS_SLOT, color_stops_texture),
             ];
             for (slot, texture) in textures {
-                cached.mesh.set_texture(context, slot, Some(texture));
+                cached.mesh.set_texture(res, slot, Some(texture));
             }
             let projection = tile_projection(&tile_id.to_unwrapped(), cx.frame, TileTransform::NONE);
             let drawable = ColorReliefDrawableUBO { matrix: projection.fallback_matrix.as_mat4().to_cols_array() };

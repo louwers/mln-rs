@@ -13,6 +13,7 @@ use mln_wire::{Wire, Writer};
 
 use crate::draw::context::Context;
 use crate::draw::identity::SimpleIdentity;
+use crate::draw::resources::Resources;
 use crate::layer::bucket_geometry::{BucketGeometry, GeometryUpload, GeometryVec};
 use crate::layer::paint_property_binder::{LayerBinders, PaintBinders};
 use crate::tile::TileLayer;
@@ -56,16 +57,15 @@ enum Kind<'a> {
 }
 
 impl<'a> Upload<'a> {
-    /// The upload of a bucket whose geometry `geometry` keeps, into
-    /// `context`'s stores, sharing what `copies` keep: what the engine
-    /// makes as a bucket reaches the render thread, for a type's tests of
-    /// its buckets.
+    /// The upload of a bucket whose geometry `geometry` keeps, through
+    /// `res`, sharing what `copies` keep: what the engine makes as a bucket
+    /// reaches the render thread, for a type's tests of its buckets.
     pub fn geometry(
         geometry: &'a mut BucketGeometry,
         copies: &'a [&'a BucketGeometry],
-        context: &'a mut Context,
+        res: &'a mut Resources<'_>,
     ) -> Self {
-        Upload { kind: Kind::Geometry(GeometryUpload::new(geometry, copies, context)) }
+        Upload { kind: Kind::Geometry(GeometryUpload::new(geometry, copies, res.context)) }
     }
 }
 

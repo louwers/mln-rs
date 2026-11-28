@@ -1,8 +1,7 @@
 //! The render half: the passes of an image-process layer's frame.
 
 use mln_engine::draw::{
-    Depth, Draw, DrawGeometry, DrawIndexes, DrawRange, Draws, Mesh, SharedTexture, Target, Textures, Uniforms,
-    raw_vertices,
+    Depth, Draw, DrawRange, Draws, Mesh, MeshDesc, Target, Texture, Textures, Uniforms, VertexAttribute, VertexBinding,
 };
 use mln_engine::layer::{FrameTile, Layer, LayerValues, NoTiles, PrepareCx};
 use mln_engine::shaders::programs::POS;
@@ -28,7 +27,7 @@ pub(crate) struct ImageProcessLayer {
 
 /// A pass's quad over what it draws into, with the textures it samples.
 struct PassMesh {
-    textures: [SharedTexture; 2],
+    textures: [Texture; 2],
     /// Whether it blends over what it draws into, as the last pass does.
     blends: bool,
     mesh: Mesh,
@@ -97,27 +96,34 @@ impl ImageProcessLayer {
 
     /// Makes the mesh of the pass at `index` sample `textures`, blending
     /// where it `blends`: the one it has, for the same.
-    fn mesh(&mut self, cx: &mut PrepareCx<'_, '_, Self>, index: usize, textures: [SharedTexture; 2], blends: bool) {
+    fn mesh(&mut self, cx: &mut PrepareCx<'_, '_, Self>, index: usize, textures: [Texture; 2], blends: bool) {
         if self.passes.get(index).is_some_and(|pass| pass.textures == textures && pass.blends == blends) {
             return;
         }
-        let shader = cx.res.context.shader_key(&IMAGE_PROCESS, Uniforms::default(), ProjectionVariant::Mercator);
-        let corners: Vec<u8> = [0i16, 0, 1, 0, 0, 1, 1, 1].iter().flat_map(|c| c.to_le_bytes()).collect();
-        let geometry = DrawGeometry {
-            vertices: raw_vertices(POS.name, corners, 4, POS.format),
-            vertex_count: 4,
-            mode: DrawMode::Triangles(),
-            // The quad's two triangles: top left, top right, bottom left,
-            // bottom right.
-            indexes: DrawIndexes::new(vec![0, 1, 2, 1, 2, 3]),
-            ranges: vec![DrawRange::indexes(6)],
-            instances: None,
-        };
+        let res = &mut cx.res;
+        let shader = res.shader_key(&IMAGE_PROCESS, Uniforms::default(), ProjectionVariant::Mercator);
+        let corners: [[i16; 2]; 4] = [[0, 0], [1, 0], [0, 1], [1, 1]];
+        let vertices = res.vertices(&corners);
+        let position = VertexAttribute { name: POS.name, format: POS.format, offset: 0 };
+        // The quad's two triangles: top left, top right, bottom left, bottom
+        // right.
+        let indexes = res.indexes(&[0, 1, 2, 1, 2, 3]);
         let mut bound = Textures::default();
         bound[IMAGE_PROCESS.texture_slot("image")] = Some(textures[0].clone());
         bound[IMAGE_PROCESS.texture_slot("other")] = Some(textures[1].clone());
         let color_mode = if blends { ColorMode::alpha_blended() } else { ColorMode::unblended() };
-        let mesh = cx.res.mesh(shader, color_mode, CullFaceMode::disabled(), geometry, bound);
+        let mesh = res.mesh(MeshDesc {
+            shader,
+            color_mode,
+            cull_face_mode: CullFaceMode::disabled(),
+            mode: DrawMode::Triangles(),
+            vertices: vec![VertexBinding::new(&vertices, size_of::<[i16; 2]>() as u32, vec![position])],
+            vertex_count: corners.len(),
+            instances: None,
+            indexes,
+            ranges: vec![DrawRange::indexes(6)],
+            textures: bound,
+        });
         let pass = PassMesh { textures, blends, mesh };
         if index == self.passes.len() {
             self.passes.push(pass);

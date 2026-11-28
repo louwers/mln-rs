@@ -47,6 +47,8 @@ pub(crate) struct FillExtrusionLayoutVertex {
     pub(crate) a2: [u16; 2],
 }
 
+mln_engine::vertex_attributes!(FillExtrusionLayoutVertex { a1 => "pos": Short2, a2 => "decimals_ed": UShort2 });
+
 /// The point an extrusion of `polygon` stands on over terrain, as GL JS
 /// takes it: the floored mean of the vertices of its rings, holes too, each
 /// ring's closing vertex left out.

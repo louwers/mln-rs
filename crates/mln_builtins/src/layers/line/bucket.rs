@@ -1,10 +1,9 @@
 use std::sync::Once;
 
 use geometry::Point;
-use mln_engine::draw::{SharedAttribute, SharedVertices};
 use mln_engine::layer::binders::{
     CrossFadedPaintPropertyBinder, InterleavedVertexBuffer, InterleavedVertexData, LayerBinders, PaintPropertyBinder,
-    PaintPropertyBinderBase, PatternDependency, shared_paint,
+    PaintPropertyBinderBase, PatternDependency,
 };
 use mln_engine::layer::{Bucket, EvaluatedLayer, GeometryVec, Upload};
 use mln_engine::text::atlas::ImagePositions;
@@ -151,9 +150,8 @@ impl PaintPropertyBinderBase for DashArrayBinder {
         if self.vertex_offset().is_some() { buffer.vertex_count } else { 0 }
     }
 
-    fn apply(&self, buffer: &InterleavedVertexBuffer, shared: &SharedVertices) -> Option<SharedAttribute> {
-        let vertex_offset = self.vertex_offset()?;
-        Some(shared_paint(shared, vertex_offset, buffer.stride as u32, AttributeDataType::Float4))
+    fn attribute(&self, _buffer: &InterleavedVertexBuffer) -> Option<(AttributeDataType, u32)> {
+        Some((AttributeDataType::Float4, self.vertex_offset()? as u32))
     }
 }
 

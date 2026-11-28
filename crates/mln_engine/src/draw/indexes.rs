@@ -1,6 +1,6 @@
 //! The indexes of draws. A draw owns indexes of its own ([`Indexes`]), and
 //! holds those it shares with other draws, such as a tile's bucket's or a
-//! layer's quad, in the context's store ([`SharedIndexes`]). The first
+//! layer's quad, in the context's store ([`IndexBuffer`]). The first
 //! draw's upload writes them to a buffer of the context's `Gpu`, freeing
 //! their data.
 
@@ -12,7 +12,7 @@ use crate::draw::buffer::Buffer;
 use crate::draw::context::Context;
 use crate::draw::owned::Held;
 use crate::draw::resources::Device;
-pub(crate) use crate::draw::store::SharedIndexes;
+pub(crate) use crate::draw::store::IndexBuffer;
 
 /// The indexes before their upload.
 enum IndexData {
@@ -31,7 +31,7 @@ enum Place {
 
 /// Indexes, which don't change once made: an upload moves them into their
 /// buffer.
-pub struct Indexes {
+pub(crate) struct Indexes {
     len: usize,
     place: Place,
 }
@@ -39,7 +39,7 @@ pub struct Indexes {
 impl Indexes {
     /// Indexes holding `indexes`.
     #[must_use]
-    pub fn new(indexes: Vec<u16>) -> Indexes {
+    pub(crate) fn new(indexes: Vec<u16>) -> Indexes {
         Indexes { len: indexes.len(), place: Place::Data(IndexData::Vec(indexes)) }
     }
 
@@ -91,9 +91,9 @@ impl Indexes {
 
 /// The indexes a draw binds: its own, or those it shares through the
 /// context's store.
-pub enum DrawIndexes {
+pub(crate) enum DrawIndexes {
     Own(Indexes),
-    Shared(SharedIndexes),
+    Shared(IndexBuffer),
 }
 
 impl From<Indexes> for DrawIndexes {
@@ -102,8 +102,8 @@ impl From<Indexes> for DrawIndexes {
     }
 }
 
-impl From<SharedIndexes> for DrawIndexes {
-    fn from(indexes: SharedIndexes) -> DrawIndexes {
+impl From<IndexBuffer> for DrawIndexes {
+    fn from(indexes: IndexBuffer) -> DrawIndexes {
         DrawIndexes::Shared(indexes)
     }
 }
@@ -111,7 +111,7 @@ impl From<SharedIndexes> for DrawIndexes {
 impl DrawIndexes {
     /// The draw's own indexes holding `indexes`.
     #[must_use]
-    pub fn new(indexes: Vec<u16>) -> DrawIndexes {
+    pub(crate) fn new(indexes: Vec<u16>) -> DrawIndexes {
         DrawIndexes::Own(Indexes::new(indexes))
     }
 
@@ -125,17 +125,17 @@ impl DrawIndexes {
 
     /// The number of indexes, which stays once the upload freed them.
     #[must_use]
-    pub fn len(&self, context: &Context) -> usize {
+    pub(crate) fn len(&self, context: &Context) -> usize {
         self.indexes(context).map_or(0, Indexes::len)
     }
 
     /// Whether the CPU copy of the indexes is still there.
-    pub fn has_data(&self, context: &Context) -> bool {
+    pub(crate) fn has_data(&self, context: &Context) -> bool {
         self.indexes(context).is_some_and(Indexes::has_data)
     }
 
     /// Writes the indexes to a buffer of `gpu`, unless they have one.
-    pub fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) -> Result<(), GpuError> {
+    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) -> Result<(), GpuError> {
         match self {
             DrawIndexes::Own(indexes) => indexes.upload(gpu, context.device()),
             DrawIndexes::Shared(shared) => context.upload_indexes(gpu, shared),
@@ -144,7 +144,7 @@ impl DrawIndexes {
 
     /// The buffer of the indexes, once uploaded.
     #[must_use]
-    pub fn buffer(&self, context: &Context) -> Option<BufferId> {
+    pub(crate) fn buffer(&self, context: &Context) -> Option<BufferId> {
         self.indexes(context).and_then(Indexes::buffer)
     }
 
