@@ -16,7 +16,7 @@ use mln_style::size::Size;
 
 use crate::draw::context::Context;
 use crate::draw::store::SharedTexture;
-use crate::draw::texture_size;
+use crate::draw::texture2d::texture_size;
 use crate::text::atlas::RectU16;
 use crate::text::glyph::Glyph;
 

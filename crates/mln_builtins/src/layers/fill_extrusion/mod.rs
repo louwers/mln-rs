@@ -13,9 +13,8 @@ pub mod programs;
 pub mod ubo;
 mod wgsl;
 
-use mln_engine::draw::SegmentBase;
-
 use crate::layers::fill_extrusion::bucket::FillExtrusionStaticVertex;
+use crate::layers::segments::SegmentBase;
 
 #[must_use]
 pub(crate) fn fill_extrusion_vertices() -> Vec<FillExtrusionStaticVertex> {

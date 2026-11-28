@@ -7,7 +7,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use glam::Vec2;
-use mln_engine::draw::SegmentBase;
 use mln_engine::layer::binders::{PaintBinders as _, PaintPropertyBinder};
 use mln_engine::layer::{Bucket, EvaluatedLayer, GeometryVec, Upload};
 use mln_style::collections::VecMap;
@@ -23,6 +22,7 @@ use mln_style::range::Range;
 use mln_style::types::TextWritingModeType;
 use mln_wire::payload::pod;
 
+use crate::layers::segments::SegmentBase;
 use crate::layers::symbol::instance::{SymbolInstance, SymbolInstancePools, WritingMode};
 use crate::layers::symbol::pool::PoolRange;
 use crate::layers::symbol::quads::SymbolQuad;
@@ -731,7 +731,6 @@ impl Bucket for SymbolBucket {
 
 #[cfg(test)]
 mod tests {
-    use mln_engine::draw::SegmentBase;
 
     use super::*;
 

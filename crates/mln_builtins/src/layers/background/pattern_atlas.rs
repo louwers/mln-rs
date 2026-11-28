@@ -4,8 +4,9 @@ use std::sync::Arc;
 
 use etagere::{AllocId, BucketedAtlasAllocator, size2};
 use geometry::Point;
-use mln_engine::draw::{Context, ImagePosition, RectU16, SharedTexture, texture_size};
+use mln_engine::draw::{Context, SharedTexture};
 use mln_engine::image::ImageStore;
+use mln_engine::text::atlas::{ImagePosition, RectU16};
 use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::hash::HashMap;
@@ -190,7 +191,12 @@ impl PatternAtlas {
             Some(_) => return,
         };
         let image = &self.atlas_image;
-        if let Err(error) = context.upload_texture_data(gpu, texture, &image.data, texture_size(image.size)) {
+        if let Err(error) = context.upload_texture_data(
+            gpu,
+            texture,
+            &image.data,
+            mln_gfx::Size::new(image.size.width, image.size.height),
+        ) {
             context.fail(format!("Uploading the pattern atlas failed: {error}"));
         }
         self.dirty = false;

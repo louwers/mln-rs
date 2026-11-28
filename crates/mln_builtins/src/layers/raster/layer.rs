@@ -6,15 +6,14 @@
 use std::mem::offset_of;
 use std::rc::Rc;
 
-use mln_engine::draw::globe::GlobeTileMeshCache;
 use mln_engine::draw::{
-    Composite, Context, Draw, DrawGeometry, DrawIndexes, Draws, Group, Indexes, LayerFrame, Mesh, RasterLayoutVertex,
-    RenderStaticData, SegmentBase, SharedAttribute, SharedIndexes, SharedTexture, SharedVertices, SimpleIdentity,
-    StoredQuads, Textures, Uniforms, VertexAttributeArray, cast_matrix, projection_data, to_projection_ubo,
+    Composite, Context, Draw, DrawGeometry, DrawIndexes, DrawRange, Draws, Group, Indexes, LayerFrame, Mesh,
+    SharedAttribute, SharedIndexes, SharedTexture, SharedVertices, SimpleIdentity, Textures, Uniforms,
+    VertexAttributeArray, projection_data, to_projection_ubo,
 };
 use mln_engine::layer::{
-    EvaluateCx, Evaluation, FrameTile, ImageQuad, Layer, LayerValues, OnTerrain, PrepareCx, RasterTile, TileCx,
-    TileData, copied_vertices,
+    EvaluateCx, Evaluation, FrameTile, ImageQuad, Layer, LayerValues, OnTerrain, PrepareCx, RasterLayoutVertex,
+    RasterTile, TileCx, TileData, copied_vertices,
 };
 use mln_engine::source::RasterTiles;
 use mln_engine::tile::{OverscaledTileID, UnwrappedTileID};
@@ -27,6 +26,7 @@ use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_style::layers::Raster;
 use mln_style::types::{RasterResamplingType, ResamplingType, TranslateAnchorType};
 
+use crate::layers::quads::{GlobeTileMeshCache, QUAD_RANGE, StoredQuads, quad_triangle_indices, raster_vertices};
 use crate::layers::raster::programs;
 use crate::layers::raster::ubo::{RasterDrawableUBO, RasterEvaluatedPropsUBO};
 
@@ -39,16 +39,14 @@ const IMAGE1_SLOT: usize = programs::RASTER.texture_slot("image1");
 struct StaticGeometry {
     vertices: SharedVertices,
     indexes: SharedIndexes,
-    segments: Vec<SegmentBase>,
 }
 
 impl StaticGeometry {
     /// The tile extent's quad, in `context`'s stores.
     fn new(context: &mut Context) -> StaticGeometry {
         StaticGeometry {
-            vertices: copied_vertices(context, &RenderStaticData::raster_vertices()),
-            indexes: context.add_indexes(Indexes::new(RenderStaticData::quad_triangle_indices())),
-            segments: RenderStaticData::raster_segments(),
+            vertices: copied_vertices(context, &raster_vertices()),
+            indexes: context.add_indexes(Indexes::new(quad_triangle_indices())),
         }
     }
 }
@@ -121,7 +119,10 @@ impl RenderRasterLayer {
             None,
             !frame.camera_moving,
         );
-        (RasterDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) }, to_projection_ubo(&projection))
+        (
+            RasterDrawableUBO { matrix: projection.fallback_matrix.as_mat4().to_cols_array() },
+            to_projection_ubo(&projection),
+        )
     }
 
     /// Gives the frame's draws of the layer of `values`, in `group`, what
@@ -194,19 +195,19 @@ fn new_mesh(
 }
 
 /// The geometry of a raster draw of `vertex_count` vertices in `vertices`,
-/// and `segments` of `indexes`.
+/// and `ranges` of `indexes`.
 fn raster_geometry(
     vertices: &SharedVertices,
     vertex_count: usize,
     indexes: DrawIndexes,
-    segments: &[SegmentBase],
+    ranges: Vec<DrawRange>,
 ) -> DrawGeometry {
     DrawGeometry {
         vertices: raster_vertex_attributes(vertices),
         vertex_count,
         mode: DrawMode::Triangles(),
         indexes,
-        segments: segments.iter().map(SegmentBase::copy).collect(),
+        ranges,
         instances: None,
     }
 }
@@ -269,8 +270,8 @@ impl Layer for RenderRasterLayer {
         let draw_geometry = match data {
             // An image source's image draws on its mesh, once it has one.
             RasterTile::Image(image) => {
-                let quads = image.quads()?;
-                raster_geometry(&quads.vertices, quads.vertices.count(), quads.indexes.clone().into(), &quads.segments)
+                let mesh = image.mesh()?;
+                raster_geometry(&mesh.vertices, mesh.vertices.count(), mesh.indexes.clone().into(), vec![mesh.range])
             }
             // Only a masked tile has quads; any other tile is drawn with the
             // static quad over the tile's extent. On the globe, the draw is
@@ -283,21 +284,16 @@ impl Layer for RenderRasterLayer {
                         &globe_mesh.vertices,
                         globe_mesh.vertices.count(),
                         globe_mesh.indexes(),
-                        &globe_mesh.segments,
+                        globe_mesh.ranges.clone(),
                     )
-                } else if let Some(quads) = StoredQuads::of_mask(context, &raster.masking) {
-                    raster_geometry(
-                        &quads.vertices,
-                        quads.vertices.count(),
-                        quads.indexes.clone().into(),
-                        &quads.segments,
-                    )
+                } else if let Some(quads) = StoredQuads::of_mask(context, mask) {
+                    raster_geometry(&quads.vertices, quads.vertices.count(), quads.indexes.into(), quads.ranges)
                 } else {
                     raster_geometry(
                         &static_geometry.vertices,
                         4,
                         static_geometry.indexes.clone().into(),
-                        &static_geometry.segments,
+                        vec![QUAD_RANGE],
                     )
                 }
             }

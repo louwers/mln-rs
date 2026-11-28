@@ -9,9 +9,9 @@ use std::sync::Arc;
 use glam::dcamera::rh::proj::opengl::orthographic;
 use mln_engine::draw::ground::StandingDraw;
 use mln_engine::draw::{
-    Depth, Draw, DrawGeometry, DrawIndexes, Draws, Group, LayerFrame, Mesh, RenderPass, RenderStaticData, SegmentBase,
-    SharedAttribute, SharedTexture, SharedVertices, Target, Textures, Uniforms, VertexAttributeArray, cast_matrix,
-    globe_extrude_scale, projection_data, refresh_paint_attributes, to_projection_ubo,
+    Depth, Draw, DrawGeometry, DrawIndexes, Draws, Group, LayerFrame, Mesh, RenderPass, SharedAttribute, SharedTexture,
+    SharedVertices, Target, Textures, Uniforms, VertexAttributeArray, globe_extrude_scale, projection_data,
+    refresh_paint_attributes, to_projection_ubo,
 };
 use mln_engine::layer::binders::PaintBinders as _;
 use mln_engine::layer::{
@@ -37,6 +37,8 @@ use crate::layers::heatmap::layout::HeatmapLayout;
 use crate::layers::heatmap::programs;
 use crate::layers::heatmap::ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO, HeatmapTexturePropsUBO};
 use crate::layers::line::layer::apply_color_ramp;
+use crate::layers::quads::{QUAD_RANGE, quad_triangle_indices};
+use crate::layers::segments::SegmentBase;
 
 /// The slots of the programs' textures that the draws bind.
 const COLOR_RAMP_SLOT: usize = programs::HEATMAP_TEXTURE.texture_slot("color_ramp");
@@ -160,7 +162,7 @@ impl Layer for RenderHeatmapLayer {
             vertex_count: if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() },
             mode: DrawMode::Triangles(),
             indexes: indexes.into(),
-            segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
+            ranges: bucket.segments.iter().map(SegmentBase::range).collect(),
             instances: None,
         };
         let mesh = cx.res.mesh(shader, ColorMode::additive(), CullFaceMode::disabled(), geometry, Textures::default());
@@ -263,7 +265,7 @@ impl RenderHeatmapLayer {
         );
         let latitude_scale = frame.view.projection().circle_radius_correction(frame.view);
         let drawable = HeatmapDrawableUBO {
-            matrix: cast_matrix(&projection.fallback_matrix),
+            matrix: projection.fallback_matrix.as_mat4().to_cols_array(),
             extrude_scale: tile_id.pixels_to_tile_units(1.0, zoom),
             weight_t: binders.heatmap_weight.interpolation_factor(zoom),
             radius_t: binders.heatmap_radius.interpolation_factor(zoom),
@@ -327,8 +329,8 @@ impl RenderHeatmapLayer {
                 vertices: attrs,
                 vertex_count: 4,
                 mode: DrawMode::Triangles(),
-                indexes: DrawIndexes::new(RenderStaticData::quad_triangle_indices()),
-                segments: crate::layers::heatmap::heatmap_texture_segments(),
+                indexes: DrawIndexes::new(quad_triangle_indices()),
+                ranges: vec![QUAD_RANGE],
                 instances: None,
             };
             let mut textures = Textures::default();
@@ -349,7 +351,7 @@ impl RenderHeatmapLayer {
         let size = cx.frame.renderable_size;
         let m = orthographic(0.0, f64::from(size.width), f64::from(size.height), 0.0, -1.0, 1.0);
         let props = HeatmapTexturePropsUBO {
-            matrix: cast_matrix(&m),
+            matrix: m.as_mat4().to_cols_array(),
             opacity: *cx.values.evaluated.paint.heatmap_opacity.uniform(),
             pad1: 0.0,
             pad2: 0.0,

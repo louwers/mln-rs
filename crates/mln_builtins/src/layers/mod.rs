@@ -5,6 +5,7 @@
 //! symbol's holds its participant in placement too, through the engine's
 //! placement contract (`mln_engine::placement`).
 
+mod atlas_binding;
 pub mod background;
 pub mod circle;
 pub mod color_relief;
@@ -15,7 +16,9 @@ pub mod hillshade;
 pub mod line;
 mod pattern;
 mod pattern_layout;
+mod quads;
 pub mod raster;
+mod segments;
 mod subdivision;
 pub mod symbol;
 mod tessellator;

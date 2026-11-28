@@ -873,7 +873,7 @@ macro_rules! paint_property_binders {
                 feature: &dyn $crate::__private::mln_style::feature::GeometryTileFeature,
                 length: usize,
                 index: usize,
-                pattern_positions: &$crate::draw::ImagePositions,
+                pattern_positions: &$crate::text::atlas::ImagePositions,
                 pattern_dependencies: Option<&$crate::layer::binders::PatternDependency>,
                 canonical: &$crate::__private::mln_style::tile_id::CanonicalTileID,
                 formatted_section: &$crate::__private::mln_style::expression::Value,

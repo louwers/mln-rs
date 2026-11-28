@@ -35,9 +35,9 @@ use std::mem::offset_of;
 use mln_engine::camera::View;
 use mln_engine::draw::ground::{FrameGround, GroundHeights, height_attribute};
 use mln_engine::draw::{
-    AtlasBinding, Composite, Context, Depth, Draw, DrawGeometry, Draws, EvaluatedLight, Indexes, LayerFrame, Mesh,
-    RenderPass, RenderStaticData, SegmentBase, SharedAttribute, SharedIndexes, SharedVertices, Texture2D, Uniforms,
-    VertexAttributeArray, cast_matrix, copy_shared_attributes, projection_data, to_projection_ubo, zero_to_one_clip_z,
+    Composite, Context, Depth, Draw, DrawGeometry, DrawRange, Draws, EvaluatedLight, Indexes, LayerFrame, Mesh,
+    RenderPass, SharedAttribute, SharedIndexes, SharedVertices, Texture2D, Uniforms, VertexAttributeArray,
+    copy_shared_attributes, projection_data, to_projection_ubo, zero_to_one_clip_z,
 };
 use mln_engine::layer::binders::PaintBinders as _;
 use mln_engine::layer::{
@@ -55,6 +55,7 @@ use mln_style::layers::FillExtrusion;
 use mln_style::layers::fill_extrusion_layer_properties::FillExtrusionPaintProperties;
 use mln_style::types::{AlignmentType, LayerBlendType};
 
+use crate::layers::atlas_binding::AtlasBinding;
 use crate::layers::fill_extrusion::bucket::{
     FillExtrusionBinders, FillExtrusionBucket, FillExtrusionLayoutSpec, FillExtrusionLayoutVertex,
     FillExtrusionStaticVertex, FillExtrusionWallVertex, wall_quad_paint,
@@ -62,6 +63,8 @@ use crate::layers::fill_extrusion::bucket::{
 use crate::layers::fill_extrusion::programs;
 use crate::layers::fill_extrusion::ubo::{FillExtrusionDrawableUBO, FillExtrusionPropsUBO, FillExtrusionTilePropsUBO};
 use crate::layers::pattern_layout::PatternLayout;
+use crate::layers::quads::quads_ranges;
+use crate::layers::segments::SegmentBase;
 
 /// The ids of the buffers that the draws bind.
 const WALL_VERTICES_ID: usize = programs::FILL_EXTRUSION_PULLED.buffer_id("wallVertices");
@@ -99,6 +102,8 @@ struct ExtrusionDraw {
     /// Whether it tests the stencil value the layer's 3D draws share, which
     /// keeps the draws in color from blending a pixel twice.
     clip: bool,
+    /// Gives the mesh its pattern's atlas before each frame draws it.
+    atlases: Option<AtlasBinding>,
 }
 
 /// What the layer keeps of a tile: the draws of its roofs and walls, as they
@@ -176,14 +181,14 @@ impl ExtrusionTile {
 }
 
 /// The geometry of draws: vertices in their attributes, which each draw
-/// reads a copy of, and the segments of indexes they draw.
+/// reads a copy of, and the ranges of indexes they draw.
 struct SharedGeometry<'a> {
     vertices: &'a VertexAttributeArray,
     instances: Option<&'a VertexAttributeArray>,
     vertex_count: usize,
     mode: DrawMode,
     indexes: &'a SharedIndexes,
-    segments: &'a [SegmentBase],
+    ranges: &'a [DrawRange],
 }
 
 /// Whether the walls draw as instances of the static quad, rather than as
@@ -285,7 +290,7 @@ fn read_wall_instances(
 
 /// A draw of `geometry` with `shader`, in color with `color_mode` or, without
 /// one, into depth only, which binds the textures of `atlases`, those it
-/// was made with and again before each draw.
+/// was made with and again before each frame draws it.
 fn extrusion_draw(
     context: &mut Context,
     shader: &ShaderKey,
@@ -297,18 +302,17 @@ fn extrusion_draw(
 ) -> ExtrusionDraw {
     let draw_geometry = DrawGeometry {
         vertices: copy_shared_attributes(geometry.vertices),
-        vertex_count: if geometry.segments.is_empty() { 0 } else { geometry.vertex_count },
+        vertex_count: if geometry.ranges.is_empty() { 0 } else { geometry.vertex_count },
         mode: geometry.mode,
         indexes: geometry.indexes.clone().into(),
-        segments: geometry.segments.iter().map(SegmentBase::copy).collect(),
+        ranges: geometry.ranges.to_vec(),
         instances: geometry.instances.map(copy_shared_attributes),
     };
     let in_color = color_mode.is_some();
     let color_mode = color_mode.unwrap_or_else(ColorMode::disabled);
     let textures = atlases.map(|atlases| atlases.textures(shader)).unwrap_or_default();
     let mesh = Mesh::new(context, shader.clone(), color_mode, CullFaceMode::back_ccw(), draw_geometry, textures);
-    mesh.set_atlases(context, atlases.cloned());
-    ExtrusionDraw { mesh, priority: i64::from(in_color), walls, clip }
+    ExtrusionDraw { mesh, priority: i64::from(in_color), walls, clip, atlases: atlases.cloned() }
 }
 
 pub(crate) struct RenderFillExtrusionLayer {
@@ -318,7 +322,7 @@ pub(crate) struct RenderFillExtrusionLayer {
     /// The triangle strip of the wall quad, which the instanced walls draw.
     strip_indices: Option<SharedIndexes>,
     /// The triangles of walls four vertices apart
-    /// (`RenderStaticData::wall_indexes`), which the others draw.
+    /// ([`Context::quad_indexes`]), which the others draw.
     wall_indices: Option<SharedIndexes>,
 }
 
@@ -474,6 +478,9 @@ impl Layer for RenderFillExtrusionLayer {
                 let layout = cached.paint_layout;
                 let (drawable, tile_props, projection) =
                     Self::uniforms(layer, tile_id, render_data, binders, draw, layout, context, cx.frame);
+                if let Some(atlases) = &draw.atlases {
+                    atlases.bind(&draw.mesh, context, cx.frame);
+                }
                 if has_pattern {
                     out.main().push_at(&draw.mesh, tile_id, &projection, frame_draw, (drawable, tile_props));
                 } else {
@@ -577,8 +584,7 @@ impl TileBuilder<'_> {
         binders.bind(evaluated, paint, &mut vertex_attrs, &mut uniforms);
         let mut wall_attrs = VertexAttributeArray::new();
         let mut paint_layout = 0;
-        let (wall_instance_attrs, wall_vertex_count, wall_segments) = if let Some((quad_vertices, quad_paint)) = &quads
-        {
+        let (wall_instance_attrs, wall_vertex_count, wall_ranges) = if let Some((quad_vertices, quad_paint)) = &quads {
             binders.bind(evaluated, paint, &mut wall_attrs, &mut wall_uniforms);
             if let (Some(paint), Some(quad_paint)) = (paint, quad_paint) {
                 read_quad_paint(&mut wall_attrs, paint, quad_paint);
@@ -586,20 +592,20 @@ impl TileBuilder<'_> {
             if let Some(quad_vertices) = quad_vertices {
                 read_wall_quads(&mut wall_attrs, quad_vertices);
             }
-            (None, 4 * walls, RenderStaticData::quads_segments(walls))
+            (None, 4 * walls, quads_ranges(walls))
         } else if self.walls == Walls::Pulled {
             // The walls have no attributes: these say which properties the
             // shader reads from the paint values, and where.
             let mut paint_attrs = VertexAttributeArray::new();
             binders.bind(evaluated, paint, &mut paint_attrs, &mut wall_uniforms);
             paint_layout = self::paint_layout(&paint_attrs);
-            (None, 4 * walls, RenderStaticData::quads_segments(walls))
+            (None, 4 * walls, quads_ranges(walls))
         } else {
             let mut instance_attrs = VertexAttributeArray::new();
             binders.bind(evaluated, paint, &mut instance_attrs, &mut wall_uniforms);
             read_wall_instances(&mut wall_attrs, &mut instance_attrs, self.static_vertices, &vertices);
-            let segments = vec![crate::layers::fill_extrusion::fill_extrusion_segment(walls)];
-            (Some(instance_attrs), self.static_vertices.count(), segments)
+            let ranges = vec![crate::layers::fill_extrusion::fill_extrusion_segment(walls).range()];
+            (Some(instance_attrs), self.static_vertices.count(), ranges)
         };
 
         let shader = context.shader_key(self.program, uniforms, self.projection_variant);
@@ -628,7 +634,7 @@ impl TileBuilder<'_> {
 
         let atlases = self.has_pattern.then(|| tile_bucket.atlas_textures()).map(|atlases| {
             AtlasBinding::new(
-                Some(atlases.clone()),
+                atlases,
                 None,
                 Some(IMAGE_SLOT),
                 /*is_text=*/ false,
@@ -641,13 +647,14 @@ impl TileBuilder<'_> {
         let mut draws = Vec::new();
         // The draws in color clip where the layer draws into depth first.
         let clip = self.depth_pass;
+        let roof_ranges: Vec<DrawRange> = bucket.triangle_segments.iter().map(SegmentBase::range).collect();
         let roofs = SharedGeometry {
             vertices: &vertex_attrs,
             instances: None,
             vertex_count,
             mode: DrawMode::Triangles(),
             indexes: &triangles,
-            segments: &bucket.triangle_segments,
+            ranges: &roof_ranges,
         };
         if !bucket.triangles.is_empty() && vertex_count > 0 {
             if self.depth_pass {
@@ -662,7 +669,7 @@ impl TileBuilder<'_> {
             vertex_count: wall_vertex_count,
             mode: if self.walls == Walls::Instanced { DrawMode::TriangleStrip() } else { DrawMode::Triangles() },
             indexes: self.static_indices,
-            segments: &wall_segments,
+            ranges: &wall_ranges,
         };
         if walls > 0 && wall_vertex_count > 0 {
             if self.depth_pass {
@@ -805,7 +812,7 @@ impl RenderFillExtrusionLayer {
 
         let pattern_t = binders.fill_extrusion_pattern.interpolation_factor(zoom).0;
         let drawable = FillExtrusionDrawableUBO {
-            matrix: cast_matrix(&projection.fallback_matrix),
+            matrix: projection.fallback_matrix.as_mat4().to_cols_array(),
             pixel_coord_upper: [(pixel_x >> 16) as f32, (pixel_y >> 16) as f32],
             pixel_coord_lower: [(pixel_x & 0xFFFF) as f32, (pixel_y & 0xFFFF) as f32],
             height_factor,
@@ -865,7 +872,6 @@ impl RenderFillExtrusionLayer {
 #[cfg(test)]
 mod tests {
     use geometry::Point;
-    use mln_engine::draw::MAX_SEGMENT_VERTICES;
 
     use super::*;
     use crate::layers::fill_extrusion::bucket::wall_quad_vertices;
@@ -895,22 +901,17 @@ mod tests {
         assert_eq!(wall_quad_paint(&[], 0, 3).len(), 0);
     }
 
-    // The segments draw every wall, each from the start of the indices, which
-    // address no more vertices than 16 bits do.
+    // The ranges draw every wall, each from the start of the quad indexes,
+    // which address no more vertices than 16 bits do.
     #[test]
-    fn wall_segments_draw_every_wall() {
-        let indices = RenderStaticData::quads_indices();
-        assert_eq!(indices[..12], [0, 2, 1, 1, 2, 3, 4, 6, 5, 5, 6, 7]);
-        let most = indices.len() / 6;
-        assert_eq!(usize::from(*indices.iter().max().unwrap()), 4 * most - 1);
-        assert!(4 * most <= MAX_SEGMENT_VERTICES);
-
-        assert_eq!(RenderStaticData::quads_segments(0).len(), 0);
-        let segments = RenderStaticData::quads_segments(most + 2);
-        let lengths: Vec<_> = segments
+    fn wall_ranges_draw_every_wall() {
+        let most = crate::layers::segments::MAX_SEGMENT_VERTICES / 4;
+        assert_eq!(quads_ranges(0).len(), 0);
+        let lengths: Vec<_> = quads_ranges(most + 2)
             .iter()
-            .map(|s| (s.vertex_offset, s.index_offset, s.vertex_length, s.index_length, s.instance_count))
+            .map(|r| (r.base_vertex, r.first_index, r.index_count, r.instance_count))
             .collect();
-        assert_eq!(lengths, [(0, 0, 4 * most, 6 * most, 1), (4 * most, 0, 8, 12, 1)]);
+        let most = most as u32;
+        assert_eq!(lengths, [(0, 0, 6 * most, 1), (4 * most as i32, 0, 12, 1)]);
     }
 }

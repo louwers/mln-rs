@@ -1,4 +1,3 @@
-use mln_engine::draw::{Indexed, SegmentBase};
 use mln_engine::layer::binders::{CrossFadedPaintPropertyBinder, LayerBinders, PaintPropertyBinder};
 use mln_engine::layer::{Bucket, GeometryVec, Upload};
 use mln_style::color::Color;
@@ -12,6 +11,7 @@ use mln_wire::sorted;
 
 use crate::layers::fill::layer::draws_outline_quads;
 use crate::layers::fill::mesh::FillBuffers;
+use crate::layers::segments::{Indexed, SegmentBase};
 use crate::layers::tessellator::Tessellator;
 use crate::log_target;
 

@@ -11,7 +11,6 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
-use geometry::Point;
 use mln_gfx::shaders::block::uniform_block;
 use mln_gfx::shaders::program::{Program, ProgramBuffer, Projection, Stages};
 use mln_gfx::shaders::source::{Sources, WgslSource};
@@ -30,9 +29,8 @@ use mln_style::types::{HillshadeIlluminationAnchorType, TranslateAnchorType};
 use crate::RegistryBuilder;
 use crate::draw::draws::{Depth, Draw, Draws, LayerFrame};
 use crate::draw::indexes::DrawIndexes;
-use crate::draw::mesh::{Indexed, add_point_quads};
 use crate::draw::objects::{DrawGeometry, Mesh, Textures, raw_vertices};
-use crate::draw::segment::SegmentBase;
+use crate::draw::range::DrawRange;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::image::image_store::ImageType;
 use crate::layer::bucket::{Bucket, Upload};
@@ -142,7 +140,7 @@ fn square(cx: &mut TileCx<'_, '_, impl Layer>) -> Mesh {
         vertex_count: count,
         mode: DrawMode::Triangles(),
         indexes: DrawIndexes::new(RenderStaticData::quad_triangle_indices()),
-        segments: RenderStaticData::tile_triangle_segments().iter().map(SegmentBase::copy).collect(),
+        ranges: vec![DrawRange::indexes(6)],
         instances: None,
     };
     let shader = cx.res.context.shader_key(&TEST, Uniforms::default(), cx.base.projection_variant);
@@ -309,12 +307,11 @@ pub(crate) struct TestVertex {
 }
 
 /// A tile's quads, one at each point of its features, and their paint
-/// values.
+/// values. The tests' tiles have fewer points than 16-bit indexes reach.
 #[derive(Clone, mln_wire::Wire)]
 pub(crate) struct TestBucket<B: PaintBinders> {
     pub(crate) vertices: GeometryVec<TestVertex>,
     triangles: GeometryVec<u16>,
-    segments: Vec<SegmentBase>,
     binders: LayerBinders<B>,
 }
 
@@ -363,22 +360,24 @@ impl<S: TestGeometry> Layout<S> for TestLayout<S> {
 
     fn build(self, cx: &mut BuildCx<'_, S>) -> Result<Option<Self::Bucket>, Error> {
         let source_layer = cx.source_layer()?;
-        let mut bucket = TestBucket {
-            vertices: GeometryVec::default(),
-            triangles: GeometryVec::default(),
-            segments: Vec::new(),
-            binders: cx.binders(),
-        };
+        let mut bucket =
+            TestBucket { vertices: GeometryVec::default(), triangles: GeometryVec::default(), binders: cx.binders() };
         for &i in &self.features {
             let feature = source_layer.feature(i)?;
             let geometry = feature.geometry()?;
-            let points = geometry.iter().flatten().copied().collect::<Vec<Point<i16>>>();
-            let mut triangles = Indexed { indexes: bucket.triangles.get_mut(), segments: &mut bucket.segments };
-            add_point_quads(bucket.vertices.get_mut(), &mut triangles, points, |pos| TestVertex { pos });
+            for p in geometry.iter().flatten() {
+                // Each corner is the point doubled, with the corner's right
+                // and top sides in the low bits.
+                let (x, y) = (p.x.wrapping_mul(2), p.y.wrapping_mul(2));
+                let vertices = bucket.vertices.get_mut();
+                let first = vertices.len() as u16;
+                vertices.extend([[x, y], [x | 1, y], [x | 1, y | 1], [x, y | 1]].map(|pos| TestVertex { pos }));
+                bucket.triangles.get_mut().extend([0, 1, 2, 0, 3, 2].map(|i| first + i));
+            }
             cx.populate(&mut bucket.binders, i, &feature, bucket.vertices.len(), None, None);
             cx.index(i, &geometry);
         }
-        Ok((!bucket.segments.is_empty()).then_some(bucket))
+        Ok((!bucket.triangles.is_empty()).then_some(bucket))
     }
 }
 
@@ -421,7 +420,7 @@ impl<S: TestGeometry> Layer for TestFeatures<S> {
             vertex_count: bucket.vertices.len(),
             mode: DrawMode::Triangles(),
             indexes: indexes.into(),
-            segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
+            ranges: vec![DrawRange::indexes(bucket.triangles.len())],
             instances: None,
         };
         let shader = cx.res.context.shader_key(&TEST, Uniforms::default(), cx.base.projection_variant);
@@ -580,7 +579,7 @@ impl Layer for TestBackground {
                     vertex_count: count,
                     mode: DrawMode::Triangles(),
                     indexes: DrawIndexes::new(RenderStaticData::quad_triangle_indices()),
-                    segments: RenderStaticData::tile_triangle_segments().iter().map(SegmentBase::copy).collect(),
+                    ranges: vec![DrawRange::indexes(6)],
                     instances: None,
                 };
                 let context = &mut *cx.res.context;

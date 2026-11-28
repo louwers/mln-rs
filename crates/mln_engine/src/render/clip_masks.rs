@@ -17,9 +17,8 @@ use crate::draw::buffer::Buffer;
 use crate::draw::context::Context;
 use crate::draw::objects::Entries;
 use crate::draw::owned::Owned;
-use crate::draw::segment::SegmentBase;
 use crate::draw::vertex_attribute::Uniforms;
-use crate::render::globe::globe_tile_mesh::raw_globe_tile_mesh;
+use crate::render::globe::tile_mesh::tile_mesh;
 use crate::render::paint_parameters::DrawTarget;
 use crate::render::static_data::RenderStaticData;
 use crate::shaders::programs;
@@ -50,24 +49,19 @@ const SQUARE: MeshKey = (0, false, false, false);
 struct Mesh {
     vertices: Buffer,
     indices: Buffer,
-    segments: Vec<SegmentBase>,
+    index_count: u32,
     geometry: Option<Owned<GeometryId>>,
 }
 
 impl Mesh {
-    fn new(
-        gpu: &mut dyn Gpu,
-        context: &mut Context,
-        vertices: &[u8],
-        indices: &[u16],
-        segments: Vec<SegmentBase>,
-    ) -> Option<Mesh> {
+    fn new(gpu: &mut dyn Gpu, context: &mut Context, vertices: &[[i16; 2]], indices: &[u16]) -> Option<Mesh> {
         let device = context.device();
-        let made = device.buffer(gpu, BufferUsage::Vertex, vertices).and_then(|vertices| {
+        let index_count = indices.len() as u32;
+        let made = device.buffer(gpu, BufferUsage::Vertex, bytemuck::cast_slice(vertices)).and_then(|vertices| {
             Ok((vertices, device.buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(indices))?))
         });
         match made {
-            Ok((vertices, indices)) => Some(Mesh { vertices, indices, segments, geometry: None }),
+            Ok((vertices, indices)) => Some(Mesh { vertices, indices, index_count, geometry: None }),
             Err(error) => {
                 context.fail(format!("Making a clipping mask's mesh failed: {error}"));
                 None
@@ -170,14 +164,11 @@ impl ClipMasks {
                 }
                 let mesh = if globe {
                     let (_, _, _, borders) = key;
-                    let raw =
-                        raw_globe_tile_mesh(&tile.canonical, borders, SubdivisionGranularitySetting::globe().stencil);
-                    Mesh::new(gpu, context, &raw.vertices, &raw.indices, raw.segments)
+                    let mesh = tile_mesh(&tile.canonical, borders, SubdivisionGranularitySetting::globe().stencil);
+                    Mesh::new(gpu, context, &mesh.vertices, mesh.triangles.as_flattened())
                 } else {
-                    let vertices = RenderStaticData::tile_vertices();
                     let indices = RenderStaticData::quad_triangle_indices();
-                    let segment = SegmentBase::with_lengths(0, 0, vertices.len(), indices.len());
-                    Mesh::new(gpu, context, bytemuck::cast_slice(&vertices), &indices, vec![segment])
+                    Mesh::new(gpu, context, &RenderStaticData::tile_vertices(), &indices)
                 };
                 if let Some(mesh) = mesh {
                     self.meshes.insert(key, mesh);
@@ -312,21 +303,19 @@ impl ClipMasks {
                 };
                 let geometry = mesh.geometry(gpu, context, shader_id)?;
                 let bindings = self.bindings[*slot].id();
-                for segment in &mesh.segments {
-                    gpu.draw(&Draw {
-                        pipeline,
-                        bindings,
-                        geometry,
-                        first_index: segment.index_offset as u32,
-                        index_count: segment.index_length as u32,
-                        base_vertex: segment.vertex_offset as i32,
-                        first_instance: 0,
-                        instance_count: 1,
-                        global_index: 0,
-                        dynamic: DynamicState { stencil_reference: *stencil_ref as u32, ..dynamic },
-                    })?;
-                    draws += 1;
-                }
+                gpu.draw(&Draw {
+                    pipeline,
+                    bindings,
+                    geometry,
+                    first_index: 0,
+                    index_count: mesh.index_count,
+                    base_vertex: 0,
+                    first_instance: 0,
+                    instance_count: 1,
+                    global_index: 0,
+                    dynamic: DynamicState { stencil_reference: *stencil_ref as u32, ..dynamic },
+                })?;
+                draws += 1;
             }
         }
         let stats = context.rendering_stats();

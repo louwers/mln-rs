@@ -3,7 +3,7 @@
 //! dash arrays that differ by feature. Both find a pattern by the dash
 //! array's values themselves (their float bits) and its cap.
 
-use mln_engine::draw::{Context, SharedTexture, texture_size};
+use mln_engine::draw::{Context, SharedTexture};
 use mln_gfx::gpu::{Gpu, TextureFormat};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
@@ -274,7 +274,12 @@ impl DashPatternTexture {
                 ..Default::default()
             });
         });
-        if let Err(error) = context.upload_texture_data(gpu, &texture, &image.data, texture_size(image.size)) {
+        if let Err(error) = context.upload_texture_data(
+            gpu,
+            &texture,
+            &image.data,
+            mln_gfx::Size::new(image.size.width, image.size.height),
+        ) {
             context.fail(format!("Uploading a dash pattern failed: {error}"));
         }
         self.texture = Some(texture);

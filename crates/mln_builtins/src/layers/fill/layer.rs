@@ -1,10 +1,9 @@
 use std::mem::offset_of;
 
 use mln_engine::draw::{
-    AtlasBinding, Composite, Context, Depth, Draw, DrawGeometry, DrawIndexes, Draws, Group, Indexes, LayerFrame, Mesh,
-    RenderPass, RenderStaticData, SegmentBase, SharedAttribute, SharedIndexes, Texture2D, Uniforms,
-    VertexAttributeArray, cast_matrix, copy_shared_attributes, projection_data, refresh_paint_attributes,
-    to_projection_ubo,
+    Composite, Context, Depth, Draw, DrawGeometry, DrawIndexes, DrawRange, Draws, Group, Indexes, LayerFrame, Mesh,
+    RenderPass, SharedAttribute, SharedIndexes, Texture2D, Uniforms, VertexAttributeArray, copy_shared_attributes,
+    projection_data, refresh_paint_attributes, to_projection_ubo,
 };
 use mln_engine::layer::binders::PaintBinders as _;
 use mln_engine::layer::{
@@ -23,12 +22,15 @@ use mln_style::layers::Fill;
 use mln_style::layers::fill_layer_properties::FillPaintProperties;
 use mln_style::types::{AlignmentType, TranslateAnchorType};
 
+use crate::layers::atlas_binding::AtlasBinding;
 use crate::layers::fill::bucket::{FillBinders, FillLayoutVertex};
 use crate::layers::fill::programs;
 use crate::layers::fill::ubo::{
     FillDrawableUBO, FillEvaluatedPropsUBO, FillOutlineDrawableUBO, FillPatternDrawableUBO, FillPatternTilePropsUBO,
 };
 use crate::layers::pattern_layout::{FillLayoutSpec, PatternLayout};
+use crate::layers::quads::quads_ranges;
+use crate::layers::segments::SegmentBase;
 
 /// The ids of the buffers that the draws bind.
 const OUTLINE_VERTICES_ID: usize = programs::FILL_OUTLINE_PULLED.buffer_id("outlineVertices");
@@ -109,11 +111,13 @@ struct FillDraw {
     /// Of a pulled outline, where its shader finds a vertex's paint values
     /// (`FillOutlineDrawableUBO::paint_layout`).
     paint_layout: Option<u32>,
+    /// Gives the mesh its pattern's atlas before each frame draws it.
+    atlases: Option<AtlasBinding>,
 }
 
 impl FillDraw {
     /// A draw of `geometry` with `shader` and `color_mode`, without culling,
-    /// which binds the textures of `atlases` before each draw.
+    /// which binds the textures of `atlases` before each frame draws it.
     fn new(
         context: &mut Context,
         shader: ShaderKey,
@@ -125,27 +129,26 @@ impl FillDraw {
     ) -> FillDraw {
         let textures = atlases.map(|atlases| atlases.textures(&shader)).unwrap_or_default();
         let mesh = Mesh::new(context, shader, color_mode, CullFaceMode::disabled(), geometry, textures);
-        mesh.set_atlases(context, atlases.cloned());
-        FillDraw { mesh, sub_layer, depth, paint_layout: None }
+        FillDraw { mesh, sub_layer, depth, paint_layout: None, atlases: atlases.cloned() }
     }
 }
 
-/// The geometry of `vertex_count` vertices in `vertices`, and the `segments`
-/// of `indexes` drawn as `mode`, without instances; with no segments, it
+/// The geometry of `vertex_count` vertices in `vertices`, and the `ranges`
+/// of `indexes` drawn as `mode`, without instances; with no ranges, it
 /// draws nothing and has no vertices.
 fn fill_geometry(
     vertices: VertexAttributeArray,
     vertex_count: usize,
     mode: DrawMode,
     indexes: DrawIndexes,
-    segments: &[SegmentBase],
+    ranges: Vec<DrawRange>,
 ) -> DrawGeometry {
     DrawGeometry {
         vertices,
-        vertex_count: if segments.is_empty() { 0 } else { vertex_count },
+        vertex_count: if ranges.is_empty() { 0 } else { vertex_count },
         mode,
         indexes,
-        segments: segments.iter().map(SegmentBase::copy).collect(),
+        ranges,
         instances: None,
     }
 }
@@ -283,7 +286,7 @@ impl TileBuilder<'_> {
         let atlases = Some(tile_bucket.atlas_textures()).filter(|atlases| self.pattern && atlases.icon().is_some());
         let atlases = atlases.map(|atlases| {
             AtlasBinding::new(
-                Some(atlases.clone()),
+                atlases,
                 None,
                 Some(IMAGE_SLOT),
                 /*is_text*/ false,
@@ -302,7 +305,7 @@ impl TileBuilder<'_> {
                 fill_vertex_count,
                 DrawMode::Triangles(),
                 indexes.into(),
-                &bucket.triangle_segments,
+                bucket.triangle_segments.iter().map(SegmentBase::range).collect(),
             );
             FillDraw::new(context, fill_shader, color_mode, 1, fill_depth, fill_geometry, atlases.as_ref())
         });
@@ -316,7 +319,7 @@ impl TileBuilder<'_> {
                     4 * fill_vertex_count,
                     DrawMode::Triangles(),
                     DrawIndexes::Shared(indexes.clone()),
-                    &RenderStaticData::quads_segments(fill_vertex_count),
+                    quads_ranges(fill_vertex_count),
                 );
                 let mut draw = FillDraw::new(
                     context,
@@ -351,7 +354,7 @@ impl TileBuilder<'_> {
                         quad.vertex_count,
                         DrawMode::TriangleStrip(),
                         DrawIndexes::Shared(quad.indexes.clone()),
-                        &[crate::layers::fill::fill_outline_segment(fill_vertex_count)],
+                        vec![crate::layers::fill::fill_outline_segment(fill_vertex_count).range()],
                     )
                 };
                 Some(FillDraw::new(
@@ -369,7 +372,7 @@ impl TileBuilder<'_> {
                     fill_vertex_count,
                     DrawMode::Lines(LINE_WIDTH),
                     bucket_indexes(geometry, &bucket.basic_lines)?.into(),
-                    &bucket.basic_line_segments,
+                    bucket.basic_line_segments.iter().map(SegmentBase::range).collect(),
                 );
                 Some(FillDraw::new(
                     context,
@@ -440,7 +443,7 @@ impl RenderFillLayer {
             None,
             false,
         );
-        let matrix = cast_matrix(&projection.fallback_matrix);
+        let matrix = projection.fallback_matrix.as_mat4().to_cols_array();
         let projection = to_projection_ubo(&projection);
 
         if !pattern {
@@ -703,6 +706,9 @@ impl Layer for RenderFillLayer {
                     depth: Depth::Layer { sub_layer: draw.sub_layer, mask: draw.depth },
                     clip: true,
                 };
+                if let Some(atlases) = &draw.atlases {
+                    atlases.bind(&draw.mesh, cx.res.context, cx.frame);
+                }
                 blocks.push(out.main(), &draw.mesh, tile_id, &projection, tile_draw);
             }
         }

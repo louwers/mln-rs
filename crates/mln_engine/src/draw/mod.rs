@@ -3,12 +3,11 @@
 //!
 //! A layer makes its GPU objects through the [`Resources`] its hooks get and
 //! keeps their handles, from vertices, indexes and textures in the
-//! [`Context`]'s stores, the meshes the layers share
-//! ([`RenderStaticData`], [`globe`]) and the quads of a tile's mask
-//! ([`StoredQuads`]): [`Mesh`]es, which draw a program over geometry with
-//! textures, and [`Target`]s, textures of the layer's own that its draws
-//! draw into ahead of the frame and that its other draws sample. An object
-//! goes once its last handle drops and the GPU is done with it.
+//! [`Context`]'s stores: [`Mesh`]es, which draw a program over geometry
+//! with textures, a [`DrawRange`] of it in each draw call, and [`Target`]s,
+//! textures of the layer's own that its draws draw into ahead of the frame
+//! and that its other draws sample. An object goes once its last handle
+//! drops and the GPU is done with it.
 //!
 //! Each frame, a layer pushes its draws into its [`Draws`]: into its main
 //! [`Group`], which draws at its place in the layers' order and depth, and
@@ -33,7 +32,6 @@
 //! releases it in order.
 
 pub(crate) mod after_gpu;
-pub(crate) mod atlas_binding;
 pub(crate) mod buffer;
 pub(crate) mod context;
 pub(crate) mod draws;
@@ -41,13 +39,11 @@ pub(crate) mod dynamic_texture;
 pub(crate) mod dynamic_texture_atlas;
 pub(crate) mod identity;
 pub(crate) mod indexes;
-pub(crate) mod mesh;
 pub(crate) mod objects;
 pub(crate) mod owned;
-pub(crate) mod quads;
+pub(crate) mod range;
 pub(crate) mod release;
 pub(crate) mod resources;
-pub(crate) mod segment;
 pub(crate) mod store;
 pub(crate) mod target;
 pub(crate) mod texture2d;
@@ -56,12 +52,6 @@ pub(crate) mod uniform_buffer;
 pub(crate) mod upload;
 pub(crate) mod vertex_attribute;
 pub(crate) mod vertices;
-
-/// `m` as the column-major `f32`s that a block's matrix holds.
-#[must_use]
-pub fn cast_matrix(m: &glam::DMat4) -> [f32; 16] {
-    m.as_mat4().to_cols_array()
-}
 
 /// Copies again into `mesh`'s paint attributes, through `refresh`, the
 /// values of its bucket's paint properties that `changes` says feature
@@ -79,23 +69,14 @@ pub fn refresh_paint_attributes(
     mesh.update(context, |objects, context| refresh(context, objects.paint_attributes_mut()));
 }
 
-/// The size of a texture of an image of `size`.
-#[must_use]
-pub fn texture_size(size: mln_style::size::Size) -> mln_gfx::Size {
-    mln_gfx::Size::new(size.width, size.height)
-}
-
 pub use crate::draw::after_gpu::{AfterGpu, GpuEnd};
-pub use crate::draw::atlas_binding::AtlasBinding;
 pub use crate::draw::context::Context;
 pub use crate::draw::draws::{Depth, Draw, Draws, Group, LayerFrame, LendAt, Lent};
 pub use crate::draw::identity::SimpleIdentity;
 pub use crate::draw::indexes::{DrawIndexes, Indexes};
-pub use crate::draw::mesh::{Indexed, add_point_quads};
 pub use crate::draw::objects::{DrawGeometry, Mesh, Textures, copy_shared_attributes, raw_vertices};
-pub use crate::draw::quads::{RasterLayoutVertex, StoredQuads, mask_quads};
+pub use crate::draw::range::DrawRange;
 pub use crate::draw::resources::Resources;
-pub use crate::draw::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 pub use crate::draw::store::{SharedIndexes, SharedTexture};
 pub use crate::draw::target::Target;
 pub use crate::draw::texture2d::Texture2D;
@@ -105,15 +86,13 @@ pub use crate::render::frame_projection::zero_to_one_clip_z;
 pub use crate::render::layer_composite::Composite;
 pub use crate::render::light::EvaluatedLight;
 pub use crate::render::pass::RenderPass;
-pub use crate::render::static_data::RenderStaticData;
 pub use crate::render::tile::RenderTile;
 pub use crate::render::tile_matrix::{globe_extrude_scale, projection_data, to_projection_ubo};
-pub use crate::text::atlas::{ImagePosition, ImagePositions, RectU16};
 
-/// The globe's tile meshes, which a layer that draws whole tiles draws on
-/// the globe, and the rows of the poles' vertices.
+/// The grid of a tile on the globe, which a layer that draws whole tiles
+/// draws there, and the rows of the poles' vertices.
 pub mod globe {
-    pub use crate::render::globe::globe_tile_mesh::{GlobeTileMeshCache, RawGlobeTileMesh, raw_globe_tile_mesh};
+    pub use crate::render::globe::tile_mesh::{TileMesh, tile_mesh};
     pub use crate::render::globe::{NORTH_POLE_Y, SOUTH_POLE_Y};
 }
 

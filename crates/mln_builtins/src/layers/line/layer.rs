@@ -3,9 +3,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_engine::draw::{
-    AtlasBinding, Composite, Context, Draw, DrawGeometry, Draws, Group, LayerFrame, Mesh, RenderPass, SegmentBase,
-    SharedAttribute, SharedTexture, Texture2D, Textures, Uniforms, VertexAttributeArray, cast_matrix, projection_data,
-    refresh_paint_attributes, texture_size, to_projection_ubo,
+    Composite, Context, Draw, DrawGeometry, Draws, Group, LayerFrame, Mesh, RenderPass, SharedAttribute, SharedTexture,
+    Texture2D, Textures, Uniforms, VertexAttributeArray, projection_data, refresh_paint_attributes, to_projection_ubo,
 };
 use mln_engine::layer::binders::PaintBinders as _;
 use mln_engine::layer::{
@@ -28,6 +27,7 @@ use mln_style::layers::line_layer_properties::LinePaintProperties;
 use mln_style::size::Size;
 use mln_style::types::{AlignmentType, LineCapType, TranslateAnchorType};
 
+use crate::layers::atlas_binding::AtlasBinding;
 use crate::layers::line::bucket::{LineBinders, LineBucket};
 use crate::layers::line::dashes::{LineAtlas, LinePatternCap};
 use crate::layers::line::mesh::LineLayoutVertex;
@@ -37,6 +37,7 @@ use crate::layers::line::ubo::{
     LineSDFDrawableUBO, LineSDFTilePropsUBO,
 };
 use crate::layers::pattern_layout::{LineLayoutSpec, PatternLayout};
+use crate::layers::segments::SegmentBase;
 
 /// The slots of the programs' textures that the draws bind.
 const DASH_SLOT: usize = programs::LINE_GRADIENT_SDF.texture_slot("image_dash");
@@ -57,9 +58,11 @@ enum LineType {
 /// What the layer keeps of a tile: the draw of its bucket's lines, as it was
 /// built for the bucket.
 pub(crate) struct LineTile {
-    /// The lines' mesh, which binds the texture of the tile's icon atlas
-    /// before each draw of a pattern.
+    /// The lines' mesh.
     mesh: Mesh,
+    /// Gives the mesh of a pattern the texture of the tile's icon atlas
+    /// before each frame draws it.
+    atlases: Option<AtlasBinding>,
     line_type: LineType,
     /// The passes the draw draws in.
     pass: RenderPass,
@@ -165,7 +168,9 @@ fn dash_atlas_texture(gpu: &mut dyn Gpu, context: &mut Context, binders: &LineBi
             ..Default::default()
         });
     });
-    if let Err(error) = context.upload_texture_data(gpu, &texture, &image.data, texture_size(image.size)) {
+    if let Err(error) =
+        context.upload_texture_data(gpu, &texture, &image.data, mln_gfx::Size::new(image.size.width, image.size.height))
+    {
         context.fail(format!("Uploading the dash patterns failed: {error}"));
         return None;
     }
@@ -400,6 +405,9 @@ impl Layer for RenderLineLayer {
                     clip: true,
                     ..Draw::DEFAULT
                 };
+                if let Some(atlases) = &cached.atlases {
+                    atlases.bind(&cached.mesh, context, cx.frame);
+                }
                 blocks.push(out.main(), &cached.mesh, tile_id, &projection, draw);
             }
         }
@@ -529,7 +537,7 @@ impl RenderLineLayer {
         } else if !cx.values.unevaluated.line_pattern.is_undefined() {
             let icons = Some(tile_bucket.atlas_textures()).filter(|atlases| atlases.icon().is_some())?;
             atlases = Some(AtlasBinding::new(
-                Some(icons.clone()),
+                icons,
                 None,
                 Some(IMAGE_SLOT),
                 /*is_text*/ false,
@@ -572,7 +580,7 @@ impl RenderLineLayer {
             vertex_count: if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() },
             mode: DrawMode::Triangles(),
             indexes: bucket_indexes(geometry, &bucket.triangles)?.into(),
-            segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
+            ranges: bucket.segments.iter().map(SegmentBase::range).collect(),
             instances: None,
         };
         let color_mode =
@@ -581,8 +589,7 @@ impl RenderLineLayer {
             .then(|| textures[IMAGE_SLOT].clone())
             .flatten();
         let mesh = Mesh::new(context, shader, color_mode, CullFaceMode::disabled(), draw_geometry, textures);
-        mesh.set_atlases(context, atlases);
-        Some(LineTile { mesh, line_type, pass, dash_cap: dash_pattern_cap(bucket), color_ramp })
+        Some(LineTile { mesh, atlases, line_type, pass, dash_cap: dash_pattern_cap(bucket), color_ramp })
     }
 
     /// The texture of the color ramp, which every gradient of the layer
@@ -642,7 +649,7 @@ impl RenderLineLayer {
             None,
             false,
         );
-        let matrix = cast_matrix(&projection.fallback_matrix);
+        let matrix = projection.fallback_matrix.as_mat4().to_cols_array();
         let projection = to_projection_ubo(&projection);
         let ratio = pixel_scale / tile_id.pixels_to_tile_units(1.0, zoom);
 

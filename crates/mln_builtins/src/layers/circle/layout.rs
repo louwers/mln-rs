@@ -3,7 +3,6 @@
 // builds the bucket.
 
 use geometry::Point;
-use mln_engine::draw::{Indexed, add_point_quads};
 use mln_engine::layer::{BuildCx, Layout, LayoutCx};
 use mln_engine::map::MapMode;
 use mln_style::StyleValue as _;
@@ -13,6 +12,7 @@ use mln_style::expression::EvaluationContext;
 use mln_style::layers::{Circle, CircleLayoutProperties};
 
 use crate::layers::circle::bucket::{CircleBucket, CircleLayoutVertex};
+use crate::layers::segments::{Indexed, add_point_quads};
 
 /// A feature the filter accepted, by index (see the file comment).
 #[derive(Clone, Copy, Debug)]

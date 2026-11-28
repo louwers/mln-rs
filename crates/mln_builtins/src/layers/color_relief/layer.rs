@@ -8,15 +8,13 @@ use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_engine::draw::globe::GlobeTileMeshCache;
 use mln_engine::draw::{
-    Context, Draw, DrawGeometry, DrawIndexes, Draws, Indexes, Mesh, RasterLayoutVertex, RenderStaticData, SegmentBase,
-    SharedAttribute, SharedIndexes, SharedTexture, SharedVertices, SimpleIdentity, StoredQuads, Textures, Uniforms,
-    VertexAttributeArray, cast_matrix, to_projection_ubo,
+    Context, Draw, DrawGeometry, DrawIndexes, DrawRange, Draws, Indexes, Mesh, SharedAttribute, SharedIndexes,
+    SharedTexture, SharedVertices, SimpleIdentity, Textures, Uniforms, VertexAttributeArray, to_projection_ubo,
 };
 use mln_engine::layer::{
-    DemContents, EvaluateCx, Evaluation, FrameTile, Layer, LayerValues, OnTerrain, PrepareCx, TileCx, TileData,
-    copied_vertices,
+    DemContents, EvaluateCx, Evaluation, FrameTile, Layer, LayerValues, OnTerrain, PrepareCx, RasterLayoutVertex,
+    TileCx, TileData, copied_vertices,
 };
 use mln_engine::source::DemTiles;
 use mln_engine::tile::dem::DemUnpack;
@@ -38,6 +36,7 @@ use mln_style::types::ResamplingType;
 
 use crate::layers::color_relief::programs;
 use crate::layers::color_relief::ubo::{ColorReliefDrawableUBO, ColorReliefEvaluatedPropsUBO, ColorReliefTilePropsUBO};
+use crate::layers::quads::{GlobeTileMeshCache, QUAD_RANGE, StoredQuads, quad_triangle_indices, raster_vertices};
 
 /// The slots of the programs' textures that the draws bind.
 const COLOR_STOPS_SLOT: usize = programs::COLOR_RELIEF.texture_slot("color_stops");
@@ -342,10 +341,10 @@ impl Layer for RenderColorReliefLayer {
 
         let color_relief_shader =
             context.shader_key(&programs::COLOR_RELIEF, Uniforms::default(), cx.base.projection_variant);
-        let static_data_shared_vertices = &*static_data_shared_vertices
-            .get_or_insert_with(|| copied_vertices(context, &RenderStaticData::raster_vertices()));
-        let static_data_indices = &*static_data_indices
-            .get_or_insert_with(|| context.add_indexes(Indexes::new(RenderStaticData::quad_triangle_indices())));
+        let static_data_shared_vertices =
+            &*static_data_shared_vertices.get_or_insert_with(|| copied_vertices(context, &raster_vertices()));
+        let static_data_indices =
+            &*static_data_indices.get_or_insert_with(|| context.add_indexes(Indexes::new(quad_triangle_indices())));
         let (Some(elevation_stops_texture), Some(color_stops_texture)) =
             (elevation_stops_texture.as_ref(), color_stops_texture.as_ref())
         else {
@@ -368,36 +367,24 @@ impl Layer for RenderColorReliefLayer {
 
         // The tile's geometry: the globe's mesh of its mask, the mask's
         // quads, or the whole tile's quad.
-        let (vertices, vertex_count, indices, segments): (SharedVertices, usize, DrawIndexes, Vec<SegmentBase>) =
-            if cx.base.projection_variant == ProjectionVariant::Globe {
-                let globe_mesh = globe_meshes.get(context, &tile_id.canonical, masking.mask(), RasterLayoutVertex::new);
-                (
-                    globe_mesh.vertices.clone(),
-                    globe_mesh.vertices.count(),
-                    globe_mesh.indexes(),
-                    globe_mesh.segments.iter().map(SegmentBase::copy).collect(),
-                )
-            } else if let Some(quads) = StoredQuads::of_mask(context, masking) {
-                (
-                    quads.vertices.clone(),
-                    quads.vertices.count(),
-                    quads.indexes.clone().into(),
-                    quads.segments.iter().map(SegmentBase::copy).collect(),
-                )
-            } else {
-                (
-                    static_data_shared_vertices.clone(),
-                    4,
-                    static_data_indices.clone().into(),
-                    RenderStaticData::raster_segments(),
-                )
-            };
+        let (vertices, vertex_count, indices, ranges): (SharedVertices, usize, DrawIndexes, Vec<DrawRange>) = if cx
+            .base
+            .projection_variant
+            == ProjectionVariant::Globe
+        {
+            let globe_mesh = globe_meshes.get(context, &tile_id.canonical, masking.mask(), RasterLayoutVertex::new);
+            (globe_mesh.vertices.clone(), globe_mesh.vertices.count(), globe_mesh.indexes(), globe_mesh.ranges.clone())
+        } else if let Some(quads) = StoredQuads::of_mask(context, masking.mask()) {
+            (quads.vertices.clone(), quads.vertices.count(), quads.indexes.clone().into(), quads.ranges)
+        } else {
+            (static_data_shared_vertices.clone(), 4, static_data_indices.clone().into(), vec![QUAD_RANGE])
+        };
         let geometry = DrawGeometry {
             vertices: color_relief_vertex_attributes(&vertices),
-            vertex_count: if segments.is_empty() { 0 } else { vertex_count },
+            vertex_count: if ranges.is_empty() { 0 } else { vertex_count },
             mode: DrawMode::Triangles(),
             indexes: indices,
-            segments,
+            ranges,
             instances: None,
         };
         let mut draw_textures = Textures::default();
@@ -468,7 +455,7 @@ impl Layer for RenderColorReliefLayer {
                 cached.mesh.set_texture(context, slot, Some(texture));
             }
             let projection = cx.frame.projection_data_for_tile(&tile_id.to_unwrapped(), false);
-            let drawable = ColorReliefDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) };
+            let drawable = ColorReliefDrawableUBO { matrix: projection.fallback_matrix.as_mat4().to_cols_array() };
             let draw = Draw { order: cached.mesh.seq(), ..Draw::DEFAULT };
             let projection = to_projection_ubo(&projection);
             out.main().push_at(&cached.mesh, tile_id, &projection, draw, (drawable, cached.tile_props));

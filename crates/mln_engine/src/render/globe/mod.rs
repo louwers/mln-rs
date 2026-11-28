@@ -1,7 +1,6 @@
 //! The globe: its tile meshes and its depth pass.
 
 pub(crate) mod depth_pass;
-pub(crate) mod globe_tile_mesh;
 pub(crate) mod tile_mesh;
 
 /// The Y coordinate of a vertex at the north pole, which the globe's vertex

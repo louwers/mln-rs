@@ -5,7 +5,6 @@ use std::f64::consts::PI;
 
 use geometry::Point;
 use mln_engine::camera::View;
-use mln_engine::draw::{Indexed, MAX_SEGMENT_VERTICES, SegmentBase};
 use mln_engine::geo::constants::{EARTH_RADIUS_M, M2PI};
 use mln_engine::layer::binders::{
     CrossFadedPaintPropertyBinder, LayerBinders, PaintBinders, PaintPropertyBinder, PatternLayerMap,
@@ -26,6 +25,7 @@ use mln_style::types::LightAnchorType;
 
 use crate::layers::fill_extrusion::layer::instanced_walls;
 use crate::layers::pattern_layout::PatternLayoutSpec;
+use crate::layers::segments::{Indexed, MAX_SEGMENT_VERTICES, SegmentBase};
 use crate::layers::subdivision::{SubdividedPolygon, subdivide_polygon, subdivide_vertex_line};
 use crate::layers::tessellator::Tessellator;
 

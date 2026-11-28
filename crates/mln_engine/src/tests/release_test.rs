@@ -27,7 +27,7 @@ fn bindings_and_geometry_go_before_what_they_were_made_of() {
         context.device().write_uniforms(gpu, &mut ubo, &vec![0; projection], false);
         let ubo_id = ubo.as_ref().expect("a uniform buffer").id();
         let texture = context.add_texture_with(|texture| texture.set_size(Size::new(2, 2)));
-        let (texture_id, sampler) = context.texture_binding(gpu, &texture).expect("the texture");
+        let (texture_id, sampler) = context.texture_binding(gpu, &texture, None).expect("the texture");
         let vertices = context.add_vertices(vec![[0i16; 2]; 4]);
         let vertices_id = context.upload_vertices(gpu, &vertices).expect("vertices").expect("a buffer");
         let indexes = context.add_indexes(Indexes::new(vec![0, 1, 2, 3]));
@@ -55,7 +55,7 @@ fn bindings_and_geometry_go_before_what_they_were_made_of() {
         let geometry = context.own(geometry, vec![vertices.held(), Held::Indexes(indexes.clone())]);
         drop((vertices, indexes));
         context.texture_mut(&texture).expect("the texture").set_size(Size::new(4, 4));
-        context.texture_binding(gpu, &texture).expect("the resized texture");
+        context.texture_binding(gpu, &texture, None).expect("the resized texture");
 
         let stats = context.stats();
         context.destroy_released(gpu);
@@ -97,7 +97,7 @@ fn a_frames_bindings_of_a_mesh_go_with_the_mesh_and_with_its_buffers() {
             vertex_count: 0,
             mode: DrawMode::Triangles(),
             indexes: DrawIndexes::new(vec![0, 1, 2]),
-            segments: Vec::new(),
+            ranges: Vec::new(),
             instances: None,
         };
         let shader = ShaderKey::new(&programs::CLIPPING_MASK, []);

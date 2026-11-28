@@ -1,12 +1,13 @@
 use std::sync::Once;
 
 use geometry::Point;
-use mln_engine::draw::{ImagePositions, Indexed, SegmentBase, SharedAttribute, SharedVertices};
+use mln_engine::draw::{SharedAttribute, SharedVertices};
 use mln_engine::layer::binders::{
     CrossFadedPaintPropertyBinder, InterleavedVertexBuffer, InterleavedVertexData, LayerBinders, PaintPropertyBinder,
     PaintPropertyBinderBase, PatternDependency, shared_paint,
 };
 use mln_engine::layer::{Bucket, EvaluatedLayer, GeometryVec, Upload};
+use mln_engine::text::atlas::ImagePositions;
 use mln_engine::tile::OverscaledTileID;
 use mln_engine::tile::feature::numeric_value_f64;
 use mln_gfx::gfx_types::AttributeDataType;
@@ -24,6 +25,7 @@ use mln_style::types::LineCapType;
 
 use crate::layers::line::dashes::{DashAtlas, LinePatternCap};
 use crate::layers::line::mesh::{LineLayoutVertex, LineOptions, add_line};
+use crate::layers::segments::{Indexed, SegmentBase};
 use crate::layers::subdivision::subdivide_vertex_line;
 use crate::layers::tessellator::Tessellator;
 use crate::log_target;

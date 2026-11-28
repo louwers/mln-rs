@@ -11,8 +11,7 @@ use std::sync::{Arc, Once};
 
 use mln_engine::RegistryBuilder;
 use mln_engine::draw::{
-    Draw, DrawGeometry, DrawIndexes, Draws, Mesh, RenderStaticData, SegmentBase, SharedTexture, Textures, Uniforms,
-    raw_vertices,
+    Draw, DrawGeometry, DrawIndexes, DrawRange, Draws, Mesh, SharedTexture, Textures, Uniforms, raw_vertices,
 };
 use mln_engine::layer::{FrameTile, Layer, LayerValues, NoTiles, OnTerrain, PrepareCx, Router, Routes};
 use mln_engine::map::MapMode;
@@ -121,8 +120,8 @@ impl Layer for CopyLayer {
                 vertices: raw_vertices("pos", corners, 4, AttributeDataType::Short2),
                 vertex_count: 4,
                 mode: DrawMode::Triangles(),
-                indexes: DrawIndexes::new(RenderStaticData::quad_triangle_indices()),
-                segments: vec![SegmentBase::with_lengths(0, 0, 4, 6)],
+                indexes: DrawIndexes::new(vec![0, 1, 2, 1, 2, 3]),
+                ranges: vec![DrawRange::indexes(6)],
                 instances: None,
             };
             let mut textures = Textures::default();

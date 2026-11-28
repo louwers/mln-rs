@@ -16,8 +16,9 @@ use crate::camera::TileCoordinate;
 use crate::camera::tile_coordinate::TileCoordinatePoint;
 use crate::draw::context::Context;
 use crate::draw::identity::SimpleIdentity;
-use crate::draw::quads::{RasterLayoutVertex, StoredQuads};
-use crate::draw::segment::SegmentBase;
+use crate::draw::indexes::{Indexes, SharedIndexes};
+use crate::draw::range::DrawRange;
+use crate::draw::vertices::SharedVertices;
 use crate::layer::layer_drawing::MadeFrom;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::log_target;
@@ -191,8 +192,33 @@ fn build_image_mesh(tile: &mut ImageTile, cells: u32, from_top_left: bool) {
             }
         }
     }
-    let segments = vec![SegmentBase::with_lengths(0, 0, vertices.len(), indices.len())];
-    tile.set_mesh(vertices, indices, segments);
+    tile.set_mesh(vertices, indices);
+}
+
+/// A vertex of an image source's mesh: its position in tile units (`a1`),
+/// and where it samples the image (`a2`), in the same units over the image.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(C)]
+pub struct RasterLayoutVertex {
+    pub a1: [i16; 2],
+    pub a2: [u16; 2],
+}
+
+impl RasterLayoutVertex {
+    /// The vertex at `p` that samples the image at `t`.
+    #[must_use]
+    pub fn new(p: Point<i16>, t: Point<u16>) -> RasterLayoutVertex {
+        RasterLayoutVertex { a1: [p.x, p.y], a2: [t.x, t.y] }
+    }
+}
+
+/// An image source's mesh in the context's stores, which the raster layers
+/// that draw the source share: triangles over [`RasterLayoutVertex`]es.
+pub struct ImageMesh {
+    pub vertices: SharedVertices,
+    pub indexes: SharedIndexes,
+    /// The draw call that draws the triangles.
+    pub range: DrawRange,
 }
 
 /// Where an image tile's mesh is.
@@ -200,9 +226,9 @@ enum Mesh {
     /// It has none yet.
     None,
     /// Its vertices and indices, until their upload moves them.
-    Data { vertices: Vec<RasterLayoutVertex>, indices: Vec<u16>, segments: Vec<SegmentBase> },
+    Data { vertices: Vec<RasterLayoutVertex>, indices: Vec<u16> },
     /// In the context's stores.
-    Stored(StoredQuads),
+    Stored(ImageMesh),
 }
 
 /// What an image source shows in each of its tiles: its image, and the mesh
@@ -255,15 +281,15 @@ impl ImageTile {
         !matches!(self.mesh, Mesh::None)
     }
 
-    /// Makes the mesh `vertices` and `indices` in `segments`.
-    fn set_mesh(&mut self, vertices: Vec<RasterLayoutVertex>, indices: Vec<u16>, segments: Vec<SegmentBase>) {
-        self.mesh = Mesh::Data { vertices, indices, segments };
+    /// Makes the mesh the triangles of `indices` over `vertices`.
+    fn set_mesh(&mut self, vertices: Vec<RasterLayoutVertex>, indices: Vec<u16>) {
+        self.mesh = Mesh::Data { vertices, indices };
         self.generation += 1;
     }
 
     /// The mesh in the context's stores, once its upload moved it.
     #[must_use]
-    pub fn quads(&self) -> Option<&StoredQuads> {
+    pub fn mesh(&self) -> Option<&ImageMesh> {
         match &self.mesh {
             Mesh::Stored(quads) => Some(quads),
             Mesh::Data { vertices, .. } => {
@@ -278,8 +304,10 @@ impl ImageTile {
     /// is none.
     fn upload(&mut self, context: &mut Context) {
         self.mesh = match std::mem::replace(&mut self.mesh, Mesh::None) {
-            Mesh::Data { vertices, indices, segments } if !vertices.is_empty() => {
-                Mesh::Stored(StoredQuads::new(context, vertices, indices, segments))
+            Mesh::Data { vertices, indices } if !vertices.is_empty() => {
+                let range = DrawRange::indexes(indices.len());
+                let vertices = context.add_vertices(vertices);
+                Mesh::Stored(ImageMesh { vertices, indexes: context.add_indexes(Indexes::new(indices)), range })
             }
             mesh => mesh,
         };

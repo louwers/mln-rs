@@ -14,8 +14,6 @@ pub mod programs;
 pub mod ubo;
 mod wgsl;
 
-use mln_engine::draw::SegmentBase;
-
 #[must_use]
 pub(crate) fn heatmap_texture_vertices() -> Vec<bucket::HeatmapTextureLayoutVertex> {
     use geometry::Point;
@@ -27,9 +25,4 @@ pub(crate) fn heatmap_texture_vertices() -> Vec<bucket::HeatmapTextureLayoutVert
         HeatmapBucket::texture_vertex(Point::new(0, 1)),
         HeatmapBucket::texture_vertex(Point::new(1, 1)),
     ]
-}
-
-#[must_use]
-pub(crate) fn heatmap_texture_segments() -> Vec<SegmentBase> {
-    vec![SegmentBase::with_lengths(0, 0, 4, 6)]
 }
