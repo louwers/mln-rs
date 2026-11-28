@@ -4,6 +4,8 @@
 mod support;
 
 mod camera;
+// The limits on the camera, and the areas that cameras show.
+mod camera_bounds;
 mod commands;
 // Image sources whose corners make a concave quad.
 mod concave_image;
@@ -23,10 +25,16 @@ mod flipped_viewport;
 ))]
 mod frame_depth;
 mod gestures;
+// The style's global state, as layers draw it.
+mod global_state;
+// Maps drawn as a globe: their tiles and symbols.
+mod globe;
 // Vertical perspective close in, which draws as Mercator does.
 mod globe_precision;
 // Hillshades over DEM tiles that the tests make.
 mod hillshade;
+// Layers that change after they drew.
+mod layer_updates;
 // Maps whose scale factor changes.
 mod pixel_ratio;
 mod placement;
@@ -39,6 +47,8 @@ mod shared_targets;
 // Frames with more clipped tiles than the stencil buffer has values.
 mod stencil_overflow;
 mod style;
+// The style's images, as icons and patterns.
+mod style_images;
 mod surfaces;
 mod surfaces_win32;
 mod surfaces_window;
@@ -53,3 +63,7 @@ mod terrain_hillshade;
 mod terrain_standing;
 // The order in which a frame stacks overlapping tiles.
 mod tile_order;
+// What layers hold and draw as they leave their zoom range.
+mod tile_release;
+// Tile and glyph requests, and maps whose requests fail.
+mod tile_requests;
