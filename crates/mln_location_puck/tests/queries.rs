@@ -1,5 +1,6 @@
 //! A rendered-feature query of a puck, which has no tile: the query's
-//! filter takes or drops it, and a spatial filter places it where it is.
+//! filter takes or drops it, a spatial filter places it where it is, and it
+//! comes in the layers' order with the features of tiles.
 
 use mln_builtins::register_builtins;
 use mln_engine::RegistryBuilder;
@@ -17,12 +18,15 @@ use mln_style::size::Size;
 const SIDE: u32 = 256;
 
 /// A puck a degree west of the center of a map at zoom 3.
-const STYLE: &str = r#"{"version": 8, "zoom": 3, "sources": {}, "layers": [
-    {"id": "puck", "type": "org.maplibre.location-puck", "paint": {"puck-position": [-1, 0]}}
-]}"#;
+const PUCK: &str = r#"{"id": "puck", "type": "org.maplibre.location-puck", "paint": {"puck-position": [-1, 0]}}"#;
 
-/// A static map of [`STYLE`] whose session drew a still of it.
-fn render() -> (Runtime, Map, RenderSession) {
+/// A circle where [`PUCK`] is, of the GeoJSON source `point`.
+const CIRCLE: &str = r#"{"id": "circle", "type": "circle", "source": "point", "paint": {"circle-radius": 20}}"#;
+
+/// A static map at zoom 3 whose layers are `layers`, over a GeoJSON source
+/// `point` of a point where [`PUCK`] is, and whose session drew a still of
+/// it.
+fn render_layers(layers: &[&str]) -> (Runtime, Map, RenderSession) {
     let mut builder = RegistryBuilder::new();
     register_builtins(&mut builder).unwrap();
     mln_location_puck::register(&mut builder).unwrap();
@@ -37,9 +41,20 @@ fn render() -> (Runtime, Map, RenderSession) {
     let target = RenderTarget::Offscreen { size, device: Some(render_test::harness_device().unwrap()) };
     let (session, attached) = map.attach(target, AttachOptions::default()).unwrap();
     attached.wait().unwrap();
-    map.set_style_json(STYLE).unwrap().wait().unwrap();
+    let style = format!(
+        r#"{{"version": 8, "zoom": 3, "layers": [{}], "sources": {{
+            "point": {{"type": "geojson", "data": {{"type": "Point", "coordinates": [-1, 0]}}}}
+        }}}}"#,
+        layers.join(", ")
+    );
+    map.set_style_json(style).unwrap().wait().unwrap();
     map.request_still_image().unwrap().wait().expect("a frame");
     (runtime, map, session)
+}
+
+/// A static map of [`PUCK`] alone whose session drew a still of it.
+fn render() -> (Runtime, Map, RenderSession) {
+    render_layers(&[PUCK])
 }
 
 /// The ids of the layers of what a query at the puck finds with `filter`.
@@ -71,4 +86,12 @@ fn a_query_finds_the_puck_within_a_polygon_around_it() {
     };
     assert_eq!(found(&session, &within(-1.5, -0.5)), ["puck"]);
     assert_eq!(found(&session, &within(0.5, 1.5)), Vec::<String>::new());
+}
+
+#[test]
+fn a_query_finds_the_puck_in_the_layers_order_with_tile_features() {
+    let (_runtime, _map, session) = render_layers(&[CIRCLE, PUCK]);
+    assert_eq!(found(&session, "true"), ["puck", "circle"]);
+    let (_runtime, _map, session) = render_layers(&[PUCK, CIRCLE]);
+    assert_eq!(found(&session, "true"), ["circle", "puck"]);
 }
