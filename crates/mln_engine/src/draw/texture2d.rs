@@ -11,7 +11,6 @@ use mln_gfx::texture2d::SamplerState;
 use mln_style::bitmap::PremultipliedImage;
 
 use crate::draw::resources::{Device, SharedGpuTexture};
-use crate::draw::texture_size;
 
 /// A texture of the renderer: its size, format and sampler state, the image
 /// it waits to upload, and once made, a texture of the backend's
@@ -259,4 +258,10 @@ fn write(
     stats.num_texture_updates += 1;
     stats.texture_update_bytes += data.len();
     Ok(())
+}
+
+/// The size of a texture of an image of `size`.
+#[must_use]
+pub(crate) fn texture_size(size: mln_style::size::Size) -> Size {
+    Size::new(size.width, size.height)
 }

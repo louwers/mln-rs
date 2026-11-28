@@ -26,16 +26,16 @@ use mln_gfx::gpu::{
 use mln_gfx::shaders::bindings::{BUFFER_IDS, MAX_TEXTURES};
 use mln_gfx::shaders::program::Program;
 use mln_gfx::stencil_mode::StencilMode;
+use mln_gfx::texture2d::SamplerState;
 use mln_style::hash::HashMap;
 
-use crate::draw::atlas_binding::AtlasBinding;
 use crate::draw::buffer::Buffer;
 use crate::draw::context::Context;
 use crate::draw::identity::SimpleIdentity;
 use crate::draw::indexes::DrawIndexes;
 use crate::draw::owned::{Held, Owned};
+use crate::draw::range::DrawRange;
 use crate::draw::resources::Device;
-use crate::draw::segment::SegmentBase;
 use crate::draw::store::{MeshKey, Shared, SharedTexture, WeakShared};
 use crate::draw::uniform_buffer::UniformBufferArray;
 use crate::draw::upload::{self, AttributeBindingArray, AttributeSlots};
@@ -50,19 +50,19 @@ pub type Textures = [Option<SharedTexture>; MAX_TEXTURES];
 /// The most vertex buffers a draw binds, WebGPU's default limit.
 const MAX_VERTEX_BUFFERS: usize = 8;
 
-/// What a mesh draws: its vertices, and the primitives its segments draw of
-/// them.
+/// What a mesh draws: its vertices, and the primitives its draw calls draw
+/// of them.
 pub struct DrawGeometry {
     /// The vertex attributes, by the names of the program's attributes.
     pub vertices: VertexAttributeArray,
     /// How many vertices the attributes hold, which an attribute the
     /// shader reads and the draw lacks gets default values for.
     pub vertex_count: usize,
-    /// The primitive the segments draw.
+    /// The primitive the draw calls draw.
     pub mode: DrawMode,
     pub indexes: DrawIndexes,
-    /// The ranges of the indexes and vertices each draw call draws.
-    pub segments: Vec<SegmentBase>,
+    /// What each draw call draws.
+    pub ranges: Vec<DrawRange>,
     /// The attributes of each instance, for a draw of instances.
     pub instances: Option<VertexAttributeArray>,
 }
@@ -211,7 +211,7 @@ impl DrawBuffers {
         let mut textures = [None; MAX_TEXTURES];
         for slot in sampled_slots(program) {
             if let Some(texture) = mesh.textures.get(slot).and_then(Option::as_ref) {
-                textures[slot] = Some(context.texture_binding(gpu, texture)?);
+                textures[slot] = Some(context.texture_binding(gpu, texture, mesh.samplers[slot])?);
             }
         }
         let global = context.global_uniform_buffers();
@@ -291,7 +291,7 @@ struct PipelineVariant {
 }
 
 /// Geometry drawn with one program, and the GPU objects that draw it: its
-/// vertices, indexes and segments, the textures it binds, the color and cull
+/// vertices, indexes and the ranges it draws of them, the textures it binds, the color and cull
 /// modes it draws with, and the shader, pipelines and geometry it made of
 /// them on the context's `Gpu`, which it makes again when what they are made
 /// of changes. The frames that draw it bind it with their buffers
@@ -319,6 +319,9 @@ pub(crate) struct DrawObjects {
     instance_slots_of: AttributeSlots,
     /// The textures it binds, by slot.
     textures: Textures,
+    /// The states it samples them with, by slot, in place of the textures'
+    /// own.
+    samplers: [Option<SamplerState>; MAX_TEXTURES],
     /// The vertices the shader reads as storage buffers, each with the
     /// buffer id it binds at, past the uniform buffers' ids, and its buffer
     /// as of the last upload.
@@ -329,7 +332,7 @@ pub(crate) struct DrawObjects {
     cull_face_mode: CullFaceMode,
 
     mode: DrawMode,
-    segments: Vec<SegmentBase>,
+    ranges: Vec<DrawRange>,
     indexes: DrawIndexes,
     vertex_count: usize,
     attribute_bindings: AttributeBindingArray,
@@ -348,8 +351,6 @@ pub(crate) struct DrawObjects {
     /// The geometry of its vertex slots and the index buffer it was made
     /// with.
     geometry: Option<(Owned<GeometryId>, BufferId)>,
-    /// Gives it the textures of its tile's atlases before each draw.
-    atlases: Option<AtlasBinding>,
 }
 
 impl DrawObjects {
@@ -363,7 +364,7 @@ impl DrawObjects {
         geometry: DrawGeometry,
         textures: Textures,
     ) -> Self {
-        let DrawGeometry { vertices, vertex_count, mode, indexes, segments, instances } = geometry;
+        let DrawGeometry { vertices, vertex_count, mode, indexes, ranges, instances } = geometry;
         DrawObjects {
             id: SimpleIdentity::new(),
             handle: WeakShared::default(),
@@ -375,12 +376,13 @@ impl DrawObjects {
             vertex_slots_of: AttributeSlots::default(),
             instance_slots_of: AttributeSlots::default(),
             textures,
+            samplers: [None; MAX_TEXTURES],
             storage_vertices: Vec::new(),
             storage_epoch: 0,
             color_mode,
             cull_face_mode,
             mode,
-            segments,
+            ranges,
             indexes,
             vertex_count,
             attribute_bindings: Vec::new(),
@@ -390,7 +392,6 @@ impl DrawObjects {
             pipelines: Vec::new(),
             pipeline_layouts: Vec::new(),
             geometry: None,
-            atlases: None,
         }
     }
 
@@ -481,7 +482,7 @@ impl DrawObjects {
         self.shader.program()
     }
 
-    /// Draws the segments into `parameters`' open pass on `gpu`, the
+    /// Draws the ranges into `parameters`' open pass on `gpu`, the
     /// context's, with `depth_mode` and `stencil_mode`, binding the buffers
     /// of the draws in `frame`. Shaders read the draw's entries in those
     /// storage buffers at `global_index`. Returns whether it didn't fail; a
@@ -496,10 +497,6 @@ impl DrawObjects {
         stencil_mode: StencilMode,
         global_index: u32,
     ) -> bool {
-        if let Some(atlases) = self.atlases.take() {
-            atlases.bind(self, parameters);
-            self.atlases = Some(atlases);
-        }
         let drawn = self.draw_in(gpu, parameters, frame, depth_mode, stencil_mode, global_index);
         if let Err(error) = &drawn {
             parameters.context.fail(format!("Drawing {} failed: {error}", self.shader.program().name));
@@ -586,8 +583,8 @@ impl DrawObjects {
         let stencil = StencilState::from(&stencil_mode);
         let mut draws = 0;
         let mode = self.mode;
-        for segment in &self.segments {
-            if segment.index_length == 0 {
+        for range in &self.ranges {
+            if range.index_count == 0 {
                 continue;
             }
             let variant = PipelineVariant { primitive: mode.type_, depth, stencil, targets };
@@ -609,11 +606,11 @@ impl DrawObjects {
                 pipeline,
                 bindings,
                 geometry,
-                first_index: segment.index_offset as u32,
-                index_count: segment.index_length as u32,
-                base_vertex: segment.vertex_offset as i32,
-                first_instance: segment.base_instance as u32,
-                instance_count: segment.instance_count as u32,
+                first_index: range.first_index,
+                index_count: range.index_count,
+                base_vertex: range.base_vertex,
+                first_instance: range.first_instance,
+                instance_count: range.instance_count,
                 global_index,
                 dynamic: DynamicState { line_width, ..dynamic },
             })?;
@@ -692,13 +689,19 @@ impl DrawObjects {
         }
     }
 
-    /// Replaces the indexes and the segments drawn from them.
-    pub(crate) fn replace_indexes(&mut self, indexes: DrawIndexes, segments: Vec<SegmentBase>) {
+    /// Samples the texture at its program's texture slot `slot` with
+    /// `state`, or with the texture's own state with `None`.
+    pub(crate) fn set_sampler(&mut self, slot: usize, state: Option<SamplerState>) {
+        self.samplers[slot] = state;
+    }
+
+    /// Replaces the indexes and the ranges drawn of them.
+    pub(crate) fn replace_indexes(&mut self, indexes: DrawIndexes, ranges: Vec<DrawRange>) {
         if let DrawIndexes::Own(_) = self.indexes {
             self.geometry = None;
         }
         self.indexes = indexes;
-        self.segments = segments;
+        self.ranges = ranges;
     }
 
     /// Culls faces as `cull_face_mode` says from the next draw on.
@@ -708,11 +711,6 @@ impl DrawObjects {
             // The pipelines bake the culling in.
             self.pipelines.clear();
         }
-    }
-
-    #[must_use]
-    pub(crate) fn shader(&self) -> &ShaderKey {
-        &self.shader
     }
 }
 
@@ -767,7 +765,7 @@ impl Mesh {
 
     /// The program the mesh draws with.
     #[must_use]
-    pub(crate) fn program(&self) -> &'static Program {
+    pub fn program(&self) -> &'static Program {
         self.program
     }
 
@@ -856,10 +854,10 @@ impl Mesh {
         }
     }
 
-    /// Replaces the mesh's indexes and the segments drawn from them.
-    pub fn replace_indexes(&self, context: &mut Context, indexes: DrawIndexes, segments: Vec<SegmentBase>) {
+    /// Replaces the mesh's indexes and the ranges drawn of them.
+    pub fn replace_indexes(&self, context: &mut Context, indexes: DrawIndexes, ranges: Vec<DrawRange>) {
         if let Some(objects) = context.mesh_mut(self) {
-            objects.replace_indexes(indexes, segments);
+            objects.replace_indexes(indexes, ranges);
         }
     }
 
@@ -870,11 +868,10 @@ impl Mesh {
         }
     }
 
-    /// Makes `atlases` what gives the mesh the textures of its tile's glyph
-    /// and icon atlases before each draw.
-    pub fn set_atlases(&self, context: &mut Context, atlases: Option<AtlasBinding>) {
+    /// See `DrawObjects::set_sampler`.
+    pub fn set_sampler(&self, context: &mut Context, slot: usize, state: Option<SamplerState>) {
         if let Some(objects) = context.mesh_mut(self) {
-            objects.atlases = atlases;
+            objects.set_sampler(slot, state);
         }
     }
 }

@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 use geometry::Point;
 use glam::Vec2;
-use mln_engine::draw::Indexed;
 use mln_engine::image::ImageType;
 use mln_engine::layer::binders::PaintBinders as _;
 use mln_engine::layer::{BuildCx, EvaluatedLayer, Layout, LayoutCx, layers_by_id};
@@ -43,6 +42,7 @@ use mln_style::types::{
 };
 use mln_style::{PropertyEvaluationParameters, StyleValue as _, i18n};
 
+use crate::layers::segments::Indexed;
 use crate::layers::symbol::anchor::Anchor;
 use crate::layers::symbol::bucket::{
     Buffer, PaintProperties, PlacedSymbol, QuadCorner, SortKeyRange, SymbolBucket, SymbolBucketState,

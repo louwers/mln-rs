@@ -9,9 +9,8 @@ use glam::{DMat4, DVec3};
 use mln_engine::camera::{Projection, ProjectionData};
 use mln_engine::draw::ground::FrameGround;
 use mln_engine::draw::{
-    AtlasBinding, Context, Draw, DrawGeometry, Draws, LayerFrame, Mesh, RenderPass, RenderTile, SegmentBase,
-    SharedAttribute, SharedVertices, TypedVertices, Uniforms, VertexAttributeArray, cast_matrix,
-    copy_shared_attributes, projection_data, to_projection_ubo,
+    Context, Draw, DrawGeometry, Draws, LayerFrame, Mesh, RenderPass, RenderTile, SharedAttribute, SharedVertices,
+    TypedVertices, Uniforms, VertexAttributeArray, copy_shared_attributes, projection_data, to_projection_ubo,
 };
 use mln_engine::layer::binders::PaintBinders as _;
 use mln_engine::layer::{
@@ -32,6 +31,8 @@ use mln_style::layers::symbol_layer::SymbolLayerPaintPropertyOverrides;
 use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties};
 use mln_style::types::{AlignmentType, IconTextFitType, SymbolPlacementType, TextRotationAlignmentType};
 
+use crate::layers::atlas_binding::AtlasBinding;
+use crate::layers::segments::SegmentBase;
 use crate::layers::symbol::bucket::{
     Buffer, PaintProperties, SymbolBucket, SymbolDynamicLayoutVertex, SymbolOpacityVertex,
 };
@@ -263,6 +264,9 @@ struct PlacedVertices {
 /// icons of one of the bucket's buffers, or of one of its segments.
 struct SymbolDraw {
     mesh: Mesh,
+    /// Gives the mesh the textures of its tile's atlases before each frame
+    /// draws it.
+    atlases: AtlasBinding,
     /// The vertices placement lays out, which the draw's attributes read.
     placed: PlacedVertices,
     data: SymbolDrawData,
@@ -394,8 +398,8 @@ fn refresh_draw(
             Some(i) => buffer.segments.get(i..=i).unwrap_or_default(),
             None => &buffer.segments,
         };
-        let segments = segments.iter().map(SegmentBase::copy).collect();
-        draw.mesh.replace_indexes(context, copied_indexes(&buffer.triangles), segments);
+        let ranges = segments.iter().map(SegmentBase::range).collect();
+        draw.mesh.replace_indexes(context, copied_indexes(&buffer.triangles), ranges);
     }
     copy_attributes
 }
@@ -551,9 +555,9 @@ impl RenderSymbolLayer {
         };
 
         let drawable = SymbolDrawableUBO {
-            matrix: cast_matrix(&matrix),
-            label_plane_matrix: cast_matrix(&label_plane_matrix),
-            coord_matrix: cast_matrix(&gl_coord_matrix),
+            matrix: matrix.as_mat4().to_cols_array(),
+            label_plane_matrix: label_plane_matrix.as_mat4().to_cols_array(),
+            coord_matrix: gl_coord_matrix.as_mat4().to_cols_array(),
             texsize: texture_size(context, &draw.mesh, TEXTURE_SLOT),
             texsize_icon: texture_size(context, &draw.mesh, TEXTURE_ICON_SLOT),
             is_text_prop: i32::from(is_text),
@@ -615,6 +619,7 @@ impl RenderSymbolLayer {
                 }
                 let opaque = passes & RenderPass::Opaque != RenderPass::None;
                 let frame_draw = Draw { order: draw.mesh.seq(), opaque, ..Draw::DEFAULT };
+                draw.atlases.bind(&draw.mesh, cx.res.context, frame);
                 out.main().push_at(&draw.mesh, tile_id, &projection, frame_draw, blocks);
             }
         }
@@ -931,7 +936,7 @@ impl Layer for RenderSymbolLayer {
                         let text_size_is_zoom_constant =
                             bucket.text_size_binder.evaluate_for_zoom(current_zoom).kind.is_zoom_constant();
                         AtlasBinding::new(
-                            Some(atlases.clone()),
+                            atlases,
                             Some(TEXTURE_ICON_SLOT),
                             Some(TEXTURE_SLOT),
                             is_text,
@@ -945,7 +950,7 @@ impl Layer for RenderSymbolLayer {
                     tile_atlases.icon.get_or_insert_with(|| {
                         let icon_scaled = bucket_layout.icon_size.constant_or(&1.0) != 1.0 || bucket.icons_need_linear;
                         AtlasBinding::new(
-                            Some(atlases.clone()),
+                            atlases,
                             Some(TEXTURE_ICON_SLOT),
                             Some(TEXTURE_SLOT),
                             is_text,
@@ -963,16 +968,16 @@ impl Layer for RenderSymbolLayer {
                     vertex_count: buffer.attribute_data.len(),
                     mode: DrawMode::Triangles(),
                     indexes: copied_indexes(&buffer.triangles),
-                    segments: segments.iter().map(SegmentBase::copy).collect(),
+                    ranges: segments.iter().map(SegmentBase::range).collect(),
                     instances: None,
                 };
                 let shader = cx.res.context.shader_key(program, uniforms, symbol_projection_variant);
                 let textures = draw_atlases.textures(&shader);
                 let mesh = Mesh::new(cx.res.context, shader, color_mode, CullFaceMode::disabled(), geometry, textures);
-                mesh.set_atlases(cx.res.context, Some(draw_atlases.clone()));
 
                 let draw = SymbolDraw {
                     mesh,
+                    atlases: draw_atlases.clone(),
                     placed: placed.clone(),
                     data: SymbolDrawData {
                         is_halo,

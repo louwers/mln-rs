@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use geometry::Point;
-use mln_engine::draw::{Indexed, MAX_SEGMENT_VERTICES, SegmentBase};
 use mln_style::constants::EXTENT;
 use mln_style::feature::{GeometryCollection, GeometryCoordinate, GeometryCoordinates};
 use mln_style::tile_id::CanonicalTileID;
 
 use crate::layers::fill::bucket::FillLayoutVertex;
 use crate::layers::fill::mesh::FillBuffers;
+use crate::layers::segments::{Indexed, MAX_SEGMENT_VERTICES, SegmentBase};
 use crate::layers::subdivision::{
     SubdividedPolygon, TILE_BORDER_STRIP_WIDTH, add_tile_border_strips, subdivide_polygon,
 };

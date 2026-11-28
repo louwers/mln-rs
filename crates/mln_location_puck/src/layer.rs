@@ -1,7 +1,7 @@
 use glam::Vec2;
 use mln_engine::draw::ground::FrameGround;
 use mln_engine::draw::{
-    Context, Draw, DrawGeometry, DrawIndexes, Draws, Mesh, RenderStaticData, Textures, Uniforms, projection_data,
+    Context, Draw, DrawGeometry, DrawIndexes, DrawRange, Draws, Mesh, Textures, Uniforms, projection_data,
     raw_vertices, to_projection_ubo,
 };
 use mln_engine::layer::{
@@ -43,8 +43,10 @@ impl LocationPuckLayer {
             ),
             vertex_count: corners.len(),
             mode: DrawMode::Triangles(),
-            indexes: DrawIndexes::new(RenderStaticData::quad_triangle_indices()),
-            segments: RenderStaticData::tile_triangle_segments(),
+            // The quad's two triangles: top left, top right, bottom left,
+            // bottom right.
+            indexes: DrawIndexes::new(vec![0, 1, 2, 1, 2, 3]),
+            ranges: vec![DrawRange::indexes(6)],
             instances: None,
         };
         Mesh::new(context, shader, ColorMode::alpha_blended(), CullFaceMode::disabled(), geometry, Textures::default())

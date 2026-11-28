@@ -13,15 +13,14 @@ use std::sync::Arc;
 
 use glam::dcamera::rh::proj::opengl::orthographic;
 use glam::{DMat4, DVec3};
-use mln_engine::draw::globe::GlobeTileMeshCache;
 use mln_engine::draw::{
-    Context, Draw, DrawGeometry, DrawIndexes, Draws, Indexes, LayerFrame, Mesh, RasterLayoutVertex, RenderStaticData,
-    Resources, SegmentBase, SharedAttribute, SharedIndexes, SharedTexture, SharedVertices, SimpleIdentity, StoredQuads,
-    Target, Textures, Uniforms, VertexAttributeArray, cast_matrix, projection_data, to_projection_ubo,
+    Context, Draw, DrawGeometry, DrawIndexes, DrawRange, Draws, Indexes, LayerFrame, Mesh, Resources, SharedAttribute,
+    SharedIndexes, SharedTexture, SharedVertices, SimpleIdentity, Target, Textures, Uniforms, VertexAttributeArray,
+    projection_data, to_projection_ubo,
 };
 use mln_engine::layer::{
     DemContents, EvaluateCx, EvaluatedLayer, Evaluation, FrameTile, Layer, LayerValues, OnTerrain, PrepareCx,
-    SurfaceLight, TileCx, TileData, UpdateCx, copied_vertices,
+    RasterLayoutVertex, SurfaceLight, TileCx, TileData, UpdateCx, copied_vertices,
 };
 use mln_engine::shaders::terrain::ubo::{HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO, MAX_ILLUMINATION_SOURCES};
 use mln_engine::source::DemTiles;
@@ -42,6 +41,7 @@ use mln_style::types::{HillshadeIlluminationAnchorType, HillshadeMethodType, Res
 
 use crate::layers::hillshade::programs;
 use crate::layers::hillshade::ubo::{HillshadeDrawableUBO, HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO};
+use crate::layers::quads::{GlobeTileMeshCache, QUAD_RANGE, StoredQuads, quad_triangle_indices, raster_vertices};
 
 /// The slots of the programs' textures that the draws bind.
 const IMAGE_SLOT: usize = programs::HILLSHADE.texture_slot("image");
@@ -201,8 +201,8 @@ fn static_quad<'a>(
     context: &mut Context,
 ) -> (&'a SharedVertices, &'a SharedIndexes) {
     (
-        vertices.get_or_insert_with(|| copied_vertices(context, &RenderStaticData::raster_vertices())),
-        indexes.get_or_insert_with(|| context.add_indexes(Indexes::new(RenderStaticData::quad_triangle_indices()))),
+        vertices.get_or_insert_with(|| copied_vertices(context, &raster_vertices())),
+        indexes.get_or_insert_with(|| context.add_indexes(Indexes::new(quad_triangle_indices()))),
     )
 }
 
@@ -311,32 +311,25 @@ impl Layer for RenderHillshadeLayer {
         let masking = &dem.masking;
         // The tile's geometry: the globe's mesh of its mask, the mask's
         // quads, or the whole tile's quad.
-        let (vertices, vertex_count, indexes, segments): (SharedVertices, usize, DrawIndexes, Vec<SegmentBase>) =
-            if cx.base.projection_variant == ProjectionVariant::Globe {
-                let globe_mesh = globe_meshes.get(context, &tile_id.canonical, masking.mask(), RasterLayoutVertex::new);
-                (
-                    globe_mesh.vertices.clone(),
-                    globe_mesh.vertices.count(),
-                    globe_mesh.indexes(),
-                    globe_mesh.segments.iter().map(SegmentBase::copy).collect(),
-                )
-            } else if let Some(quads) = StoredQuads::of_mask(context, masking) {
-                (
-                    quads.vertices.clone(),
-                    quads.vertices.count(),
-                    quads.indexes.clone().into(),
-                    quads.segments.iter().map(SegmentBase::copy).collect(),
-                )
-            } else {
-                let (vertices, indexes) = quad;
-                (vertices.clone(), 4, indexes.clone().into(), RenderStaticData::raster_segments())
-            };
+        let (vertices, vertex_count, indexes, ranges): (SharedVertices, usize, DrawIndexes, Vec<DrawRange>) = if cx
+            .base
+            .projection_variant
+            == ProjectionVariant::Globe
+        {
+            let globe_mesh = globe_meshes.get(context, &tile_id.canonical, masking.mask(), RasterLayoutVertex::new);
+            (globe_mesh.vertices.clone(), globe_mesh.vertices.count(), globe_mesh.indexes(), globe_mesh.ranges.clone())
+        } else if let Some(quads) = StoredQuads::of_mask(context, masking.mask()) {
+            (quads.vertices.clone(), quads.vertices.count(), quads.indexes.clone().into(), quads.ranges)
+        } else {
+            let (vertices, indexes) = quad;
+            (vertices.clone(), 4, indexes.clone().into(), vec![QUAD_RANGE])
+        };
         let geometry = DrawGeometry {
             vertices: hillshade_vertex_attributes(&vertices),
-            vertex_count: if segments.is_empty() { 0 } else { vertex_count },
+            vertex_count: if ranges.is_empty() { 0 } else { vertex_count },
             mode: DrawMode::Triangles(),
             indexes,
-            segments,
+            ranges,
             instances: None,
         };
         let mut textures = Textures::default();
@@ -453,7 +446,7 @@ impl DemTarget {
             vertex_count: 4,
             mode: DrawMode::Triangles(),
             indexes: indexes.clone().into(),
-            segments: RenderStaticData::raster_segments(),
+            ranges: vec![QUAD_RANGE],
             instances: None,
         };
         let mut textures = Textures::default();
@@ -462,7 +455,7 @@ impl DemTarget {
         let extent = f64::from(EXTENT);
         let m =
             orthographic(0.0, extent, -extent, 0.0, -1.0, 1.0) * DMat4::from_translation(DVec3::new(0.0, -extent, 0.0));
-        let draw_ubo = HillshadePrepareDrawableUBO { matrix: cast_matrix(&m) };
+        let draw_ubo = HillshadePrepareDrawableUBO { matrix: m.as_mat4().to_cols_array() };
         let unpack = DemUnpack::of(encoding);
         let tile_props = HillshadePrepareTilePropsUBO {
             unpack: unpack.weights_and_base(),
@@ -495,7 +488,7 @@ impl RenderHillshadeLayer {
             None,
             !frame.camera_moving,
         );
-        let drawable = HillshadeDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) };
+        let drawable = HillshadeDrawableUBO { matrix: projection.fallback_matrix.as_mat4().to_cols_array() };
         let tile_props = HillshadeTilePropsUBO {
             latrange: mln_engine::geo::lat_range(tile_id),
             exaggeration: *evaluated.hillshade_exaggeration.uniform(),

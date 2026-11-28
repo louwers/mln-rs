@@ -1,15 +1,74 @@
-//! Index buffers drawn in segments: a segment's 16-bit indices address at
-//! most [`MAX_SEGMENT_VERTICES`] vertices from its first.
+//! The built-in layers' index buffers, drawn in segments: a segment's
+//! 16-bit indices address at most [`MAX_SEGMENT_VERTICES`] vertices from
+//! its first.
 
 use geometry::Point;
+use mln_engine::draw::DrawRange;
+use mln_engine::layer::Wire;
 
-use crate::draw::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
+/// A range of a mesh's vertices and indexes that one draw call draws,
+/// within the 16-bit indexes of one segment, and its instances.
+#[derive(Clone, Debug, PartialEq, Wire)]
+pub(crate) struct SegmentBase {
+    pub(crate) vertex_offset: usize,
+    pub(crate) index_offset: usize,
+    pub(crate) vertex_length: usize,
+    pub(crate) index_length: usize,
+    pub(crate) base_instance: usize,
+    pub(crate) instance_count: usize,
+    pub(crate) sort_key: f32,
+}
+
+impl SegmentBase {
+    /// An empty segment from the vertex at `vertex_offset` and the index at
+    /// `index_offset`.
+    #[must_use]
+    pub(crate) fn new(vertex_offset: usize, index_offset: usize) -> Self {
+        Self::with_lengths(vertex_offset, index_offset, 0, 0)
+    }
+
+    /// The segment of `vertex_length` vertices and `index_length` indexes from
+    /// those offsets.
+    #[must_use]
+    pub(crate) fn with_lengths(
+        vertex_offset: usize,
+        index_offset: usize,
+        vertex_length: usize,
+        index_length: usize,
+    ) -> Self {
+        SegmentBase {
+            vertex_offset,
+            index_offset,
+            vertex_length,
+            index_length,
+            base_instance: 0,
+            instance_count: 1,
+            sort_key: 0.0,
+        }
+    }
+
+    /// The draw call that draws the segment.
+    #[must_use]
+    pub(crate) fn range(&self) -> DrawRange {
+        DrawRange {
+            first_index: self.index_offset as u32,
+            index_count: self.index_length as u32,
+            base_vertex: self.vertex_offset as i32,
+            first_instance: self.base_instance as u32,
+            instance_count: self.instance_count as u32,
+        }
+    }
+}
+
+/// The most vertices a segment holds, since they are addressed by 16-bit
+/// indices.
+pub(crate) const MAX_SEGMENT_VERTICES: usize = u16::MAX as usize;
 
 /// Adds the quads that circles and heatmap points are drawn as, one for
 /// each of `points`, and indexes their triangles. `vertex` makes each
 /// corner from the point doubled, with the corner's right and top sides in
 /// the low bits.
-pub fn add_point_quads<V: Copy>(
+pub(crate) fn add_point_quads<V: Copy>(
     vertices: &mut Vec<V>,
     triangles: &mut Indexed<'_>,
     points: impl IntoIterator<Item = Point<i16>>,
@@ -28,9 +87,9 @@ pub fn add_point_quads<V: Copy>(
 ///
 /// Where a vertex buffer has per-vertex buffers beside it, a mesh larger
 /// than a segment, whose split copies vertices, must extend them after.
-pub struct Indexed<'a> {
-    pub indexes: &'a mut Vec<u16>,
-    pub segments: &'a mut Vec<SegmentBase>,
+pub(crate) struct Indexed<'a> {
+    pub(crate) indexes: &'a mut Vec<u16>,
+    pub(crate) segments: &'a mut Vec<SegmentBase>,
 }
 
 impl Indexed<'_> {
@@ -46,7 +105,7 @@ impl Indexed<'_> {
     /// and each later one draws copies, appended to `vertices`, of the
     /// vertices its primitives use. A mesh without primitives adds no
     /// segment.
-    pub fn add<V: Copy, const N: usize>(
+    pub(crate) fn add<V: Copy, const N: usize>(
         &mut self,
         vertices: &mut Vec<V>,
         first: usize,
@@ -57,7 +116,7 @@ impl Indexed<'_> {
 
     /// [`Indexed::add`] into segments of one sort key, which a draw orders
     /// by: a mesh continues the last segment only if it has `sort_key`.
-    pub fn add_keyed<V: Copy, const N: usize>(
+    pub(crate) fn add_keyed<V: Copy, const N: usize>(
         &mut self,
         vertices: &mut Vec<V>,
         first: usize,

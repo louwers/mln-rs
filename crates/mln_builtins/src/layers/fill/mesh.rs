@@ -2,12 +2,12 @@
 //! outline them, over the same vertices.
 
 use geometry::Point;
-use mln_engine::draw::Indexed;
 use mln_engine::tile::geometry_tile_data::limit_holes;
 use mln_style::feature::{GeometryCollection, classify_rings, signed_area};
 use mln_style::tile_id::CanonicalTileID;
 
 use crate::layers::fill::bucket::FillLayoutVertex;
+use crate::layers::segments::Indexed;
 use crate::layers::subdivision::{TILE_BORDER_STRIP_WIDTH, add_tile_border_strips, subdivide_polygon};
 use crate::layers::tessellator::Tessellator;
 

@@ -2,11 +2,12 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use geometry::Point;
-use mln_engine::draw::{Context, DrawIndexes, ImagePositions, SegmentBase};
+use mln_engine::draw::{Context, DrawIndexes, DrawRange};
 use mln_engine::layer::binders::{LayerBinders, PaintBinders as _, PatternLayerMap};
 use mln_engine::layer::{
     Bucket, BucketGeometry, EvaluatedLayer, Upload, bucket_indexes, bucket_vertices, paint_vertices,
 };
+use mln_engine::text::atlas::ImagePositions;
 use mln_engine::tile::OverscaledTileID;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::collections::VecMap;
@@ -31,6 +32,7 @@ use crate::layers::fill::bucket::FillBucket;
 use crate::layers::fill_extrusion::bucket::{FillExtrusionBucket, tile_units_per_meter};
 use crate::layers::line::bucket::LineBucket;
 use crate::layers::line::mesh::LineLayoutVertex;
+use crate::layers::segments::SegmentBase;
 use crate::layers::symbol::bucket::{SymbolBucket, SymbolBucketStyle, SymbolLayoutFlags};
 use crate::layers::symbol::instance::SymbolInstancePools;
 use crate::layers::tessellator::Tessellator;
@@ -673,7 +675,7 @@ fn a_draw_binds_the_vertices_it_reads_as_a_storage_buffer() {
             vertex_count: 4,
             mode: DrawMode::Triangles(),
             indexes: DrawIndexes::new(vec![0, 2, 1, 1, 2, 3]),
-            segments: vec![SegmentBase::new(0, 0)],
+            ranges: vec![DrawRange::indexes(0)],
             instances: None,
         };
         let mesh = Mesh::new(

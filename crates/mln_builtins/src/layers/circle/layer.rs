@@ -5,9 +5,8 @@ use glam::Vec2;
 use mln_engine::camera::{TileCoordinate, TileProjector};
 use mln_engine::draw::ground::{FrameGround, StandingDraw, TileGround};
 use mln_engine::draw::{
-    Draw, DrawGeometry, Draws, LayerFrame, RenderPass, RenderTile, SegmentBase, SharedAttribute, Textures, Uniforms,
-    VertexAttributeArray, cast_matrix, globe_extrude_scale, projection_data, refresh_paint_attributes,
-    to_projection_ubo,
+    Draw, DrawGeometry, Draws, LayerFrame, RenderPass, RenderTile, SharedAttribute, Textures, Uniforms,
+    VertexAttributeArray, globe_extrude_scale, projection_data, refresh_paint_attributes, to_projection_ubo,
 };
 use mln_engine::layer::binders::PaintBinders as _;
 use mln_engine::layer::{
@@ -27,6 +26,7 @@ use crate::layers::circle::bucket::{CircleBinders, CircleLayoutVertex};
 use crate::layers::circle::layout::CircleLayout;
 use crate::layers::circle::programs;
 use crate::layers::circle::ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
+use crate::layers::segments::SegmentBase;
 
 /// The slots of the programs' textures that the draws bind.
 const GROUND_DEPTH_SLOT: usize = programs::CIRCLE.texture_slot("ground_depth");
@@ -132,7 +132,7 @@ impl RenderCircleLayer {
         let pixels_to_tile_units = tile_id.pixels_to_tile_units(1.0, zoom);
         let latitude_scale = frame.view.projection().circle_radius_correction(frame.view);
         let draw_ubo = CircleDrawableUBO {
-            matrix: cast_matrix(&projection.fallback_matrix),
+            matrix: projection.fallback_matrix.as_mat4().to_cols_array(),
             extrude_scale: if pitch_with_map {
                 [pixels_to_tile_units, pixels_to_tile_units]
             } else {
@@ -242,7 +242,7 @@ impl Layer for RenderCircleLayer {
                 vertex_count,
                 mode: DrawMode::Triangles(),
                 indexes: indexes.into(),
-                segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
+                ranges: bucket.segments.iter().map(SegmentBase::range).collect(),
                 instances: None,
             },
             Textures::default(),

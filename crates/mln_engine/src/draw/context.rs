@@ -302,9 +302,9 @@ impl Context {
         }
     }
 
-    /// The indexes of quads four vertices apart, two triangles each, which
-    /// the draws that draw such quads share: they stay in the store while a
-    /// draw holds them.
+    /// The indexes of as many quads as 16-bit indexes reach, four vertices
+    /// apart, two triangles each, which the draws that draw such quads
+    /// share: they stay in the store while a draw holds them.
     pub fn quad_indexes(&mut self) -> SharedIndexes {
         let held = self.quad_indexes.upgrade();
         let indexes = held.unwrap_or_else(|| {
@@ -467,14 +467,16 @@ impl Context {
     }
 
     /// What a draw binds of the texture of `handle`, through `gpu`: the
-    /// texture, made and holding its image, and the sampler of its state.
+    /// texture, made and holding its image, and the sampler of `state`, or
+    /// of the texture's state without one.
     pub(crate) fn texture_binding(
         &mut self,
         gpu: &mut dyn Gpu,
         handle: &SharedTexture,
+        state: Option<SamplerState>,
     ) -> Result<(TextureId, SamplerId), GpuError> {
         let Context { device, textures, samplers, .. } = self;
-        bind(textures, samplers, device, gpu, handle)
+        bind(textures, samplers, device, gpu, handle, state)
     }
 
     /// The backend's texture of the texture of `handle`, once made, which
@@ -585,17 +587,21 @@ impl Context {
 
 /// What a draw binds of the texture of `handle` in `textures`, through
 /// `gpu`: the texture, made through `device` and holding its image, and
-/// the sampler of its state in `samplers`.
+/// the sampler in `samplers` of `state`, or of the texture's state without
+/// one.
 fn bind(
     textures: &mut Store<TextureKey, Texture2D>,
     samplers: &mut HashMap<SamplerState, SamplerId>,
     device: &mut Device,
     gpu: &mut dyn Gpu,
     handle: &SharedTexture,
+    state: Option<SamplerState>,
 ) -> Result<(TextureId, SamplerId), GpuError> {
     let texture = textures.get_mut(handle).ok_or(GpuError::UnknownId("texture"))?;
     let id = texture.bind(gpu, device)?;
-    let sampler = if let Some(sampler) = texture.sampler_id() {
+    let sampler = if let Some(state) = state {
+        sampler(samplers, gpu, state)?
+    } else if let Some(sampler) = texture.sampler_id() {
         sampler
     } else {
         let sampler = sampler(samplers, gpu, texture.sampler())?;

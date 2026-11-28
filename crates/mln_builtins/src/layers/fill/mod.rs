@@ -14,7 +14,7 @@ pub mod programs;
 pub mod ubo;
 mod wgsl;
 
-use mln_engine::draw::SegmentBase;
+use crate::layers::segments::SegmentBase;
 
 /// The corners of the quad that an instanced fill outline draws a
 /// segment with: x picks the segment's start (0) or end (1), y its side.

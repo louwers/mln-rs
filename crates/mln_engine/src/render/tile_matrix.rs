@@ -8,7 +8,6 @@ use mln_style::constants::EXTENT;
 use mln_style::types::TranslateAnchorType;
 
 use crate::camera::{ProjectionData, View};
-use crate::draw::cast_matrix;
 use crate::draw::draws::LayerFrame;
 use crate::geo::constants::M2PI;
 use crate::render::paint_parameters::TransformParameters;
@@ -185,4 +184,10 @@ pub(crate) fn translate_vtx_matrix(
         )
     };
     *tile_matrix * DMat4::from_translation(offset)
+}
+
+/// `m` as the column-major `f32`s that a block's matrix holds.
+#[must_use]
+pub(crate) fn cast_matrix(m: &DMat4) -> [f32; 16] {
+    m.as_mat4().to_cols_array()
 }

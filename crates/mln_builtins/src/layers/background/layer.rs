@@ -1,7 +1,7 @@
-use mln_engine::draw::globe::raw_globe_tile_mesh;
+use mln_engine::draw::globe::tile_mesh;
 use mln_engine::draw::{
-    Context, Depth, Draw, DrawGeometry, DrawIndexes, Draws, LayerFrame, Mesh, RenderPass, RenderStaticData, Resources,
-    SegmentBase, Textures, Uniforms, cast_matrix, projection_data, raw_vertices, to_projection_ubo,
+    Context, Depth, Draw, DrawGeometry, DrawIndexes, DrawRange, Draws, LayerFrame, Mesh, RenderPass, Resources,
+    Textures, Uniforms, projection_data, raw_vertices, to_projection_ubo,
 };
 use mln_engine::layer::{
     EvaluateCx, Evaluation, FrameTile, Layer, LayerValues, NoTiles, OnTerrain, PrepareCx, UpdateCx,
@@ -25,6 +25,7 @@ use crate::layers::background::programs;
 use crate::layers::background::ubo::{
     BackgroundDrawableUBO, BackgroundPatternDrawableUBO, BackgroundPatternPropsUBO, BackgroundPropsUBO,
 };
+use crate::layers::quads::{QUAD_RANGE, quad_triangle_indices, tile_vertices};
 
 /// What the layer keeps of a tile: its mesh, and the passes it was built
 /// for and whether with a pattern.
@@ -62,22 +63,27 @@ impl RenderBackgroundLayer {
         color_mode: ColorMode,
         variant: ProjectionVariant,
     ) -> Mesh {
-        let (vertices, vertex_count, indexes, segments) = if variant == ProjectionVariant::Globe {
+        let (vertices, indexes, range) = if variant == ProjectionVariant::Globe {
             // The background is not depth tested, so it needs no tile border.
-            let mesh = raw_globe_tile_mesh(&tile_id.canonical, false, SubdivisionGranularitySetting::globe().tile);
-            (mesh.vertices, mesh.vertex_count, mesh.indices, mesh.segments)
+            let mesh = tile_mesh(&tile_id.canonical, false, SubdivisionGranularitySetting::globe().tile);
+            let indexes = mesh.triangles.into_flattened();
+            let range = DrawRange::indexes(indexes.len());
+            (mesh.vertices, indexes, range)
         } else {
-            let vertices = RenderStaticData::tile_vertices();
-            let count = vertices.len();
-            let bytes = bytemuck::cast_slice(&vertices).to_vec();
-            (bytes, count, RenderStaticData::quad_triangle_indices(), RenderStaticData::tile_triangle_segments())
+            (tile_vertices(), quad_triangle_indices(), QUAD_RANGE)
         };
+        let vertex_count = vertices.len();
         let geometry = DrawGeometry {
-            vertices: raw_vertices("pos", vertices, vertex_count, AttributeDataType::Short2),
+            vertices: raw_vertices(
+                "pos",
+                bytemuck::cast_slice(&vertices).to_vec(),
+                vertex_count,
+                AttributeDataType::Short2,
+            ),
             vertex_count,
             mode: DrawMode::Triangles(),
             indexes: DrawIndexes::new(indexes),
-            segments: segments.iter().map(SegmentBase::copy).collect(),
+            ranges: vec![range],
             instances: None,
         };
         Mesh::new(context, shader, color_mode, CullFaceMode::disabled(), geometry, Textures::default())
@@ -88,7 +94,7 @@ impl RenderBackgroundLayer {
         let tile_id = tile_id.to_unwrapped();
         let projection =
             projection_data(&tile_id, frame, [0.0, 0.0], TranslateAnchorType::Viewport, false, false, None, false);
-        let matrix = cast_matrix(&projection.fallback_matrix);
+        let matrix = projection.fallback_matrix.as_mat4().to_cols_array();
         let draw_ubo = if pattern {
             let state = frame.view;
             let int_zoom = state.integer_zoom();

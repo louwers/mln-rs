@@ -4,9 +4,10 @@
 
 use geometry::Point;
 use glam::DVec2;
-use mln_engine::draw::Indexed;
 use mln_style::constants::{EXTENT, TILE_SIZE_D};
 use mln_style::types::{LineCapType, LineJoinType};
+
+use crate::layers::segments::Indexed;
 
 /// Whether a vertex is rounded or sharp.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

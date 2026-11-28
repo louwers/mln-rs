@@ -23,7 +23,7 @@ use crate::draw::context::Context;
 use crate::draw::draws::{Depth, Draw, Group};
 use crate::draw::indexes::Indexes;
 use crate::draw::objects::{DrawGeometry, Mesh, Textures};
-use crate::draw::segment::SegmentBase;
+use crate::draw::range::DrawRange;
 use crate::draw::store::SharedIndexes;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::draw::vertices::SharedVertices;
@@ -386,7 +386,7 @@ fn mesh_objects(
         vertex_count: mesh.vertex_count,
         mode: DrawMode::Triangles(),
         indexes: mesh.indexes.clone().into(),
-        segments: vec![SegmentBase::with_lengths(0, 0, mesh.vertex_count, mesh.index_count)],
+        ranges: vec![DrawRange::indexes(mesh.index_count)],
         instances: None,
     };
     Mesh::new(context, shader.clone(), color_mode, cull_face_mode, geometry, Textures::default())

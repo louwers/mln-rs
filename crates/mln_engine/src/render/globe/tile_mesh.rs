@@ -1,4 +1,6 @@
 use mln_style::constants::EXTENT;
+use mln_style::subdivision_granularity::SubdivisionGranularityExpression;
+use mln_style::tile_id::CanonicalTileID;
 
 use crate::render::globe::{NORTH_POLE_Y, SOUTH_POLE_Y};
 
@@ -29,11 +31,31 @@ impl Default for TileMeshOptions {
     }
 }
 
+/// A grid over a tile on the globe: its vertices' `x, y` in tile units,
+/// and its triangles, counter-clockwise in tile space, of 16-bit indexes.
+/// A vertex at [`NORTH_POLE_Y`] or [`SOUTH_POLE_Y`] is at the pole.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct TileMesh {
-    /// The vertices' `x, y` in tile units.
-    pub(crate) vertices: Vec<[i16; 2]>,
-    pub(crate) triangles: Vec<[u16; 3]>,
+pub struct TileMesh {
+    pub vertices: Vec<[i16; 2]>,
+    pub triangles: Vec<[u16; 3]>,
+}
+
+/// The grid that draws the tile `canonical` on the globe, subdivided as
+/// `granularity` says at its zoom, reaching the poles where it touches
+/// them, and with a border outside the tile if `generate_borders`, for
+/// stencil masks.
+#[must_use]
+pub fn tile_mesh(
+    canonical: &CanonicalTileID,
+    generate_borders: bool,
+    granularity: SubdivisionGranularityExpression,
+) -> TileMesh {
+    create_tile_mesh(TileMeshOptions {
+        granularity: granularity.granularity_for_zoom_level(canonical.z),
+        generate_borders,
+        extend_to_north_pole: canonical.y == 0,
+        extend_to_south_pole: canonical.y == (1u32 << canonical.z) - 1,
+    })
 }
 
 /// A grid mesh covering one tile, optionally with borders and pole caps, as

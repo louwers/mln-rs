@@ -5,8 +5,10 @@
 mod bucket_test;
 mod calculate_tile_distances;
 mod fixture_log;
+mod globe_meshes_test;
 mod gtest_fill_mesh;
 mod gtest_subdivision;
+mod raster_quads_test;
 // Ports test/layout/sort_key.test.cpp.
 mod sort_key_test;
 mod terrain_labels_test;

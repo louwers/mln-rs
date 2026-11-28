@@ -1,8 +1,8 @@
 //! The render half: the passes of an image-process layer's frame.
 
 use mln_engine::draw::{
-    Depth, Draw, DrawGeometry, DrawIndexes, Draws, Mesh, RenderStaticData, SegmentBase, SharedTexture, Target,
-    Textures, Uniforms, raw_vertices,
+    Depth, Draw, DrawGeometry, DrawIndexes, DrawRange, Draws, Mesh, SharedTexture, Target, Textures, Uniforms,
+    raw_vertices,
 };
 use mln_engine::layer::{FrameTile, Layer, LayerValues, NoTiles, PrepareCx};
 use mln_engine::shaders::programs::POS;
@@ -107,8 +107,10 @@ impl ImageProcessLayer {
             vertices: raw_vertices(POS.name, corners, 4, POS.format),
             vertex_count: 4,
             mode: DrawMode::Triangles(),
-            indexes: DrawIndexes::new(RenderStaticData::quad_triangle_indices()),
-            segments: vec![SegmentBase::with_lengths(0, 0, 4, 6)],
+            // The quad's two triangles: top left, top right, bottom left,
+            // bottom right.
+            indexes: DrawIndexes::new(vec![0, 1, 2, 1, 2, 3]),
+            ranges: vec![DrawRange::indexes(6)],
             instances: None,
         };
         let mut bound = Textures::default();

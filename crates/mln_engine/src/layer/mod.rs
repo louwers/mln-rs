@@ -125,6 +125,7 @@ pub(crate) mod tile_layout;
 
 pub use mln_wire::{Reader, Wire, Writer};
 
+pub use crate::draw::tile_render_data::TileAtlasTextures;
 pub use crate::layer::bucket::{Bucket, Upload};
 pub use crate::layer::bucket_geometry::{
     BucketGeometry, GeometryVec, bucket_indexes, bucket_vertices, copied_indexes, copied_vertices, derived_vertices,
@@ -142,6 +143,6 @@ pub use crate::query::feature_index::QueryRegion;
 pub use crate::render::shared_targets::{Router, Routes};
 pub use crate::render::terrain::SurfaceLight;
 pub use crate::render::tile::FrameTile;
-pub use crate::source::render_image_source::ImageQuad;
+pub use crate::source::render_image_source::{ImageMesh, ImageQuad, RasterLayoutVertex};
 pub use crate::source::render_source::TileOrder;
 pub use crate::tile_store::dem::DemContents;

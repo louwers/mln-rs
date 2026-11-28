@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use geometry::Point;
-use mln_engine::draw::MAX_SEGMENT_VERTICES;
 use mln_engine::draw::globe::{NORTH_POLE_Y, SOUTH_POLE_Y};
 use mln_engine::layer::binders::LayerBinders;
 use mln_style::constants::EXTENT;
@@ -11,6 +10,7 @@ use mln_style::subdivision_granularity::{SubdivisionGranularityExpression, Subdi
 use mln_style::tile_id::CanonicalTileID;
 
 use crate::layers::fill_extrusion::bucket::FillExtrusionBucket;
+use crate::layers::segments::MAX_SEGMENT_VERTICES;
 use crate::layers::subdivision::{
     SubdividedPolygon, TILE_BORDER_STRIP_WIDTH, add_tile_border_strips, subdivide_polygon, subdivide_vertex_line,
 };

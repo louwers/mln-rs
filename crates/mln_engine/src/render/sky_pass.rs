@@ -15,7 +15,7 @@ use crate::draw::context::Context;
 use crate::draw::draws::{Depth, Draw, SingleDraw};
 use crate::draw::indexes::DrawIndexes;
 use crate::draw::objects::{DrawGeometry, Mesh, Textures, raw_vertices};
-use crate::draw::segment::SegmentBase;
+use crate::draw::range::DrawRange;
 use crate::draw::vertex_attribute::Uniforms;
 use crate::render::light::EvaluatedLight;
 use crate::render::sky::EvaluatedSky;
@@ -38,7 +38,7 @@ fn fullscreen_draw(
         vertex_count: corners.len(),
         mode: DrawMode::Triangles(),
         indexes: DrawIndexes::new(RenderStaticData::quad_triangle_indices()),
-        segments: vec![SegmentBase::with_lengths(0, 0, 4, 6)],
+        ranges: vec![DrawRange::indexes(6)],
         instances: None,
     };
     let mesh =

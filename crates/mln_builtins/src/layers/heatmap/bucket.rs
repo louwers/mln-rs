@@ -4,12 +4,13 @@
 
 use geometry::Point;
 use mln_engine::draw::ground::point_center;
-use mln_engine::draw::{Indexed, SegmentBase, add_point_quads};
 use mln_engine::layer::binders::{LayerBinders, PaintPropertyBinder};
 use mln_engine::layer::{Bucket, GeometryVec, Upload};
 use mln_style::constants::EXTENT;
 use mln_style::feature::{GeometryCollection, GeometryCoordinate};
 use mln_style::layers::heatmap_layer_properties::HeatmapPaintProperties;
+
+use crate::layers::segments::{Indexed, SegmentBase, add_point_quads};
 
 mln_engine::paint_property_binders!(
     pub struct HeatmapBinders for HeatmapPaintProperties::PossiblyEvaluated {

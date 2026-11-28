@@ -1,13 +1,14 @@
 // The vertices and indices are `GeometryVec`s, which a worker fills and the
 // bucket's upload moves into the context's stores, which its draws read.
 
-use mln_engine::draw::SegmentBase;
 use mln_engine::draw::ground::point_center;
 use mln_engine::layer::binders::{LayerBinders, PaintPropertyBinder};
 use mln_engine::layer::{Bucket, EvaluatedLayer, GeometryVec, Upload};
 use mln_style::color::Color;
 use mln_style::layers::Circle;
 use mln_style::layers::circle_layer_properties::CirclePaintProperties;
+
+use crate::layers::segments::SegmentBase;
 
 mln_engine::paint_property_binders!(
     pub struct CircleBinders for CirclePaintProperties::PossiblyEvaluated {

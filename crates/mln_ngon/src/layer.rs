@@ -5,9 +5,8 @@ use glam::Vec2;
 use mln_engine::camera::{TileCoordinate, TileProjector, View};
 use mln_engine::draw::ground::{FrameGround, StandingDraw, TileGround};
 use mln_engine::draw::{
-    Draw, DrawGeometry, Draws, LayerFrame, RenderPass, RenderTile, SegmentBase, SharedAttribute, Textures, Uniforms,
-    VertexAttributeArray, cast_matrix, globe_extrude_scale, projection_data, refresh_paint_attributes,
-    to_projection_ubo,
+    Draw, DrawGeometry, Draws, LayerFrame, RenderPass, RenderTile, SharedAttribute, Textures, Uniforms,
+    VertexAttributeArray, globe_extrude_scale, projection_data, refresh_paint_attributes, to_projection_ubo,
 };
 use mln_engine::geo::ScreenCoordinate;
 use mln_engine::layer::binders::PaintBinders as _;
@@ -65,7 +64,7 @@ impl NgonLayer {
         let pixels_to_tile_units = tile_id.pixels_to_tile_units(1.0, zoom);
         let latitude_scale = frame.view.projection().circle_radius_correction(frame.view);
         let draw = NgonDrawableUBO {
-            matrix: cast_matrix(&projection.fallback_matrix),
+            matrix: projection.fallback_matrix.as_mat4().to_cols_array(),
             extrude_scale: if pitch_with_map { [pixels_to_tile_units; 2] } else { frame.pixels_to_gl_units },
             radius_t: binders.ngon_radius.interpolation_factor(zoom),
             corners_t: binders.ngon_corners.interpolation_factor(zoom),
@@ -139,7 +138,7 @@ impl Layer for NgonLayer {
         let bucket = render_data.bucket;
         let binders = bucket.binders.get(&cx.base.style.base().id)?;
         let geometry = render_data.geometry();
-        if bucket.vertices.is_empty() || bucket.segments.is_empty() {
+        if bucket.vertices.is_empty() || bucket.triangles.is_empty() {
             return None;
         }
         let (vertices, indexes) =
@@ -162,7 +161,7 @@ impl Layer for NgonLayer {
                 vertex_count: bucket.vertices.len(),
                 mode: DrawMode::Triangles(),
                 indexes: indexes.into(),
-                segments: bucket.segments.iter().map(SegmentBase::copy).collect(),
+                ranges: bucket.ranges(),
                 instances: None,
             },
             Textures::default(),
