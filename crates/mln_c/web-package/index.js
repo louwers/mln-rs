@@ -12,7 +12,13 @@ import initBindings, {
 
 export * from "./maplibre_native_c.js";
 
+// Whether `configure` has run: a later `init` returns the same instance and
+// leaves whatever the host has configured since.
+let configured = false;
+
 function configure() {
+  if (configured) return;
+  configured = true;
   mlnWebConfigureTileWorkers(
     undefined,
     () =>
