@@ -2932,7 +2932,6 @@ dependencies = [
  "mln-rs-headless",
  "mln-rs-render-test",
  "mln-rs-style",
- "mln-rs-wire",
 ]
 
 [[package]]
@@ -3141,6 +3140,7 @@ dependencies = [
 name = "mln-rs-wire-derive"
 version = "0.0.18"
 dependencies = [
+ "proc-macro-crate",
  "proc-macro2",
  "quote",
  "syn 2.0.119",

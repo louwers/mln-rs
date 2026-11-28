@@ -6,7 +6,7 @@ use geometry::Point;
 use mln_engine::draw::ground::point_center;
 use mln_engine::draw::{Indexed, SegmentBase, add_point_quads};
 use mln_engine::layer::binders::{LayerBinders, PaintPropertyBinder};
-use mln_engine::layer::{Bucket, BuildCx, EvaluatedLayer, GeometryVec, Layout, LayoutCx, Upload};
+use mln_engine::layer::{Bucket, BuildCx, EvaluatedLayer, GeometryVec, Layout, LayoutCx, Upload, Wire};
 use mln_engine::map::MapMode;
 use mln_style::color::Color;
 use mln_style::constants::EXTENT;
@@ -30,7 +30,7 @@ mln_engine::paint_property_binders!(
 
 /// A tile's quads: each corner the point doubled, with the corner's right
 /// and bottom sides in the low bits.
-#[derive(Clone, Default, mln_wire::Wire)]
+#[derive(Clone, Default, Wire)]
 pub(crate) struct NgonBucket {
     pub(crate) vertices: GeometryVec<[i16; 2]>,
     /// The center of each vertex's point, which the upload keeps before the

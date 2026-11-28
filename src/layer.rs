@@ -1,5 +1,6 @@
 //! What a crate needs to write a layer type: the engine's layer contract
-//! ([`Layer`] and its contexts, inputs, layouts and buckets), the style half
+//! ([`Layer`] and its contexts, inputs, layouts and buckets, which derive
+//! [`Wire`] to cross to and from tile workers), the style half
 //! ([`StyleLayerType`], its properties declared with [`layer_properties!`]
 //! and the extension members it reads, [`Member`]), the registration
 //! ([`RegistryBuilder::add_layer_type`]), and what a layer draws with

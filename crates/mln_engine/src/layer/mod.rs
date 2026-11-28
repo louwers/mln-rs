@@ -95,7 +95,8 @@
 //!
 //! The layer and every hook but the layout's run on the renderer's thread;
 //! the layout and the bucket are `Send`, and a bucket crosses to a tile
-//! worker with memory of its own through the worker codec.
+//! worker with memory of its own through the worker codec, which writes and
+//! reads it as a [`Wire`]: `#[derive(Wire)]` writes its fields in order.
 
 pub mod bucket;
 
@@ -121,6 +122,8 @@ pub(crate) mod paint_property_statistics;
 pub(crate) mod render_layer;
 pub(crate) mod tile_input;
 pub(crate) mod tile_layout;
+
+pub use mln_wire::{Reader, Wire, Writer};
 
 pub use crate::layer::bucket::{Bucket, Upload};
 pub use crate::layer::bucket_geometry::{

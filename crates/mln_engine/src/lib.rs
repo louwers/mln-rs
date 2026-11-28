@@ -44,8 +44,8 @@ pub use render::update_slot::{Update, UpdateReader, UpdateSlot};
 
 /// The `log` targets of this crate's records. Each names the event that
 /// `mln_c` reports the record under (`mln_c::logging`).
-/// What the expansions of the crate's macros name, so that a crate that
-/// invokes them needn't depend on it.
+/// What the expansions of the crate's macros and of `#[derive(Wire)]` name,
+/// so that a crate that invokes them needn't depend on it.
 #[doc(hidden)]
 pub mod __private {
     pub use mln_style;
