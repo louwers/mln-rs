@@ -207,6 +207,8 @@ pub(crate) struct HeadlessMap {
     frontend: Frontend,
     /// Whether the session has driver work for this thread.
     driver_woken: Arc<AtomicBool>,
+    /// How many times this thread has serviced the session's driver work.
+    serviced: std::cell::Cell<u64>,
     signal: Arc<Signal>,
     /// The first resource that the map failed to load, which its event
     /// reported.
@@ -274,6 +276,7 @@ impl HeadlessMap {
             runtime,
             frontend,
             driver_woken,
+            serviced: std::cell::Cell::new(0),
             signal,
             failure,
             frames: 0,
@@ -313,6 +316,7 @@ impl HeadlessMap {
             return false;
         }
         self.driver.service().expect("the session's driver work");
+        self.serviced.set(self.serviced.get() + 1);
         true
     }
 
@@ -445,16 +449,19 @@ impl HeadlessMap {
     pub(crate) fn wait_for_workers(&mut self) -> bool {
         let mut any = self.background_work() != self.drained;
         loop {
+            // Read before the pool runs: work that arrives once it's empty,
+            // even before `run_all` returns, changes the count.
+            let arrived = self.background_work();
+            let serviced = self.serviced.get();
             self.frontend.pool.run_all();
-            // The pool is empty now, so any task spawned from here on
-            // arrives at an idle pool, and counts.
-            self.drained = self.background_work();
             // The map handles what the workers sent, which can start more
             // work, such as the requests of a style that loaded, and the
-            // session handles what came back to the renderer.
+            // session handles what came back to the renderer, during the
+            // round trip's wait or after it.
             self.round_trip();
-            let serviced = self.service();
-            if !serviced && self.background_work() == self.drained {
+            self.service();
+            if self.serviced.get() == serviced && self.background_work() == arrived {
+                self.drained = arrived;
                 self.check_failures();
                 return any;
             }
