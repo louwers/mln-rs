@@ -1,3 +1,4 @@
+use mln_gfx::gpu::MAX_BASE_VERTEX;
 use mln_style::constants;
 
 use crate::draw::quads::RasterLayoutVertex;
@@ -5,6 +6,11 @@ use crate::draw::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 
 /// The most quads a segment draws: as many as its 16-bit indices reach.
 const SEGMENT_QUADS: usize = MAX_SEGMENT_VERTICES / 4;
+
+/// The most quads that [`RenderStaticData::quads_segments`] draws without a
+/// segment past [`MAX_BASE_VERTEX`]: a shader that reads vertices by index
+/// draws its segments at their vertex offsets.
+pub const MAX_INDEXED_QUADS: usize = (MAX_BASE_VERTEX as usize / (4 * SEGMENT_QUADS) + 1) * SEGMENT_QUADS;
 
 /// The vertices and indices of the geometry the layers share.
 pub struct RenderStaticData;
@@ -83,5 +89,17 @@ impl RenderStaticData {
     #[must_use]
     pub fn tile_triangle_segments() -> Vec<SegmentBase> {
         vec![SegmentBase::with_lengths(0, 0, 4, 6)]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn indexed_quads_start_their_segments_at_most_at_the_largest_base_vertex() {
+        let start = |quads| RenderStaticData::quads_segments(quads).last().map_or(0, |segment| segment.vertex_offset);
+        assert!(start(MAX_INDEXED_QUADS) <= MAX_BASE_VERTEX as usize);
+        assert!(start(MAX_INDEXED_QUADS + 1) > MAX_BASE_VERTEX as usize);
     }
 }

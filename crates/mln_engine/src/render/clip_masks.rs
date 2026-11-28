@@ -46,12 +46,16 @@ type MeshKey = (u8, bool, bool, bool);
 /// The key of the square, which every mask off the globe draws.
 const SQUARE: MeshKey = (0, false, false, false);
 
-/// A mesh that masks draw, and its geometry, made at its first draw.
+/// A mesh that masks draw, and the geometry of each of its segments from the
+/// segment's first vertex, made at its first draw. Its segments draw at base
+/// vertex 0, since later ones may start past [`MAX_BASE_VERTEX`].
+///
+/// [`MAX_BASE_VERTEX`]: mln_gfx::gpu::MAX_BASE_VERTEX
 struct Mesh {
     vertices: Buffer,
     indices: Buffer,
     segments: Vec<SegmentBase>,
-    geometry: Option<Owned<GeometryId>>,
+    geometry: Vec<(usize, Owned<GeometryId>)>,
 }
 
 impl Mesh {
@@ -67,7 +71,7 @@ impl Mesh {
             Ok((vertices, device.buffer(gpu, BufferUsage::Index, bytemuck::cast_slice(indices))?))
         });
         match made {
-            Ok((vertices, indices)) => Some(Mesh { vertices, indices, segments, geometry: None }),
+            Ok((vertices, indices)) => Some(Mesh { vertices, indices, segments, geometry: Vec::new() }),
             Err(error) => {
                 context.fail(format!("Making a clipping mask's mesh failed: {error}"));
                 None
@@ -75,17 +79,25 @@ impl Mesh {
         }
     }
 
-    fn geometry(&mut self, gpu: &mut dyn Gpu, context: &Context, shader: ShaderId) -> Result<GeometryId, GpuError> {
-        if let Some(geometry) = &self.geometry {
+    /// The geometry whose vertices start at vertex `start` of the mesh's.
+    fn geometry(
+        &mut self,
+        gpu: &mut dyn Gpu,
+        context: &Context,
+        shader: ShaderId,
+        start: usize,
+    ) -> Result<GeometryId, GpuError> {
+        if let Some((_, geometry)) = self.geometry.iter().find(|(at, _)| *at == start) {
             return Ok(geometry.id());
         }
+        let layout = layout();
         let geometry = gpu.create_geometry(&GeometryDesc {
             shader,
-            layouts: &[layout()],
-            vertex_buffers: &[(self.vertices.id(), 0)],
+            vertex_buffers: &[(self.vertices.id(), start as u64 * u64::from(layout.stride))],
+            layouts: &[layout],
             index_buffer: self.indices.id(),
         })?;
-        self.geometry = Some(context.own(geometry, Vec::new()));
+        self.geometry.push((start, context.own(geometry, Vec::new())));
         Ok(geometry)
     }
 }
@@ -310,16 +322,20 @@ impl ClipMasks {
                 let Some(mesh) = self.meshes.get_mut(&keys[pass]) else {
                     continue;
                 };
-                let geometry = mesh.geometry(gpu, context, shader_id)?;
                 let bindings = self.bindings[*slot].id();
-                for segment in &mesh.segments {
+                for index in 0..mesh.segments.len() {
+                    let (start, first_index, index_count) = {
+                        let segment = &mesh.segments[index];
+                        (segment.vertex_offset, segment.index_offset as u32, segment.index_length as u32)
+                    };
+                    let geometry = mesh.geometry(gpu, context, shader_id, start)?;
                     gpu.draw(&Draw {
                         pipeline,
                         bindings,
                         geometry,
-                        first_index: segment.index_offset as u32,
-                        index_count: segment.index_length as u32,
-                        base_vertex: segment.vertex_offset as i32,
+                        first_index,
+                        index_count,
+                        base_vertex: 0,
                         first_instance: 0,
                         instance_count: 1,
                         global_index: 0,

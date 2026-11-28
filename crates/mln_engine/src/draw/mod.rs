@@ -105,7 +105,7 @@ pub use crate::render::frame_projection::zero_to_one_clip_z;
 pub use crate::render::layer_composite::Composite;
 pub use crate::render::light::EvaluatedLight;
 pub use crate::render::pass::RenderPass;
-pub use crate::render::static_data::RenderStaticData;
+pub use crate::render::static_data::{MAX_INDEXED_QUADS, RenderStaticData};
 pub use crate::render::tile::RenderTile;
 pub use crate::render::tile_matrix::{globe_extrude_scale, projection_data, to_projection_ubo};
 pub use crate::text::atlas::{ImagePosition, ImagePositions, RectU16};
