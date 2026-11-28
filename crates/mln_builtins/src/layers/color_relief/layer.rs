@@ -8,9 +8,10 @@ use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use mln_engine::draw::projection::{TileTransform, tile_projection};
 use mln_engine::draw::{
     Context, Draw, DrawGeometry, DrawIndexes, DrawRange, Draws, Indexes, Mesh, SharedAttribute, SharedIndexes,
-    SharedTexture, SharedVertices, SimpleIdentity, Textures, Uniforms, VertexAttributeArray, to_projection_ubo,
+    SharedTexture, SharedVertices, SimpleIdentity, Textures, Uniforms, VertexAttributeArray,
 };
 use mln_engine::layer::{
     DemContents, EvaluateCx, Evaluation, FrameTile, Layer, LayerValues, OnTerrain, PrepareCx, RasterLayoutVertex,
@@ -454,10 +455,10 @@ impl Layer for RenderColorReliefLayer {
             for (slot, texture) in textures {
                 cached.mesh.set_texture(context, slot, Some(texture));
             }
-            let projection = cx.frame.projection_data_for_tile(&tile_id.to_unwrapped(), false);
+            let projection = tile_projection(&tile_id.to_unwrapped(), cx.frame, TileTransform::NONE);
             let drawable = ColorReliefDrawableUBO { matrix: projection.fallback_matrix.as_mat4().to_cols_array() };
             let draw = Draw { order: cached.mesh.seq(), ..Draw::DEFAULT };
-            let projection = to_projection_ubo(&projection);
+            let projection = projection.ubo();
             out.main().push_at(&cached.mesh, tile_id, &projection, draw, (drawable, cached.tile_props));
         }
 

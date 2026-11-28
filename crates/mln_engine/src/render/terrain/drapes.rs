@@ -69,7 +69,6 @@ use crate::render::layer_composite::LayerComposite;
 use crate::render::paint_parameters::{OpenPass, PaintParameters, TransformParameters};
 use crate::render::pass::RenderPass;
 use crate::render::tile::TileStamp;
-use crate::render::tile_matrix::to_projection_ubo;
 use crate::tile::OverscaledTileID;
 
 /// The format of a drape's texture.
@@ -603,7 +602,7 @@ impl Drapes {
             clip_tiles.dedup();
             let transform = parameters.transform_params;
             parameters.clip_masks.update(gpu, parameters.context, false, &clip_tiles, |tile| {
-                to_projection_ubo(&transform.projection_data_for_tile(tile, false))
+                (transform.projection_data_for_tile(tile, false)).ubo()
             });
         }
         for targets in &mut self.targets {

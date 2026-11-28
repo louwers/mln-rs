@@ -30,6 +30,7 @@ use crate::RegistryBuilder;
 use crate::draw::draws::{Depth, Draw, Draws, LayerFrame};
 use crate::draw::indexes::DrawIndexes;
 use crate::draw::objects::{DrawGeometry, Mesh, Textures, raw_vertices};
+use crate::draw::projection::{TileTransform, tile_projection};
 use crate::draw::range::DrawRange;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 use crate::image::image_store::ImageType;
@@ -43,7 +44,6 @@ use crate::layer::tile_input::{Features, NoTiles, TileData};
 use crate::render::static_data::RenderStaticData;
 use crate::render::terrain::SurfaceLight;
 use crate::render::tile::FrameTile;
-use crate::render::tile_matrix::{projection_data, to_projection_ubo};
 use crate::shaders::programs::POS;
 use crate::source::{DemTiles, RasterTiles};
 use crate::text::glyph::GlyphID;
@@ -111,22 +111,13 @@ fn push_draws<L: Layer<Tile = Mesh>>(cx: &mut PrepareCx<'_, '_, L>, ids: &[Overs
     for &tile_id in ids {
         let Some(entry) = cx.tiles.entry(&tile_id) else { continue };
         let Some(mesh) = entry.value.as_ref() else { continue };
-        let projection = projection_data(
-            &tile_id.to_unwrapped(),
-            cx.frame,
-            [0.0, 0.0],
-            TranslateAnchorType::Viewport,
-            false,
-            false,
-            None,
-            false,
-        );
+        let projection = tile_projection(&tile_id.to_unwrapped(), cx.frame, TileTransform::NONE);
         let draw = Draw {
             order: mesh.seq(),
             depth: Depth::Layer { sub_layer: 0, mask: DepthMaskType::ReadOnly },
             ..Draw::DEFAULT
         };
-        out.main().push_at(mesh, tile_id, &to_projection_ubo(&projection), draw, ());
+        out.main().push_at(mesh, tile_id, &projection.ubo(), draw, ());
     }
     out.main().block(&TestPropsUBO { color: [0.0, 0.0, 1.0, 1.0] });
 }

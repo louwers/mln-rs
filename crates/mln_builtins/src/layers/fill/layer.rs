@@ -1,9 +1,10 @@
 use std::mem::offset_of;
 
+use mln_engine::draw::projection::{TileTransform, tile_projection};
 use mln_engine::draw::{
     Composite, Context, Depth, Draw, DrawGeometry, DrawIndexes, DrawRange, Draws, Group, Indexes, LayerFrame, Mesh,
     RenderPass, SharedAttribute, SharedIndexes, Texture2D, Uniforms, VertexAttributeArray, copy_shared_attributes,
-    projection_data, refresh_paint_attributes, to_projection_ubo,
+    refresh_paint_attributes,
 };
 use mln_engine::layer::binders::PaintBinders as _;
 use mln_engine::layer::{
@@ -427,24 +428,21 @@ impl RenderFillLayer {
         frame: &LayerFrame<'_>,
         context: &Context,
     ) -> Option<(FillBlocks, ProjectionUBO)> {
-        const IN_VIEWPORT_PIXEL_UNITS: bool = false;
-        const NEAR_CLIPPED: bool = false;
         let evaluated = &layer.paint;
         let zoom = frame.view.zoom() as f32;
         let tile_id = tile.draw_id().to_unwrapped();
 
-        let projection = projection_data(
+        let projection = tile_projection(
             &tile_id,
             frame,
-            *evaluated.fill_translate.uniform(),
-            *evaluated.fill_translate_anchor.uniform(),
-            NEAR_CLIPPED,
-            IN_VIEWPORT_PIXEL_UNITS,
-            None,
-            false,
+            TileTransform {
+                translate: *evaluated.fill_translate.uniform(),
+                anchor: *evaluated.fill_translate_anchor.uniform(),
+                ..TileTransform::NONE
+            },
         );
         let matrix = projection.fallback_matrix.as_mat4().to_cols_array();
-        let projection = to_projection_ubo(&projection);
+        let projection = projection.ubo();
 
         if !pattern {
             let blocks = if outline {

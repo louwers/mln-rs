@@ -33,7 +33,7 @@ use mln_gfx::shaders::program::{BufferKind, Program, Projection};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::types::{CullFaceWindingType, DepthMaskType};
 
-use crate::camera::{FrameProjection, ProjectionData, View, ViewportMode};
+use crate::camera::{FrameProjection, View, ViewportMode};
 use crate::draw::after_gpu::AfterGpu;
 use crate::draw::context::Context;
 use crate::draw::identity::SimpleIdentity;
@@ -106,12 +106,6 @@ impl LayerFrame<'_> {
     #[must_use]
     pub fn drape_lit(&self) -> bool {
         matches!(self.into, DrawsInto::Drape { lit: true })
-    }
-
-    /// See `TransformParameters::projection_data_for_tile`.
-    #[must_use]
-    pub fn projection_data_for_tile(&self, tile_id: &UnwrappedTileID, aligned: bool) -> ProjectionData {
-        self.transform_params.projection_data_for_tile(tile_id, aligned)
     }
 
     /// Culling of the faces turned away from the camera, whose triangles

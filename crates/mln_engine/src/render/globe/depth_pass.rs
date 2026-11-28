@@ -31,7 +31,6 @@ use crate::draw::vertex_attribute::Uniforms;
 use crate::layer::layer_drawing::TileMap;
 use crate::render::globe::tile_mesh::{TileMesh, tile_mesh};
 use crate::render::paint_parameters::PaintParameters;
-use crate::render::tile_matrix::to_projection_ubo;
 use crate::render::update_parameters::UpdateParameters;
 use crate::shaders::programs;
 use crate::tile_store::tile_cover::{TileCoverParameters, tile_cover};
@@ -146,7 +145,7 @@ impl GlobeDepthPass {
                 // z + setback * w: the pixels the planet covers stay.
                 matrix.set_row(2, matrix.row(2) + DEPTH_SETBACK * matrix.row(3));
             }
-            let projection = to_projection_ubo(&projection);
+            let projection = projection.ubo();
             // The draws draw in the order their meshes were made.
             let frame_draw = Draw { order: draw.seq(), depth, ..Draw::DEFAULT };
             self.frame.push_at(draw, *tile_id, &projection, frame_draw, ());

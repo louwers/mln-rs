@@ -8,10 +8,10 @@ use std::sync::Arc;
 
 use glam::dcamera::rh::proj::opengl::orthographic;
 use mln_engine::draw::ground::StandingDraw;
+use mln_engine::draw::projection::{TileTransform, globe_extrude_scale, tile_projection};
 use mln_engine::draw::{
     Depth, Draw, DrawGeometry, DrawIndexes, Draws, Group, LayerFrame, Mesh, RenderPass, SharedAttribute, SharedTexture,
-    SharedVertices, Target, Textures, Uniforms, VertexAttributeArray, globe_extrude_scale, projection_data,
-    refresh_paint_attributes, to_projection_ubo,
+    SharedVertices, Target, Textures, Uniforms, VertexAttributeArray, refresh_paint_attributes,
 };
 use mln_engine::layer::binders::PaintBinders as _;
 use mln_engine::layer::{
@@ -30,7 +30,6 @@ use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_inters
 use mln_style::layers::Heatmap;
 use mln_style::layers::heatmap_layer_properties::{HeatmapPaintProperties, default_heatmap_color};
 use mln_style::size::Size;
-use mln_style::types::TranslateAnchorType;
 
 use crate::layers::heatmap::bucket::{HeatmapBinders, HeatmapLayoutVertex};
 use crate::layers::heatmap::layout::HeatmapLayout;
@@ -249,20 +248,9 @@ impl RenderHeatmapLayer {
         binders: &HeatmapBinders,
         frame: &LayerFrame<'_>,
     ) -> (HeatmapDrawableUBO, ProjectionUBO) {
-        const NEAR_CLIPPED: bool = false;
-        const IN_VIEWPORT_PIXEL_UNITS: bool = false;
         let zoom = frame.view.zoom() as f32;
         let tile_id = tile_id.to_unwrapped();
-        let projection = projection_data(
-            &tile_id,
-            frame,
-            [0.0, 0.0],
-            TranslateAnchorType::Viewport,
-            NEAR_CLIPPED,
-            IN_VIEWPORT_PIXEL_UNITS,
-            None,
-            false,
-        );
+        let projection = tile_projection(&tile_id, frame, TileTransform::NONE);
         let latitude_scale = frame.view.projection().circle_radius_correction(frame.view);
         let drawable = HeatmapDrawableUBO {
             matrix: projection.fallback_matrix.as_mat4().to_cols_array(),
@@ -271,7 +259,7 @@ impl RenderHeatmapLayer {
             radius_t: binders.heatmap_radius.interpolation_factor(zoom),
             globe_extrude_scale: globe_extrude_scale(&tile_id, zoom, latitude_scale),
         };
-        (drawable, to_projection_ubo(&projection))
+        (drawable, projection.ubo())
     }
 
     /// The block that the tiles' draws into the target share, of a

@@ -23,6 +23,7 @@ use crate::draw::context::Context;
 use crate::draw::draws::{Depth, Draw, Group};
 use crate::draw::indexes::Indexes;
 use crate::draw::objects::{DrawGeometry, Mesh, Textures};
+use crate::draw::projection::zero_to_one_clip_z;
 use crate::draw::range::DrawRange;
 use crate::draw::store::SharedIndexes;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
@@ -30,11 +31,9 @@ use crate::draw::vertices::SharedVertices;
 use crate::geo::lat_range;
 use crate::layer::layer_drawing::TileMap;
 use crate::log_target;
-use crate::render::frame_projection::zero_to_one_clip_z;
 use crate::render::paint_parameters::PaintParameters;
 use crate::render::terrain::programs;
 use crate::render::terrain::ubo::{HillshadeTilePropsUBO, TerrainDrawableUBO, TerrainFog, TerrainSurfaceUBO};
-use crate::render::tile_matrix::to_projection_ubo;
 
 /// The slots of the programs' textures that the draws bind.
 const GROUND_DEM_SLOT: usize = programs::TERRAIN.texture_slot("ground_dem");
@@ -168,7 +167,7 @@ impl TerrainDraws {
                 zero_to_one_clip_z(&mut projection.fallback_matrix);
             }
             let drawable = TerrainDrawableUBO { dem_coords };
-            let projection = to_projection_ubo(&projection);
+            let projection = projection.ubo();
             let latrange = lat_range(&tile.id.to_unwrapped());
             // The ground's depth is the surface's without the skirts, which
             // fill the cracks between tiles: a skirt that the camera sees
