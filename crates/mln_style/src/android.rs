@@ -4,7 +4,7 @@
 
 #![expect(unsafe_code, reason = "dlsym and the JNI invocation API are the FFI here")]
 
-use std::ffi::c_void;
+use std::ffi::{CStr, c_void};
 
 use jni::JavaVM;
 use jni::sys::{JNI_OK, jint, jsize};
@@ -21,9 +21,14 @@ pub fn java_vm() -> Option<JavaVM> {
 
 /// The process's Java VM, through `JNI_GetCreatedJavaVMs`, which
 /// libnativehelper exports to apps from API 31. A process with a Java VM has
-/// loaded libnativehelper, so this doesn't load it (`RTLD_NOLOAD`).
+/// loaded libnativehelper, so this doesn't load it (`RTLD_NOLOAD`). Before API
+/// 31, a process without a Java VM can still have loaded libnativehelper, whose
+/// `JNI_GetCreatedJavaVMs` then aborts the process instead of finding none.
 fn process_java_vm() -> Option<JavaVM> {
     type GetCreatedJavaVms = unsafe extern "system" fn(*mut *mut jni::sys::JavaVM, jsize, *mut jsize) -> jint;
+    if device_api_level() < 31 {
+        return None;
+    }
     // SAFETY: a library name and flags that dlopen takes.
     let library = unsafe { libc::dlopen(c"libnativehelper.so".as_ptr(), libc::RTLD_NOW | libc::RTLD_NOLOAD) };
     if library.is_null() {
@@ -42,4 +47,15 @@ fn process_java_vm() -> Option<JavaVM> {
     let status = unsafe { get_created_java_vms(&raw mut vm, 1, &raw mut count) };
     // SAFETY: the process's live VM, which it keeps until it exits.
     (status == JNI_OK && count == 1 && !vm.is_null()).then(|| unsafe { JavaVM::from_raw(vm) })
+}
+
+/// The device's API level, from `ro.build.version.sdk`, or 0 where it reads
+/// none.
+fn device_api_level() -> i32 {
+    let mut value = [0; libc::PROP_VALUE_MAX as usize];
+    // SAFETY: a property name, and room for the longest value and its NUL.
+    unsafe { libc::__system_property_get(c"ro.build.version.sdk".as_ptr(), value.as_mut_ptr()) };
+    // SAFETY: the value, NUL-terminated within the buffer, or empty.
+    let value = unsafe { CStr::from_ptr(value.as_ptr()) };
+    value.to_str().ok().and_then(|value| value.parse().ok()).unwrap_or(0)
 }
