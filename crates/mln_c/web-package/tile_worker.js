@@ -1,13 +1,12 @@
 // The script of the library's tile worker Web Workers in the browser package
-// (`mise run c-web:build`): wasm-bindgen copies it to snippets/<crate>/js/,
-// three directories below the package's root, beside the module's bindings. Each
-// message is {module, port} from a map's instance: the first instantiates
-// the module, and each port gets tile workers of its own.
+// (`mise run c-web:build`), beside the module's bindings. Each message is
+// {module, port} from a map's instance: the first instantiates the module,
+// and each port gets tile workers of its own.
 //
 // A panic aborts the instance, and nothing may call into it after that: the
 // Web Worker sends {fatal: message} over each port instead.
 
-import init, { mlnWebServeTileWorker } from "../../../maplibre_native_c.js";
+import init, { mlnWebServeTileWorker } from "./maplibre_native_c.js";
 
 const ports = [];
 let ready = null;

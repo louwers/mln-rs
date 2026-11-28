@@ -83,9 +83,6 @@ web-sys = { workspace = true, features = [
   "MessagePort",
   "OffscreenCanvas",
   "WebGl2RenderingContext",
-  "Worker",
-  "WorkerOptions",
-  "WorkerType",
 ] }
 # wgpu's objects are Send and Sync on an instance without threads, as the
 # runtime's handles need.

@@ -82,17 +82,6 @@ pub fn set_loader(loader: js_sys::Function) {
     });
 }
 
-/// Sets how this instance loads the shaper module, unless a loader is set
-/// already: for the package that ships the module beside its own.
-pub fn set_default_loader(loader: js_sys::Function) {
-    MODULE.with(|module| {
-        let mut module = module.borrow_mut();
-        if module.is_none() {
-            *module = Some(Module::NotLoaded { loader });
-        }
-    });
-}
-
 /// [`set_loader`], for the JavaScript that hosts the instance.
 #[wasm_bindgen(js_name = mlnWebSetShaperLoader)]
 pub fn set_loader_js(loader: js_sys::Function) {
@@ -132,7 +121,9 @@ impl FontFaceEngine for ShaperModuleEngine {
             }
         });
         match step {
-            Step::NoLoader => return ready(Err("the map has no shaper module loader".to_owned())),
+            Step::NoLoader => {
+                return ready(Err("no shaper module loader was set (`mlnWebSetShaperLoader`)".to_owned()));
+            }
             Step::Ready => return ready(Ok(())),
             Step::Wait | Step::Load(_) => MODULE.with(|module| {
                 if let Some(Module::Loading { waiting }) = &mut *module.borrow_mut() {

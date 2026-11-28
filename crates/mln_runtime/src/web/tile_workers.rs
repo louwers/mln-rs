@@ -149,8 +149,6 @@ struct Pool {
     count: Option<usize>,
     /// `spawn()` returns a new Web Worker (or what posts to one).
     spawn: Option<js_sys::Function>,
-    /// The script of the Web Workers that `start` starts without `spawn`.
-    script: Option<String>,
     /// The Web Workers, once the first map side connected.
     workers: Option<Vec<JsValue>>,
 }
@@ -162,26 +160,18 @@ thread_local! {
 /// Sets how this instance starts its tile workers' Web Workers, before the
 /// first map side [`connect`]s: `count` of them (by default one fewer than
 /// the browser's logical processors, from one to four), each from
-/// `spawn()`, which returns a Web Worker, or else from the default script
-/// ([`set_default_script`]). Each Web Worker gets a message
-/// `{module, port}` for each map side that connects: `module` the
-/// instance's `WebAssembly.Module`, which it instantiates with the first,
-/// and `port` to serve with the module's `mlnWebServeTileWorker` export,
-/// which calls [`tile_worker::serve`](super::tile_worker::serve).
+/// `spawn()`, which returns a Web Worker. Without a `spawn`, none start, and
+/// each map side loads its tiles on the instance's thread. Each Web Worker
+/// gets a message `{module, port}` for each map side that connects:
+/// `module` the instance's `WebAssembly.Module`, which it instantiates with
+/// the first, and `port` to serve with the module's `mlnWebServeTileWorker`
+/// export, which calls [`tile_worker::serve`](super::tile_worker::serve).
 #[wasm_bindgen::prelude::wasm_bindgen(js_name = mlnWebConfigureTileWorkers)]
 pub fn configure(count: Option<u32>, spawn: Option<js_sys::Function>) {
     with_pool(|pool| {
         pool.count = count.map(|count| count as usize);
         pool.spawn = spawn;
     });
-}
-
-/// Sets the script of the Web Workers that the instance starts when
-/// [`configure`] gave no `spawn`: a module script, at `url`, that serves
-/// each `{module, port}` it gets as `configure` describes. For the package
-/// that ships it beside the module's bindings.
-pub fn set_default_script(url: String) {
-    with_pool(|pool| pool.script = Some(url));
 }
 
 fn with_pool<R>(f: impl FnOnce(&mut Pool) -> R) -> R {
@@ -206,17 +196,10 @@ fn start(pool: &Pool) -> Result<Vec<JsValue>, String> {
 }
 
 fn start_one(pool: &Pool) -> Result<JsValue, String> {
-    match (&pool.spawn, &pool.script) {
-        (Some(spawn), _) => spawn.call0(&JsValue::NULL).map_err(|error| format!("spawn() threw {error:?}")),
-        (None, Some(script)) => {
-            let options = web_sys::WorkerOptions::new();
-            options.set_type(web_sys::WorkerType::Module);
-            web_sys::Worker::new_with_options(script, &options)
-                .map(JsValue::from)
-                .map_err(|error| format!("the tile worker script {script} didn't start: {error:?}"))
-        }
-        (None, None) => Err("no tile worker script: configure a `spawn`".to_owned()),
-    }
+    let Some(spawn) = &pool.spawn else {
+        return Err("no tile worker spawn was set (`mlnWebConfigureTileWorkers`)".to_owned());
+    };
+    spawn.call0(&JsValue::NULL).map_err(|error| format!("spawn() threw {error:?}"))
 }
 
 /// A port to `worker` for a new map side.

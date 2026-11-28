@@ -4,9 +4,10 @@
 //!
 //! The browser build's other JavaScript-facing exports, which wasm-bindgen
 //! makes rather than the headers, live here too: the table's `insert` and
-//! `get`, the callback trampolines (`trampoline.rs`), the tile workers'
-//! entry point, and the defaults of the instance's tile workers and shaper
-//! module, which the package ships beside the module's bindings.
+//! `get`, the callback trampolines (`trampoline.rs`), and the tile workers'
+//! entry point. `mln_runtime` exports the hooks that start the tile workers'
+//! Web Workers and load the shaper module; the package that ships those
+//! files beside the module's bindings calls them.
 
 #[cfg(target_family = "wasm")]
 mod table {
@@ -133,7 +134,8 @@ mod upcalls {
     }
 }
 
-/// The entry point of the tile workers' Web Workers (`js/tile_worker.js`).
+/// The entry point of the tile workers' Web Workers, whose script the
+/// package ships.
 #[cfg(target_family = "wasm")]
 mod tile_worker {
     use wasm_bindgen::prelude::*;
@@ -189,27 +191,4 @@ pub(crate) unsafe extern "C" fn mln_web_free(pointer: *mut c_void, size: usize, 
         // SAFETY: the caller's contract.
         unsafe { std::alloc::dealloc(pointer.cast(), layout) }
     }
-}
-
-/// Sets the defaults of the instance's tile workers and shaper module: the
-/// files that the package ships beside the module's bindings, which a host
-/// replaces with `mlnWebConfigureTileWorkers` and `mlnWebSetShaperLoader`.
-#[cfg(target_family = "wasm")]
-pub(crate) fn set_defaults() {
-    use wasm_bindgen::prelude::*;
-
-    #[wasm_bindgen(module = "/js/package.js")]
-    extern "C" {
-        #[wasm_bindgen(js_name = shaperLoader)]
-        fn shaper_loader() -> js_sys::Function;
-    }
-
-    thread_local! {
-        static SET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    }
-    if SET.replace(true) {
-        return;
-    }
-    mln_runtime::web::tile_workers::set_default_script(wasm_bindgen::link_to!(module = "/js/tile_worker.js"));
-    mln_runtime::web::shaper::set_default_loader(shaper_loader());
 }
