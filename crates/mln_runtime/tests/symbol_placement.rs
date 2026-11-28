@@ -237,9 +237,18 @@ fn labels_and_vehicles() -> StillMap {
 fn settle_placed(map: &StillMap) {
     for _ in 0..100 {
         settle(map);
+        let before = map.events.events().len();
         let (_, status) = frame(map, DemandMode::Force);
         let status = status.expect("a forced frame renders");
         if !status.placement_changed && !status.needs_repaint {
+            // The map reports `Idle` after the frame, through the runtime's
+            // thread: wait for it, so that the frames after the next change
+            // don't take it for the map going idle after that change.
+            let deadline = Instant::now() + TIMEOUT;
+            while !idle_since(map, before) {
+                assert!(Instant::now() < deadline, "the map didn't go idle after a frame that placed nothing");
+                std::thread::sleep(Duration::from_millis(1));
+            }
             return;
         }
     }
