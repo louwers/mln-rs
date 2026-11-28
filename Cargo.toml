@@ -60,7 +60,6 @@ mln_engine = { package = "mln-rs-engine", path = "crates/mln_engine", version = 
 mln_gfx = { package = "mln-rs-gfx", path = "crates/mln_gfx", version = "=0.0.19" }
 mln_gl = { package = "mln-rs-gl", path = "crates/mln_gl", version = "=0.0.19" }
 mln_glsl = { package = "mln-rs-glsl", path = "crates/mln_glsl", version = "=0.0.19" }
-mln_headless = { package = "mln-rs-headless", path = "crates/mln_headless", version = "=0.0.19" }
 mln_image_process = { package = "mln-rs-image-process", path = "crates/mln_image_process", version = "=0.0.19" }
 mln_location_puck = { package = "mln-rs-location-puck", path = "crates/mln_location_puck", version = "=0.0.19" }
 mln_mtl = { package = "mln-rs-mtl", path = "crates/mln_mtl", version = "=0.0.19" }
