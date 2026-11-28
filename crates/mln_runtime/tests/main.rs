@@ -35,6 +35,8 @@ mod globe_precision;
 mod hillshade;
 // Layers that change after they drew.
 mod layer_updates;
+// A layer that draws with the backend's own commands, which the frame lends it.
+mod lent_commands;
 // Maps whose scale factor changes.
 mod pixel_ratio;
 mod placement;
@@ -44,6 +46,8 @@ mod resources;
 mod sessions;
 // Shared targets through an extension of the tests' own.
 mod shared_targets;
+// The built-in source types' tiles as a host of the runtime sees them load.
+mod source_tiles;
 // Frames with more clipped tiles than the stencil buffer has values.
 mod stencil_overflow;
 mod style;

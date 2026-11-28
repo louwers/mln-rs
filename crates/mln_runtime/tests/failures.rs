@@ -130,6 +130,26 @@ fn a_still_image_whose_frame_fails_ends_with_the_error() {
     assert_eq!(RED, center_pixel(&session));
 }
 
+/// A still image whose frames always fail ends with the GPU's error each
+/// time it is asked for, each after one frame: its demand's result, with no
+/// update.
+#[test]
+fn a_still_image_whose_frames_always_fail_ends_with_the_error_each_time() {
+    let runtime = runtime();
+    let Some((map, session, broken)) = broken_map(&runtime, MapMode::Static) else { return };
+    broken.store(true, Ordering::SeqCst);
+    for attempt in 0..2 {
+        let error = result_of(map.request_still_image().unwrap()).expect_err("a still whose frame failed");
+        assert_eq!(ErrorKind::Native, error.kind, "still {attempt}");
+        assert!(error.message.contains("Submitting the frame failed"), "still {attempt}: {error}");
+        let results = session.drain_frame_results().unwrap();
+        assert!(
+            matches!(&results[..], [result] if result.token.is_none() && result.disposition == FrameDisposition::NoUpdate),
+            "still {attempt}: {results:?}"
+        );
+    }
+}
+
 /// A still image whose offscreen target can't make its textures, here for
 /// a width that no WebGPU device takes, ends with an error, its demand's
 /// result with no update, rather than waiting for ever.

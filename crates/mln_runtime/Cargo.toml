@@ -125,14 +125,21 @@ image_diff.workspace = true
 httpmock.workspace = true
 pollster.workspace = true
 
-# The X11 windows of the surface tests, the host's EGL contexts and textures
-# of the device tests, and the mapped dmabufs and sync files of the exported
-# ring tests.
-[target.'cfg(target_os = "linux")'.dev-dependencies]
+# The host's EGL contexts and textures of the device tests, and the OpenGL
+# host of the lent-command tests.
+[target.'cfg(all(unix, not(target_vendor = "apple")))'.dev-dependencies]
 glow.workspace = true
 khronos-egl.workspace = true
+
+# The X11 windows of the surface tests, and the mapped dmabufs and sync files
+# of the exported ring tests.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
 libc.workspace = true
 winit.workspace = true
+
+# The SPIR-V of the lent-command tests' Vulkan host.
+[target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dev-dependencies]
+naga.workspace = true
 
 # The sync files of the exported ring tests, whose hardware buffers they
 # lock.

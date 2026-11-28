@@ -1,4 +1,7 @@
 mod borrowed_target_test;
+// Frames of a map that fail on the GPU, through a GPU that fails some of its
+// calls on purpose.
+mod gpu_failure_test;
 mod gpu_test;
 mod shader_group_preprocessor;
 mod shared_device_test;

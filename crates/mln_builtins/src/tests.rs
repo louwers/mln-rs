@@ -1,6 +1,6 @@
 //! The registrations, and how the source types' sources load: what they
 //! describe their fetched data and the style's GeoJSON as, and what they
-//! report. `mln_headless`'s integration tests (`tests/source_tiles`) cover how
+//! report. `mln_runtime`'s integration tests (`tests/source_tiles`) cover how
 //! their tiles load.
 
 use std::sync::Arc;
