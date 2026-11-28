@@ -2,7 +2,7 @@
 //! the same images on every backend, through tools/render-test's runner
 //! with the built-in types and this one. The tests run in this process,
 //! with the report and the actual/diff images in `ngon_<test>` in the test
-//! output directory (`mln_headless::test_output_dir`).
+//! output directory (`render_test::test_output_dir`).
 
 use std::path::PathBuf;
 
@@ -15,7 +15,7 @@ fn run(name: &str, args: &[&str]) -> i32 {
     let package_dir =
         std::env::var_os("CARGO_MANIFEST_DIR").map_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")), PathBuf::from);
     let manifest = package_dir.join("render-tests/manifest.json");
-    let output = mln_headless::test_output_dir(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let output = render_test::test_output_dir(env!("CARGO_TARGET_TMPDIR")).join(name);
     let mut argv = vec![
         "render-test".to_owned(),
         "--manifestPath".to_owned(),

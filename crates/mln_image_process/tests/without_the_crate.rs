@@ -2,10 +2,8 @@
 
 use std::sync::Once;
 
-use mln_engine::exec::pool::Pool;
-use mln_engine::exec::queue::Queue;
-use mln_engine::map::{Map, MapMode, MapOptions};
-use mln_headless::HeadlessFrontend;
+use mln_engine::map::MapMode;
+use mln_runtime::{AttachOptions, MapOptions, RenderTarget, Runtime, RuntimeOptions};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::size::Size;
 use parking_lot::Mutex;
@@ -38,13 +36,19 @@ fn warnings() -> Vec<String> {
 /// The image of `style`, drawn with the built-in types alone.
 fn render(style: &str) -> PremultipliedImage {
     let size = Size::new(96, 64);
-    let (queue, pool) = (Queue::<()>::new(), Pool::new(2));
-    let mut frontend = HeadlessFrontend::new(size, 1.0, &queue, &pool).expect("a headless frontend");
-    let options = MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() };
-    let mut map = Map::new(options, mln_builtins::registry(), &pool).unwrap();
-    frontend.attach(&mut map);
-    map.load_style_json(style);
-    frontend.render(&mut map).expect("a still image").image
+    let runtime = Runtime::new(&RuntimeOptions::default()).unwrap();
+    let options = MapOptions {
+        map: mln_engine::map::MapOptions { map_mode: MapMode::Static, size, pixel_ratio: 1.0, ..Default::default() },
+        ..Default::default()
+    };
+    let (map, created) = runtime.create_map(options).unwrap();
+    created.wait().unwrap();
+    let target = RenderTarget::Offscreen { size, device: Some(render_test::harness_device().unwrap()) };
+    let (session, attached) = map.attach(target, AttachOptions::default()).unwrap();
+    attached.wait().unwrap();
+    map.set_style_json(style).unwrap().wait().unwrap();
+    map.request_still_image().unwrap().wait().expect("a still image");
+    session.read_texture().unwrap().wait().expect("the still image's pixels")
 }
 
 const SHAPES: &str = r#""shapes":{"type":"geojson","data":{"type":"FeatureCollection","features":[

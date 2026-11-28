@@ -26,8 +26,7 @@ mln_style.workspace = true
 [dev-dependencies]
 log.workspace = true
 mln_builtins.workspace = true
-# Unpublished: without a version, `cargo package` drops it.
-mln_headless = { package = "mln-rs-headless", path = "../mln_headless" }
+mln_runtime.workspace = true
 parking_lot.workspace = true
 render_test.workspace = true
 
