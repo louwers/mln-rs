@@ -1,8 +1,8 @@
 use glam::Vec2;
 use mln_engine::draw::ground::FrameGround;
+use mln_engine::draw::projection::{TileTransform, tile_projection};
 use mln_engine::draw::{
-    Context, Draw, DrawGeometry, DrawIndexes, DrawRange, Draws, Mesh, Textures, Uniforms, projection_data,
-    raw_vertices, to_projection_ubo,
+    Context, Draw, DrawGeometry, DrawIndexes, DrawRange, Draws, Mesh, Textures, Uniforms, raw_vertices,
 };
 use mln_engine::layer::{
     EvaluateCx, Evaluation, FrameQuery, FrameTile, Layer, LayerValues, NoTiles, OnTerrain, PrepareCx,
@@ -90,16 +90,12 @@ impl Layer for LocationPuckLayer {
         let main = out.main();
         for anchor in anchors(frame.view, *paint.puck_position.uniform(), height) {
             let tile = OverscaledTileID::new(anchor.tile.canonical.z, anchor.tile.wrap, anchor.tile.canonical);
-            let projection = to_projection_ubo(&projection_data(
+            let projection = tile_projection(
                 &anchor.tile,
                 frame,
-                [0.0, 0.0],
-                TranslateAnchorType::Map,
-                false,
-                false,
-                None,
-                false,
-            ));
+                TileTransform { anchor: TranslateAnchorType::Map, ..TileTransform::NONE },
+            )
+            .ubo();
             let at = Ground::new(paint, frame.view, &anchor);
             for (order, part) in parts(paint).enumerate() {
                 let draw = Draw { order: order as i64, ..Draw::DEFAULT };

@@ -22,7 +22,6 @@ use crate::render::layer_composite::LayerComposite;
 use crate::render::orchestrator::RenderOrchestrator;
 use crate::render::paint_parameters::{OpenPass, PaintParameters};
 use crate::render::pass::RenderPass;
-use crate::render::tile_matrix::to_projection_ubo;
 use crate::render::update_parameters::UpdateParameters;
 use crate::text::GlyphCache;
 use crate::text::local_fonts::LocalGlyphs;
@@ -613,7 +612,7 @@ impl Encoder {
         parameters.opaque_pass_cutoff = orchestrator.opaque_pass_cutoff();
         let (proj_state, transform) = (parameters.view, parameters.transform_params);
         parameters.clip_masks.update(gpu, parameters.context, proj_state.is_globe(), &draw_groups.clip_tiles, |tile| {
-            to_projection_ubo(&transform.projection_data_for_tile(tile, false))
+            (transform.projection_data_for_tile(tile, false)).ubo()
         });
         orchestrator.terrain().upload_drapes(gpu, &mut parameters);
         parameters.layer_composite.update(

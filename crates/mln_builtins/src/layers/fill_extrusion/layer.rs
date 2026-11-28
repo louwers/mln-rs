@@ -34,10 +34,11 @@ use std::mem::offset_of;
 
 use mln_engine::camera::View;
 use mln_engine::draw::ground::{FrameGround, GroundHeights, height_attribute};
+use mln_engine::draw::projection::{TileTransform, tile_projection, zero_to_one_clip_z};
 use mln_engine::draw::{
     Composite, Context, Depth, Draw, DrawGeometry, DrawRange, Draws, EvaluatedLight, Indexes, LayerFrame, Mesh,
     RenderPass, SharedAttribute, SharedIndexes, SharedVertices, Texture2D, Uniforms, VertexAttributeArray,
-    copy_shared_attributes, projection_data, to_projection_ubo, zero_to_one_clip_z,
+    copy_shared_attributes,
 };
 use mln_engine::layer::binders::PaintBinders as _;
 use mln_engine::layer::{
@@ -758,7 +759,6 @@ impl RenderFillExtrusionLayer {
         context: &Context,
         frame: &LayerFrame<'_>,
     ) -> (FillExtrusionDrawableUBO, FillExtrusionTilePropsUBO, ProjectionUBO) {
-        const IN_VIEWPORT_PIXEL_UNITS: bool = false;
         // The near-clipped projection keeps the depth buffer's precision for
         // the extrusions, but over terrain they test the frame's depth of the
         // ground, which the surface's projection draws, and the frame reports
@@ -769,15 +769,15 @@ impl RenderFillExtrusionLayer {
         let zoom = state.zoom() as f32;
         let tile_id = tile_id.to_unwrapped();
 
-        let mut projection = projection_data(
+        let mut projection = tile_projection(
             &tile_id,
             frame,
-            *evaluated.fill_extrusion_translate.uniform(),
-            *evaluated.fill_extrusion_translate_anchor.uniform(),
-            near_clipped,
-            IN_VIEWPORT_PIXEL_UNITS,
-            None,
-            false,
+            TileTransform {
+                translate: *evaluated.fill_extrusion_translate.uniform(),
+                anchor: *evaluated.fill_extrusion_translate_anchor.uniform(),
+                near_clipped,
+                ..TileTransform::NONE
+            },
         );
         if draw.priority == 0 {
             // z + setback * w: x, y and w, and so the pixels the draw
@@ -831,7 +831,7 @@ impl RenderFillExtrusionLayer {
             pad1: 0.0,
             pad2: 0.0,
         };
-        (drawable, tile_props, to_projection_ubo(&projection))
+        (drawable, tile_props, projection.ubo())
     }
 
     /// The block of the layer's values that its draws share, which draw at

@@ -19,6 +19,5 @@ pub(crate) mod sky_pass;
 pub(crate) mod static_data;
 pub(crate) mod terrain;
 pub(crate) mod tile;
-pub(crate) mod tile_matrix;
 pub(crate) mod update_parameters;
 pub(crate) mod update_slot;

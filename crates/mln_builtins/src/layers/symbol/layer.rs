@@ -8,9 +8,10 @@ use glam::dcamera::rh::proj::opengl::orthographic;
 use glam::{DMat4, DVec3};
 use mln_engine::camera::{Projection, ProjectionData};
 use mln_engine::draw::ground::FrameGround;
+use mln_engine::draw::projection::{TileTransform, tile_projection};
 use mln_engine::draw::{
     Context, Draw, DrawGeometry, Draws, LayerFrame, Mesh, RenderPass, RenderTile, SharedAttribute, SharedVertices,
-    TypedVertices, Uniforms, VertexAttributeArray, copy_shared_attributes, projection_data, to_projection_ubo,
+    TypedVertices, Uniforms, VertexAttributeArray, copy_shared_attributes,
 };
 use mln_engine::layer::binders::PaintBinders as _;
 use mln_engine::layer::{
@@ -486,18 +487,7 @@ impl RenderSymbolLayer {
         let mut projection: ProjectionData = if is_screen_space {
             Projection::Mercator.projection_data(state, &tile_id, &screen_matrix(*translate.uniform()))
         } else {
-            const NEAR_CLIPPED: bool = false;
-            const IN_VIEWPORT_PIXEL_UNITS: bool = false;
-            projection_data(
-                &tile_id,
-                frame,
-                [0.0, 0.0],
-                *anchor.uniform(),
-                NEAR_CLIPPED,
-                IN_VIEWPORT_PIXEL_UNITS,
-                None,
-                false,
-            )
+            tile_projection(&tile_id, frame, TileTransform { anchor: *anchor.uniform(), ..TileTransform::NONE })
         };
         // The translation stays out of the matrices on every projection: the
         // shader adds it to point anchors, and placement to the positions it
@@ -582,7 +572,7 @@ impl RenderSymbolLayer {
         };
         let tile_props =
             SymbolTilePropsUBO { is_text: i32::from(is_text), is_halo: i32::from(data.is_halo), pad1: 0.0, pad2: 0.0 };
-        Some(((drawable, tile_props), to_projection_ubo(&projection)))
+        Some(((drawable, tile_props), projection.ubo()))
     }
 
     /// Pushes into `out` the frame's draws of the layer's draws of `tiles`

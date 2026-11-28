@@ -4,9 +4,10 @@ use geometry::Point;
 use glam::Vec2;
 use mln_engine::camera::{TileCoordinate, TileProjector};
 use mln_engine::draw::ground::{FrameGround, StandingDraw, TileGround};
+use mln_engine::draw::projection::{TileTransform, globe_extrude_scale, tile_projection};
 use mln_engine::draw::{
     Draw, DrawGeometry, Draws, LayerFrame, RenderPass, RenderTile, SharedAttribute, Textures, Uniforms,
-    VertexAttributeArray, globe_extrude_scale, projection_data, refresh_paint_attributes, to_projection_ubo,
+    VertexAttributeArray, refresh_paint_attributes,
 };
 use mln_engine::layer::binders::PaintBinders as _;
 use mln_engine::layer::{
@@ -112,20 +113,17 @@ impl RenderCircleLayer {
         binders: &CircleBinders,
         frame: &LayerFrame<'_>,
     ) -> (CircleDrawableUBO, ProjectionUBO) {
-        const IN_VIEWPORT_PIXEL_UNITS: bool = false;
-        const NEAR_CLIPPED: bool = false;
         let evaluated = &layer.paint;
         let zoom = frame.view.zoom() as f32;
         let tile_id = tile_id.to_unwrapped();
-        let projection = projection_data(
+        let projection = tile_projection(
             &tile_id,
             frame,
-            *evaluated.circle_translate.uniform(),
-            *evaluated.circle_translate_anchor.uniform(),
-            NEAR_CLIPPED,
-            IN_VIEWPORT_PIXEL_UNITS,
-            None,
-            false,
+            TileTransform {
+                translate: *evaluated.circle_translate.uniform(),
+                anchor: *evaluated.circle_translate_anchor.uniform(),
+                ..TileTransform::NONE
+            },
         );
 
         let pitch_with_map = *evaluated.circle_pitch_alignment.uniform() == AlignmentType::Map;
@@ -149,7 +147,7 @@ impl RenderCircleLayer {
             pad2: 0.0,
             pad3: 0.0,
         };
-        (draw_ubo, to_projection_ubo(&projection))
+        (draw_ubo, projection.ubo())
     }
 
     /// The block of the layer's values that its draws share.

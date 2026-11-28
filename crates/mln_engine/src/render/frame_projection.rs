@@ -4,7 +4,7 @@
 //! The renderer draws with OpenGL's projection matrices, whose clip z runs
 //! from -w to w. Metal, Vulkan, D3D12 and WebGPU clip z below 0, so their 3D
 //! layers write `depth_range_size * z / w` and drop what is nearer than the
-//! plane where z is 0. OpenGL's 3D layers draw through [`zero_to_one_clip_z`]
+//! plane where z is 0. OpenGL's 3D layers draw through [`zero_to_one_clip_z`](crate::draw::projection::zero_to_one_clip_z)
 //! to write the same depth, so the depth of a frame means one thing on every
 //! backend.
 
@@ -57,14 +57,6 @@ pub(crate) fn compute(
     }
 }
 
-/// Makes a 3D layer's OpenGL matrix clip and write depth as Metal, Vulkan,
-/// D3D12 and WebGPU do with it: clip z from -w to w becomes `2z - w`, so that
-/// OpenGL clips what was below 0 and writes the depth range times the old z
-/// over w.
-pub fn zero_to_one_clip_z(matrix: &mut DMat4) {
-    matrix.set_row(2, 2.0 * matrix.row(2) - matrix.row(3));
-}
-
 #[cfg(test)]
 mod tests {
     use mln_style::geo::LatLng;
@@ -73,6 +65,7 @@ mod tests {
 
     use super::*;
     use crate::camera::{Camera, LogicalExtent, MapView, ProjectionMode, Viewport};
+    use crate::draw::projection::zero_to_one_clip_z;
     use crate::geo::EdgeInsets;
 
     const SIZE: Size = Size { width: 300, height: 200 };

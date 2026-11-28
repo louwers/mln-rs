@@ -1,7 +1,8 @@
 use mln_engine::draw::globe::tile_mesh;
+use mln_engine::draw::projection::{TileTransform, tile_projection};
 use mln_engine::draw::{
     Context, Depth, Draw, DrawGeometry, DrawIndexes, DrawRange, Draws, LayerFrame, Mesh, RenderPass, Resources,
-    Textures, Uniforms, projection_data, raw_vertices, to_projection_ubo,
+    Textures, Uniforms, raw_vertices,
 };
 use mln_engine::layer::{
     EvaluateCx, Evaluation, FrameTile, Layer, LayerValues, NoTiles, OnTerrain, PrepareCx, UpdateCx,
@@ -18,7 +19,6 @@ use mln_style::constants::TILE_SIZE_D;
 use mln_style::layers::Background;
 use mln_style::range::Range;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
-use mln_style::types::TranslateAnchorType;
 
 use crate::layers::background::pattern_atlas::PatternAtlas;
 use crate::layers::background::programs;
@@ -92,8 +92,7 @@ impl RenderBackgroundLayer {
     /// The block of the draw of `tile_id`, and its projection.
     fn uniforms(tile_id: &OverscaledTileID, pattern: bool, frame: &LayerFrame<'_>) -> (DrawableBlock, ProjectionUBO) {
         let tile_id = tile_id.to_unwrapped();
-        let projection =
-            projection_data(&tile_id, frame, [0.0, 0.0], TranslateAnchorType::Viewport, false, false, None, false);
+        let projection = tile_projection(&tile_id, frame, TileTransform::NONE);
         let matrix = projection.fallback_matrix.as_mat4().to_cols_array();
         let draw_ubo = if pattern {
             let state = frame.view;
@@ -119,7 +118,7 @@ impl RenderBackgroundLayer {
         } else {
             DrawableBlock::Plain(BackgroundDrawableUBO { matrix })
         };
-        (draw_ubo, to_projection_ubo(&projection))
+        (draw_ubo, projection.ubo())
     }
 }
 

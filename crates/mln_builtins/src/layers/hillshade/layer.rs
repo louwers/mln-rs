@@ -13,10 +13,10 @@ use std::sync::Arc;
 
 use glam::dcamera::rh::proj::opengl::orthographic;
 use glam::{DMat4, DVec3};
+use mln_engine::draw::projection::{TileTransform, tile_projection};
 use mln_engine::draw::{
     Context, Draw, DrawGeometry, DrawIndexes, DrawRange, Draws, Indexes, LayerFrame, Mesh, Resources, SharedAttribute,
     SharedIndexes, SharedTexture, SharedVertices, SimpleIdentity, Target, Textures, Uniforms, VertexAttributeArray,
-    projection_data, to_projection_ubo,
 };
 use mln_engine::layer::{
     DemContents, EvaluateCx, EvaluatedLayer, Evaluation, FrameTile, Layer, LayerValues, OnTerrain, PrepareCx,
@@ -37,7 +37,7 @@ use mln_style::constants::EXTENT;
 use mln_style::layers::Hillshade;
 use mln_style::layers::hillshade_layer_properties::HillshadePaintProperties;
 use mln_style::math::deg2radf;
-use mln_style::types::{HillshadeIlluminationAnchorType, HillshadeMethodType, ResamplingType, TranslateAnchorType};
+use mln_style::types::{HillshadeIlluminationAnchorType, HillshadeMethodType, ResamplingType};
 
 use crate::layers::hillshade::programs;
 use crate::layers::hillshade::ubo::{HillshadeDrawableUBO, HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO};
@@ -478,15 +478,10 @@ impl RenderHillshadeLayer {
         num_lights: usize,
         frame: &LayerFrame<'_>,
     ) -> ((HillshadeDrawableUBO, HillshadeTilePropsUBO), ProjectionUBO) {
-        let projection = projection_data(
+        let projection = tile_projection(
             tile_id,
             frame,
-            [0.0, 0.0],
-            TranslateAnchorType::Viewport,
-            false,
-            false,
-            None,
-            !frame.camera_moving,
+            TileTransform { pixel_aligned: !frame.camera_moving, ..TileTransform::NONE },
         );
         let drawable = HillshadeDrawableUBO { matrix: projection.fallback_matrix.as_mat4().to_cols_array() };
         let tile_props = HillshadeTilePropsUBO {
@@ -498,7 +493,7 @@ impl RenderHillshadeLayer {
             pad1: 0.0,
             pad2: 0.0,
         };
-        ((drawable, tile_props), to_projection_ubo(&projection))
+        ((drawable, tile_props), projection.ubo())
     }
 
     /// The illumination of the layer's evaluation `layer` at `frame`'s

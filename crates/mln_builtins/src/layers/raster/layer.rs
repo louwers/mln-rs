@@ -6,10 +6,11 @@
 use std::mem::offset_of;
 use std::rc::Rc;
 
+use mln_engine::draw::projection::{TileTransform, tile_projection};
 use mln_engine::draw::{
     Composite, Context, Draw, DrawGeometry, DrawIndexes, DrawRange, Draws, Group, Indexes, LayerFrame, Mesh,
     SharedAttribute, SharedIndexes, SharedTexture, SharedVertices, SimpleIdentity, Textures, Uniforms,
-    VertexAttributeArray, projection_data, to_projection_ubo,
+    VertexAttributeArray,
 };
 use mln_engine::layer::{
     EvaluateCx, Evaluation, FrameTile, ImageQuad, Layer, LayerValues, OnTerrain, PrepareCx, RasterLayoutVertex,
@@ -24,7 +25,7 @@ use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
 use mln_style::layers::Raster;
-use mln_style::types::{RasterResamplingType, ResamplingType, TranslateAnchorType};
+use mln_style::types::{RasterResamplingType, ResamplingType};
 
 use crate::layers::quads::{GlobeTileMeshCache, QUAD_RANGE, StoredQuads, quad_triangle_indices, raster_vertices};
 use crate::layers::raster::programs;
@@ -109,20 +110,12 @@ impl RenderRasterLayer {
 impl RenderRasterLayer {
     /// The block and the projection of a draw of `tile_id`.
     fn uniforms(tile_id: &UnwrappedTileID, frame: &LayerFrame<'_>) -> (RasterDrawableUBO, ProjectionUBO) {
-        let projection = projection_data(
+        let projection = tile_projection(
             tile_id,
             frame,
-            [0.0, 0.0],
-            TranslateAnchorType::Viewport,
-            false,
-            false,
-            None,
-            !frame.camera_moving,
+            TileTransform { pixel_aligned: !frame.camera_moving, ..TileTransform::NONE },
         );
-        (
-            RasterDrawableUBO { matrix: projection.fallback_matrix.as_mat4().to_cols_array() },
-            to_projection_ubo(&projection),
-        )
+        (RasterDrawableUBO { matrix: projection.fallback_matrix.as_mat4().to_cols_array() }, projection.ubo())
     }
 
     /// Gives the frame's draws of the layer of `values`, in `group`, what

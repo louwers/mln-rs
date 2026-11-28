@@ -15,8 +15,9 @@
 //! among the group's draws, whether it may draw in the opaque pass, how it
 //! tests depth ([`Depth`]) and whether it clips to its tile, and comes with
 //! the values of its program's blocks of each draw and, for a draw of a
-//! tile, the tile's projection. The engine writes the blocks once for the
-//! group, uploads the meshes, and draws the group in the frame's passes.
+//! tile, the tile's projection ([`projection`]). The engine writes the
+//! blocks once for the group, uploads the meshes, and draws the group in
+//! the frame's passes.
 //!
 //! A layer sees its frame as a [`LayerFrame`]: the map's, or a drape's. A
 //! layer that draws with the backend's own commands asks the frame to lend
@@ -41,6 +42,7 @@ pub(crate) mod identity;
 pub(crate) mod indexes;
 pub(crate) mod objects;
 pub(crate) mod owned;
+pub mod projection;
 pub(crate) mod range;
 pub(crate) mod release;
 pub(crate) mod resources;
@@ -82,12 +84,10 @@ pub use crate::draw::target::Target;
 pub use crate::draw::texture2d::Texture2D;
 pub use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
 pub use crate::draw::vertices::{SharedVertices, TypedVertices, Vertices};
-pub use crate::render::frame_projection::zero_to_one_clip_z;
 pub use crate::render::layer_composite::Composite;
 pub use crate::render::light::EvaluatedLight;
 pub use crate::render::pass::RenderPass;
 pub use crate::render::tile::RenderTile;
-pub use crate::render::tile_matrix::{globe_extrude_scale, projection_data, to_projection_ubo};
 
 /// The grid of a tile on the globe, which a layer that draws whole tiles
 /// draws there, and the rows of the poles' vertices.

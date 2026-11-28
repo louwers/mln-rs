@@ -2,9 +2,10 @@ use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use mln_engine::draw::projection::{TileTransform, tile_projection};
 use mln_engine::draw::{
     Composite, Context, Draw, DrawGeometry, Draws, Group, LayerFrame, Mesh, RenderPass, SharedAttribute, SharedTexture,
-    Texture2D, Textures, Uniforms, VertexAttributeArray, projection_data, refresh_paint_attributes, to_projection_ubo,
+    Texture2D, Textures, Uniforms, VertexAttributeArray, refresh_paint_attributes,
 };
 use mln_engine::layer::binders::PaintBinders as _;
 use mln_engine::layer::{
@@ -630,8 +631,6 @@ impl RenderLineLayer {
         context: &mut Context,
         line_atlas: &LineAtlas,
     ) -> Option<(LineBlocks, ProjectionUBO)> {
-        const NEAR_CLIPPED: bool = false;
-        const IN_VIEWPORT_PIXEL_UNITS: bool = false;
         let evaluated = &layer.paint;
         let crossfade = layer.crossfade;
         let state = frame.view;
@@ -639,18 +638,17 @@ impl RenderLineLayer {
         let int_zoom = state.integer_zoom();
         let pixel_scale = state.projection().pixel_scale(state) as f32;
 
-        let projection = projection_data(
+        let projection = tile_projection(
             &tile_id,
             frame,
-            *evaluated.line_translate.uniform(),
-            *evaluated.line_translate_anchor.uniform(),
-            NEAR_CLIPPED,
-            IN_VIEWPORT_PIXEL_UNITS,
-            None,
-            false,
+            TileTransform {
+                translate: *evaluated.line_translate.uniform(),
+                anchor: *evaluated.line_translate_anchor.uniform(),
+                ..TileTransform::NONE
+            },
         );
         let matrix = projection.fallback_matrix.as_mat4().to_cols_array();
-        let projection = to_projection_ubo(&projection);
+        let projection = projection.ubo();
         let ratio = pixel_scale / tile_id.pixels_to_tile_units(1.0, zoom);
 
         let blocks = match cached.line_type {
