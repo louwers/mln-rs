@@ -117,8 +117,9 @@ fn cjk(bench: &mut Bench) {
 }
 
 /// Measures a map's start, over the fixtures, at `camera`, with `style`,
-/// until its first complete frame. The GPU device and its target are made
-/// before, and left out.
+/// until its first complete frame: the runtime, the map, its render session
+/// and its target are made inside. The GPU device is made before, and left
+/// out.
 fn load(bench: &mut Bench, fixtures: &Fixtures, style: &str, camera: &CameraOptions) {
     let frontend = Frontend::new(VIEW);
     bench.gpu = Some(frontend.gpu());
@@ -126,7 +127,7 @@ fn load(bench: &mut Bench, fixtures: &Fixtures, style: &str, camera: &CameraOpti
         let file_source = fixtures.file_source(frontend.pool());
         let mut map = HeadlessMap::new(frontend, MapMode::Continuous, file_source);
         map.jump(camera);
-        map.map().load_style_json(style);
+        map.load_style_json(style);
         let frames = map.load();
         (map, frames)
     });
@@ -251,9 +252,10 @@ fn load_online_from(bench: &mut Bench, zoom: f64, profile: Profile, cached: Cach
 /// and the map renders a still image once it has loaded everything. The GPU
 /// device is made before, and left out.
 ///
-/// The other load scenarios drive the map on the scenario's thread, a step
-/// at a time, so they do the same work every run. Here the runtime's
-/// threads, workers and render session take their own turns, so how its
+/// The other load scenarios drive the runtime's map and its session from
+/// the scenario's thread, a step at a time, so they do the same work every
+/// run. Here the runtime's workers and render session take their own
+/// turns on threads of their own, so how its
 /// work interleaves, and with it the counts, varies a little from run to
 /// run. A static map renders one frame, once nothing is missing, so the
 /// frames drawn don't vary.

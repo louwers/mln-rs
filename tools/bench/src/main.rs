@@ -49,6 +49,30 @@ cores by default).
 fixtures installs the snapshot that tools/bench/fixtures.json names, from its
 base URL or from a directory laid out as it is.";
 
+/// Prints the warnings and errors of the libraries to stderr.
+struct StderrLog;
+
+impl log::Log for StderrLog {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata.level() <= log::Level::Warn
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        if self.enabled(record.metadata()) {
+            eprintln!("[{}] [{}] {}", record.level(), record.target(), record.args());
+        }
+    }
+
+    fn flush(&self) {}
+}
+
+/// Makes the process's `log` logger print warnings and errors to stderr.
+fn log_to_stderr() {
+    if log::set_logger(&StderrLog).is_ok() {
+        log::set_max_level(log::LevelFilter::Warn);
+    }
+}
+
 fn main() -> ExitCode {
     // Kept in the binary, never called.
     #[cfg(feature = "layout-probe")]
@@ -59,7 +83,7 @@ fn main() -> ExitCode {
     if std::env::args().nth(1).as_deref() == Some("exec") {
         aslr::fix();
     }
-    mln_headless::log_to_stderr();
+    log_to_stderr();
     // Before any thread starts, so that the counters count them all.
     meter::start_counters();
     match run(std::env::args().skip(1).collect()) {

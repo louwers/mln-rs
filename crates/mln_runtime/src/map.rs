@@ -130,6 +130,10 @@ pub(crate) struct Published {
     /// The map's frame clock, once the map is built: each frame demand sets
     /// it.
     frame_clock: OnceLock<FrameClock>,
+    /// Whether the frame clock holds the time that the benchmarks set
+    /// (`bench::hold_frame_clock`), which frame demands leave as it is.
+    #[cfg(feature = "bench")]
+    frame_clock_held: AtomicBool,
     /// The frame samples that demands asked for, numbered from 1, and the
     /// last that the map took and a frame can show.
     samples_requested: AtomicU64,
@@ -181,6 +185,8 @@ impl Published {
             updates: OnceLock::new(),
             applied: AtomicU64::new(0),
             frame_clock: OnceLock::new(),
+            #[cfg(feature = "bench")]
+            frame_clock_held: AtomicBool::new(false),
             samples_requested: AtomicU64::new(0),
             sampled: AtomicU64::new(0),
             sample_queued: AtomicBool::new(false),
@@ -811,6 +817,17 @@ impl Map {
 
     /// How many worker instances behind the worker codec the tile workers
     /// of a session's renderer run in, or 0 for the runtime's pool.
+    /// Holds the map's frame clock at `time`, which frame demands then
+    /// leave as it is.
+    #[cfg(feature = "bench")]
+    pub(crate) fn hold_frame_clock(&self, time: Instant) {
+        let published = &self.shared.published;
+        published.frame_clock_held.store(true, Ordering::SeqCst);
+        if let Some(clock) = published.frame_clock.get() {
+            clock.set(Some(time));
+        }
+    }
+
     pub(crate) fn tile_worker_instances(&self) -> usize {
         self.shared.runtime.tile_worker_instances.load(Ordering::SeqCst)
     }
@@ -962,7 +979,13 @@ impl Map {
     /// before the runtime's thread takes a sample share it.
     pub(crate) fn frame_demanded(&self) -> u64 {
         let published = &self.shared.published;
-        if let Some(clock) = published.frame_clock.get() {
+        #[cfg(feature = "bench")]
+        let held = published.frame_clock_held.load(Ordering::SeqCst);
+        #[cfg(not(feature = "bench"))]
+        let held = false;
+        if let Some(clock) = published.frame_clock.get()
+            && !held
+        {
             clock.set(Some(Instant::now()));
         }
         // A still map has nothing to sample, and its frames don't wait for

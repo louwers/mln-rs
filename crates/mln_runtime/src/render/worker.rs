@@ -1600,6 +1600,13 @@ impl Worker {
         Ok(())
     }
 
+    /// Runs `f` on the target's `Gpu`.
+    #[cfg(feature = "bench")]
+    pub(crate) fn with_gpu(&mut self, f: impl FnMut(&mut dyn mln_gfx::gpu::Gpu)) -> Result<(), Error> {
+        self.gfx.as_mut().ok_or_else(target_lost)?.target.with_gpu(f);
+        Ok(())
+    }
+
     pub(crate) fn read_texture(&mut self) -> Result<PremultipliedImage, Error> {
         let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
         if !gfx.target.is_offscreen() {
