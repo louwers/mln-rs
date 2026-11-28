@@ -3,9 +3,8 @@
 
 use mln_engine::TileOperation;
 use mln_engine::camera::CameraOptions;
-use mln_engine::geo::EdgeInsets;
 use mln_engine::map::MapEvent;
-use mln_runtime::{RuntimeEventKind, RuntimeOptions, ViewportOptions};
+use mln_runtime::{RuntimeEventKind, RuntimeOptions};
 use serde_json::json;
 
 use crate::support::still::{StillMap, StillOptions, check_image, fixtures_root, ll, read_file};
@@ -120,49 +119,4 @@ fn a_line_shows_the_dashes_of_its_zoom_on_a_kept_tile() {
     let fresh = render_at(&fresh, 2.8);
 
     assert!(zoomed.data == fresh.data, "the zoomed map draws other dashes than a map that starts at its zoom");
-}
-
-/// Thousands of line layers each draw above the one below, though they
-/// share the depth range.
-#[test]
-#[ignore = "annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn per tile; the port has no annotation layer, so the background becomes the clear color and also fills the 5 rows above the pitched world that C++ leaves transparent (measured: 0.01953125 > 0.0006, exactly those 5 rows); see map.test.cpp:2509. testdata/ also lacks the expected image."]
-fn line_layers_spread_over_the_depth_range() {
-    const LAYER_COUNT: u32 = 1 << 11;
-
-    let map = StillMap::still();
-    map.load_json(&read_file("test/fixtures/api/empty.json"));
-    map.jump(CameraOptions { zoom: Some(0.0), pitch: Some(45.0), ..Default::default() });
-    let background =
-        r#"{"id": "Background", "type": "background", "paint": {"background-color": "rgba(255,255,0,1)"}}"#;
-    wait(map.map.add_style_layer_json(background, None));
-
-    let colors = ["rgba(255,0,0,1)", "rgba(0,255,0,1)", "rgba(0,0,255,1)"];
-    let bounds = wait(map.map.lat_lng_bounds_for_camera(CameraOptions::default()));
-    for i in 0..LAYER_COUNT {
-        let y = (bounds.north() - bounds.south()) * 0.95 / f64::from(LAYER_COUNT) * f64::from(i + 1) / 2.0;
-        let x = (bounds.east() - bounds.west()) * 0.95 / f64::from(LAYER_COUNT) * f64::from(i + 1) / 2.0;
-        let source = json!({"type": "geojson", "data": {"type": "LineString",
-            "coordinates": [[-x, y], [x, y], [x, -y], [-x, -y], [-x, y]]}});
-        wait(map.map.add_style_source_json(format!("GeoJSONSource_{i}"), source.to_string()));
-        let layer = json!({"id": format!("LineLayer{i}"), "type": "line", "source": format!("GeoJSONSource_{i}"),
-            "paint": {"line-color": colors[i as usize % colors.len()]}});
-        wait(map.map.add_style_layer_json(layer.to_string(), None));
-    }
-
-    check_image("test/fixtures/map/layer_depth_distribution/line", &map.render(), 0.0006, 0.1);
-}
-
-/// A frustum offset moves the map's center within the view.
-#[test]
-#[ignore = "annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn as a drawable inside the frustum-offset scissor; the port has no annotation layer, so the background becomes the clear color, which fills the whole frame (measured on `after`: 0.628662109375 > 0.0006; `before` passes); see map.test.cpp:2560. testdata/ also lacks the expected images."]
-fn a_frustum_offset_moves_the_view() {
-    let map = StillMap::still();
-    map.load_json(&read_file("test/fixtures/api/empty.json"));
-    let background = r#"{"id": "background", "type": "background", "paint": {"background-color": "rgba(255,0,0,1)"}}"#;
-    wait(map.map.add_style_layer_json(background, None));
-    check_image("test/fixtures/map/setFrustumOffset/before", &map.render(), 0.0006, 0.1);
-
-    let offset = EdgeInsets::new(50.0, 50.0, 50.0, 50.0);
-    wait(map.map.set_viewport_options(ViewportOptions { frustum_offset: Some(offset), ..ViewportOptions::default() }));
-    check_image("test/fixtures/map/setFrustumOffset/after", &map.render(), 0.0006, 0.1);
 }
