@@ -15,6 +15,7 @@ use mln_style::size::Size;
 use parking_lot::{Condvar, Mutex};
 
 pub(crate) mod lends;
+pub(crate) mod still;
 
 pub(crate) const TIMEOUT: Duration = Duration::from_secs(10);
 

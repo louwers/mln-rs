@@ -19,6 +19,8 @@ mod feature_state;
 ))]
 mod frame_depth;
 mod gestures;
+// Hillshades over DEM tiles that the tests make.
+mod hillshade;
 mod placement;
 mod resources;
 mod sessions;

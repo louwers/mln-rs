@@ -119,6 +119,8 @@ mln_d3d12 = { workspace = true, optional = true }
 
 [dev-dependencies]
 glam.workspace = true
+# The comparisons of rendered images with the expected ones.
+image_diff.workspace = true
 # Serves the styles of the resource tests.
 httpmock.workspace = true
 pollster.workspace = true

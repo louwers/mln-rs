@@ -2981,6 +2981,7 @@ dependencies = [
  "mln-rs-engine",
  "mln-rs-gfx",
  "mln-rs-gl",
+ "mln-rs-image-diff",
  "mln-rs-mtl",
  "mln-rs-style",
  "mln-rs-vulkan",
