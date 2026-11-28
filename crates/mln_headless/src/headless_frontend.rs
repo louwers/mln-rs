@@ -384,7 +384,3 @@ impl HeadlessFrontend {
         self.target.resize(physical_size(self.size, self.pixel_ratio));
     }
 }
-
-#[cfg(test)]
-#[path = "headless_frontend_test.rs"]
-mod headless_frontend_test;

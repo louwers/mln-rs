@@ -2834,30 +2834,13 @@ dependencies = [
 name = "mln-rs-headless"
 version = "0.0.19"
 dependencies = [
- "geo-types",
- "geojson",
- "glam",
- "glow",
- "khronos-egl",
  "log",
  "mln-rs-builtins",
- "mln-rs-d3d12",
  "mln-rs-engine",
  "mln-rs-gfx",
- "mln-rs-gl",
- "mln-rs-image-diff",
- "mln-rs-mtl",
  "mln-rs-runtime",
  "mln-rs-style",
- "mln-rs-vulkan",
- "mln-rs-webgpu",
- "naga",
- "objc2 0.6.5",
- "objc2-foundation 0.3.2",
- "objc2-metal 0.3.2",
  "parking_lot",
- "serde_json",
- "wgpu",
 ]
 
 [[package]]
