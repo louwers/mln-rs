@@ -3,19 +3,19 @@ use geometry::Point;
 use mln_engine::layer::RasterLayoutVertex;
 use mln_style::tile_id::CanonicalTileID;
 
-use super::with_context;
+use super::with_resources;
 use crate::layers::quads::{StoredQuads, TileMask, mask_quads};
 use crate::layers::segments::SegmentBase;
 
 // gtest: Buckets.RasterBucket
 #[test]
 fn a_masks_quads_go_into_the_stores() {
-    with_context(|_, context| {
-        let quads = StoredQuads::of_mask(context, &mask(&[(1, 0, 0), (1, 1, 1)])).expect("the mask's quads");
+    with_resources(|res| {
+        let quads = StoredQuads::of_mask(res, &mask(&[(1, 0, 0), (1, 1, 1)])).expect("the mask's quads");
         assert_eq!(quads.vertices.count(), 8);
 
         let whole = mask(&[(0, 0, 0)]);
-        assert!(StoredQuads::of_mask(context, &whole).is_none(), "the whole tile draws the tile's quad");
+        assert!(StoredQuads::of_mask(res, &whole).is_none(), "the whole tile draws the tile's quad");
     });
 }
 

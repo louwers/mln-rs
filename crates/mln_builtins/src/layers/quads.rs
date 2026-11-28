@@ -7,8 +7,9 @@ use std::marker::PhantomData;
 
 use geometry::Point;
 use mln_engine::draw::globe::{NORTH_POLE_Y, SOUTH_POLE_Y, tile_mesh};
-use mln_engine::draw::{Context, DrawIndexes, DrawRange, Indexes, SharedIndexes, SharedVertices};
+use mln_engine::draw::{DrawRange, IndexBuffer, Resources, VertexAttribute, VertexBinding, VertexBuffer};
 use mln_engine::layer::RasterLayoutVertex;
+use mln_gfx::AttributeDataType;
 use mln_style::constants::EXTENT;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
@@ -21,6 +22,16 @@ pub(crate) type TileMask = BTreeSet<CanonicalTileID>;
 
 /// The most quads a segment draws: as many as its 16-bit indices reach.
 const SEGMENT_QUADS: usize = MAX_SEGMENT_VERTICES / 4;
+
+/// The attributes of position-only vertices, `[i16; 2]` each.
+const POSITION: &[VertexAttribute] = &[VertexAttribute { name: "pos", format: AttributeDataType::Short2, offset: 0 }];
+
+/// `buffer`'s position-only vertices, `[i16; 2]` each, as the attribute
+/// `pos`.
+#[must_use]
+pub(crate) fn positions(buffer: &VertexBuffer) -> VertexBinding {
+    VertexBinding::new(buffer, size_of::<[i16; 2]>() as u32, POSITION)
+}
 
 /// The tile's four corners, as position-only vertices (`a_pos`).
 #[must_use]
@@ -53,8 +64,8 @@ pub(crate) fn raster_vertices() -> Vec<RasterLayoutVertex> {
 }
 
 /// The draw calls that draw `quads` quads that are in the vertex buffer,
-/// one after the other, from the context's quad indexes
-/// ([`Context::quad_indexes`]).
+/// one after the other, from the shared quad indexes
+/// ([`Resources::quad_indexes`]).
 #[must_use]
 pub(crate) fn quads_ranges(quads: usize) -> Vec<DrawRange> {
     (0..quads)
@@ -66,21 +77,21 @@ pub(crate) fn quads_ranges(quads: usize) -> Vec<DrawRange> {
         .collect()
 }
 
-/// Quads in the context's stores, and the draw calls that draw them.
+/// Quads' vertex and index buffers, and the draw calls that draw them.
 pub(crate) struct StoredQuads {
-    pub(crate) vertices: SharedVertices,
-    pub(crate) indexes: SharedIndexes,
+    pub(crate) vertices: VertexBuffer,
+    pub(crate) indexes: IndexBuffer,
     pub(crate) ranges: Vec<DrawRange>,
 }
 
 impl StoredQuads {
-    /// The quads of `mask` in `context`'s stores; `None` where it keeps
+    /// The quads of `mask`, made through `res`; `None` where it keeps
     /// the whole tile, which draws its quad, or nothing.
-    pub(crate) fn of_mask(context: &mut Context, mask: &TileMask) -> Option<StoredQuads> {
+    pub(crate) fn of_mask(res: &mut Resources<'_>, mask: &TileMask) -> Option<StoredQuads> {
         let (vertices, indices, segments) = mask_quads(mask);
         (!vertices.is_empty()).then(|| StoredQuads {
-            vertices: context.add_vertices(vertices),
-            indexes: context.add_indexes(Indexes::new(indices)),
+            vertices: res.vertices(&vertices),
+            indexes: res.indexes(&indices),
             ranges: segments.iter().map(SegmentBase::range).collect(),
         })
     }
@@ -109,13 +120,13 @@ pub(crate) fn mask_quads(mask: &TileMask) -> (Vec<RasterLayoutVertex>, Vec<u16>,
 }
 
 /// The pole-capped globe grid for the parts of a tile its mask keeps, as
-/// position + texture-position vertices, in the context's stores. Each part
+/// position + texture-position vertices, in GPU buffers. Each part
 /// is gridded like the tile it stands in for, so it meets that tile's
 /// neighbours edge to edge; texture positions stay inside the tile so the
 /// pole rows sample the tile's edge.
 pub(crate) struct GlobeTileMesh {
-    pub(crate) vertices: SharedVertices,
-    indices: SharedIndexes,
+    pub(crate) vertices: VertexBuffer,
+    pub(crate) indexes: IndexBuffer,
     pub(crate) ranges: Vec<DrawRange>,
 }
 
@@ -128,25 +139,19 @@ pub(crate) struct GlobeMeshData<V> {
 
 impl GlobeTileMesh {
     /// The mesh of the parts of the tile `canonical` that `mask` keeps, of
-    /// `layout_vertex`'s vertices, in `context`'s stores.
+    /// `layout_vertex`'s vertices, made through `res`.
     fn new<V: bytemuck::Pod>(
-        context: &mut Context,
+        res: &mut Resources<'_>,
         canonical: &CanonicalTileID,
         mask: &TileMask,
         layout_vertex: fn(Point<i16>, Point<u16>) -> V,
     ) -> Self {
         let GlobeMeshData { vertices, indices, segments } = globe_mesh_data(canonical, mask, layout_vertex);
         GlobeTileMesh {
-            vertices: context.add_vertices(vertices),
-            indices: context.add_indexes(Indexes::new(indices)),
+            vertices: res.vertices(&vertices),
+            indexes: res.indexes(&indices),
             ranges: segments.iter().map(SegmentBase::range).collect(),
         }
-    }
-
-    /// The mesh's indexes, for a draw that shares them.
-    #[must_use]
-    pub(crate) fn indexes(&self) -> DrawIndexes {
-        DrawIndexes::Shared(self.indices.clone())
     }
 }
 
@@ -209,10 +214,10 @@ impl<V: bytemuck::Pod> GlobeTileMeshCache<V> {
     }
 
     /// The mesh of the parts of the tile `canonical` that `mask` keeps, of
-    /// `layout_vertex`'s vertices, which `context`'s stores keep.
+    /// `layout_vertex`'s vertices, made through `res`.
     pub(crate) fn get(
         &mut self,
-        context: &mut Context,
+        res: &mut Resources<'_>,
         canonical: &CanonicalTileID,
         mask: &TileMask,
         layout_vertex: fn(Point<i16>, Point<u16>) -> V,
@@ -228,10 +233,10 @@ impl<V: bytemuck::Pod> GlobeTileMeshCache<V> {
             self.meshes.remove(&oldest);
         }
         self.uses += 1;
-        let entry = self.meshes.entry(key).or_insert_with(|| Entry {
-            mesh: GlobeTileMesh::new(context, canonical, mask, layout_vertex),
-            last_use: 0,
-        });
+        let entry = self
+            .meshes
+            .entry(key)
+            .or_insert_with(|| Entry { mesh: GlobeTileMesh::new(res, canonical, mask, layout_vertex), last_use: 0 });
         entry.last_use = self.uses;
         &entry.mesh
     }

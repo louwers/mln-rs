@@ -22,7 +22,7 @@ use crate::camera::View;
 use crate::draw::context::Context;
 use crate::draw::draws::{DrawOrder, Draws, Group, LayerFrame, LendAt, Lent};
 use crate::draw::resources::Resources;
-use crate::draw::store::SharedTexture;
+use crate::draw::store::Texture;
 use crate::geo::ScreenCoordinate;
 use crate::layer::bucket::ErasedBucket;
 use crate::layer::layer_drawing::{ChangedBuckets, TileMap};
@@ -421,7 +421,7 @@ impl<L: Layer> PrepareCx<'_, '_, L> {
     /// target's pass before the layer's draws. A layer reads the targets only
     /// in the map's frame, for its draws over the map: `None` in a drape,
     /// and, with a warning, for a name that the frame has no target of.
-    pub fn read_target(&mut self, name: &str) -> Option<SharedTexture> {
+    pub fn read_target(&mut self, name: &str) -> Option<Texture> {
         self.targets.as_deref_mut()?.read(&self.base.style.base().id, name)
     }
 }

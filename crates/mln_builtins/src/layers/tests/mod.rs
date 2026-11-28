@@ -13,12 +13,11 @@ mod raster_quads_test;
 mod sort_key_test;
 mod terrain_labels_test;
 
-/// Runs `f` with the `Gpu` of a headless WebGPU backend and a context over
-/// it, which it then tears down. Skipped where no WebGPU adapter is
-/// available unless `MLN_RENDER_BACKEND` asks for `webgpu`.
-fn with_context(f: impl FnOnce(&mut dyn mln_gfx::gpu::Gpu, &mut mln_engine::draw::Context)) {
+/// Runs `f` with resources over the `Gpu` of a headless WebGPU backend,
+/// which it then tears down. Skipped where no WebGPU adapter is available
+/// unless `MLN_RENDER_BACKEND` asks for `webgpu`.
+fn with_resources(f: impl FnOnce(&mut mln_engine::draw::Resources<'_>)) {
     use mln_gfx::RendererBackend as _;
-    use mln_gfx::gpu::Gpu as _;
     let requested = std::env::var("MLN_RENDER_BACKEND").is_ok_and(|backend| backend.eq_ignore_ascii_case("webgpu"));
     let device = match mln_webgpu::Device::new(None) {
         Ok(device) => device,
@@ -29,8 +28,5 @@ fn with_context(f: impl FnOnce(&mut dyn mln_gfx::gpu::Gpu, &mut mln_engine::draw
         Err(error) => panic!("WebGPU device: {error}"),
     };
     let mut backend = mln_webgpu::RendererBackend::new(&device);
-    let gpu = backend.gpu();
-    let mut context = mln_engine::draw::Context::new(*gpu.caps(), 1.0);
-    f(gpu, &mut context);
-    context.tear_down(gpu);
+    mln_engine::draw::Resources::with_test_resources(backend.gpu(), f);
 }

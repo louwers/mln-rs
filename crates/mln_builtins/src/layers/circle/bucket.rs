@@ -28,6 +28,8 @@ pub(crate) struct CircleLayoutVertex {
     pub(crate) a1: [i16; 2],
 }
 
+mln_engine::vertex_attributes!(CircleLayoutVertex { a1 => "pos": Short2 });
+
 #[derive(Clone, Default, mln_wire::Wire)]
 pub(crate) struct CircleBucket {
     pub(crate) vertices: GeometryVec<CircleLayoutVertex>,

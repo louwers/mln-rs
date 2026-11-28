@@ -1,13 +1,10 @@
-use std::mem::offset_of;
-
 use geometry::Point;
 use glam::Vec2;
 use mln_engine::camera::{TileCoordinate, TileProjector};
 use mln_engine::draw::ground::{FrameGround, StandingDraw, TileGround};
 use mln_engine::draw::projection::{TileTransform, globe_extrude_scale, tile_projection};
 use mln_engine::draw::{
-    Draw, DrawGeometry, Draws, LayerFrame, RenderPass, RenderTile, SharedAttribute, Textures, Uniforms,
-    VertexAttributeArray, refresh_paint_attributes,
+    Draw, Draws, LayerFrame, MeshDesc, RenderPass, RenderTile, Textures, VertexBinding, refresh_paint_attributes,
 };
 use mln_engine::layer::binders::PaintBinders as _;
 use mln_engine::layer::{
@@ -16,7 +13,7 @@ use mln_engine::layer::{
 };
 use mln_engine::tile::OverscaledTileID;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
+use mln_gfx::{ColorMode, CullFaceMode, DrawMode};
 use mln_style::color::Color;
 use mln_style::expression::EvaluationContext;
 use mln_style::geo::WrapMode;
@@ -214,37 +211,24 @@ impl Layer for RenderCircleLayer {
         }
         let (vertices, indexes) =
             (bucket_vertices(geometry, &bucket.vertices)?, bucket_indexes(geometry, &bucket.triangles)?);
-        let context = &mut *cx.res.context;
-        let paint =
-            paint_vertices(context, geometry, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state());
-        let mut uniforms = Uniforms::default();
-        let mut attrs = VertexAttributeArray::new();
-        binders.bind(&cx.values.evaluated.paint, paint.as_ref(), &mut attrs, &mut uniforms);
-        attrs.set_shared(
-            "pos",
-            SharedAttribute::new(
-                vertices,
-                AttributeDataType::Short2,
-                offset_of!(CircleLayoutVertex, a1) as u32,
-                size_of::<CircleLayoutVertex>() as u32,
-            ),
-        );
+        let res = &mut cx.res;
+        let buffer = &binders.interleaved_vertex_buffer;
+        let paint = paint_vertices(res, geometry, buffer, binders.depends_on_feature_state());
+        let paint = binders.paint(&cx.values.evaluated.paint, paint.as_ref());
         let vertex_count = if bucket.segments.is_empty() { 0 } else { bucket.vertices.len() };
-        let shader = context.shader_key(&programs::CIRCLE, uniforms, cx.base.projection_variant);
-        let mesh = cx.res.mesh(
+        let shader = res.shader_key(&programs::CIRCLE, paint.uniforms, cx.base.projection_variant);
+        let mesh = res.mesh(MeshDesc {
             shader,
-            ColorMode::alpha_blended(),
-            CullFaceMode::disabled(),
-            DrawGeometry {
-                vertices: attrs,
-                vertex_count,
-                mode: DrawMode::Triangles(),
-                indexes: indexes.into(),
-                ranges: bucket.segments.iter().map(SegmentBase::range).collect(),
-                instances: None,
-            },
-            Textures::default(),
-        );
+            color_mode: ColorMode::alpha_blended(),
+            cull_face_mode: CullFaceMode::disabled(),
+            mode: DrawMode::Triangles(),
+            vertices: [VertexBinding::of::<CircleLayoutVertex>(&vertices)].into_iter().chain(paint.vertices).collect(),
+            vertex_count,
+            instances: None,
+            indexes,
+            ranges: bucket.segments.iter().map(SegmentBase::range).collect(),
+            textures: Textures::default(),
+        });
         Some(StandingDraw::new(mesh))
     }
 
@@ -279,15 +263,15 @@ impl Layer for RenderCircleLayer {
             let Some(draw) = entry.value.as_mut() else {
                 continue;
             };
-            let context = &mut *cx.res.context;
-            refresh_paint_attributes(&draw.mesh, context, changes, |context, attrs| {
+            let res = &mut cx.res;
+            refresh_paint_attributes(&draw.mesh, res, changes, |res| {
                 let geometry = render_data.geometry();
                 let buffer = &binders.interleaved_vertex_buffer;
-                let paint = paint_vertices(context, geometry, buffer, binders.depends_on_feature_state());
-                binders.bind(evaluated, paint.as_ref(), attrs, &mut Uniforms::default());
+                let paint = paint_vertices(res, geometry, buffer, binders.depends_on_feature_state());
+                binders.paint(evaluated, paint.as_ref()).vertices
             });
-            draw.stand(context, ground, tile_id.to_unwrapped(), "ground_height", &bucket.centers);
-            draw.mesh.set_texture(context, GROUND_DEPTH_SLOT, ground.and_then(FrameGround::depth));
+            draw.stand(res, ground, tile_id.to_unwrapped(), "ground_height", &bucket.centers);
+            draw.mesh.set_texture(res, GROUND_DEPTH_SLOT, ground.and_then(FrameGround::depth));
             let (draw_ubo, projection) = Self::uniforms(layer, &tile_id, binders, cx.frame);
             // The draws keep the order they're pushed in, the tiles'.
             out.main().push_at(&draw.mesh, tile_id, &projection, Draw::DEFAULT, draw_ubo);

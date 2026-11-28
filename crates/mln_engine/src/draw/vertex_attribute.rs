@@ -12,31 +12,31 @@ use mln_gfx::shaders::bindings::MAX_ATTRIBUTES;
 use crate::draw::buffer::Buffer;
 use crate::draw::context::Context;
 use crate::draw::upload::{AttributeBinding, AttributeDescriptor};
-use crate::draw::vertices::{SharedVertices, Vertices};
+use crate::draw::vertices::{VertexBuffer, Vertices};
 
 /// Where an attribute reads vertices of the context's store: at `offset`
 /// in each of `stride` bytes, from the vertex `vertex_offset` on, as
 /// `data_type`.
 #[derive(Clone)]
-pub struct SharedAttribute {
-    pub vertices: SharedVertices,
+pub(crate) struct SharedAttribute {
+    pub(crate) vertices: VertexBuffer,
     pub(crate) data_type: AttributeDataType,
-    pub offset: u32,
+    pub(crate) offset: u32,
     pub(crate) vertex_offset: u32,
-    pub stride: u32,
+    pub(crate) stride: u32,
 }
 
 impl SharedAttribute {
     /// The attribute that reads `vertices` at `offset` in each of `stride`
     /// bytes, from the first vertex on, as `data_type`.
     #[must_use]
-    pub fn new(vertices: SharedVertices, data_type: AttributeDataType, offset: u32, stride: u32) -> Self {
+    pub(crate) fn new(vertices: VertexBuffer, data_type: AttributeDataType, offset: u32, stride: u32) -> Self {
         SharedAttribute { vertices, data_type, offset, vertex_offset: 0, stride }
     }
 
     /// The attribute, reading from the vertex `vertex_offset` on.
     #[must_use]
-    pub fn starting_at(self, vertex_offset: u32) -> Self {
+    pub(crate) fn starting_at(self, vertex_offset: u32) -> Self {
         SharedAttribute { vertex_offset, ..self }
     }
 }
@@ -49,28 +49,19 @@ pub(crate) enum OwnValues {
 }
 
 /// What a vertex attribute reads.
-pub(crate) enum VertexAttribute {
+pub(crate) enum AttributeSource {
     /// Values of its own, of `data_type`, `count` of them.
     Own { data_type: AttributeDataType, count: usize, values: OwnValues },
     /// Vertices of the context's store.
     Shared(SharedAttribute),
 }
 
-impl VertexAttribute {
+impl AttributeSource {
     /// The number of values the attribute reads.
     pub(crate) fn count(&self) -> usize {
         match self {
-            VertexAttribute::Own { count, .. } => *count,
-            VertexAttribute::Shared(shared) => shared.vertices.count(),
-        }
-    }
-
-    /// Where the attribute reads vertices of the context's store, if it
-    /// does.
-    pub(crate) fn shared(&self) -> Option<&SharedAttribute> {
-        match self {
-            VertexAttribute::Shared(shared) => Some(shared),
-            VertexAttribute::Own { .. } => None,
+            AttributeSource::Own { count, .. } => *count,
+            AttributeSource::Shared(shared) => shared.vertices.count(),
         }
     }
 
@@ -79,8 +70,8 @@ impl VertexAttribute {
     /// or updated since theirs.
     pub(crate) fn needs_upload(&self, context: &Context) -> bool {
         match self {
-            VertexAttribute::Own { values, .. } => matches!(values, OwnValues::Bytes(_)),
-            VertexAttribute::Shared(shared) => context.vertices(&shared.vertices).is_some_and(Vertices::needs_upload),
+            AttributeSource::Own { values, .. } => matches!(values, OwnValues::Bytes(_)),
+            AttributeSource::Shared(shared) => context.vertices(&shared.vertices).is_some_and(Vertices::needs_upload),
         }
     }
 
@@ -93,7 +84,7 @@ impl VertexAttribute {
         context: &mut Context,
     ) -> Result<Option<AttributeBinding>, GpuError> {
         match self {
-            VertexAttribute::Own { data_type, values, .. } => {
+            AttributeSource::Own { data_type, values, .. } => {
                 let buffer = match values {
                     OwnValues::Buffer(buffer) => buffer.id(),
                     OwnValues::Bytes(bytes) => {
@@ -111,7 +102,7 @@ impl VertexAttribute {
                     held: None,
                 }))
             }
-            VertexAttribute::Shared(shared) => {
+            AttributeSource::Shared(shared) => {
                 let Some(buffer) = context.upload_vertices(gpu, &shared.vertices)? else {
                     return Ok(None);
                 };
@@ -171,8 +162,8 @@ impl FromIterator<&'static str> for Uniforms {
 /// Vertex attributes by the names of the program's attributes they bind to,
 /// each in a slot of the array, which `slot_of` finds.
 #[derive(Default)]
-pub struct VertexAttributeArray {
-    attrs: [Option<Box<(&'static str, VertexAttribute)>>; MAX_ATTRIBUTES],
+pub(crate) struct VertexAttributeArray {
+    attrs: [Option<Box<(&'static str, AttributeSource)>>; MAX_ATTRIBUTES],
     /// Which names its slots hold ([`layout`](Self::layout)).
     layout: u64,
 }
@@ -186,7 +177,7 @@ fn new_layout() -> u64 {
 impl VertexAttributeArray {
     /// An array without attributes.
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
@@ -203,26 +194,14 @@ impl VertexAttributeArray {
         self.attrs.iter().position(|attr| attr.as_ref().is_some_and(|attr| attr.0 == name))
     }
 
-    #[must_use]
-    pub(crate) fn get(&self, name: &str) -> Option<&VertexAttribute> {
-        self.at(self.slot_of(name)?)
-    }
-
-    /// Where the attribute `name` reads vertices of the context's store, if
-    /// the array has it and it does.
-    #[must_use]
-    pub fn shared(&self, name: &str) -> Option<&SharedAttribute> {
-        self.get(name)?.shared()
-    }
-
     /// The attribute in `slot`.
     #[must_use]
-    pub(crate) fn at(&self, slot: usize) -> Option<&VertexAttribute> {
+    pub(crate) fn at(&self, slot: usize) -> Option<&AttributeSource> {
         self.attrs.get(slot)?.as_ref().map(|attr| &attr.1)
     }
 
     /// The attribute in `slot`, to change.
-    pub(crate) fn at_mut(&mut self, slot: usize) -> Option<&mut VertexAttribute> {
+    pub(crate) fn at_mut(&mut self, slot: usize) -> Option<&mut AttributeSource> {
         self.attrs.get_mut(slot)?.as_mut().map(|attr| &mut attr.1)
     }
 
@@ -239,47 +218,56 @@ impl VertexAttributeArray {
     /// `data_type`.
     pub(crate) fn set_own(&mut self, name: &'static str, data_type: AttributeDataType, bytes: Vec<u8>) {
         let count = bytes.len().checked_div(data_type.stride()).unwrap_or(0);
-        self.set(name, VertexAttribute::Own { data_type, count, values: OwnValues::Bytes(bytes) });
+        self.set(name, AttributeSource::Own { data_type, count, values: OwnValues::Bytes(bytes) });
     }
 
     /// Makes the attribute `name` read vertices of the context's store as
     /// `shared` says.
-    pub fn set_shared(&mut self, name: &'static str, shared: SharedAttribute) {
-        self.set(name, VertexAttribute::Shared(shared));
+    pub(crate) fn set_shared(&mut self, name: &'static str, shared: SharedAttribute) {
+        let _slot = self.set(name, AttributeSource::Shared(shared));
     }
 
     /// Makes `attribute` the one of `name`, in its slot or the first empty
-    /// one.
-    fn set(&mut self, name: &'static str, attribute: VertexAttribute) {
-        if let Some(slot) = self.slot_of(name).and_then(|slot| self.attrs.get_mut(slot)) {
-            *slot = Some(Box::new((name, attribute)));
-            return;
+    /// one, and returns the slot.
+    fn set(&mut self, name: &'static str, attribute: AttributeSource) -> Option<usize> {
+        if let Some(slot) = self.slot_of(name) {
+            if let Some(Some(held)) = self.attrs.get_mut(slot) {
+                held.1 = attribute;
+            }
+            return Some(slot);
         }
-        let slot = self.attrs.iter_mut().find(|slot| slot.is_none());
+        let slot = self.attrs.iter().position(Option::is_none);
         debug_assert!(slot.is_some(), "more attributes than a shader has");
-        if let Some(slot) = slot {
-            *slot = Some(Box::new((name, attribute)));
-            self.layout = new_layout();
-        }
+        let slot = slot?;
+        self.attrs[slot] = Some(Box::new((name, attribute)));
+        self.layout = new_layout();
+        Some(slot)
     }
 
-    /// Where the attributes that read vertices of the context's store read
-    /// them, to change.
-    pub fn shared_mut(&mut self) -> impl Iterator<Item = &mut SharedAttribute> {
-        self.attrs.iter_mut().filter_map(|attr| match &mut attr.as_mut()?.1 {
-            VertexAttribute::Shared(shared) => Some(shared),
-            VertexAttribute::Own { .. } => None,
-        })
+    /// Makes `attributes` the array's, in place of what it had: those of
+    /// the names it has stay in their slots, and the others go.
+    pub(crate) fn replace(&mut self, attributes: impl IntoIterator<Item = (&'static str, SharedAttribute)>) {
+        let mut kept = [false; MAX_ATTRIBUTES];
+        for (name, shared) in attributes {
+            if let Some(slot) = self.set(name, AttributeSource::Shared(shared)) {
+                kept[slot] = true;
+            }
+        }
+        for (slot, kept) in self.attrs.iter_mut().zip(kept) {
+            if !kept && slot.take().is_some() {
+                self.layout = new_layout();
+            }
+        }
     }
 
     /// Whether an attribute has values of its own, in a buffer the draw
     /// owns.
     pub(crate) fn has_own(&self) -> bool {
-        self.iter().any(|(_, attr)| matches!(attr, VertexAttribute::Own { .. }))
+        self.iter().any(|(_, attr)| matches!(attr, AttributeSource::Own { .. }))
     }
 
     /// The attributes, with their names.
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (&'static str, &VertexAttribute)> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&'static str, &AttributeSource)> {
         self.attrs.iter().filter_map(|attr| attr.as_ref().map(|attr| (attr.0, &attr.1)))
     }
 }

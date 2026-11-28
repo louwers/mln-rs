@@ -1,6 +1,6 @@
 //! The renderer's textures. Each is a [`Texture2D`] in the context's store,
 //! which its owner and the draws that bind it hold as a
-//! [`SharedTexture`](crate::draw::store::SharedTexture).
+//! [`Texture`](crate::draw::store::Texture).
 
 use std::rc::Rc;
 
@@ -17,7 +17,7 @@ use crate::draw::resources::{Device, SharedGpuTexture};
 /// [`Gpu`](mln_gfx::gpu::Gpu), which the texture lets go of when it
 /// replaces it or drops, and which bindings made of it hold until they go. The context changes it, and lends it to set up as a
 /// `TextureMut`.
-pub struct Texture2D {
+pub(crate) struct Texture2D {
     texture: Option<SharedGpuTexture>,
     size: Size,
     format: TextureFormat,
@@ -48,7 +48,7 @@ impl Texture2D {
 
     /// The texture's size, in texels.
     #[must_use]
-    pub fn size(&self) -> Size {
+    pub(crate) fn size(&self) -> Size {
         self.size
     }
 
@@ -188,7 +188,7 @@ impl Texture2D {
 
 /// A texture of the context's store, to set up: changes that replace its
 /// backend's texture let go of that.
-pub struct TextureMut<'a> {
+pub(crate) struct TextureMut<'a> {
     texture: &'a mut Texture2D,
 }
 
@@ -205,7 +205,7 @@ impl<'a> TextureMut<'a> {
 
     /// Sets the format the texture is made with. A texture made with
     /// another format goes.
-    pub fn set_format(&mut self, format: TextureFormat) {
+    pub(crate) fn set_format(&mut self, format: TextureFormat) {
         self.texture.set_format(format);
     }
 
@@ -225,7 +225,7 @@ impl<'a> TextureMut<'a> {
     }
 
     /// Sets how shaders sample the texture, with an anisotropy of at least 1.
-    pub fn set_sampler(&mut self, sampler: SamplerState) {
+    pub(crate) fn set_sampler(&mut self, sampler: SamplerState) {
         let texture = &mut *self.texture;
         let sampler = SamplerState { max_anisotropy: sampler.max_anisotropy.max(1), ..sampler };
         if sampler != texture.sampler {
@@ -236,7 +236,7 @@ impl<'a> TextureMut<'a> {
 
     /// Sets the RGBA image the next upload writes, and the texture's size to
     /// the image's.
-    pub fn set_image(&mut self, image: Option<Rc<PremultipliedImage>>) {
+    pub(crate) fn set_image(&mut self, image: Option<Rc<PremultipliedImage>>) {
         if let Some(image) = &image {
             self.set_size(texture_size(image.size));
             self.set_format(TextureFormat::Rgba8Unorm);

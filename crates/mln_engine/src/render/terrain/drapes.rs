@@ -60,7 +60,7 @@ use crate::camera::View;
 use crate::draw::context::Context;
 use crate::draw::draws::{DrawGroups, DrawOrder, Draws};
 use crate::draw::resources::{GpuTexture, attachment_bytes};
-use crate::draw::store::SharedTexture;
+use crate::draw::store::Texture;
 use crate::layer::layer_drawing::ChangedBuckets;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::layer::render_layer::{DrapeTile, FrameSourceTiles, RenderLayer};
@@ -193,7 +193,7 @@ impl DrapeKey {
 struct StackDrape {
     /// The texture, and its side in texels, while the stack's layers draw
     /// something in the tile.
-    texture: Option<(SharedTexture, u32)>,
+    texture: Option<(Texture, u32)>,
     /// What the drape keeps of the stack's layers, in drawing order.
     layers: Vec<DrapeLayer>,
     /// What it kept of the layers in the last frame that this frame's
@@ -492,7 +492,7 @@ impl Drapes {
 
     /// The texture of the drape of `stack` of the terrain tile `tile`:
     /// `None` where the stack draws nothing in the tile.
-    pub(crate) fn texture(&self, stack: usize, tile: &OverscaledTileID) -> Option<&SharedTexture> {
+    pub(crate) fn texture(&self, stack: usize, tile: &OverscaledTileID) -> Option<&Texture> {
         let drape = self.drapes.iter().find(|drape| drape.tile == *tile)?;
         drape.stacks.get(stack)?.texture.as_ref().map(|(texture, _)| texture)
     }
@@ -707,7 +707,7 @@ impl Drapes {
 /// A drape's texture of `side` texels a side, made in `context`'s store,
 /// mipmapped and sampled through its mips, anisotropically, clamped to its
 /// edges.
-fn drape_texture(context: &mut Context, side: u32) -> SharedTexture {
+fn drape_texture(context: &mut Context, side: u32) -> Texture {
     context.add_texture_with(|texture| {
         texture.set_size(Size::new(side, side));
         texture.set_format(COLOR);

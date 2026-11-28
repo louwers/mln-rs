@@ -25,9 +25,9 @@ use crate::draw::indexes::Indexes;
 use crate::draw::objects::{DrawGeometry, Mesh, Textures};
 use crate::draw::projection::zero_to_one_clip_z;
 use crate::draw::range::DrawRange;
-use crate::draw::store::SharedIndexes;
+use crate::draw::store::IndexBuffer;
 use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
-use crate::draw::vertices::SharedVertices;
+use crate::draw::vertices::VertexBuffer;
 use crate::geo::lat_range;
 use crate::layer::layer_drawing::TileMap;
 use crate::log_target;
@@ -45,9 +45,9 @@ struct SharedMesh {
     skirts: bool,
     /// Whether it has a cap to the north and to the south pole.
     poles: [bool; 2],
-    vertices: SharedVertices,
+    vertices: VertexBuffer,
     vertex_count: usize,
-    indexes: SharedIndexes,
+    indexes: IndexBuffer,
     index_count: usize,
 }
 
@@ -204,10 +204,14 @@ impl TerrainDraws {
                     let mesh = &meshes[surface_mesh];
                     let mesh = || mesh_objects(context, &shader, ColorMode::alpha_blended(), mesh, cull_face_mode);
                     let draw = entry.value.get_or_insert_with(mesh);
-                    draw.set_texture(context, DRAPE_SLOT, Some(&drape));
+                    if let Some(objects) = context.mesh_mut(draw) {
+                        objects.set_texture(DRAPE_SLOT, Some(&drape));
+                    }
                     draw
                 };
-                draw.set_texture(context, GROUND_DEM_SLOT, Some(dem_texture));
+                if let Some(objects) = context.mesh_mut(draw) {
+                    objects.set_texture(GROUND_DEM_SLOT, Some(dem_texture));
+                }
                 // Nearest the center first: one draw of each tile.
                 let frame_draw = Draw {
                     order: index as i64,

@@ -10,13 +10,13 @@ use mln_engine::camera::{Projection, ProjectionData};
 use mln_engine::draw::ground::FrameGround;
 use mln_engine::draw::projection::{TileTransform, tile_projection};
 use mln_engine::draw::{
-    Context, Draw, DrawGeometry, Draws, LayerFrame, Mesh, RenderPass, RenderTile, SharedAttribute, SharedVertices,
-    TypedVertices, Uniforms, VertexAttributeArray, copy_shared_attributes,
+    Draw, Draws, LayerFrame, Mesh, MeshDesc, RenderPass, RenderTile, Resources, Uniforms, VertexAttribute,
+    VertexBinding, VertexBuffer,
 };
-use mln_engine::layer::binders::PaintBinders as _;
+use mln_engine::layer::binders::{PaintAttributes, PaintBinders as _};
 use mln_engine::layer::{
     BucketChanges, BucketGeometry, EvaluateCx, EvaluatedLayer, Evaluation, Features, FrameTile, Layer, LayerValues,
-    OnTerrain, PrepareCx, TileOrder, bucket_vertices, copied_indexes, paint_vertices,
+    OnTerrain, PrepareCx, TileOrder, bucket_vertices, paint_vertices,
 };
 use mln_engine::tile::{OverscaledTileID, UnwrappedTileID};
 use mln_gfx::projection_variant::ProjectionVariant;
@@ -112,153 +112,148 @@ pub(crate) fn screen_matrix(translation: [f32; 2]) -> DMat4 {
         * DMat4::from_translation(DVec3::new(f64::from(translation[0]), f64::from(translation[1]) - extent, 0.0))
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the bucket's buffers and the layer's paint properties, and the attributes and uniforms they fill"
-)]
-fn update_tile_attributes(
-    context: &mut Context,
-    geometry: &BucketGeometry,
-    buffer: &Buffer,
-    layer_id: &str,
-    is_text: bool,
-    paint_props: &PaintProperties,
-    evaluated: &SymbolPaintProperties::PossiblyEvaluated,
-    attribs: &mut VertexAttributeArray,
-    uniforms: &mut Uniforms,
-) -> PlacedVertices {
-    set_binder_attributes(context, geometry, is_text, paint_props, evaluated, attribs, uniforms);
-    let mut placed = PlacedVertices::default();
-    set_layout_attributes(geometry, buffer, attribs);
-    set_projected_pos_attribute(context, buffer, layer_id, attribs, &mut placed.projected);
-    set_fade_opacity_attribute(context, buffer, attribs, &mut placed.opacity);
-    set_elevation_attribute(context, geometry, buffer, attribs, &mut placed.elevation);
-    placed
+/// The attributes of the layout vertices ([`SymbolLayoutVertex`]).
+///
+/// [`SymbolLayoutVertex`]: crate::layers::symbol::bucket::SymbolLayoutVertex
+const LAYOUT: &[VertexAttribute] = &[
+    VertexAttribute { name: "pos_offset", format: AttributeDataType::Short4, offset: 0 },
+    VertexAttribute { name: "data", format: AttributeDataType::UShort4, offset: 8 },
+    VertexAttribute { name: "pixeloffset", format: AttributeDataType::Short4, offset: 16 },
+    VertexAttribute { name: "tex_origin", format: AttributeDataType::UShort2, offset: 24 },
+];
+/// The symbols' heights: the layout vertices' `symbol-height-offset`s, or
+/// those placement gave them over the ground, an `f32` a vertex.
+const HEIGHT_OFFSET: &[VertexAttribute] =
+    &[VertexAttribute { name: "height_offset", format: AttributeDataType::Float, offset: 28 }];
+const ELEVATION: &[VertexAttribute] =
+    &[VertexAttribute { name: "height_offset", format: AttributeDataType::Float, offset: 0 }];
+const PROJECTED_POS: &[VertexAttribute] =
+    &[VertexAttribute { name: "projected_pos", format: AttributeDataType::Float4, offset: 0 }];
+const FADE_OPACITY: &[VertexAttribute] =
+    &[VertexAttribute { name: "fade_opacity", format: AttributeDataType::Float, offset: 0 }];
+
+/// The size of a layout vertex.
+const LAYOUT_SIZE: u32 = size_of::<crate::layers::symbol::bucket::SymbolLayoutVertex>() as u32;
+
+/// The vertices a draw of a tile reads, which the draws of the tile that
+/// read the same attributes share: of the bucket's paint values and layout
+/// vertices, and those that placement lays out, of the symbols' positions
+/// along lines or at variable anchors, of their opacities and of their
+/// heights.
+#[derive(Clone, Default)]
+struct SymbolVertices {
+    paint: Option<VertexBinding>,
+    layout: Option<VertexBinding>,
+    /// The heights: the layout vertices', or `elevation`'s.
+    height: Option<VertexBinding>,
+    projected: Option<VertexBinding>,
+    opacity: Option<VertexBinding>,
+    /// The heights over the ground, where placement gives them.
+    elevation: Option<VertexBuffer>,
+}
+
+impl SymbolVertices {
+    /// The vertices of `buffer`'s symbols, of the layer `layer_id`, through
+    /// `res`, with the uniforms of the paint properties the program reads
+    /// from them.
+    fn new(
+        res: &mut Resources<'_>,
+        geometry: &BucketGeometry,
+        buffer: &Buffer,
+        layer_id: &str,
+        is_text: bool,
+        paint_props: &PaintProperties,
+        evaluated: &SymbolPaintProperties::PossiblyEvaluated,
+    ) -> (SymbolVertices, Uniforms) {
+        let paint = binder_attributes(res, geometry, is_text, paint_props, evaluated);
+        let mut vertices = SymbolVertices { paint: paint.vertices, ..SymbolVertices::default() };
+        if let Some(layout_data) = bucket_vertices(geometry, &buffer.attribute_data) {
+            vertices.layout = Some(VertexBinding::new(&layout_data, LAYOUT_SIZE, LAYOUT));
+            vertices.height = Some(VertexBinding::new(&layout_data, LAYOUT_SIZE, HEIGHT_OFFSET));
+        }
+        vertices.set_projected_pos(res, buffer, layer_id);
+        vertices.set_fade_opacity(res, buffer);
+        vertices.set_elevation(res, geometry, buffer);
+        (vertices, paint.uniforms)
+    }
+
+    /// What the draws bind of the vertices.
+    fn bindings(&self) -> impl Iterator<Item = &VertexBinding> {
+        [&self.paint, &self.layout, &self.height, &self.projected, &self.opacity].into_iter().flatten()
+    }
+
+    /// Sets the symbols' heights to the heights placement gave them over the
+    /// ground ([`Buffer::elevation_attribute_data`]), or, where it gave none,
+    /// to their `symbol-height-offset`s.
+    fn set_elevation(&mut self, res: &mut Resources<'_>, geometry: &BucketGeometry, buffer: &Buffer) {
+        let elevations = &buffer.elevation_attribute_data;
+        if !elevations.is_empty() {
+            if let Some(elevation) = place(res, elevations, &mut self.elevation) {
+                self.height = Some(VertexBinding::new(&elevation, size_of::<f32>() as u32, ELEVATION));
+            }
+        } else if self.elevation.take().is_some()
+            && let Some(layout_data) = bucket_vertices(geometry, &buffer.attribute_data)
+        {
+            self.height = Some(VertexBinding::new(&layout_data, LAYOUT_SIZE, HEIGHT_OFFSET));
+        }
+    }
+
+    /// Sets the dynamic layout vertices, which placement updates: the
+    /// layer's own when it has them.
+    fn set_projected_pos(&mut self, res: &mut Resources<'_>, buffer: &Buffer, layer_id: &str) {
+        let mut placed = self.projected.as_ref().map(|binding| binding.buffer.clone());
+        if let Some(projected) = place(res, buffer.dynamic_attribute_data_for(layer_id), &mut placed) {
+            let size = size_of::<SymbolDynamicLayoutVertex>() as u32;
+            self.projected = Some(VertexBinding::new(&projected, size, PROJECTED_POS));
+        }
+    }
+
+    /// Sets the opacity vertices, which placement updates.
+    fn set_fade_opacity(&mut self, res: &mut Resources<'_>, buffer: &Buffer) {
+        let mut placed = self.opacity.as_ref().map(|binding| binding.buffer.clone());
+        if let Some(opacity) = place(res, &buffer.opacity_attribute_data, &mut placed) {
+            let size = size_of::<SymbolOpacityVertex>() as u32;
+            self.opacity = Some(VertexBinding::new(&opacity, size, FADE_OPACITY));
+        }
+    }
+}
+
+/// Puts a copy of `vertices`, which placement updates, into `placed`, the
+/// vertices that a draw reads, where they are as many, so that the upload
+/// writes them over their buffer, or else into a buffer of their own, which
+/// `placed` then holds, and which this returns.
+fn place<V: bytemuck::Pod>(
+    res: &mut Resources<'_>,
+    vertices: &[V],
+    placed: &mut Option<VertexBuffer>,
+) -> Option<VertexBuffer> {
+    if placed.as_ref().is_some_and(|buffer| res.update_vertices(buffer, vertices)) {
+        return None;
+    }
+    let buffer = res.dynamic_vertices(vertices);
+    *placed = Some(buffer.clone());
+    Some(buffer)
 }
 
 /// The attributes of the data-driven paint properties.
-fn set_binder_attributes(
-    context: &mut Context,
+fn binder_attributes(
+    res: &mut Resources<'_>,
     geometry: &BucketGeometry,
     is_text: bool,
     paint_props: &PaintProperties,
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
-    attribs: &mut VertexAttributeArray,
-    uniforms: &mut Uniforms,
-) {
+) -> PaintAttributes {
     if is_text {
         let binders = &paint_props.text_binders;
         let buffer = &binders.interleaved_vertex_buffer;
-        let shared = paint_vertices(context, geometry, buffer, binders.depends_on_feature_state());
-        binders.bind(evaluated, shared.as_ref(), attribs, uniforms);
+        let shared = paint_vertices(res, geometry, buffer, binders.depends_on_feature_state());
+        binders.paint(evaluated, shared.as_ref())
     } else {
         let binders = &paint_props.icon_binders;
         let buffer = &binders.interleaved_vertex_buffer;
-        let shared = paint_vertices(context, geometry, buffer, binders.depends_on_feature_state());
-        binders.bind(evaluated, shared.as_ref(), attribs, uniforms);
+        let shared = paint_vertices(res, geometry, buffer, binders.depends_on_feature_state());
+        binders.paint(evaluated, shared.as_ref())
     }
-}
-
-/// The attributes of the layout vertices.
-fn set_layout_attributes(geometry: &BucketGeometry, buffer: &Buffer, attribs: &mut VertexAttributeArray) {
-    let layout_size = size_of::<crate::layers::symbol::bucket::SymbolLayoutVertex>() as u32;
-    let Some(layout_data) = bucket_vertices(geometry, &buffer.attribute_data) else {
-        return;
-    };
-    attribs
-        .set_shared("pos_offset", SharedAttribute::new(layout_data.clone(), AttributeDataType::Short4, 0, layout_size));
-    attribs.set_shared("data", SharedAttribute::new(layout_data.clone(), AttributeDataType::UShort4, 8, layout_size));
-    attribs.set_shared(
-        "pixeloffset",
-        SharedAttribute::new(layout_data.clone(), AttributeDataType::Short4, 16, layout_size),
-    );
-    attribs.set_shared(
-        "tex_origin",
-        SharedAttribute::new(layout_data.clone(), AttributeDataType::UShort2, 24, layout_size),
-    );
-    set_height_offset_attribute(layout_data, attribs);
-}
-
-/// Sets the symbols' heights to the layout vertices' `symbol-height-offset`s,
-/// of `layout_data`.
-fn set_height_offset_attribute(layout_data: SharedVertices, attribs: &mut VertexAttributeArray) {
-    let layout_size = size_of::<crate::layers::symbol::bucket::SymbolLayoutVertex>() as u32;
-    attribs.set_shared("height_offset", SharedAttribute::new(layout_data, AttributeDataType::Float, 28, layout_size));
-}
-
-/// Sets the symbols' heights to the heights placement gave them over the
-/// ground ([`Buffer::elevation_attribute_data`]), into `placed`, or, where
-/// it gave none, to their `symbol-height-offset`s.
-fn set_elevation_attribute(
-    context: &mut Context,
-    geometry: &BucketGeometry,
-    buffer: &Buffer,
-    attribs: &mut VertexAttributeArray,
-    placed: &mut Option<TypedVertices<f32>>,
-) {
-    let elevations = &buffer.elevation_attribute_data;
-    if !elevations.is_empty() {
-        set_placed_attribute(context, attribs, "height_offset", elevations, AttributeDataType::Float, placed);
-    } else if placed.take().is_some()
-        && let Some(layout_data) = bucket_vertices(geometry, &buffer.attribute_data)
-    {
-        set_height_offset_attribute(layout_data, attribs);
-    }
-}
-
-/// Sets the dynamic layout vertices, which placement updates: the layer's
-/// own when it has them.
-fn set_projected_pos_attribute(
-    context: &mut Context,
-    buffer: &Buffer,
-    layer_id: &str,
-    attribs: &mut VertexAttributeArray,
-    placed: &mut Option<TypedVertices<SymbolDynamicLayoutVertex>>,
-) {
-    let vertices = buffer.dynamic_attribute_data_for(layer_id);
-    set_placed_attribute(context, attribs, "projected_pos", vertices, AttributeDataType::Float4, placed);
-}
-
-/// Sets the opacity vertices, which placement updates.
-fn set_fade_opacity_attribute(
-    context: &mut Context,
-    buffer: &Buffer,
-    attribs: &mut VertexAttributeArray,
-    placed: &mut Option<TypedVertices<SymbolOpacityVertex>>,
-) {
-    let vertices = &buffer.opacity_attribute_data;
-    set_placed_attribute(context, attribs, "fade_opacity", vertices, AttributeDataType::Float, placed);
-}
-
-/// Sets attribute `name` of `attribs` to read a copy of `vertices`, which
-/// placement updates, as `type_`: into `placed`, the vertices the attribute
-/// reads, where they are as many, so that the upload writes them over their
-/// buffer, or else into vertices of their own, which `placed` then holds.
-fn set_placed_attribute<V: bytemuck::Pod>(
-    context: &mut Context,
-    attribs: &mut VertexAttributeArray,
-    name: &'static str,
-    vertices: &[V],
-    type_: AttributeDataType,
-    placed: &mut Option<TypedVertices<V>>,
-) {
-    if placed.as_ref().is_some_and(|typed| context.update_vertices(typed, vertices)) {
-        return;
-    }
-    let typed = context.add_dynamic_vertices(vertices);
-    attribs.set_shared(name, SharedAttribute::new(typed.shared().clone(), type_, 0, size_of::<V>() as u32));
-    *placed = Some(typed);
-}
-
-/// The vertices that placement lays out, which the draws of a tile that read
-/// the same attributes share, of their positions along lines or at variable
-/// anchors, of their opacities and of their heights.
-#[derive(Clone, Default)]
-struct PlacedVertices {
-    projected: Option<TypedVertices<SymbolDynamicLayoutVertex>>,
-    opacity: Option<TypedVertices<SymbolOpacityVertex>>,
-    /// The heights over the ground, where placement gives them.
-    elevation: Option<TypedVertices<f32>>,
 }
 
 /// A draw the layer keeps of a tile: the halo or the fill of the text or the
@@ -268,8 +263,8 @@ struct SymbolDraw {
     /// Gives the mesh the textures of its tile's atlases before each frame
     /// draws it.
     atlases: AtlasBinding,
-    /// The vertices placement lays out, which the draw's attributes read.
-    placed: PlacedVertices,
+    /// The vertices it reads.
+    vertices: SymbolVertices,
     data: SymbolDrawData,
     /// Whether placement shows any of the draw's symbols. A draw that shows
     /// none doesn't draw, and doesn't copy the bucket's attributes again
@@ -294,11 +289,10 @@ pub(crate) struct SymbolTile {
     draws: Vec<SymbolDraw>,
 }
 
-/// The size of the texture `mesh` binds at `slot` in `context`,
-/// zero for none.
-fn texture_size(context: &Context, mesh: &Mesh, slot: usize) -> [f32; 2] {
-    mesh.texture(context, slot).and_then(|texture| context.texture(texture)).map_or([0.0, 0.0], |texture| {
-        let size = texture.size();
+/// The size of the texture `mesh` binds at `slot`, zero for none.
+fn texture_size(res: &Resources<'_>, mesh: &Mesh, slot: usize) -> [f32; 2] {
+    mesh.texture(res, slot).map_or([0.0, 0.0], |texture| {
+        let size = res.texture_size(texture);
         [size.width as f32, size.height as f32]
     })
 }
@@ -308,7 +302,7 @@ fn texture_size(context: &Context, mesh: &Mesh, slot: usize) -> [f32; 2] {
 /// attributes (a halo and a fill): their triangles, and the attributes,
 /// which the first of them that is visible copies and the others then read.
 fn refresh_draws(
-    context: &mut Context,
+    res: &mut Resources<'_>,
     draws: &mut [SymbolDraw],
     geometry: &BucketGeometry,
     bucket: &SymbolBucket,
@@ -318,7 +312,7 @@ fn refresh_draws(
 ) {
     let mut source = None;
     for (index, draw) in draws.iter_mut().enumerate() {
-        if refresh_draw(context, draw, geometry, bucket, layer_id, evaluated, refresh, source.is_none()) {
+        if refresh_draw(res, draw, geometry, bucket, layer_id, evaluated, refresh, source.is_none()) {
             source = Some(index);
         }
     }
@@ -326,17 +320,17 @@ fn refresh_draws(
     let (before, rest) = draws.split_at_mut(source);
     let Some((source, after)) = rest.split_first_mut() else { return };
     for draw in before.iter_mut().chain(after) {
-        draw.mesh.share_vertex_attributes(context, &source.mesh);
-        draw.placed = source.placed.clone();
+        draw.mesh.set_vertices(res, source.vertices.bindings());
+        draw.vertices = source.vertices.clone();
     }
 }
 
 /// Copies again what placement, sorting or feature state changed of the
 /// bucket into a draw of it: its triangles, and where `copy_attributes`, its
 /// attributes. Returns whether it copied the attributes.
-#[expect(clippy::too_many_arguments, reason = "the draw and its tile's bucket, what changed of it, and the context")]
+#[expect(clippy::too_many_arguments, reason = "the draw and its tile's bucket, what changed of it, and the resources")]
 fn refresh_draw(
-    context: &mut Context,
+    res: &mut Resources<'_>,
     draw: &mut SymbolDraw,
     geometry: &BucketGeometry,
     bucket: &SymbolBucket,
@@ -376,22 +370,21 @@ fn refresh_draw(
     }
 
     if copy_attributes {
-        let placed = &mut draw.placed;
-        draw.mesh.update_vertex_attributes(context, |attrs, context| {
-            if refresh.dynamic {
-                set_projected_pos_attribute(context, buffer, layer_id, attrs, &mut placed.projected);
-            }
-            if refresh.opacity {
-                set_fade_opacity_attribute(context, buffer, attrs, &mut placed.opacity);
-                set_elevation_attribute(context, geometry, buffer, attrs, &mut placed.elevation);
-            }
-            if refresh.paint
-                && let Some(paint_props) = bucket.paint_properties.get(layer_id)
-            {
-                let uniforms = &mut Uniforms::default();
-                set_binder_attributes(context, geometry, is_text, paint_props, evaluated, attrs, uniforms);
-            }
-        });
+        let vertices = &mut draw.vertices;
+        if refresh.dynamic {
+            vertices.set_projected_pos(res, buffer, layer_id);
+        }
+        if refresh.opacity {
+            vertices.set_fade_opacity(res, buffer);
+            vertices.set_elevation(res, geometry, buffer);
+        }
+        if refresh.paint
+            && let Some(paint_props) = bucket.paint_properties.get(layer_id)
+            && let Some(paint) = binder_attributes(res, geometry, is_text, paint_props, evaluated).vertices
+        {
+            vertices.paint = Some(paint);
+        }
+        draw.mesh.set_vertices(res, vertices.bindings());
     }
 
     if refresh.sort && !buffer.triangles.is_empty() {
@@ -400,7 +393,8 @@ fn refresh_draw(
             None => &buffer.segments,
         };
         let ranges = segments.iter().map(SegmentBase::range).collect();
-        draw.mesh.replace_indexes(context, copied_indexes(&buffer.triangles), ranges);
+        let indexes = res.indexes(&buffer.triangles);
+        draw.mesh.replace_indexes(res, indexes, ranges);
     }
     copy_attributes
 }
@@ -458,7 +452,7 @@ pub(crate) struct RenderSymbolLayer {
 impl RenderSymbolLayer {
     /// The blocks and the projection of `draw`, of the tile `tile_id` and
     /// its `bucket`, of the layer `layer_id` with the values `layer`, in
-    /// `frame`, with the textures of `context`.
+    /// `frame`, with the textures of `res`.
     fn uniforms(
         layer_id: &str,
         layer: &EvaluatedLayer<Symbol>,
@@ -466,7 +460,7 @@ impl RenderSymbolLayer {
         bucket: &SymbolBucket,
         draw: &SymbolDraw,
         frame: &LayerFrame<'_>,
-        context: &Context,
+        res: &Resources<'_>,
     ) -> Option<((SymbolDrawableUBO, SymbolTilePropsUBO), ProjectionUBO)> {
         let state = frame.view;
         let evaluated = &layer.paint;
@@ -548,8 +542,8 @@ impl RenderSymbolLayer {
             matrix: matrix.as_mat4().to_cols_array(),
             label_plane_matrix: label_plane_matrix.as_mat4().to_cols_array(),
             coord_matrix: gl_coord_matrix.as_mat4().to_cols_array(),
-            texsize: texture_size(context, &draw.mesh, TEXTURE_SLOT),
-            texsize_icon: texture_size(context, &draw.mesh, TEXTURE_ICON_SLOT),
+            texsize: texture_size(res, &draw.mesh, TEXTURE_SLOT),
+            texsize_icon: texture_size(res, &draw.mesh, TEXTURE_ICON_SLOT),
             is_text_prop: i32::from(is_text),
             rotate_symbol: i32::from(rotate_in_shader),
             pitch_with_map: i32::from(pitch_with_map),
@@ -599,17 +593,17 @@ impl RenderSymbolLayer {
             let bucket = tile.data().map(|bucket| bucket.bucket);
             debug_assert!(bucket.is_some() || cached.draws.is_empty());
             for draw in cached.draws.iter().filter(|draw| draw.visible) {
-                let Some((blocks, projection)) = bucket
-                    .and_then(|bucket| Self::uniforms(layer_id, layer, &tile_id, bucket, draw, frame, cx.res.context))
+                let Some((blocks, projection)) =
+                    bucket.and_then(|bucket| Self::uniforms(layer_id, layer, &tile_id, bucket, draw, frame, &cx.res))
                 else {
                     continue;
                 };
                 if let Some(depth) = depth {
-                    draw.mesh.set_texture(cx.res.context, GROUND_DEPTH_SLOT, Some(depth));
+                    draw.mesh.set_texture(&mut cx.res, GROUND_DEPTH_SLOT, Some(depth));
                 }
                 let opaque = passes & RenderPass::Opaque != RenderPass::None;
                 let frame_draw = Draw { order: draw.mesh.seq(), opaque, ..Draw::DEFAULT };
-                draw.atlases.bind(&draw.mesh, cx.res.context, frame);
+                draw.atlases.bind(&draw.mesh, &mut cx.res, frame);
                 out.main().push_at(&draw.mesh, tile_id, &projection, frame_draw, blocks);
             }
         }
@@ -762,9 +756,9 @@ impl Layer for RenderSymbolLayer {
             if let Some(cached) = entry.value.as_mut().filter(|cached| !cached.draws.is_empty()) {
                 // The draws that read the same attributes are next to each
                 // other, as the update builds them.
-                let (context, geometry) = (&mut *cx.res.context, render_data.geometry());
+                let (res, geometry) = (&mut cx.res, render_data.geometry());
                 for draws in cached.draws.chunk_by_mut(|a, b| a.attributes_key() == b.attributes_key()) {
-                    refresh_draws(context, draws, geometry, bucket, layer_id, evaluated, refresh);
+                    refresh_draws(res, draws, geometry, bucket, layer_id, evaluated, refresh);
                 }
                 continue;
             }
@@ -880,18 +874,14 @@ impl Layer for RenderSymbolLayer {
 
             let atlases = render_data.atlas_textures();
 
-            let mut uniforms = Uniforms::default();
-            let mut vertex_attribs = VertexAttributeArray::new();
-            let placed = update_tile_attributes(
-                cx.res.context,
+            let (vertices, uniforms) = SymbolVertices::new(
+                &mut cx.res,
                 render_data.geometry(),
                 buffer,
                 layer_id,
                 is_text,
                 bucket_paint_properties,
                 evaluated,
-                &mut vertex_attribs,
-                &mut uniforms,
             );
 
             let text_halo = evaluated.text_halo_color.constant_or(&Color::black()).a > 0.0
@@ -953,22 +943,27 @@ impl Layer for RenderSymbolLayer {
                 };
 
                 // The halo and the fill read the same attributes.
-                let geometry = DrawGeometry {
-                    vertices: copy_shared_attributes(&vertex_attribs),
-                    vertex_count: buffer.attribute_data.len(),
-                    mode: DrawMode::Triangles(),
-                    indexes: copied_indexes(&buffer.triangles),
-                    ranges: segments.iter().map(SegmentBase::range).collect(),
-                    instances: None,
-                };
-                let shader = cx.res.context.shader_key(program, uniforms, symbol_projection_variant);
+                let res = &mut cx.res;
+                let shader = res.shader_key(program, uniforms, symbol_projection_variant);
                 let textures = draw_atlases.textures(&shader);
-                let mesh = Mesh::new(cx.res.context, shader, color_mode, CullFaceMode::disabled(), geometry, textures);
+                let indexes = res.indexes(&buffer.triangles);
+                let mesh = res.mesh(MeshDesc {
+                    shader,
+                    color_mode,
+                    cull_face_mode: CullFaceMode::disabled(),
+                    mode: DrawMode::Triangles(),
+                    vertices: vertices.bindings().cloned().collect(),
+                    vertex_count: buffer.attribute_data.len(),
+                    instances: None,
+                    indexes,
+                    ranges: segments.iter().map(SegmentBase::range).collect(),
+                    textures,
+                });
 
                 let draw = SymbolDraw {
                     mesh,
                     atlases: draw_atlases.clone(),
-                    placed: placed.clone(),
+                    vertices: vertices.clone(),
                     data: SymbolDrawData {
                         is_halo,
                         bucket_variable_placement: state.has_variable_placement,

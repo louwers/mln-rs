@@ -11,7 +11,7 @@ use std::sync::{Arc, Once};
 
 use mln_engine::RegistryBuilder;
 use mln_engine::draw::{
-    Draw, DrawGeometry, DrawIndexes, DrawRange, Draws, Mesh, SharedTexture, Textures, Uniforms, raw_vertices,
+    Draw, DrawRange, Draws, Mesh, MeshDesc, Texture, Textures, Uniforms, VertexAttribute, VertexBinding,
 };
 use mln_engine::layer::{FrameTile, Layer, LayerValues, NoTiles, OnTerrain, PrepareCx, Router, Routes};
 use mln_engine::map::MapMode;
@@ -98,7 +98,7 @@ impl StyleLayerType for Copy {
 /// engine's layer composite program, texel for texel.
 struct CopyLayer {
     /// The quad of the texture it last read.
-    mesh: Option<(SharedTexture, Mesh)>,
+    mesh: Option<(Texture, Mesh)>,
 }
 
 impl Layer for CopyLayer {
@@ -114,20 +114,28 @@ impl Layer for CopyLayer {
         let Some(Name(source)) = cx.values.style.members().get(&SOURCE) else { return };
         let Some(texture) = cx.read_target(&source.clone()) else { return };
         if self.mesh.as_ref().is_none_or(|(read, _)| *read != texture) {
-            let shader = cx.res.context.shader_key(&LAYER_COMPOSITE, Uniforms::default(), ProjectionVariant::Mercator);
-            let corners: Vec<u8> = [0i16, 0, 1, 0, 0, 1, 1, 1].iter().flat_map(|c| c.to_le_bytes()).collect();
-            let geometry = DrawGeometry {
-                vertices: raw_vertices("pos", corners, 4, AttributeDataType::Short2),
-                vertex_count: 4,
-                mode: DrawMode::Triangles(),
-                indexes: DrawIndexes::new(vec![0, 1, 2, 1, 2, 3]),
-                ranges: vec![DrawRange::indexes(6)],
-                instances: None,
-            };
+            const POSITION: &[VertexAttribute] =
+                &[VertexAttribute { name: "pos", format: AttributeDataType::Short2, offset: 0 }];
+            let res = &mut cx.res;
+            let shader = res.shader_key(&LAYER_COMPOSITE, Uniforms::default(), ProjectionVariant::Mercator);
+            let corners: [[i16; 2]; 4] = [[0, 0], [1, 0], [0, 1], [1, 1]];
+            let vertices = res.vertices(&corners);
+            let indexes = res.indexes(&[0, 1, 2, 1, 2, 3]);
             let mut textures = Textures::default();
             textures[LAYER_COMPOSITE.texture_slot("image")] = Some(texture.clone());
             textures[LAYER_COMPOSITE.texture_slot("backdrop")] = Some(texture.clone());
-            let mesh = cx.res.mesh(shader, ColorMode::alpha_blended(), CullFaceMode::disabled(), geometry, textures);
+            let mesh = res.mesh(MeshDesc {
+                shader,
+                color_mode: ColorMode::alpha_blended(),
+                cull_face_mode: CullFaceMode::disabled(),
+                mode: DrawMode::Triangles(),
+                vertices: vec![VertexBinding::new(&vertices, size_of::<[i16; 2]>() as u32, POSITION)],
+                vertex_count: corners.len(),
+                instances: None,
+                indexes,
+                ranges: vec![DrawRange::indexes(6)],
+                textures,
+            });
             self.mesh = Some((texture, mesh));
         }
         let Some((_, mesh)) = &self.mesh else { return };

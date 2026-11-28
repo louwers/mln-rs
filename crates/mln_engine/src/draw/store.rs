@@ -158,10 +158,10 @@ impl<K: Key + std::fmt::Debug> std::fmt::Debug for Shared<K> {
 }
 
 /// A texture of the context's store.
-pub type SharedTexture = Shared<TextureKey>;
+pub type Texture = Shared<TextureKey>;
 
 /// Indexes of the context's store.
-pub type SharedIndexes = Shared<IndexesKey>;
+pub type IndexBuffer = Shared<IndexesKey>;
 
 /// The slots of a store's chunk.
 const CHUNK: usize = 32;

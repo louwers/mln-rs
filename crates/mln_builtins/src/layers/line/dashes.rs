@@ -3,8 +3,8 @@
 //! dash arrays that differ by feature. Both find a pattern by the dash
 //! array's values themselves (their float bits) and its cap.
 
-use mln_engine::draw::{Context, SharedTexture};
-use mln_gfx::gpu::{Gpu, TextureFormat};
+use mln_engine::draw::{Resources, Texture};
+use mln_gfx::gpu::TextureFormat;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_style::bitmap::AlphaImage;
@@ -239,7 +239,7 @@ pub(crate) struct DashPatternTexture {
     size: Size,
     /// The patterns, until the texture uploads them.
     image: Option<AlphaImage>,
-    texture: Option<SharedTexture>,
+    texture: Option<Texture>,
 }
 
 impl DashPatternTexture {
@@ -261,33 +261,27 @@ impl DashPatternTexture {
     }
 
     /// Makes the texture and uploads the patterns to it, unless it did.
-    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+    pub(crate) fn upload(&mut self, res: &mut Resources<'_>) {
         let Some(image) = self.image.take() else {
             return;
         };
-        let texture = context.add_texture_with(|texture| {
-            texture.set_format(TextureFormat::A8Unorm);
-            texture.set_sampler(SamplerState {
-                filter: TextureFilterType::Linear,
-                wrap_u: TextureWrapType::Repeat,
-                wrap_v: TextureWrapType::Clamp,
-                ..Default::default()
-            });
-        });
-        if let Err(error) = context.upload_texture_data(
-            gpu,
-            &texture,
-            &image.data,
-            mln_gfx::Size::new(image.size.width, image.size.height),
-        ) {
-            context.fail(format!("Uploading a dash pattern failed: {error}"));
+        let sampler = SamplerState {
+            filter: TextureFilterType::Linear,
+            wrap_u: TextureWrapType::Repeat,
+            wrap_v: TextureWrapType::Clamp,
+            ..Default::default()
+        };
+        let texture = res.texture(TextureFormat::A8Unorm, sampler);
+        let size = mln_gfx::Size::new(image.size.width, image.size.height);
+        if let Err(error) = res.write_texture(&texture, &image.data, size) {
+            res.fail(format!("Uploading a dash pattern failed: {error}"));
         }
         self.texture = Some(texture);
     }
 
     /// The texture, once `upload` made it.
     #[must_use]
-    pub(crate) fn texture(&self) -> Option<&SharedTexture> {
+    pub(crate) fn texture(&self) -> Option<&Texture> {
         self.texture.as_ref()
     }
 
@@ -432,9 +426,9 @@ impl LineAtlas {
     }
 
     /// Uploads the textures to the GPU to be available when we need it.
-    pub(crate) fn upload(&mut self, gpu: &mut dyn Gpu, context: &mut Context) {
+    pub(crate) fn upload(&mut self, res: &mut Resources<'_>) {
         for index in self.needs_upload.drain(..) {
-            self.textures[index].1.upload(gpu, context);
+            self.textures[index].1.upload(res);
         }
     }
 }

@@ -2,12 +2,14 @@
 //! contract](crate::layer).
 //!
 //! A layer makes its GPU objects through the [`Resources`] its hooks get and
-//! keeps their handles, from vertices, indexes and textures in the
-//! [`Context`]'s stores: [`Mesh`]es, which draw a program over geometry
-//! with textures, a [`DrawRange`] of it in each draw call, and [`Target`]s,
+//! keeps their handles: [`VertexBuffer`]s of `#[repr(C)]` vertices, which a
+//! mesh reads as the attributes of a layout ([`VertexBinding`], [`Vertex`]),
+//! [`IndexBuffer`]s and [`Texture`]s; [`Mesh`]es, which draw a program over
+//! them ([`MeshDesc`]), a [`DrawRange`] in each draw call; and [`Target`]s,
 //! textures of the layer's own that its draws draw into ahead of the frame
-//! and that its other draws sample. An object goes once its last handle
-//! drops and the GPU is done with it.
+//! and that its other draws sample. Meshes share the buffers and textures
+//! they read. An object goes once its last handle drops and the GPU is done
+//! with it.
 //!
 //! Each frame, a layer pushes its draws into its [`Draws`]: into its main
 //! [`Group`], which draws at its place in the layers' order and depth, and
@@ -52,38 +54,37 @@ pub(crate) mod texture2d;
 pub(crate) mod tile_render_data;
 pub(crate) mod uniform_buffer;
 pub(crate) mod upload;
+pub(crate) mod vertex;
 pub(crate) mod vertex_attribute;
 pub(crate) mod vertices;
 
-/// Copies again into `mesh`'s paint attributes, through `refresh`, the
-/// values of its bucket's paint properties that `changes` says feature
-/// state rewrote: a layer's [`prepare`](crate::layer::Layer::prepare) calls
-/// it with what its tile's entry took (`TileEntry::take_changes`).
+/// Binds again in `mesh` the vertices of its bucket's paint values that
+/// `refresh` makes, where `changes` says feature state rewrote them: a
+/// layer's [`prepare`](crate::layer::Layer::prepare) calls it with what its
+/// tile's entry took (`TileEntry::take_changes`).
 pub fn refresh_paint_attributes(
     mesh: &Mesh,
-    context: &mut Context,
+    res: &mut Resources<'_>,
     changes: crate::layer::BucketChanges,
-    refresh: impl FnOnce(&mut Context, &mut VertexAttributeArray),
+    refresh: impl FnOnce(&mut Resources<'_>) -> Option<VertexBinding>,
 ) {
-    if !changes.paint {
-        return;
+    if changes.paint
+        && let Some(paint) = refresh(res)
+    {
+        mesh.set_paint(res, &paint);
     }
-    mesh.update(context, |objects, context| refresh(context, objects.paint_attributes_mut()));
 }
 
 pub use crate::draw::after_gpu::{AfterGpu, GpuEnd};
-pub use crate::draw::context::Context;
 pub use crate::draw::draws::{Depth, Draw, Draws, Group, LayerFrame, LendAt, Lent};
-pub use crate::draw::identity::SimpleIdentity;
-pub use crate::draw::indexes::{DrawIndexes, Indexes};
-pub use crate::draw::objects::{DrawGeometry, Mesh, Textures, copy_shared_attributes, raw_vertices};
+pub use crate::draw::objects::{Mesh, MeshDesc, Textures};
 pub use crate::draw::range::DrawRange;
 pub use crate::draw::resources::Resources;
-pub use crate::draw::store::{SharedIndexes, SharedTexture};
+pub use crate::draw::store::{IndexBuffer, Texture};
 pub use crate::draw::target::Target;
-pub use crate::draw::texture2d::Texture2D;
-pub use crate::draw::vertex_attribute::{SharedAttribute, Uniforms, VertexAttributeArray};
-pub use crate::draw::vertices::{SharedVertices, TypedVertices, Vertices};
+pub use crate::draw::vertex::{Vertex, VertexAttribute, VertexBinding};
+pub use crate::draw::vertex_attribute::Uniforms;
+pub use crate::draw::vertices::VertexBuffer;
 pub use crate::render::layer_composite::Composite;
 pub use crate::render::light::EvaluatedLight;
 pub use crate::render::pass::RenderPass;
@@ -107,7 +108,7 @@ pub mod globe {
 pub mod ground {
     pub use crate::render::terrain::programs::{GROUND_DEM, GROUND_DEPTH, GROUND_HEIGHT, TERRAIN_SURFACE};
     pub use crate::render::terrain::{
-        FrameGround, GroundHeights, StandingDraw, TerrainElevation, TileGround, height_attribute, point_center,
+        FrameGround, GroundHeights, StandingDraw, TerrainElevation, TileGround, height_binding, point_center,
     };
 
     /// The GLSL snippets of the ground: `ground_height!()`, which a program

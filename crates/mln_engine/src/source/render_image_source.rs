@@ -16,9 +16,9 @@ use crate::camera::TileCoordinate;
 use crate::camera::tile_coordinate::TileCoordinatePoint;
 use crate::draw::context::Context;
 use crate::draw::identity::SimpleIdentity;
-use crate::draw::indexes::{Indexes, SharedIndexes};
+use crate::draw::indexes::{IndexBuffer, Indexes};
 use crate::draw::range::DrawRange;
-use crate::draw::vertices::SharedVertices;
+use crate::draw::vertices::VertexBuffer;
 use crate::layer::layer_drawing::MadeFrom;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::log_target;
@@ -195,14 +195,17 @@ fn build_image_mesh(tile: &mut ImageTile, cells: u32, from_top_left: bool) {
     tile.set_mesh(vertices, indices);
 }
 
-/// A vertex of an image source's mesh: its position in tile units (`a1`),
-/// and where it samples the image (`a2`), in the same units over the image.
+/// A vertex of an image source's mesh: its position in tile units (`a1`,
+/// the attribute `pos`), and where it samples the image (`a2`,
+/// `texture_pos`), in the same units over the image.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct RasterLayoutVertex {
     pub a1: [i16; 2],
     pub a2: [u16; 2],
 }
+
+crate::vertex_attributes!(RasterLayoutVertex { a1 => "pos": Short2, a2 => "texture_pos": Short2 });
 
 impl RasterLayoutVertex {
     /// The vertex at `p` that samples the image at `t`.
@@ -215,8 +218,8 @@ impl RasterLayoutVertex {
 /// An image source's mesh in the context's stores, which the raster layers
 /// that draw the source share: triangles over [`RasterLayoutVertex`]es.
 pub struct ImageMesh {
-    pub vertices: SharedVertices,
-    pub indexes: SharedIndexes,
+    pub vertices: VertexBuffer,
+    pub indexes: IndexBuffer,
     /// The draw call that draws the triangles.
     pub range: DrawRange,
 }

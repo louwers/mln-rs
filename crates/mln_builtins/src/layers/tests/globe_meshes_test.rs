@@ -7,7 +7,7 @@ use mln_style::constants::EXTENT;
 use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
 
-use super::with_context;
+use super::with_resources;
 use crate::layers::quads::{GlobeTileMeshCache, TileMask, globe_mesh_data};
 
 /// `EXTENT` as a tile coordinate.
@@ -91,12 +91,12 @@ fn globe_mask_keeps_the_uncovered_parts() {
 // gtest: TileMesh.GlobeMeshCacheStaysBounded
 #[test]
 fn globe_mesh_cache_stays_bounded() {
-    with_context(|_, context| {
+    with_resources(|res| {
         let mut cache: GlobeTileMeshCache<GlobeTestVertex> = GlobeTileMeshCache::new();
         let tile = CanonicalTileID::new(3, 2, 2);
         for i in 0..1000u32 {
             let child = i % 256;
-            cache.get(context, &tile, &mask(&[(4, child % 16, child / 16)]), globe_test_vertex);
+            cache.get(res, &tile, &mask(&[(4, child % 16, child / 16)]), globe_test_vertex);
             assert!(cache.size() <= 64, "{i}");
         }
     });
@@ -108,14 +108,14 @@ fn globe_mesh_cache_stays_bounded() {
 // gtest: TileMesh.GlobeMeshCacheKeepsTheMeshesInUse
 #[test]
 fn globe_mesh_cache_keeps_the_meshes_in_use() {
-    with_context(|_, context| {
+    with_resources(|res| {
         let mut cache: GlobeTileMeshCache<GlobeTestVertex> = GlobeTileMeshCache::new();
         let tile = CanonicalTileID::new(3, 2, 2);
         let whole = mask(&[(0, 0, 0)]);
-        let vertices = cache.get(context, &tile, &whole, globe_test_vertex).vertices.clone();
+        let vertices = cache.get(res, &tile, &whole, globe_test_vertex).vertices.clone();
         for i in 0..256u32 {
-            cache.get(context, &tile, &mask(&[(4, i % 16, i / 16)]), globe_test_vertex);
-            assert!(vertices == cache.get(context, &tile, &whole, globe_test_vertex).vertices, "{i}");
+            cache.get(res, &tile, &mask(&[(4, i % 16, i / 16)]), globe_test_vertex);
+            assert!(vertices == cache.get(res, &tile, &whole, globe_test_vertex).vertices, "{i}");
         }
     });
 }

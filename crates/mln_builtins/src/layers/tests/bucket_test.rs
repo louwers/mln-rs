@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use geometry::Point;
-use mln_engine::draw::{Context, DrawIndexes, DrawRange};
+use mln_engine::draw::{DrawRange, Resources};
 use mln_engine::layer::binders::{LayerBinders, PaintBinders as _, PatternLayerMap};
 use mln_engine::layer::{
     Bucket, BucketGeometry, EvaluatedLayer, Upload, bucket_indexes, bucket_vertices, paint_vertices,
@@ -26,7 +26,7 @@ use mln_style::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_style::tile_id::CanonicalTileID;
 
 use super::fixture_log::FixtureLog;
-use super::with_context;
+use super::with_resources;
 use crate::layers::circle::bucket::CircleBucket;
 use crate::layers::fill::bucket::FillBucket;
 use crate::layers::fill_extrusion::bucket::{FillExtrusionBucket, tile_units_per_meter};
@@ -69,9 +69,9 @@ fn collection(rings: &[&[(i16, i16)]]) -> GeometryCollection {
     )
 }
 
-/// Uploads `bucket`, keeping its geometry in `geometry`, through `context`.
-fn upload(bucket: &mut impl Bucket, geometry: &mut BucketGeometry, context: &mut Context) {
-    bucket.upload(&mut Upload::geometry(geometry, &[], context));
+/// Uploads `bucket`, keeping its geometry in `geometry`, through `res`.
+fn upload(bucket: &mut impl Bucket, geometry: &mut BucketGeometry, res: &mut Resources<'_>) {
+    bucket.upload(&mut Upload::geometry(geometry, &[], res));
 }
 
 /// What a bucket's layout does with each of its features: adds its geometry
@@ -179,8 +179,8 @@ fn circle_bucket() {
     // A bucket uploads once, until it changes.
     let mut bucket = CircleBucket::default();
 
-    with_context(|_, context| {
-        upload(&mut bucket, &mut BucketGeometry::default(), context);
+    with_resources(|res| {
+        upload(&mut bucket, &mut BucketGeometry::default(), res);
     });
 }
 
@@ -213,8 +213,8 @@ fn symbol_bucket() {
     assert!(bucket.has_text_data());
     assert!(bucket.has_data());
 
-    with_context(|_, context| {
-        upload(&mut bucket, &mut BucketGeometry::default(), context);
+    with_resources(|res| {
+        upload(&mut bucket, &mut BucketGeometry::default(), res);
     });
 }
 
@@ -236,8 +236,8 @@ fn fill_bucket() {
     );
     assert!(bucket.has_data());
 
-    with_context(|_, context| {
-        upload(&mut bucket, &mut BucketGeometry::default(), context);
+    with_resources(|res| {
+        upload(&mut bucket, &mut BucketGeometry::default(), res);
     });
 }
 
@@ -381,47 +381,49 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
     assert!(vertex_count > 0);
     assert!(index_count > 0);
 
-    with_context(|gpu, context| {
+    with_resources(|res| {
         // The bucket's upload moves its data to the context's stores, which
         // hold it until it is uploaded.
         let mut geometry = BucketGeometry::default();
-        upload(&mut bucket, &mut geometry, context);
+        upload(&mut bucket, &mut geometry, res);
         let vertices = bucket_vertices(&geometry, &bucket.vertices).expect("moved");
         assert!(bucket.vertices.data().is_empty());
         assert_eq!(bucket.vertices.len(), vertex_count);
-        let stored = context.vertices(&vertices).expect("stored");
-        assert_eq!(stored.bytes().len(), vertex_count * stored.vertex_size());
+        let stored = res.test_vertex_bytes(&vertices).expect("stored");
+        assert_eq!(stored.len(), vertex_count * size_of::<crate::layers::fill::bucket::FillLayoutVertex>());
 
         // A draw's upload writes them to buffers.
-        let buffer = context.upload_vertices(gpu, &vertices).expect("uploads").expect("a buffer");
-        let mut triangles = DrawIndexes::from(bucket_indexes(&geometry, &bucket.triangles).expect("moved"));
-        triangles.upload(gpu, context).expect("uploads");
+        let buffer = res.test_upload_vertices(&vertices).expect("a buffer");
+        let triangles = bucket_indexes(&geometry, &bucket.triangles).expect("moved");
+        let (triangles_buffer, kept, len) = res.test_upload_indexes(&triangles);
 
         // The CPU copies are gone, the counts that draws are built from
         // are not.
-        assert!(context.vertices(&vertices).is_some_and(|stored| !stored.needs_upload() && stored.bytes().is_empty()));
+        assert!(!res.test_vertices_need_upload(&vertices));
+        assert!(res.test_vertex_bytes(&vertices).is_some_and(<[u8]>::is_empty));
         assert_eq!(vertices.count(), vertex_count);
-        assert!(!triangles.has_data(context));
-        assert_eq!(triangles.len(context), index_count);
+        assert!(!kept);
+        assert_eq!(len, index_count);
         assert_eq!(bucket.triangles.len(), index_count);
 
         // A second draw over the same bucket shares the vertices and the
         // buffer without reading the data.
         let again = bucket_vertices(&geometry, &bucket.vertices).expect("moved");
-        assert!(vertices == again);
-        let indexes = DrawIndexes::from(bucket_indexes(&geometry, &bucket.triangles).expect("moved"));
-        assert!(indexes.buffer(context).is_some_and(|buffer| triangles.buffer(context) == Some(buffer)));
-        let reused = context.upload_vertices(gpu, &again).expect("uploads").expect("a buffer");
+        assert_eq!(vertices, again);
+        let indexes = bucket_indexes(&geometry, &bucket.triangles).expect("moved");
+        assert_eq!(indexes, triangles);
+        assert!(triangles_buffer.is_some() && res.test_upload_indexes(&indexes).0 == triangles_buffer);
+        let reused = res.test_upload_vertices(&again).expect("a buffer");
         assert_eq!(buffer, reused);
 
         // Data-driven paint values are freed too when nothing can rewrite them.
         let binders = bucket.paint_property_binders.get("fill").unwrap();
         assert!(!binders.depends_on_feature_state());
         let buffer = &binders.interleaved_vertex_buffer;
-        let paint = paint_vertices(context, &geometry, buffer, false).expect("moved");
+        let paint = paint_vertices(res, &geometry, buffer, false).expect("moved");
         assert!(paint.count() > 0);
-        assert!(context.upload_vertices(gpu, &paint).expect("uploads").is_some());
-        assert!(context.vertices(&paint).is_some_and(|stored| !stored.needs_upload()));
+        assert!(res.test_upload_vertices(&paint).is_some());
+        assert!(!res.test_vertices_need_upload(&paint));
         assert!(buffer.shared_vertex_vector.data().is_empty());
     });
 }
@@ -433,11 +435,11 @@ fn fill_bucket_frees_cpu_geometry_after_upload() {
 fn world_copies_share_their_buckets_stored_geometry() {
     let mut bucket = data_driven_fill_bucket(&serde_json::json!(["to-color", ["get", "c"]]));
     let mut copy = bucket.clone();
-    with_context(|_, context| {
+    with_resources(|res| {
         let mut copy_geometry = BucketGeometry::default();
-        upload(&mut copy, &mut copy_geometry, context);
+        upload(&mut copy, &mut copy_geometry, res);
         let mut geometry = BucketGeometry::default();
-        bucket.upload(&mut Upload::geometry(&mut geometry, &[&copy_geometry], context));
+        bucket.upload(&mut Upload::geometry(&mut geometry, &[&copy_geometry], res));
 
         assert!(bucket.vertices.is_moved() && bucket.vertices.data().is_empty());
         assert!(bucket.triangles.is_moved() && bucket.triangles.data().is_empty());
@@ -447,9 +449,9 @@ fn world_copies_share_their_buckets_stored_geometry() {
         assert!(indexes.is_some() && indexes == bucket_indexes(&copy_geometry, &copy.triangles));
         let mut paint = |bucket: &FillBucket, geometry: &BucketGeometry| {
             let buffer = &bucket.paint_property_binders.get("fill").unwrap().interleaved_vertex_buffer;
-            paint_vertices(context, geometry, buffer, false)
+            paint_vertices(res, geometry, buffer, false)
         };
-        assert!(paint(&bucket, &geometry) == paint(&copy, &copy_geometry));
+        assert_eq!(paint(&bucket, &geometry), paint(&copy, &copy_geometry));
     });
 }
 
@@ -461,15 +463,15 @@ fn fill_bucket_keeps_paint_data_that_feature_state_rewrites() {
         ["case", ["boolean", ["feature-state", "hover"], false], "red", "blue"]
     ]));
 
-    with_context(|gpu, context| {
+    with_resources(|res| {
         let mut geometry = BucketGeometry::default();
-        upload(&mut bucket, &mut geometry, context);
+        upload(&mut bucket, &mut geometry, res);
         let binders = bucket.paint_property_binders.get("fill").unwrap();
         assert!(binders.depends_on_feature_state());
         let buffer = &binders.interleaved_vertex_buffer;
-        let paint = paint_vertices(context, &geometry, buffer, binders.depends_on_feature_state()).expect("a copy");
+        let paint = paint_vertices(res, &geometry, buffer, binders.depends_on_feature_state()).expect("a copy");
         assert!(paint.count() > 0);
-        assert!(context.upload_vertices(gpu, &paint).expect("uploads").is_some());
+        assert!(res.test_upload_vertices(&paint).is_some());
         assert!(!buffer.shared_vertex_vector.is_moved());
         assert_eq!(buffer.shared_vertex_vector.data().len(), paint.count());
     });
@@ -507,8 +509,8 @@ fn line_bucket() {
     );
     assert!(bucket.has_data());
 
-    with_context(|_, context| {
-        upload(&mut bucket, &mut BucketGeometry::default(), context);
+    with_resources(|res| {
+        upload(&mut bucket, &mut BucketGeometry::default(), res);
     });
 }
 
@@ -528,22 +530,22 @@ fn line_bucket_drawables_build_from_freed_indexes() {
     );
     assert!(bucket.has_data());
 
-    with_context(|gpu, context| {
+    with_resources(|res| {
         let mut geometry = BucketGeometry::default();
         let index_count = bucket.triangles.len();
-        upload(&mut bucket, &mut geometry, context);
+        upload(&mut bucket, &mut geometry, res);
 
         // An earlier draw put the indexes in a buffer, which frees their CPU
         // copy.
-        let mut triangles = DrawIndexes::from(bucket_indexes(&geometry, &bucket.triangles).expect("moved"));
-        triangles.upload(gpu, context).expect("uploads");
-        assert!(!triangles.has_data(context));
+        let triangles = bucket_indexes(&geometry, &bucket.triangles).expect("moved");
+        let (_, kept, len) = res.test_upload_indexes(&triangles);
+        assert!(!kept);
 
         // A layer that rebuilds its draws of the tile builds the segments
         // from the counts.
-        let indexes = DrawIndexes::from(bucket_indexes(&geometry, &bucket.triangles).expect("moved"));
-        assert_eq!(indexes.len(context), index_count);
-        assert_eq!(triangles.len(context), index_count);
+        let indexes = bucket_indexes(&geometry, &bucket.triangles).expect("moved");
+        assert_eq!(res.test_upload_indexes(&indexes).2, index_count);
+        assert_eq!(len, index_count);
     });
 }
 
@@ -659,50 +661,47 @@ fn line_bucket_evaluates_cap_and_limits_per_feature() {
 #[test]
 fn a_draw_binds_the_vertices_it_reads_as_a_storage_buffer() {
     const ID: usize = crate::layers::fill_extrusion::programs::FILL_EXTRUSION_PULLED.buffer_id("wallVertices");
-    use mln_engine::draw::{DrawGeometry, Mesh, Uniforms, VertexAttributeArray};
+    use mln_engine::draw::{MeshDesc, Uniforms};
     use mln_gfx::{ColorMode, CullFaceMode, DrawMode};
 
-    with_context(|gpu, context| {
+    with_resources(|res| {
         let variant = mln_gfx::projection_variant::ProjectionVariant::Mercator;
-        let shader = context.shader_key(
+        let shader = res.shader_key(
             &crate::layers::fill_extrusion::programs::FILL_EXTRUSION_PULLED,
             Uniforms::default(),
             variant,
         );
-        let typed = context.add_dynamic_vertices(&[[0u32; 2], [1; 2]]);
-        let geometry = DrawGeometry {
-            vertices: VertexAttributeArray::new(),
-            vertex_count: 4,
-            mode: DrawMode::Triangles(),
-            indexes: DrawIndexes::new(vec![0, 2, 1, 1, 2, 3]),
-            ranges: vec![DrawRange::indexes(0)],
-            instances: None,
-        };
-        let mesh = Mesh::new(
-            context,
+        let vertices = res.dynamic_vertices(&[[0u32; 2], [1; 2]]);
+        let indexes = res.indexes(&[0, 2, 1, 1, 2, 3]);
+        let mesh = res.mesh(MeshDesc {
             shader,
-            ColorMode::alpha_blended(),
-            CullFaceMode::back_ccw(),
-            geometry,
-            Default::default(),
-        );
-        mesh.read_as_storage(context, ID, Some(typed.shared().clone()));
-        assert!(mesh.storage_buffer(context, ID).is_none(), "bound before the upload");
+            color_mode: ColorMode::alpha_blended(),
+            cull_face_mode: CullFaceMode::back_ccw(),
+            mode: DrawMode::Triangles(),
+            vertices: Vec::new(),
+            vertex_count: 4,
+            instances: None,
+            indexes,
+            ranges: vec![DrawRange::indexes(0)],
+            textures: Default::default(),
+        });
+        mesh.read_as_storage(res, ID, Some(vertices.clone()));
+        assert!(res.test_storage_buffer(&mesh, ID).is_none(), "bound before the upload");
 
-        mesh.upload(gpu, context);
-        let buffer = context.upload_vertices(gpu, typed.shared()).expect("uploads");
-        assert!(buffer.is_some() && mesh.storage_buffer(context, ID) == buffer);
-        let uploaded = context.rendering_stats().buffer_updates;
+        res.test_upload_mesh(&mesh);
+        let buffer = res.test_upload_vertices(&vertices);
+        assert!(buffer.is_some() && res.test_storage_buffer(&mesh, ID) == buffer);
+        let uploaded = res.test_rendering_stats().buffer_updates;
 
         // An update goes to the same buffer.
-        assert!(context.update_vertices(&typed, &[[2; 2], [3; 2]]));
-        mesh.upload(gpu, context);
-        assert_eq!(context.rendering_stats().buffer_updates, uploaded + 1);
-        assert_eq!(mesh.storage_buffer(context, ID), buffer);
+        assert!(res.update_vertices(&vertices, &[[2u32; 2], [3; 2]]));
+        res.test_upload_mesh(&mesh);
+        assert_eq!(res.test_rendering_stats().buffer_updates, uploaded + 1);
+        assert_eq!(res.test_storage_buffer(&mesh, ID), buffer);
 
-        mesh.read_as_storage(context, ID, None);
-        mesh.upload(gpu, context);
-        assert!(mesh.storage_buffer(context, ID).is_none());
+        mesh.read_as_storage(res, ID, None);
+        res.test_upload_mesh(&mesh);
+        assert!(res.test_storage_buffer(&mesh, ID).is_none());
     });
 }
 
@@ -710,22 +709,20 @@ fn a_draw_binds_the_vertices_it_reads_as_a_storage_buffer() {
 // attributes read them.
 #[test]
 fn the_paint_layout_of_pulled_walls_is_the_paint_attributes() {
-    use mln_engine::draw::{SharedAttribute, VertexAttributeArray};
+    use mln_engine::draw::{VertexAttribute, VertexBinding};
     use mln_gfx::AttributeDataType::{Float, Float4};
 
     use crate::layers::fill_extrusion::layer::paint_layout;
 
-    with_context(|_, context| {
-        let mut attrs = VertexAttributeArray::new();
-        assert_eq!(paint_layout(&attrs), 0, "every property a uniform");
+    with_resources(|res| {
+        assert_eq!(paint_layout(None), 0, "every property a uniform");
 
         // A vertex's base, its color's four floats, then its height.
-        let paint = context.add_vertices(vec![[0f32; 6]]);
-        for (name, data_type, offset) in [("base", Float, 0), ("color", Float4, 4), ("height", Float, 20)] {
-            attrs.set_shared(name, SharedAttribute::new(paint.clone(), data_type, offset, 24));
-        }
+        let paint = res.vertices(&[[0f32; 6]]);
+        let attributes = [("base", Float, 0), ("color", Float4, 4), ("height", Float, 20)]
+            .map(|(name, format, offset)| VertexAttribute { name, format, offset });
         // Six words a vertex: the base at 0, the height at 5, the color at 1.
-        assert_eq!(paint_layout(&attrs), 0x0105_0006);
+        assert_eq!(paint_layout(Some(&VertexBinding::new(&paint, 24, attributes.to_vec()))), 0x0105_0006);
     });
 }
 
@@ -733,27 +730,24 @@ fn the_paint_layout_of_pulled_walls_is_the_paint_attributes() {
 // attributes read them.
 #[test]
 fn the_paint_layout_of_pulled_outlines_is_the_paint_attributes() {
-    use mln_engine::draw::{SharedAttribute, VertexAttributeArray};
+    use mln_engine::draw::{VertexAttribute, VertexBinding};
     use mln_gfx::AttributeDataType::{Float, Float2, Float4};
 
     use crate::layers::fill::layer::outline_paint_layout;
 
-    with_context(|_, context| {
-        let mut attrs = VertexAttributeArray::new();
-        assert_eq!(outline_paint_layout(&attrs), 0, "every property a uniform");
+    with_resources(|res| {
+        assert_eq!(outline_paint_layout(None), 0, "every property a uniform");
 
         // A vertex's fill color, its opacity, then its outline color.
-        let paint = context.add_vertices(vec![[0f32; 5]]);
-        for (name, data_type, offset) in [("color", Float2, 0), ("opacity", Float, 8), ("outline_color", Float2, 12)] {
-            attrs.set_shared(name, SharedAttribute::new(paint.clone(), data_type, offset, 20));
-        }
+        let paint = res.vertices(&[[0f32; 5]]);
+        let attributes = [("color", Float2, 0), ("opacity", Float, 8), ("outline_color", Float2, 12)]
+            .map(|(name, format, offset)| VertexAttribute { name, format, offset });
         // Five words a vertex: the outline color at 3, the opacity at 2.
-        assert_eq!(outline_paint_layout(&attrs), 0x0002_0305);
+        assert_eq!(outline_paint_layout(Some(&VertexBinding::new(&paint, 20, attributes.to_vec()))), 0x0002_0305);
 
         // An interpolated outline color alone.
-        let mut attrs = VertexAttributeArray::new();
-        let paint = context.add_vertices(vec![[0f32; 4]]);
-        attrs.set_shared("outline_color", SharedAttribute::new(paint, Float4, 0, 16));
-        assert_eq!(outline_paint_layout(&attrs), 4);
+        let paint = res.vertices(&[[0f32; 4]]);
+        let outline_color = vec![VertexAttribute { name: "outline_color", format: Float4, offset: 0 }];
+        assert_eq!(outline_paint_layout(Some(&VertexBinding::new(&paint, 16, outline_color))), 4);
     });
 }

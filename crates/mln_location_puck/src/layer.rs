@@ -2,7 +2,7 @@ use glam::Vec2;
 use mln_engine::draw::ground::FrameGround;
 use mln_engine::draw::projection::{TileTransform, tile_projection};
 use mln_engine::draw::{
-    Context, Draw, DrawGeometry, DrawIndexes, DrawRange, Draws, Mesh, Textures, Uniforms, raw_vertices,
+    Draw, DrawRange, Draws, Mesh, MeshDesc, Resources, Textures, Uniforms, VertexAttribute, VertexBinding,
 };
 use mln_engine::layer::{
     EvaluateCx, Evaluation, FrameQuery, FrameTile, Layer, LayerValues, NoTiles, OnTerrain, PrepareCx,
@@ -31,25 +31,27 @@ pub(crate) struct LocationPuckLayer {
 
 impl LocationPuckLayer {
     /// The quad of the unit square, in the projection `variant`.
-    fn quad(context: &mut Context, variant: ProjectionVariant) -> Mesh {
+    fn quad(res: &mut Resources<'_>, variant: ProjectionVariant) -> Mesh {
+        const POSITION: &[VertexAttribute] =
+            &[VertexAttribute { name: "pos", format: AttributeDataType::Short2, offset: 0 }];
         let corners: [[i16; 2]; 4] = [[-1, -1], [1, -1], [-1, 1], [1, 1]];
-        let shader = context.shader_key(&PUCK, Uniforms::default(), variant);
-        let geometry = DrawGeometry {
-            vertices: raw_vertices(
-                "pos",
-                bytemuck::cast_slice(&corners).to_vec(),
-                corners.len(),
-                AttributeDataType::Short2,
-            ),
-            vertex_count: corners.len(),
+        let shader = res.shader_key(&PUCK, Uniforms::default(), variant);
+        let vertices = res.vertices(&corners);
+        // The quad's two triangles: top left, top right, bottom left, bottom
+        // right.
+        let indexes = res.indexes(&[0, 1, 2, 1, 2, 3]);
+        res.mesh(MeshDesc {
+            shader,
+            color_mode: ColorMode::alpha_blended(),
+            cull_face_mode: CullFaceMode::disabled(),
             mode: DrawMode::Triangles(),
-            // The quad's two triangles: top left, top right, bottom left,
-            // bottom right.
-            indexes: DrawIndexes::new(vec![0, 1, 2, 1, 2, 3]),
-            ranges: vec![DrawRange::indexes(6)],
+            vertices: vec![VertexBinding::new(&vertices, size_of::<[i16; 2]>() as u32, POSITION)],
+            vertex_count: corners.len(),
             instances: None,
-        };
-        Mesh::new(context, shader, ColorMode::alpha_blended(), CullFaceMode::disabled(), geometry, Textures::default())
+            indexes,
+            ranges: vec![DrawRange::indexes(6)],
+            textures: Textures::default(),
+        })
     }
 }
 
@@ -73,16 +75,16 @@ impl Layer for LocationPuckLayer {
     fn prepare(&mut self, cx: &mut PrepareCx<'_, '_, Self>, _tiles: &[FrameTile<'_, Self>], out: &mut Draws) {
         let paint = &cx.values.evaluated.paint;
         let frame = cx.frame;
-        let context = &mut *cx.res.context;
+        let res = &mut cx.res;
         let variant = cx.base.projection_variant;
         let quad = match &mut self.quad {
             Some((made_for, quad)) if *made_for == variant => quad,
-            quad => &mut quad.insert((variant, Self::quad(context, variant))).1,
+            quad => &mut quad.insert((variant, Self::quad(res, variant))).1,
         };
         // Over terrain, the parts stand on the frame's ground and hide
         // behind it.
         let ground = frame.ground.as_deref();
-        quad.set_texture(context, GROUND_DEPTH_SLOT, ground.and_then(FrameGround::depth));
+        quad.set_texture(res, GROUND_DEPTH_SLOT, ground.and_then(FrameGround::depth));
         let height = |tile, [x, y]: [f64; 2]| {
             ground.map_or(0.0, |ground| f64::from(ground.tile(tile).height(Vec2::new(x as f32, y as f32))))
         };

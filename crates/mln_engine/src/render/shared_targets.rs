@@ -36,7 +36,7 @@ use mln_style::hash::HashMap;
 
 use crate::draw::context::Context;
 use crate::draw::resources::{GpuTexture, Resources};
-use crate::draw::store::SharedTexture;
+use crate::draw::store::Texture;
 use crate::draw::target::Target;
 use crate::layer::render_layer::RenderLayer;
 use crate::log_target;
@@ -351,7 +351,7 @@ impl SharedTargets {
     /// map's frame: for the layer whose draws the frame makes, which orders
     /// the target's pass before them. `None`, with a warning, for a name the
     /// frame has no target of.
-    pub(crate) fn read(&mut self, id: &str, name: &str) -> Option<SharedTexture> {
+    pub(crate) fn read(&mut self, id: &str, name: &str) -> Option<Texture> {
         let Some(index) = self.index(name) else {
             self.warnings.warn(id, Warning::UndeclaredRead, name);
             return None;

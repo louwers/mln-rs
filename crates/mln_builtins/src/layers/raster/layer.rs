@@ -3,18 +3,16 @@
 // tile's value keeps the texture of its image, in the context's store, which
 // the tile's next value takes while the image is the same.
 
-use std::mem::offset_of;
 use std::rc::Rc;
 
 use mln_engine::draw::projection::{TileTransform, tile_projection};
 use mln_engine::draw::{
-    Composite, Context, Draw, DrawGeometry, DrawIndexes, DrawRange, Draws, Group, Indexes, LayerFrame, Mesh,
-    SharedAttribute, SharedIndexes, SharedTexture, SharedVertices, SimpleIdentity, Textures, Uniforms,
-    VertexAttributeArray,
+    Composite, Draw, DrawRange, Draws, Group, IndexBuffer, LayerFrame, Mesh, MeshDesc, Resources, Texture, Textures,
+    Uniforms, VertexBinding, VertexBuffer,
 };
 use mln_engine::layer::{
-    EvaluateCx, Evaluation, FrameTile, ImageQuad, Layer, LayerValues, OnTerrain, PrepareCx, RasterLayoutVertex,
-    RasterTile, TileCx, TileData, copied_vertices,
+    EvaluateCx, Evaluation, FrameTile, ImageId, ImageQuad, Layer, LayerValues, OnTerrain, PrepareCx,
+    RasterLayoutVertex, RasterTile, TileCx, TileData,
 };
 use mln_engine::source::RasterTiles;
 use mln_engine::tile::{OverscaledTileID, UnwrappedTileID};
@@ -23,7 +21,7 @@ use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
-use mln_gfx::{AttributeDataType, ColorMode, CullFaceMode, DrawMode};
+use mln_gfx::{ColorMode, CullFaceMode, DrawMode};
 use mln_style::layers::Raster;
 use mln_style::types::{RasterResamplingType, ResamplingType};
 
@@ -38,17 +36,14 @@ const IMAGE1_SLOT: usize = programs::RASTER.texture_slot("image1");
 /// The tile extent's geometry, which a tile draws that its mask keeps
 /// whole.
 struct StaticGeometry {
-    vertices: SharedVertices,
-    indexes: SharedIndexes,
+    vertices: VertexBuffer,
+    indexes: IndexBuffer,
 }
 
 impl StaticGeometry {
-    /// The tile extent's quad, in `context`'s stores.
-    fn new(context: &mut Context) -> StaticGeometry {
-        StaticGeometry {
-            vertices: copied_vertices(context, &raster_vertices()),
-            indexes: context.add_indexes(Indexes::new(quad_triangle_indices())),
-        }
+    /// The tile extent's quad, made through `res`.
+    fn new(res: &mut Resources<'_>) -> StaticGeometry {
+        StaticGeometry { vertices: res.vertices(&raster_vertices()), indexes: res.indexes(&quad_triangle_indices()) }
     }
 }
 
@@ -61,8 +56,8 @@ pub(crate) struct RenderRasterLayer {
 /// texture, with the image's id.
 pub(crate) struct ImageDraw {
     mesh: Mesh,
-    image: SimpleIdentity,
-    texture: SharedTexture,
+    image: ImageId,
+    texture: Texture,
 }
 
 impl RenderRasterLayer {
@@ -71,17 +66,16 @@ impl RenderRasterLayer {
     fn texture(
         previous: Option<ImageDraw>,
         sampler: SamplerState,
-        context: &mut Context,
+        res: &mut Resources<'_>,
         data: RasterTile<'_>,
-    ) -> SharedTexture {
-        let texture = match previous {
-            Some(previous) if previous.image == data.id() => previous.texture,
-            _ => context.add_texture_with(|texture| texture.set_image(Some(Rc::new(data.image().clone())))),
-        };
-        if let Some(mut texture) = context.texture_mut(&texture) {
-            texture.set_sampler(sampler);
+    ) -> Texture {
+        match previous {
+            Some(previous) if previous.image == data.id() => {
+                res.set_sampler(&previous.texture, sampler);
+                previous.texture
+            }
+            _ => res.image_texture(Rc::new(data.image().clone()), sampler),
         }
-        texture
     }
 
     /// How the draws of the layer of `values` composite onto the frame: as
@@ -172,62 +166,40 @@ fn contrast_factor(contrast: f32) -> f32 {
     if contrast > 0.0 { 1.0 / (1.0 - contrast) } else { 1.0 + contrast }
 }
 
+/// The geometry of a raster draw: `vertex_count` vertices of `vertices`,
+/// and `ranges` of `indexes`.
+struct RasterGeometry {
+    vertices: VertexBuffer,
+    vertex_count: usize,
+    indexes: IndexBuffer,
+    ranges: Vec<DrawRange>,
+}
+
 /// The mesh of a raster draw of `geometry` with `shader`, which binds
 /// `texture` as both of its images.
 fn new_mesh(
-    context: &mut Context,
+    res: &mut Resources<'_>,
     shader: &ShaderKey,
     color_mode: ColorMode,
-    geometry: DrawGeometry,
-    texture: &SharedTexture,
+    geometry: RasterGeometry,
+    texture: &Texture,
 ) -> Mesh {
     let mut textures = Textures::default();
     textures[IMAGE0_SLOT] = Some(texture.clone());
     textures[IMAGE1_SLOT] = Some(texture.clone());
-    Mesh::new(context, shader.clone(), color_mode, CullFaceMode::disabled(), geometry, textures)
-}
-
-/// The geometry of a raster draw of `vertex_count` vertices in `vertices`,
-/// and `ranges` of `indexes`.
-fn raster_geometry(
-    vertices: &SharedVertices,
-    vertex_count: usize,
-    indexes: DrawIndexes,
-    ranges: Vec<DrawRange>,
-) -> DrawGeometry {
-    DrawGeometry {
-        vertices: raster_vertex_attributes(vertices),
-        vertex_count,
+    let RasterGeometry { vertices, vertex_count, indexes, ranges } = geometry;
+    res.mesh(MeshDesc {
+        shader: shader.clone(),
+        color_mode,
+        cull_face_mode: CullFaceMode::disabled(),
         mode: DrawMode::Triangles(),
+        vertices: vec![VertexBinding::of::<RasterLayoutVertex>(&vertices)],
+        vertex_count,
+        instances: None,
         indexes,
         ranges,
-        instances: None,
-    }
-}
-
-/// The vertex attributes of a raster draw over `vertices`.
-fn raster_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
-    let mut attrs = VertexAttributeArray::new();
-    let stride = size_of::<RasterLayoutVertex>() as u32;
-    attrs.set_shared(
-        "pos",
-        SharedAttribute::new(
-            vertices.clone(),
-            AttributeDataType::Short2,
-            offset_of!(RasterLayoutVertex, a1) as u32,
-            stride,
-        ),
-    );
-    attrs.set_shared(
-        "texture_pos",
-        SharedAttribute::new(
-            vertices.clone(),
-            AttributeDataType::Short2,
-            offset_of!(RasterLayoutVertex, a2) as u32,
-            stride,
-        ),
-    );
-    attrs
+        textures,
+    })
 }
 
 impl Layer for RenderRasterLayer {
@@ -256,15 +228,20 @@ impl Layer for RenderRasterLayer {
         previous: Option<ImageDraw>,
     ) -> Option<ImageDraw> {
         let sampler = Self::sampler_state(cx.values);
-        let context = &mut *cx.res.context;
-        let raster_shader = context.shader_key(&programs::RASTER, Uniforms::default(), cx.base.projection_variant);
-        let static_geometry = self.static_geometry.get_or_insert_with(|| StaticGeometry::new(context));
+        let res = &mut cx.res;
+        let raster_shader = res.shader_key(&programs::RASTER, Uniforms::default(), cx.base.projection_variant);
+        let static_geometry = self.static_geometry.get_or_insert_with(|| StaticGeometry::new(res));
         let tile_id = tile.draw_id();
         let draw_geometry = match data {
             // An image source's image draws on its mesh, once it has one.
             RasterTile::Image(image) => {
                 let mesh = image.mesh()?;
-                raster_geometry(&mesh.vertices, mesh.vertices.count(), mesh.indexes.clone().into(), vec![mesh.range])
+                RasterGeometry {
+                    vertices: mesh.vertices.clone(),
+                    vertex_count: mesh.vertices.count(),
+                    indexes: mesh.indexes.clone(),
+                    ranges: vec![mesh.range],
+                }
             }
             // Only a masked tile has quads; any other tile is drawn with the
             // static quad over the tile's extent. On the globe, the draw is
@@ -272,28 +249,34 @@ impl Layer for RenderRasterLayer {
             RasterTile::Tile(raster) => {
                 let mask = raster.masking.mask();
                 if cx.base.projection_variant == ProjectionVariant::Globe {
-                    let globe_mesh = self.globe_meshes.get(context, &tile_id.canonical, mask, RasterLayoutVertex::new);
-                    raster_geometry(
-                        &globe_mesh.vertices,
-                        globe_mesh.vertices.count(),
-                        globe_mesh.indexes(),
-                        globe_mesh.ranges.clone(),
-                    )
-                } else if let Some(quads) = StoredQuads::of_mask(context, mask) {
-                    raster_geometry(&quads.vertices, quads.vertices.count(), quads.indexes.into(), quads.ranges)
+                    let globe_mesh = self.globe_meshes.get(res, &tile_id.canonical, mask, RasterLayoutVertex::new);
+                    RasterGeometry {
+                        vertices: globe_mesh.vertices.clone(),
+                        vertex_count: globe_mesh.vertices.count(),
+                        indexes: globe_mesh.indexes.clone(),
+                        ranges: globe_mesh.ranges.clone(),
+                    }
+                } else if let Some(quads) = StoredQuads::of_mask(res, mask) {
+                    let vertex_count = quads.vertices.count();
+                    RasterGeometry {
+                        vertices: quads.vertices,
+                        vertex_count,
+                        indexes: quads.indexes,
+                        ranges: quads.ranges,
+                    }
                 } else {
-                    raster_geometry(
-                        &static_geometry.vertices,
-                        4,
-                        static_geometry.indexes.clone().into(),
-                        vec![QUAD_RANGE],
-                    )
+                    RasterGeometry {
+                        vertices: static_geometry.vertices.clone(),
+                        vertex_count: 4,
+                        indexes: static_geometry.indexes.clone(),
+                        ranges: vec![QUAD_RANGE],
+                    }
                 }
             }
         };
-        let texture = Self::texture(previous, sampler, context, data);
+        let texture = Self::texture(previous, sampler, res, data);
         let color_mode = ColorMode::alpha_blended();
-        let mesh = new_mesh(context, &raster_shader, color_mode, draw_geometry, &texture);
+        let mesh = new_mesh(res, &raster_shader, color_mode, draw_geometry, &texture);
         Some(ImageDraw { mesh, image: data.id(), texture })
     }
 
@@ -313,8 +296,8 @@ impl Layer for RenderRasterLayer {
             let kept = cx.tiles.get_mut(&tile.id()).map(|kept| &*kept);
             // Kept draws keep their textures, so a changed filter is applied
             // to the textures themselves.
-            if let Some(mut texture) = kept.and_then(|kept| cx.res.context.texture_mut(&kept.texture)) {
-                texture.set_sampler(sampler);
+            if let Some(kept) = kept {
+                cx.res.set_sampler(&kept.texture, sampler);
             }
             raster_draw(kept.map(|kept| &kept.mesh), tile.draw_id(), cx.frame, out.main());
         }

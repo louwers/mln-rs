@@ -6,8 +6,8 @@ use mln_engine::camera::{TileCoordinate, TileProjector, View};
 use mln_engine::draw::ground::{FrameGround, StandingDraw, TileGround};
 use mln_engine::draw::projection::{TileTransform, globe_extrude_scale, tile_projection};
 use mln_engine::draw::{
-    Draw, DrawGeometry, Draws, LayerFrame, RenderPass, RenderTile, SharedAttribute, Textures, Uniforms,
-    VertexAttributeArray, refresh_paint_attributes,
+    Draw, Draws, LayerFrame, MeshDesc, RenderPass, RenderTile, Textures, VertexAttribute, VertexBinding,
+    refresh_paint_attributes,
 };
 use mln_engine::geo::ScreenCoordinate;
 use mln_engine::layer::binders::PaintBinders as _;
@@ -34,6 +34,10 @@ const GROUND_DEPTH_SLOT: usize = NGON.texture_slot("ground_depth");
 
 /// The pass the layer's draws draw in.
 const RENDER_PASS: RenderPass = RenderPass::Translucent;
+
+/// The attribute of the vertices of the polygons' quads, `[i16; 2]` each:
+/// each corner is its point doubled, with the corner in the low bits.
+const POSITION: &[VertexAttribute] = &[VertexAttribute { name: "pos", format: AttributeDataType::Short2, offset: 0 }];
 
 /// An `org.maplibre.ngon` layer: a draw per tile of its bucket's quads,
 /// which stand on the ground over terrain.
@@ -143,29 +147,24 @@ impl Layer for NgonLayer {
         }
         let (vertices, indexes) =
             (bucket_vertices(geometry, &bucket.vertices)?, bucket_indexes(geometry, &bucket.triangles)?);
-        let context = &mut *cx.res.context;
-        let paint =
-            paint_vertices(context, geometry, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state());
-        let mut uniforms = Uniforms::default();
-        let mut attrs = VertexAttributeArray::new();
-        binders.bind(&cx.values.evaluated.paint, paint.as_ref(), &mut attrs, &mut uniforms);
-        let stride = size_of::<[i16; 2]>() as u32;
-        attrs.set_shared("pos", SharedAttribute::new(vertices, AttributeDataType::Short2, 0, stride));
-        let shader = context.shader_key(&NGON, uniforms, cx.base.projection_variant);
-        let mesh = cx.res.mesh(
+        let res = &mut cx.res;
+        let buffer = &binders.interleaved_vertex_buffer;
+        let paint = paint_vertices(res, geometry, buffer, binders.depends_on_feature_state());
+        let paint = binders.paint(&cx.values.evaluated.paint, paint.as_ref());
+        let position = VertexBinding::new(&vertices, size_of::<[i16; 2]>() as u32, POSITION);
+        let shader = res.shader_key(&NGON, paint.uniforms, cx.base.projection_variant);
+        let mesh = res.mesh(MeshDesc {
             shader,
-            ColorMode::alpha_blended(),
-            CullFaceMode::disabled(),
-            DrawGeometry {
-                vertices: attrs,
-                vertex_count: bucket.vertices.len(),
-                mode: DrawMode::Triangles(),
-                indexes: indexes.into(),
-                ranges: bucket.ranges(),
-                instances: None,
-            },
-            Textures::default(),
-        );
+            color_mode: ColorMode::alpha_blended(),
+            cull_face_mode: CullFaceMode::disabled(),
+            mode: DrawMode::Triangles(),
+            vertices: [position].into_iter().chain(paint.vertices).collect(),
+            vertex_count: bucket.vertices.len(),
+            instances: None,
+            indexes,
+            ranges: bucket.ranges(),
+            textures: Textures::default(),
+        });
         Some(StandingDraw::new(mesh))
     }
 
@@ -200,15 +199,15 @@ impl Layer for NgonLayer {
             let Some(draw) = entry.value.as_mut() else {
                 continue;
             };
-            let context = &mut *cx.res.context;
-            refresh_paint_attributes(&draw.mesh, context, changes, |context, attrs| {
+            let res = &mut cx.res;
+            refresh_paint_attributes(&draw.mesh, res, changes, |res| {
                 let geometry = render_data.geometry();
                 let buffer = &binders.interleaved_vertex_buffer;
-                let vertices = paint_vertices(context, geometry, buffer, binders.depends_on_feature_state());
-                binders.bind(paint, vertices.as_ref(), attrs, &mut Uniforms::default());
+                let vertices = paint_vertices(res, geometry, buffer, binders.depends_on_feature_state());
+                binders.paint(paint, vertices.as_ref()).vertices
             });
-            draw.stand(context, ground, tile_id.to_unwrapped(), "ground_height", &bucket.centers);
-            draw.mesh.set_texture(context, GROUND_DEPTH_SLOT, ground.and_then(FrameGround::depth));
+            draw.stand(res, ground, tile_id.to_unwrapped(), "ground_height", &bucket.centers);
+            draw.mesh.set_texture(res, GROUND_DEPTH_SLOT, ground.and_then(FrameGround::depth));
             let (draw_ubo, projection) = Self::uniforms(layer, &tile_id, binders, cx.frame);
             // The draws keep the order they're pushed in, the tiles'.
             out.main().push_at(&draw.mesh, tile_id, &projection, Draw::DEFAULT, draw_ubo);

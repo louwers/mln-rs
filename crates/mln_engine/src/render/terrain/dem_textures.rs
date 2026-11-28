@@ -9,8 +9,8 @@ use mln_style::hash::{HashMap, HashSet};
 use mln_style::size::Size;
 
 use crate::draw::context::Context;
-use crate::draw::identity::SimpleIdentity;
-use crate::draw::store::SharedTexture;
+use crate::draw::store::Texture;
+use crate::layer::ImageId;
 use crate::tile_store::dem::DemContents;
 
 /// The DEM textures of a frame's terrain tiles, kept while a tile reads
@@ -19,19 +19,19 @@ use crate::tile_store::dem::DemContents;
 pub(crate) struct DemTextures {
     /// The texture of each DEM a tile reads, by its contents' id, with the
     /// generation of the DEM's border it holds.
-    textures: HashMap<SimpleIdentity, (SharedTexture, u64)>,
+    textures: HashMap<ImageId, (Texture, u64)>,
     /// The DEMs the frame's tiles read so far.
-    read: HashSet<SimpleIdentity>,
+    read: HashSet<ImageId>,
     /// A transparent 1×1 texture, for the tiles that read no DEM, and for
     /// the drape of a tile that the first stack draws nothing in.
-    flat: Option<SharedTexture>,
+    flat: Option<Texture>,
 }
 
 impl DemTextures {
     /// The texture of `dem`'s DEM, which a tile of the frame reads: the one
     /// made before, or a new one if there was none or the DEM's border
     /// changed since (its `generation`).
-    pub(crate) fn texture(&mut self, context: &mut Context, dem: &DemContents) -> SharedTexture {
+    pub(crate) fn texture(&mut self, context: &mut Context, dem: &DemContents) -> Texture {
         let id = dem.id();
         let generation = dem.generation();
         self.read.insert(id);
@@ -49,7 +49,7 @@ impl DemTextures {
     /// A transparent 1×1 texture: that of the tiles that read no DEM, whose
     /// shader reads no texel of it, and of the drape of a tile that the
     /// first stack draws nothing in.
-    pub(crate) fn flat(&mut self, context: &mut Context) -> SharedTexture {
+    pub(crate) fn flat(&mut self, context: &mut Context) -> Texture {
         let flat = self.flat.get_or_insert_with(|| {
             let image = PremultipliedImage::new(Size::new(1, 1));
             context.add_texture_with(|texture| texture.set_image(Some(Rc::new(image))))
