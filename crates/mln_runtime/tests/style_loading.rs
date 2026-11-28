@@ -18,7 +18,7 @@ use crate::support::still::{
     StillMap, StillOptions, assert_double_eq, center_pixel, check_image, file_response, ll, not_found, read_file, recv,
     serve, test_device,
 };
-use crate::support::{TempDir, TestRuntime, map, wait};
+use crate::support::{TempDir, TestRuntime, eventually, map, wait};
 
 /// A runtime that keeps its cache in `dir`.
 fn cached_runtime(dir: &TempDir) -> TestRuntime {
@@ -189,8 +189,24 @@ fn expired_style_runtime(dir: &TempDir) -> (TestRuntime, Receiver<ResourceReques
             let _ = request.respond(expired(file_response("test/fixtures/api/empty.json")));
         }
     }));
-    wait(map(&runtime).set_style_url(STYLE_URL));
+    // A map caches the expired copy. Released, it cancels its own
+    // revalidations, which go: the tests answer their maps' alone.
+    let caching = map(&runtime);
+    wait(caching.set_style_url(STYLE_URL));
+    wait(caching.release());
+    while revalidations.try_recv().is_ok() {}
     (runtime, revalidations)
+}
+
+/// The next revalidation that a map that's still live waits for.
+#[track_caller]
+fn live_revalidation(revalidations: &Receiver<ResourceRequest>) -> ResourceRequest {
+    loop {
+        let revalidation = recv(revalidations);
+        if !revalidation.is_cancelled() {
+            return revalidation;
+        }
+    }
 }
 
 /// A fresh style with one layer, "revalidated".
@@ -207,15 +223,16 @@ fn style_expired() {
     let (runtime, revalidations) = expired_style_runtime(&dir);
     let unedited = map(&runtime);
     wait(unedited.set_style_url(STYLE_URL));
-    let revalidation = recv(&revalidations);
+    let revalidation = live_revalidation(&revalidations);
     revalidation.respond(revalidated_style()).unwrap();
-    assert!(wait(unedited.style_layer("revalidated")).is_some());
+    // The revalidated style loads on the runtime's thread, after the answer.
+    assert!(eventually(|| wait(unedited.style_layer("revalidated")).is_some()), "the revalidated style loads");
 
     let dir = TempDir::new();
     let (runtime, revalidations) = expired_style_runtime(&dir);
     let edited = map(&runtime);
     wait(edited.set_style_url(STYLE_URL));
-    let revalidation = recv(&revalidations);
+    let revalidation = live_revalidation(&revalidations);
     wait(edited.add_style_layer_json(r#"{"id": "bg", "type": "background"}"#, None));
     revalidation.respond(revalidated_style()).unwrap();
     assert!(wait(edited.style_layer("bg")).is_some());
@@ -230,7 +247,7 @@ fn style_expired_with_projection() {
     let (runtime, revalidations) = expired_style_runtime(&dir);
     let map = map(&runtime);
     wait(map.set_style_url(STYLE_URL));
-    let revalidation = recv(&revalidations);
+    let revalidation = live_revalidation(&revalidations);
     wait(map.set_style_root_property("projection", r#"{"type": "globe"}"#));
     revalidation.respond(revalidated_style()).unwrap();
 

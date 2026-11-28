@@ -313,18 +313,30 @@ fn a_change_that_moves_no_label_asks_for_no_frames() {
     }
 }
 
+/// Draws each frame that `map` asks for until one places its symbols again.
+/// Returns whether one did within [`TIMEOUT`]. The map can report that it
+/// went idle before the tiles that a change lays out again reach its
+/// renderer, so this waits for the placement rather than the idle.
+#[track_caller]
+fn places_again(map: &StillMap) -> bool {
+    let deadline = Instant::now() + TIMEOUT;
+    while Instant::now() < deadline {
+        match frame(map, DemandMode::IfChanged).1 {
+            Some(status) if status.placement_changed => return true,
+            Some(_) => {}
+            None => std::thread::sleep(Duration::from_millis(1)),
+        }
+    }
+    false
+}
+
 #[test]
 fn a_change_to_what_placement_reads_places_again() {
     for (name, change) in changes_to_placement_inputs() {
         let map = labels_and_vehicles();
         settle_placed(&map);
         change(&map.map);
-        let frames = settle(&map);
-        assert!(
-            frames.iter().any(|status| status.placement_changed),
-            "{name}: no placement ran in {} frames",
-            frames.len()
-        );
+        assert!(places_again(&map), "{name}: no placement ran");
     }
 }
 
