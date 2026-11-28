@@ -2526,13 +2526,13 @@ name = "mln-rs-bench"
 version = "0.0.19"
 dependencies = [
  "libc",
+ "log",
  "mln-rs-bench-workload",
  "mln-rs-builtins",
  "mln-rs-d3d12",
  "mln-rs-engine",
  "mln-rs-gfx",
  "mln-rs-gl",
- "mln-rs-headless",
  "mln-rs-mtl",
  "mln-rs-runtime",
  "mln-rs-style",

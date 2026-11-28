@@ -482,7 +482,7 @@ units spread. A macro scenario sets `bench.gpu` to the device it drew on, and
 writes its last image to `bench.image` when that is set, outside its measured
 parts; it calls `meter::leave_gpu_untimed` before making its device if no part
 waits for the GPU to finish its frames. What more than one scenario uses goes in
-`src/support/`: the headless map (`support::map`), the fixtures
+`src/support/`: the map on the runtime (`support::map`), the fixtures
 (`support::fixtures`) and seeded data (`support::random`); what more than one
 micro scenario uses, such as the tiles they read, in `src/scenarios/micro/`.
 
@@ -515,8 +515,13 @@ backend.
 
 ### Driving a map
 
-`support::map::HeadlessMap` is a map on a headless frontend that runs only when
-the scenario drives it, so that it does the same work on every run:
+`support::map::HeadlessMap` is a map on the runtime (`mln_runtime`), with an
+offscreen render session that renders on the scenario's thread
+(`Driver::CallerThread`). It runs only when the scenario drives it, so that it
+does the same work on every run. The runtime's thread runs the map's commands
+and handles what its renderer and workers report, but everything that reports
+runs on the scenario's thread, so each wait for the runtime's thread
+(`HeadlessMap::wait_for_workers`) finds the same work:
 
 - Each frame is a tick of a 60 Hz frame clock that only frames advance, so
   symbol placement, fades and transitions don't depend on how long a frame took.
@@ -526,10 +531,13 @@ the scenario drives it, so that it does the same work on every run:
   frame, so each frame has everything the frames before it asked for, and a map
   loads in the same steps, in the same order, on every run. A macro scenario's
   times are therefore the sum of its work, not what the runtime's four workers
-  would take in parallel.
-- `support::map::Frontend` holds the GPU device and target, made apart from the
-  map, so that a scenario can leave them out of what it measures. A frame's part
-  includes waiting for the GPU to finish it.
+  would take in parallel. The runtime takes the pool and the scenario's file
+  source through `mln_runtime::bench::runtime`.
+- Frames are the session's frame demands, at the frame clock's time, which
+  `mln_runtime::bench::hold_frame_clock` holds instead of the system's clock.
+- `support::map::Frontend` holds the GPU device, made apart from the map, so
+  that a scenario can leave it out of what it measures. A frame's part includes
+  waiting for the GPU to finish it.
 - `support::online::OnlineMap` loads the map over the simulated network (see
   [Network and cache](#network-and-cache)): each frame runs the network's
   answers and the map's background work, draws, and starts the transfers the

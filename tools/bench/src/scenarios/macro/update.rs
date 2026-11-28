@@ -5,13 +5,11 @@
 //! The data an application would supply (points, layers, colors, images
 //! and the features it hovers) is generated from a fixed seed.
 
-use std::sync::Arc;
-
 use mln_engine::camera::CameraOptions;
 use mln_engine::map::MapMode;
-use mln_style::Edit;
+use mln_runtime::FeatureState;
 use mln_style::bitmap::PremultipliedImage;
-use mln_style::feature::{FeatureState, Value};
+use mln_style::feature::Value;
 use mln_style::geo::LatLngBounds;
 use mln_style::image::Impl as StyleImage;
 use mln_style::size::Size;
@@ -150,7 +148,7 @@ fn layers(bench: &mut Bench) {
     let ids: Vec<String> = (0..LAYERS).map(|index| format!("overlay-{index}")).collect();
     let mut frames = bench.measure(|| {
         for layer in &layers {
-            map.map().edit_loaded_style(|style| style.add_layer_json(layer, None)).expect("a layer");
+            map.add_layer_json(layer);
         }
         map.settle()
     });
@@ -162,7 +160,7 @@ fn layers(bench: &mut Bench) {
     }
     frames += bench.measure(|| {
         for id in &ids {
-            map.map().edit_loaded_style(|style| style.apply(Edit::RemoveLayer(id.clone()))).expect("a layer");
+            map.remove_layer(id);
         }
         map.settle()
     });
@@ -255,7 +253,7 @@ fn paint(bench: &mut Bench) {
 }
 
 fn set_paint(map: &mut HeadlessMap, layer: &str, name: &str, value: &str) {
-    map.map().edit_loaded_style(|style| style.set_layer_property_json(layer, name, value)).expect("a paint property");
+    map.set_layer_property(layer, name, value);
 }
 
 /// The question: what does a frame cost that moves the hover state from
@@ -347,9 +345,9 @@ fn feature_state(bench: &mut Bench) {
         let next = (row * COLUMNS + column).to_string();
         bench.measure(|| {
             if let Some(previous) = &hovered {
-                map.map().set_feature_state("regions", None, previous, hover(false));
+                map.set_feature_state("regions", previous, hover(false));
             }
-            map.map().set_feature_state("regions", None, &next, hover(true));
+            map.set_feature_state("regions", &next, hover(true));
             map.draw_frame();
             map.wait_for_workers();
         });
@@ -399,10 +397,10 @@ fn images(bench: &mut Bench) {
     );
     map.settle();
 
-    let images: Vec<Arc<StyleImage>> = (0..IMAGES).map(|index| Arc::new(marker(index, &mut random))).collect();
+    let images: Vec<StyleImage> = (0..IMAGES).map(|index| marker(index, &mut random)).collect();
     let frames = bench.measure(|| {
         for image in images {
-            map.map().edit_loaded_style(|style| style.apply(Edit::AddImage(image))).expect("an image");
+            map.add_image(image);
         }
         map.settle()
     });
@@ -436,14 +434,14 @@ fn marker(index: usize, random: &mut Random) -> StyleImage {
 fn open(bench: &mut Bench, fixtures: &Fixtures) -> (HeadlessMap, LatLngBounds) {
     let camera: CameraOptions = super::street_center(fixtures, ZOOM);
     let style = fixtures.style(Tiles::Street);
-    let mut map = HeadlessMap::open(bench, fixtures, VIEW, MapMode::Continuous, &style, &camera);
-    let view = map.map().lat_lng_bounds_for_camera(&camera).expect("the view's bounds");
+    let map = HeadlessMap::open(bench, fixtures, VIEW, MapMode::Continuous, &style, &camera);
+    let view = map.lat_lng_bounds_for_camera(&camera);
     (map, view)
 }
 
 fn add_layer(map: &mut HeadlessMap, layer: &serde_json::Value) {
     let layer = layer.to_string();
-    map.map().edit_loaded_style(|style| style.add_layer_json(&layer, None)).expect("a layer");
+    map.add_layer_json(&layer);
 }
 
 /// A color of a hue, saturation and lightness from `random`.

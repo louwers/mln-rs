@@ -7,11 +7,11 @@ use std::sync::Arc;
 use mln_engine::RenderMode;
 use mln_engine::bench::Coverage;
 use mln_engine::camera::CameraOptions;
-use mln_engine::map::{MapMode, RenderFrameStatus};
+use mln_engine::map::MapMode;
 use mln_engine::storage::Cache;
 
 use super::cache::DiskCache;
-use super::map::{Frontend, HeadlessMap};
+use super::map::{FrameStatus, Frontend, HeadlessMap};
 use super::network::{Network, Server};
 use crate::scenario::Bench;
 
@@ -121,7 +121,7 @@ impl OnlineMap {
         let file_source = network.file_source(frontend.pool(), cache.map(|cache| -> Arc<dyn Cache> { cache }));
         let mut map = HeadlessMap::new(frontend, MapMode::Continuous, file_source);
         map.jump(camera);
-        map.map().load_style_url(&Server::style_url());
+        map.load_style_url(&Server::style_url());
         OnlineMap { map, network, sight: Sight::default() }
     }
 
@@ -139,7 +139,7 @@ impl OnlineMap {
 
     /// Draws a frame as one measured part of `bench`, and counts what it
     /// showed. The network's clock moves on outside the part.
-    pub(crate) fn frame(&mut self, bench: &mut Bench) -> RenderFrameStatus {
+    pub(crate) fn frame(&mut self, bench: &mut Bench) -> FrameStatus {
         let status = bench.measure(|| self.step());
         self.sight.observe(status.mode == RenderMode::Full, mln_engine::bench::take_coverage());
         self.network.advance();
@@ -161,7 +161,7 @@ impl OnlineMap {
     }
 
     /// The work between frames, the frame, and the transfers it asked for.
-    fn step(&mut self) -> RenderFrameStatus {
+    fn step(&mut self) -> FrameStatus {
         self.work();
         let status = self.map.draw_frame();
         self.work();
