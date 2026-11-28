@@ -5,10 +5,12 @@
 use std::sync::Arc;
 
 use mln_rs::layer::{
-    Draws, FrameTile, Layer, LayerStyle, LayerTypeInfo, LayerValues, NoProperties, NoTiles, PrepareCx, PropertyTable,
-    PropertyVisitor, RegisterError, Registry, RegistryBuilder, SourceKind, StyleLayerType, layer_properties,
+    Bucket, BuildCx, Draws, Features, FrameTile, Layer, LayerStyle, LayerTypeInfo, LayerValues, Layout, LayoutCx,
+    NoProperties, PrepareCx, PropertyTable, PropertyVisitor, RegisterError, Registry, RegistryBuilder, SourceKind,
+    StyleLayerType, Upload, Wire, layer_properties,
 };
 use mln_rs::mln_style::Style;
+use mln_rs::mln_style::error::Error;
 
 layer_properties!(
     /// The paint properties of an `org.example.dot` layer.
@@ -17,12 +19,13 @@ layer_properties!(
     }
 );
 
-/// The style half of `org.example.dot`: a layer without a source, with one
-/// paint property.
+/// The style half of `org.example.dot`: a layer of a geometry source, with
+/// one paint property.
 struct Dot;
 
 impl StyleLayerType for Dot {
-    const INFO: LayerTypeInfo = LayerTypeInfo { name: "org.example.dot", source: SourceKind::None, from_json: true };
+    const INFO: LayerTypeInfo =
+        LayerTypeInfo { name: "org.example.dot", source: SourceKind::Geometry, from_json: true };
     const PROPERTIES: &'static PropertyTable = &PROPERTIES;
 
     type LayoutProperties = NoProperties;
@@ -34,12 +37,50 @@ impl StyleLayerType for Dot {
     }
 }
 
+/// What a tile worker lays out of a tile for `org.example.dot`: the points
+/// of the features its filter selects. `#[derive(Wire)]` writes and reads
+/// it as it crosses from the worker.
+#[derive(Clone, Debug, PartialEq, Wire)]
+struct DotBucket {
+    points: Vec<[i16; 2]>,
+}
+
+impl Bucket for DotBucket {
+    fn upload(&mut self, _up: &mut Upload<'_>) {}
+}
+
+/// The features of a tile that the filter selects, by index.
+struct DotLayout {
+    features: Vec<usize>,
+}
+
+impl Layout<Dot> for DotLayout {
+    type Bucket = DotBucket;
+
+    fn new(cx: &mut LayoutCx<'_, Dot>) -> Result<Self, Error> {
+        let source_layer = cx.source_layer()?;
+        let context = cx.filter_context();
+        let features = cx.select(&source_layer, context).indexes(&source_layer)?;
+        Ok(DotLayout { features })
+    }
+
+    fn build(self, cx: &mut BuildCx<'_, Dot>) -> Result<Option<DotBucket>, Error> {
+        let source_layer = cx.source_layer()?;
+        let mut points = Vec::new();
+        for i in self.features {
+            let geometry = source_layer.feature(i)?.geometry()?;
+            points.extend(geometry.iter().flatten().map(|point| [point.x, point.y]));
+        }
+        Ok((!points.is_empty()).then_some(DotBucket { points }))
+    }
+}
+
 /// The render half of `org.example.dot`, which draws nothing.
 struct DotLayer;
 
 impl Layer for DotLayer {
     type Style = Dot;
-    type Input = NoTiles;
+    type Input = Features<DotLayout>;
     type Tile = ();
 
     fn new(_values: &LayerValues<Dot>) -> Self {
@@ -64,7 +105,7 @@ const STYLE: &str = r#"{
     "sources": {"points": {"type": "geojson", "data": {"type": "Point", "coordinates": [0, 0]}}},
     "layers": [
         {"id": "ngons", "type": "org.maplibre.ngon", "source": "points", "paint": {"ngon-corners": 6}},
-        {"id": "dots", "type": "org.example.dot", "paint": {"dot-radius": 3}}
+        {"id": "dots", "type": "org.example.dot", "source": "points", "paint": {"dot-radius": 3}}
     ]
 }"#;
 
@@ -89,5 +130,16 @@ mod tests {
         let dots = LayerStyle::<Dot>::recover(style.get_layer("dots").unwrap().style()).unwrap();
         assert_eq!(Some(&3.0), dots.paint.dot_radius.value.as_constant());
         assert!(LayerStyle::<mln_ngon::Ngon>::recover(style.get_layer("ngons").unwrap().style()).is_some());
+    }
+
+    #[test]
+    fn a_bucket_reads_back_what_it_writes() {
+        use mln_rs::layer::{Reader, Writer};
+
+        let bucket = DotBucket { points: vec![[0, 0], [-8, 4096]] };
+        let mut writer = Writer::new();
+        bucket.write(&mut writer);
+        let bytes = writer.finish().unwrap();
+        assert_eq!(Some(bucket), DotBucket::read(&mut Reader::new(&bytes)));
     }
 }

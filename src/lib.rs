@@ -8,7 +8,9 @@
 //! here under their crate names: `mln_rs::mln_engine`, `mln_rs::mln_style`,
 //! `mln_rs::mln_builtins`, and so on. They are published as the `mln-rs-*`
 //! packages, which only exist for this crate. The tile worker codec's
-//! encoding (`mln_wire`) is internal to the port and not re-exported.
+//! encoding (`mln_wire`) is internal to the port: [`layer`] re-exports only
+//! what a layer type's buckets implement, the `Wire` trait and its derive,
+//! with its `Reader` and `Writer`.
 //!
 //! The library logs through the `log` crate and installs no logger: install
 //! a `log` backend to read its records. A record's target is

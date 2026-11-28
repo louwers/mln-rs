@@ -23,7 +23,6 @@ glam.workspace = true
 mln_engine.workspace = true
 mln_gfx.workspace = true
 mln_style.workspace = true
-mln_wire.workspace = true
 
 [dev-dependencies]
 mln_builtins.workspace = true

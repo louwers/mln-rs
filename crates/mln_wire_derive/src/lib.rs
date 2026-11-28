@@ -6,8 +6,10 @@
 //! - `#[wire(bound = "...")]` on the type replaces the `T: Wire` bound that
 //!   each type parameter gets otherwise.
 //! - `#[wire(crate = path)]` on the type names the `mln_wire` crate by
-//!   `path` instead of `::mln_wire`, for a macro that derives `Wire` in a
-//!   crate that doesn't depend on `mln_wire` itself.
+//!   `path`, for a macro that derives `Wire` in a crate it doesn't know.
+//!   Without it, the impl names `mln_wire` through the first of the
+//!   deriving package's dependencies that reaches it: `mln-rs-wire` itself,
+//!   `mln-rs-engine` or `mln-rs`, under the name the package gives it.
 //! - `#[wire(default)]` on a struct that implements `Default` reads it into
 //!   its default, one field after another. A struct literal of the fields
 //!   read drops those read so far at each place reading can fail, which
@@ -19,6 +21,7 @@
 //!   with `#[wire(skip, default = "path")]` as what `path()` returns.
 
 use proc_macro::TokenStream;
+use proc_macro_crate::{FoundCrate, crate_name};
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
 use syn::{Data, DeriveInput, Fields, Index, LitStr, Path, WherePredicate, parse_macro_input, parse_quote};
@@ -99,6 +102,31 @@ fn container_attrs(attrs: &[syn::Attribute]) -> syn::Result<ContainerAttrs> {
     Ok(result)
 }
 
+/// The path of `mln_wire` from the package that derives `Wire`: its own
+/// dependency on `mln-rs-wire`, or the re-export of `mln-rs-engine` or
+/// `mln-rs`. `::mln_wire` where it depends on none of them, which the
+/// compiler then reports as a missing crate.
+fn wire_path() -> syn::Result<TokenStream2> {
+    // Each package, its library's name and the path of `mln_wire` in it.
+    const PATHS: [(&str, &str, &str); 3] = [
+        ("mln-rs-wire", "mln_wire", ""),
+        ("mln-rs-engine", "mln_engine", "::__private::mln_wire"),
+        ("mln-rs", "mln_rs", "::mln_engine::__private::mln_wire"),
+    ];
+    for (package, library, rest) in PATHS {
+        let name = match crate_name(package) {
+            // Not `crate`, which the package's tests and examples can't
+            // name it by.
+            Ok(FoundCrate::Itself) => library.to_owned(),
+            Ok(FoundCrate::Name(name)) => name,
+            Err(_) => continue,
+        };
+        let path: Path = syn::parse_str(&format!("::{name}{rest}"))?;
+        return Ok(quote! { #path });
+    }
+    Ok(quote! { ::mln_wire })
+}
+
 /// How a field is written, given an expression that borrows it.
 fn write_field(wire: &TokenStream2, attrs: &FieldAttrs, field: &TokenStream2) -> TokenStream2 {
     if attrs.skip {
@@ -169,7 +197,10 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
     let name = &input.ident;
     let mut generics = input.generics.clone();
     let container = container_attrs(&input.attrs)?;
-    let wire = container.krate.as_ref().map_or_else(|| quote! { ::mln_wire }, |path| quote! { #path });
+    let wire = match &container.krate {
+        Some(path) => quote! { #path },
+        None => wire_path()?,
+    };
     if let Some(predicates) = container.bound {
         generics.make_where_clause().predicates.extend(predicates);
     } else {

@@ -3,7 +3,8 @@
 > **Warning: this is an internal crate of
 > [mln-rs](https://crates.io/crates/mln-rs).** It is published only because the
 > other mln-rs crates depend on it, and its API can change in any release
-> without notice. mln-rs doesn't re-export it.
+> without notice. mln-rs re-exports only `Wire`, its derive, `Reader` and
+> `Writer`, which layer types' buckets implement, in `mln_rs::layer`.
 
 `#[derive(Wire)]` for `mln-rs-wire`.
 
