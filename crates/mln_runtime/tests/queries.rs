@@ -11,12 +11,8 @@ use mln_runtime::{RenderedQueryOptions, SourceQueryOptions};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::geo::LatLng;
 
-use crate::support::still::{StillMap, decode_image, read_file, serve};
+use crate::support::still::{StillMap, decode_image, ll, read_file, serve};
 use crate::support::wait;
-
-fn ll(lat: f64, lon: f64) -> LatLng {
-    LatLng::new(lat, lon).expect("LatLng")
-}
 
 /// Rendered queries of the layers `ids`.
 fn in_layers(ids: &[&str], filter: Option<mln_style::filter::Filter>) -> RenderedQueryOptions {

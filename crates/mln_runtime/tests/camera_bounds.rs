@@ -1,17 +1,12 @@
 //! The limits on the camera, and the area that a camera shows.
 
 use mln_engine::camera::{BoundOptions, CameraOptions};
-use mln_style::geo::LatLng;
 use mln_style::size::Size;
 
-use crate::support::still::{StillMap, StillOptions, assert_near};
+use crate::support::still::{StillMap, StillOptions, assert_near, ll};
 use crate::support::wait;
 
 const GLOBE_STYLE: &str = r#"{"version":8,"projection":{"type":"vertical-perspective"},"sources":{},"layers":[]}"#;
-
-fn ll(lat: f64, lon: f64) -> LatLng {
-    LatLng::new(lat, lon).expect("LatLng")
-}
 
 fn zoom(map: &StillMap) -> f64 {
     wait(map.map.camera()).camera.zoom

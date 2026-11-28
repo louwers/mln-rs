@@ -10,20 +10,15 @@ use mln_engine::map::{MapEvent, MapMode};
 use mln_engine::storage::Kind;
 use mln_runtime::{RuntimeEventKind, TileOptions};
 use mln_style::bitmap::PremultipliedImage;
-use mln_style::geo::LatLng;
 use mln_style::image::Impl as StyleImage;
 use mln_style::size::Size;
 
-use crate::support::still::{StillMap, StillOptions, center_pixel, file_response, not_found, pixel, serve};
+use crate::support::still::{StillMap, StillOptions, center_pixel, file_response, ll, not_found, pixel, serve};
 use crate::support::wait;
 
 const RED: [u8; 4] = [255, 0, 0, 255];
 const GREEN: [u8; 4] = [0, 255, 0, 255];
 const BLUE: [u8; 4] = [0, 0, 255, 255];
-
-fn ll(lat: f64, lon: f64) -> LatLng {
-    LatLng::new(lat, lon).expect("LatLng")
-}
 
 /// An image `id` of `size`, every pixel `color`, at pixel ratio 1.
 fn solid_image(id: &str, size: Size, color: [u8; 4]) -> StyleImage {

@@ -13,12 +13,8 @@ use mln_style::geo::{LatLng, LatLngBounds};
 use mln_style::size::Size;
 use mln_style::tile_id::CanonicalTileID;
 
-use crate::support::still::{StillMap, StillOptions, center_pixel, file_response, not_found, read_bytes, serve};
+use crate::support::still::{StillMap, StillOptions, center_pixel, file_response, ll, not_found, read_bytes, serve};
 use crate::support::{eventually, wait};
-
-fn ll(lat: f64, lon: f64) -> LatLng {
-    LatLng::new(lat, lon).expect("LatLng")
-}
 
 /// The report of the frame that `result` finished, once it reached the
 /// map's events.

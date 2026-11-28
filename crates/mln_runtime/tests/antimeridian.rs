@@ -7,15 +7,11 @@ use mln_engine::camera::{AnimationOptions, BoundOptions, CameraDelta, CameraOpti
 use mln_engine::geo::ScreenCoordinate;
 use mln_engine::map::MapMode;
 use mln_runtime::{Map, Runtime};
-use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
+use mln_style::geo::{LatLngBounds, WrapMode};
 use mln_style::size::Size;
 
-use crate::support::still::assert_near;
+use crate::support::still::{assert_near, ll};
 use crate::support::{map_options, result_of, runtime, wait};
-
-fn ll(lat: f64, lon: f64) -> LatLng {
-    LatLng::new(lat, lon).expect("LatLng")
-}
 
 /// A map `side` pixels square in `mode`, with no render session, so an
 /// animation stays where it starts.

@@ -9,7 +9,7 @@ use mln_runtime::RenderedQueryOptions;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::size::Size;
 
-use crate::support::still::{StillMap, file_response, not_found, serve};
+use crate::support::still::{StillMap, differing, file_response, not_found, serve};
 use crate::support::wait;
 
 const SIDE: u32 = 256;
@@ -117,11 +117,6 @@ fn still(style: &str, height: impl Fn(f64, f64) -> f64 + Send + Sync + 'static) 
 /// How many features of `layer` the last frame of `map` drew at `x`, `y`.
 fn found(map: &StillMap, layer: &str, x: f64, y: f64) -> usize {
     map.query_point(x, y, RenderedQueryOptions::new(Some(vec![layer.to_owned()]), None)).len()
-}
-
-/// How many pixels of `a` and `b` differ, as the render tests count them.
-fn differing(a: &PremultipliedImage, b: &PremultipliedImage) -> u64 {
-    image_diff::differing_pixels(&a.data, &b.data, SIDE, SIDE, 0.1285, None)
 }
 
 /// How many pixels of `image` are lime, a circle's.

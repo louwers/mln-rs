@@ -6,15 +6,10 @@ use mln_engine::camera::CameraOptions;
 use mln_engine::geo::EdgeInsets;
 use mln_engine::map::MapEvent;
 use mln_runtime::{RuntimeEventKind, RuntimeOptions, ViewportOptions};
-use mln_style::geo::LatLng;
 use serde_json::json;
 
-use crate::support::still::{StillMap, StillOptions, check_image, fixtures_root, read_file};
+use crate::support::still::{StillMap, StillOptions, check_image, fixtures_root, ll, read_file};
 use crate::support::wait;
-
-fn ll(lat: f64, lon: f64) -> LatLng {
-    LatLng::new(lat, lon).expect("LatLng")
-}
 
 /// A layer whose color comes to depend on the zoom draws the color of each
 /// zoom that the map moves to after.

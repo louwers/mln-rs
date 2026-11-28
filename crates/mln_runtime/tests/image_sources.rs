@@ -4,15 +4,10 @@ use mln_engine::camera::CameraOptions;
 use mln_engine::storage::Kind;
 use mln_runtime::RuntimeEventKind;
 use mln_style::bitmap::PremultipliedImage;
-use mln_style::geo::LatLng;
 use mln_style::size::Size;
 
-use crate::support::still::{StillMap, assert_near, center_pixel, decode_image, file_response, read_file, serve};
+use crate::support::still::{StillMap, assert_near, center_pixel, decode_image, file_response, ll, read_file, serve};
 use crate::support::{EMPTY_STYLE, eventually, wait};
-
-fn ll(lat: f64, lon: f64) -> LatLng {
-    LatLng::new(lat, lon).expect("LatLng")
-}
 
 fn add_raster_layer(map: &StillMap, id: &str, source: &str) {
     let layer = format!(r#"{{"id": "{id}", "type": "raster", "source": "{source}"}}"#);

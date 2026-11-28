@@ -6,12 +6,8 @@ use mln_engine::geo::EdgeInsets;
 use mln_runtime::{CameraFitArea, CameraFitOptions, ErrorKind, Map};
 use mln_style::geo::{LatLng, LatLngBounds};
 
-use crate::support::still::{assert_double_eq, assert_near};
+use crate::support::still::{assert_double_eq, assert_near, ll};
 use crate::support::{map, runtime, wait, wait_err};
-
-fn ll(lat: f64, lon: f64) -> LatLng {
-    LatLng::new(lat, lon).expect("LatLng")
-}
 
 /// A map whose camera is over New York at zoom 16, and bounds over India and
 /// China, far from it.

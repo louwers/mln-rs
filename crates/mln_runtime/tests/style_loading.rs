@@ -15,14 +15,10 @@ use parking_lot::Mutex;
 use serde_json::{Value, json};
 
 use crate::support::still::{
-    StillMap, StillOptions, assert_double_eq, center_pixel, check_image, file_response, not_found, read_file, recv,
+    StillMap, StillOptions, assert_double_eq, center_pixel, check_image, file_response, ll, not_found, read_file, recv,
     serve, test_device,
 };
 use crate::support::{TempDir, TestRuntime, map, wait};
-
-fn ll(lat: f64, lon: f64) -> LatLng {
-    LatLng::new(lat, lon).expect("LatLng")
-}
 
 /// A runtime that keeps its cache in `dir`.
 fn cached_runtime(dir: &TempDir) -> TestRuntime {

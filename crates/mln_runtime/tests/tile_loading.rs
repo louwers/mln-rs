@@ -11,19 +11,14 @@ use mln_engine::camera::CameraOptions;
 use mln_engine::map::{MapEvent, MapMode};
 use mln_engine::storage::{Kind, Response};
 use mln_runtime::{ResourceRequest, RuntimeEventKind, RuntimeOptions, TileOptions};
-use mln_style::geo::LatLng;
 use mln_style::size::Size;
 use mln_style::tile_id::CanonicalTileID;
 use parking_lot::Mutex;
 
 use crate::support::still::{
-    StillMap, StillOptions, check_image, file_response, fixtures_root, not_found, read_bytes, serve,
+    StillMap, StillOptions, check_image, file_response, fixtures_root, ll, not_found, read_bytes, serve,
 };
 use crate::support::{COMPLETION_TIMEOUT, wait};
-
-fn ll(lat: f64, lon: f64) -> LatLng {
-    LatLng::new(lat, lon).expect("LatLng")
-}
 
 fn zoom(zoom: f64) -> CameraOptions {
     CameraOptions { zoom: Some(zoom), ..Default::default() }

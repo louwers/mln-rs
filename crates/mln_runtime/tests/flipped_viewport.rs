@@ -4,10 +4,8 @@
 use mln_engine::camera::{BoundOptions, ViewportMode};
 use mln_style::bitmap::PremultipliedImage;
 
-use crate::support::still::{StillMap, StillOptions};
+use crate::support::still::{StillMap, StillOptions, differing};
 use crate::support::wait;
-
-const SIDE: u32 = 256;
 
 /// The still image of the map drawn with `style` in `viewport_mode`, pitched
 /// as the style says, up to 85°.
@@ -28,10 +26,6 @@ fn flipped(image: &PremultipliedImage) -> PremultipliedImage {
         to.copy_from_slice(from);
     }
     turned
-}
-
-fn differing(image: &PremultipliedImage, other: &PremultipliedImage) -> u64 {
-    image_diff::differing_pixels(&image.data, &other.data, SIDE, SIDE, 0.1285, None)
 }
 
 /// How many pixels of the map drawn with `style` in a flipped viewport,

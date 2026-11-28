@@ -9,7 +9,7 @@ use mln_engine::storage::{Kind, Response};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::size::Size;
 
-use crate::support::still::{StillMap, StillOptions, not_found, pixel, serve};
+use crate::support::still::{StillMap, StillOptions, differing, not_found, pixel, serve};
 use crate::support::wait;
 
 const SIDE: u32 = 256;
@@ -124,11 +124,6 @@ fn render(style: &str, viewport_mode: ViewportMode) -> PremultipliedImage {
     wait(map.map.set_bounds(BoundOptions { max_pitch: Some(85.0), ..Default::default() }));
     map.load_json(style);
     map.render()
-}
-
-/// How many pixels of `a` and `b` differ, as the render tests count them.
-fn differing(a: &PremultipliedImage, b: &PremultipliedImage) -> u64 {
-    image_diff::differing_pixels(&a.data, &b.data, SIDE, SIDE, 0.1285, None)
 }
 
 /// A viewport flipped upside down, which turns the surface's triangles

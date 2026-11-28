@@ -8,9 +8,7 @@ use mln_engine::storage::Response;
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::size::Size;
 
-use crate::support::still::{StillMap, not_found, serve};
-
-const SIDE: u32 = 256;
+use crate::support::still::{StillMap, differing, not_found, serve};
 
 /// A DEM tile of 256 pixels a side, in the Mapbox encoding, of a round hill
 /// at 0° N 0° E, 1500 m high and about 2 km in radius, over flat ground at
@@ -55,11 +53,6 @@ fn render(bearing: f64, paint: &str) -> PremultipliedImage {
     });
     map.load_json(&style);
     map.render()
-}
-
-/// How many pixels of `a` and `b` differ, as the render tests count them.
-fn differing(a: &PremultipliedImage, b: &PremultipliedImage) -> u64 {
-    image_diff::differing_pixels(&a.data, &b.data, SIDE, SIDE, 0.1285, None)
 }
 
 /// How many pixels the hill's shading differs by between ways of drawing

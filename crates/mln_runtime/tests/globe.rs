@@ -11,15 +11,10 @@ use mln_engine::tile::OverscaledTileID;
 use mln_runtime::{RuntimeEventKind, RuntimeOptions};
 use mln_style::TransitionOptions;
 use mln_style::bitmap::PremultipliedImage;
-use mln_style::geo::LatLng;
 use mln_style::size::Size;
 
-use crate::support::still::{StillMap, StillOptions, assert_near, fixtures_root, read_bytes, read_file, serve};
+use crate::support::still::{StillMap, StillOptions, assert_near, fixtures_root, ll, read_bytes, read_file, serve};
 use crate::support::wait;
-
-fn ll(lat: f64, lon: f64) -> LatLng {
-    LatLng::new(lat, lon).expect("LatLng")
-}
 
 /// The tiles of `source`, or of every source, that the map started to parse
 /// after the first `from` of its events.

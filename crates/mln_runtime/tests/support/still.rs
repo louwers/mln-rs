@@ -121,6 +121,12 @@ pub(crate) fn check_images(bases: &[&str], actual: &PremultipliedImage, image_th
     assert!(diffs.iter().any(|diff| *diff <= image_threshold), "{bases:?}: image differences {diffs:?}");
 }
 
+/// How many pixels of `a` differ from those of `b`, an image of the same
+/// size, by more than a small threshold, which antialiasing stays within.
+pub(crate) fn differing(a: &PremultipliedImage, b: &PremultipliedImage) -> u64 {
+    image_diff::differing_pixels(&a.data, &b.data, a.size.width, a.size.height, 0.1285, None)
+}
+
 /// The pixel at `x`, `y`.
 pub(crate) fn pixel(image: &PremultipliedImage, x: u32, y: u32) -> [u8; 4] {
     let offset = y as usize * image.stride() + x as usize * 4;
@@ -148,6 +154,11 @@ pub(crate) fn assert_double_eq(actual: f64, expected: f64) {
 #[track_caller]
 pub(crate) fn assert_near(actual: f64, expected: f64, tolerance: f64) {
     assert!((actual - expected).abs() <= tolerance, "expected {expected} +- {tolerance}, got {actual}");
+}
+
+/// A latitude and longitude that are valid.
+pub(crate) fn ll(lat: f64, lon: f64) -> mln_style::geo::LatLng {
+    mln_style::geo::LatLng::new(lat, lon).expect("a valid latitude and longitude")
 }
 
 // MARK: - Devices
