@@ -12,8 +12,7 @@ version:
   `mln_engine::`. They exist for mln-rs only.
 
 The `publish = false` packages (the desktop app, the browser build in
-examples/web and crates/mln_web_shaper, the test tools and their headless
-frontend) are not released.
+examples/web and crates/mln_web_shaper, and the test tools) are not released.
 
 ## Releasing a version
 

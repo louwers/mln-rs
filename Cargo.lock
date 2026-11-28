@@ -2831,19 +2831,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mln-rs-headless"
-version = "0.0.19"
-dependencies = [
- "log",
- "mln-rs-builtins",
- "mln-rs-engine",
- "mln-rs-gfx",
- "mln-rs-runtime",
- "mln-rs-style",
- "parking_lot",
-]
-
-[[package]]
 name = "mln-rs-image-diff"
 version = "0.0.19"
 dependencies = [
