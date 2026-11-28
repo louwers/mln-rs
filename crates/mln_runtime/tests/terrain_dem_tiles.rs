@@ -11,8 +11,8 @@ use mln_runtime::{DemandMode, FrameDisposition, MapOptions, RuntimeEventKind};
 use mln_style::bitmap::PremultipliedImage;
 use mln_style::size::Size;
 
+use crate::support::eventually;
 use crate::support::still::{StillMap, StillOptions, not_found, pixel, serve};
-use crate::support::{TIMEOUT, eventually};
 
 /// Seen from zoom 1, one terrain tile covers the world, and reads the one
 /// DEM tile, at zoom 0.
@@ -132,8 +132,9 @@ fn a_continuous_map_over_far_dem_tiles_that_flip_settles() {
     map.load_json(FAR_DEM_STYLE);
 
     // Draws each frame that the map asks for, as a display does, until it
-    // goes idle.
-    let deadline = Instant::now() + TIMEOUT;
+    // goes idle. A software rasterizer, as on CI's Windows runners, takes
+    // about 30 s to draw the frames before then at this size.
+    let deadline = Instant::now() + Duration::from_secs(120);
     while !idle_since(&map, 0) {
         assert!(Instant::now() < deadline, "the map never went idle");
         if map.frame_with(DemandMode::IfChanged).disposition != FrameDisposition::Rendered {
