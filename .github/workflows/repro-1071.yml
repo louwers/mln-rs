@@ -1,0 +1,37 @@
+name: repro-1071
+
+on:
+  push:
+    branches: [repro-1071]
+
+permissions:
+  contents: read
+
+env:
+  MISE_LOCKED: "1"
+
+jobs:
+  repro:
+    runs-on: blacksmith-6vcpu-macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ci-deps
+      - name: GPU
+        run: system_profiler SPDisplaysDataType; sw_vers
+      - name: Build
+        run: cargo build -p mln-rs-runtime --features webgpu --example repro_1071 --example repro_1071_reuse
+      - name: Render
+        run: |
+          curl -sfL -o style.json https://raw.githubusercontent.com/CommanderStorm/mln-rs/396ea3848a8b4ed137d4a24c3ac33992b4b07726/maplibre_demo.json
+          for b in metal webgpu; do
+            target/debug/examples/repro_1071 style.json $b out/single
+            target/debug/examples/repro_1071_reuse style.json $b out/reuse-$b 4 3
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: renders
+          path: out
