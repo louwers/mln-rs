@@ -1,6 +1,8 @@
+use geometry::Point;
 use mln_style::geo::{LatLng, LatLngBounds};
 use mln_style::tile_id::CanonicalTileID;
 
+use crate::geo::world::{WorldBox, WorldMapping};
 use crate::tile::tile_range::TileRange;
 
 fn ll(lat: f64, lon: f64) -> LatLng {
@@ -185,4 +187,119 @@ fn contains_bounds_starting_just_under_the_antimeridian() {
     let range = TileRange::from_lat_lng_bounds_range(&bounds, 1, 2);
     assert!(range.contains(&c(1, 1, 0)));
     assert!(!range.contains(&c(1, 0, 0)));
+}
+
+/// GL JS's CRS rotated by 30 degrees, whose world x and y both turn with
+/// longitude and latitude.
+fn rotated() -> WorldMapping {
+    let (sin, cos) = (std::f64::consts::PI / 6.0).sin_cos();
+    crate::tests::crs::mapping(crate::tests::crs::crs(
+        "test:rotated",
+        move |[lng, lat]| [lng * cos - lat * sin, lng * sin + lat * cos],
+        move |[x, y]| [x * cos + y * sin, -x * sin + y * cos],
+        [-150.0, 150.0],
+        300.0,
+    ))
+}
+
+/// The tile at zoom `z` of the place of `lat_lng` in `world`.
+fn tile_of(world: &WorldMapping, lat_lng: LatLng, z: u8) -> CanonicalTileID {
+    let point = world.world_from_lat_lng(&lat_lng);
+    let tiles = 2.0f64.powi(i32::from(z));
+    c(z, (point.x * tiles).floor() as u32, (point.y * tiles).floor() as u32)
+}
+
+/// The tiles from `min_zoom` to `max_zoom` of the rectangle `bounds` make
+/// in the world square of `world`.
+fn range_in(world: &WorldMapping, bounds: &LatLngBounds, min_zoom: u8, max_zoom: u8) -> TileRange {
+    TileRange::from_world_box(&world.lng_lat_box_to_world_box(bounds), min_zoom, max_zoom)
+}
+
+fn world_box(min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> WorldBox {
+    WorldBox { min: Point::new(min_x, min_y), max: Point::new(max_x, max_y) }
+}
+
+// gtest: TileRange.FromWorldBox
+#[test]
+fn from_world_box() {
+    // Lng 0..90 and lat 45..90 of the identity: the top row of the north-east
+    // quarter.
+    let range = TileRange::from_world_box(&world_box(0.5, 0.0, 1.0, 0.25), 0, 2);
+    assert!(range.contains(&c(2, 2, 0)));
+    assert!(range.contains(&c(2, 3, 0)));
+    assert!(!range.contains(&c(2, 2, 1)));
+    assert!(!range.contains(&c(2, 1, 0)));
+    assert!(range.contains(&c(1, 1, 0)));
+    assert!(!range.contains(&c(1, 0, 0)));
+    assert!(range.contains(&c(0, 0, 0)));
+}
+
+// gtest: TileRange.FromWorldBoxOutsideTheSquare
+#[test]
+fn from_world_box_outside_the_square() {
+    let range = TileRange::from_world_box(&world_box(1.5, 0.0, 2.0, 1.0), 0, 2);
+    assert!(!range.contains(&c(0, 0, 0)));
+    assert!(!range.contains(&c(2, 3, 0)));
+}
+
+#[test]
+fn a_world_box_as_thin_as_a_line_covers_the_tiles_it_lies_in() {
+    // On the edge between columns 1 and 2, it lies in column 2, as a
+    // Mercator range's west edge does.
+    let range = TileRange::from_world_box(&world_box(0.5, 0.25, 0.5, 0.75), 2, 2);
+    for y in 1..3 {
+        assert!(range.contains(&c(2, 2, y)), "row {y}");
+        assert!(!range.contains(&c(2, 1, y)), "row {y}");
+        assert!(!range.contains(&c(2, 0, y)), "row {y}");
+    }
+}
+
+// gtest: TileRange.FromTheWorldBoxOfThePolarCapNorthOf60
+#[test]
+fn from_the_world_box_of_the_polar_cap_north_of_60() {
+    let polar = crate::tests::crs::mapping(crate::tests::crs::polar_stereographic("test:polar"));
+    let range = range_in(&polar, &LatLngBounds::hull(ll(60.0, -180.0), ll(90.0, 180.0)), 2, 2);
+    for x in 0..4 {
+        for y in 0..4 {
+            assert!(range.contains(&c(2, x, y)), "{x},{y}");
+        }
+    }
+}
+
+// gtest: TileRange.FromTheWorldBoxOfAPolarCapThatNoSampleReachesTheEdgeOf
+#[test]
+fn from_the_world_box_of_a_polar_cap_that_no_sample_reaches_the_edge_of() {
+    // 45 E is the rightmost point of the 60 N circle, between two of the
+    // box's longitude samples.
+    let polar = crate::tests::crs::mapping(crate::tests::crs::polar_stereographic("test:polar"));
+    let range = range_in(&polar, &LatLngBounds::hull(ll(60.0, -170.0), ll(90.0, 170.0)), 13, 13);
+    assert!(range.contains(&tile_of(&polar, ll(60.0, 45.0), 13)));
+}
+
+// GL JS: TileBounds.contains follows the helper, not mercator.
+#[test]
+fn a_world_box_range_follows_the_projection_not_mercator() {
+    let rotated = rotated();
+    let bounds = LatLngBounds::hull(ll(40.0, 100.0), ll(50.0, 110.0));
+    let in_rotated = range_in(&rotated, &bounds, 3, 3);
+    let in_mercator = TileRange::from_lat_lng_bounds(&bounds, 3);
+
+    let rotated_tile = tile_of(&rotated, ll(45.0, 105.0), 3);
+    let mercator_tile = tile_of(&WorldMapping::Mercator, ll(45.0, 105.0), 3);
+    assert_ne!(rotated_tile.x, mercator_tile.x);
+    assert!(in_rotated.contains(&rotated_tile));
+    assert!(!in_rotated.contains(&mercator_tile));
+    assert!(in_mercator.contains(&mercator_tile));
+    assert!(!in_mercator.contains(&rotated_tile));
+}
+
+// GL JS: TileBounds.contains covers every tile touched by the corners of a
+// box in a non-cylindrical helper.
+#[test]
+fn a_world_box_range_holds_the_tiles_of_the_corners_of_a_turned_box() {
+    let rotated = rotated();
+    let range = range_in(&rotated, &LatLngBounds::hull(ll(-10.0, -10.0), ll(10.0, 10.0)), 5, 5);
+    for [lng, lat] in [[-10.0, -10.0], [10.0, -10.0], [10.0, 10.0], [-10.0, 10.0]] {
+        assert!(range.contains(&tile_of(&rotated, ll(lat, lng), 5)), "{lng}, {lat}");
+    }
 }

@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use geometry::Point;
+use glam::DVec3;
 use mln_style::error::Error;
 use mln_style::geo::{LatLng, WrapMode};
 use mln_style::size::Size;
@@ -25,10 +26,11 @@ use parking_lot::Mutex;
 use crate::camera::{
     AnimationOptions, CameraLimits, CameraOptions, CenterAndBearing, ConstrainMode, FreeCameraOptions,
     NorthOrientation, ProjectionMode, TransformState, TransitionEnd, VerticalPerspectiveProjection, View, ViewportMode,
+    camera_pose,
 };
 use crate::geo::constants::M2PI;
-use crate::geo::projection::Projection;
-use crate::geo::{EdgeInsets, ScreenCoordinate};
+use crate::geo::world::WorldMapping;
+use crate::geo::{EdgeInsets, LatLngAltitude, ScreenCoordinate};
 use crate::log_target;
 
 mod anchor;
@@ -88,13 +90,11 @@ fn frame_edge_insets(top: f64, left: f64, bottom: f64, right: f64) -> Option<Edg
     Some(EdgeInsets::new(top, left, bottom, right))
 }
 
-/// An animation frame's `Projection::unproject`, or `None` (logged) for a
-/// point with no `LatLng`, such as NaN: the frame keeps the center and zoom,
-/// as [`frame_edge_insets`] does.
-fn frame_unproject(p: &Point<f64>, scale: f64, wrap_mode: WrapMode) -> Option<LatLng> {
-    Projection::unproject(p, scale, wrap_mode)
-        .map_err(|e| log::error!(target: log_target::GENERAL, "{}", e.message))
-        .ok()
+/// An animation frame's [`WorldMapping::unproject`], or `None` (logged) for
+/// a point with no `LatLng`, such as NaN: the frame keeps the center and
+/// zoom, as [`frame_edge_insets`] does.
+fn frame_unproject(world: &WorldMapping, p: &Point<f64>, scale: f64, wrap_mode: WrapMode) -> Option<LatLng> {
+    world.unproject(p, scale, wrap_mode).map_err(|e| log::error!(target: log_target::GENERAL, "{}", e.message)).ok()
 }
 
 /// Identifies a camera command that the transform started, in the
@@ -608,6 +608,12 @@ impl Transform {
         self.state.set_projection_definition(definition);
     }
 
+    /// Sets how lng/lat maps to the world square (see
+    /// [`TransformState::set_world`]).
+    pub(crate) fn set_world(&mut self, world: WorldMapping) {
+        self.state.set_world(world);
+    }
+
     /// The projection the style gives at a zoom, which constrains an
     /// animation's target as it constrains a jump.
     pub(crate) fn set_projection_for_zoom(&mut self, projection_for_zoom: Option<ProjectionForZoomFn>) {
@@ -752,6 +758,14 @@ impl Transform {
         point
     }
 
+    /// The screen point (y down) of a place in the world square, at sea
+    /// level on the flat map.
+    pub(crate) fn world_to_screen_coordinate(&self, world: &Point<f64>) -> ScreenCoordinate {
+        let mut point = self.state.view().world_to_screen_coordinate(world);
+        point.y = f64::from(self.state.view().size().height) - point.y;
+        point
+    }
+
     /// The location under `point`, in screen coordinates (y down).
     /// Fails with [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a NaN
     /// or infinite point.
@@ -778,9 +792,45 @@ impl Transform {
         self.view().screen_coordinate_to_lat_lng_at(&flip_y(self.view(), point), height, wrap_mode)
     }
 
+    /// The camera's position and orientation as the map gives them: on a
+    /// map in a registered projection, the position is the Web Mercator one
+    /// ([`FreeCameraOptions::position`]) of the lat/lng and the altitude of
+    /// the camera's place in the projection's world square, where the
+    /// projection's units count as meters.
+    pub(crate) fn free_camera_options(&self) -> FreeCameraOptions {
+        let options = self.view().free_camera_options();
+        let world = self.view().world();
+        let (WorldMapping::Crs(_), Some(position)) = (world, options.position) else {
+            return options;
+        };
+        let point = Point::new(position.x, position.y);
+        let position = world
+            .lat_lng_from_world(&point)
+            .ok()
+            .map(|location| camera_pose::to_mercator(&location, position.z * world.meters_per_world_unit(&point)));
+        FreeCameraOptions { position, ..options }
+    }
+
+    /// Places the camera by `options`, as
+    /// [`free_camera_options`](Self::free_camera_options) gives them: on a
+    /// map in a registered projection, at the place in its world square of
+    /// the lat/lng that the position stands for, at its altitude. A position
+    /// that isn't finite has no lat/lng, and is ignored, as a NaN one is.
     pub(crate) fn set_free_camera_options(&mut self, options: &FreeCameraOptions) {
         self.cancel_transitions();
-        self.state.set_free_camera_options(options);
+        let world = self.view().world();
+        let options = match (world, options.position) {
+            (WorldMapping::Crs(_), Some(position)) => {
+                let location = position.is_finite().then(|| camera_pose::lat_lng_altitude_from_mercator(position));
+                let position = location.flatten().map(|LatLngAltitude { location, altitude }| {
+                    let point = world.world_from_lat_lng(&location);
+                    DVec3::new(point.x, point.y, altitude / world.meters_per_world_unit(&point))
+                });
+                FreeCameraOptions { position, ..*options }
+            }
+            _ => *options,
+        };
+        self.state.set_free_camera_options(&options);
     }
 }
 
@@ -819,3 +869,7 @@ fn max_pitch_for_padding(state: &TransformState, insets: &EdgeInsets) -> f64 {
 #[cfg(test)]
 #[path = "transform_test.rs"]
 mod transform_test;
+
+#[cfg(test)]
+#[path = "transform_crs_test.rs"]
+mod transform_crs_test;

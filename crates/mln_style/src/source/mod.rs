@@ -21,6 +21,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use crate::conversion::{Convertible, Error};
+use crate::crs::CrsMapping;
 use crate::expression::Functions;
 use crate::layer::SourceKind;
 use crate::{constants, log_target};
@@ -64,6 +65,21 @@ pub trait StyleSourceType: Sized + Send + Sync + 'static {
     fn from_json(_value: &Convertible<'_>, _functions: &Arc<Functions>, error: &mut Error) -> Option<SourceData<Self>> {
         error.message = "invalid source type".to_owned();
         None
+    }
+
+    /// The data of `source` in a style that is now drawn in the registered
+    /// projection `crs`, or in a built-in projection with `None`; `None` when
+    /// that changes nothing. The style asks when the source joins it and when
+    /// its projection changes.
+    fn in_projection(_source: &SourceData<Self>, _crs: Option<&Arc<CrsMapping>>) -> Option<SourceData<Self>> {
+        None
+    }
+
+    /// The options of a source once a load of `options` found its
+    /// description: `options` as they are, unless the type lets go of what
+    /// only the load needed.
+    fn options_once_described(options: &Self::Options) -> Self::Options {
+        options.clone()
     }
 }
 
@@ -150,8 +166,13 @@ pub trait ErasedSource: Any + Send + Sync {
     /// [`SourceData::description`].
     fn description(&self) -> Option<&ErasedDescription>;
 
-    /// This data with `description` in place of its description.
+    /// This data with `description`, which its load found, in place of its
+    /// description, and its options as the type keeps them then
+    /// ([`StyleSourceType::options_once_described`]).
     fn with_description(&self, description: Option<ErasedDescription>) -> Arc<dyn ErasedSource>;
+
+    /// [`StyleSourceType::in_projection`].
+    fn in_projection(&self, crs: Option<&Arc<CrsMapping>>) -> Option<Arc<dyn ErasedSource>>;
 }
 
 impl<T: StyleSourceType> ErasedSource for SourceData<T> {
@@ -168,7 +189,12 @@ impl<T: StyleSourceType> ErasedSource for SourceData<T> {
     }
 
     fn with_description(&self, description: Option<ErasedDescription>) -> Arc<dyn ErasedSource> {
-        Arc::new(SourceData::<T> { options: self.options.clone(), description, load: self.load })
+        Arc::new(SourceData::<T> { options: T::options_once_described(&self.options), description, load: self.load })
+    }
+
+    fn in_projection(&self, crs: Option<&Arc<CrsMapping>>) -> Option<Arc<dyn ErasedSource>> {
+        let data: Arc<dyn ErasedSource> = Arc::new(T::in_projection(self, crs)?);
+        Some(data)
     }
 }
 
@@ -223,6 +249,15 @@ impl Source {
     #[must_use]
     pub fn with_description(&self, description: Option<ErasedDescription>) -> Self {
         self.with_erased_data(self.data.with_description(description))
+    }
+
+    /// This source in a style that is now drawn in the registered projection
+    /// `crs`, or in a built-in one with `None`, as
+    /// [`StyleSourceType::in_projection`] says; `None` when that changes
+    /// nothing.
+    #[must_use]
+    pub fn in_projection(&self, crs: Option<&Arc<CrsMapping>>) -> Option<Self> {
+        Some(self.with_erased_data(self.data.in_projection(crs)?))
     }
 
     /// This source with `common` in place of its common members. Logs a

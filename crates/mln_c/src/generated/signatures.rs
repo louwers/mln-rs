@@ -350,6 +350,13 @@ const _: unsafe extern "C" fn(
 ) -> mln_status = crate::camera::mln_map_get_camera;
 const _: unsafe extern "C" fn(
     mln_map,
+    mln_buffer_view,
+    mln_canonical_tile_id,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_get_custom_source_tile_bounds;
+const _: unsafe extern "C" fn(
+    mln_map,
     *const mln_feature_state_selector,
     *const mln_completion,
     *mut mln_diagnostic,

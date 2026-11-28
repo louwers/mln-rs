@@ -26,6 +26,8 @@ use crate::camera::{
 };
 use crate::exec::event_queue::{EventQueue, Waker};
 use crate::exec::pool::Pool;
+use crate::geo::projection::Projection;
+use crate::geo::world::WorldMapping;
 use crate::geo::{EdgeInsets, ScreenCoordinate};
 use crate::map::events::{MapEvent, RenderFrameStatus};
 use crate::map::feature_state::FeatureStateStore;
@@ -752,14 +754,34 @@ impl Map {
     }
 
     /// Gives the transform the style's current projection, which constrains
-    /// the target of an animation it starts. The style reports each change
-    /// to its projection, and the map calls this then.
+    /// the target of an animation it starts, and the world it draws in. The
+    /// style reports each change to its projection, and the map calls this
+    /// then.
     fn share_projection_with_transform(&mut self) {
         let projection = (self.mode != MapMode::Tile).then(|| Arc::clone(self.style.get_projection()));
         self.transform.set_projection_for_zoom(Some(Rc::new(move |zoom: f64| match &projection {
             Some(projection) => projection.evaluate(zoom as f32),
             None => ProjectionDefinition::new(ProjectionType::Mercator),
         })));
+        let world = self.world();
+        self.transform.set_world(world);
+    }
+
+    /// The world that the style's projection draws in, in every map mode:
+    /// the registered projection it names, found in the style's registry, or
+    /// Mercator. A name the registry lacks draws Mercator, with a warning.
+    fn world(&self) -> WorldMapping {
+        let Some(name) = self.style.get_projection().registered_name() else {
+            return WorldMapping::Mercator;
+        };
+        let Some(mapping) = self.style.registry().projection(name) else {
+            log::warn!(
+                target: log_target::GENERAL,
+                "The style's projection \"{name}\" isn't registered: the map draws in Mercator"
+            );
+            return WorldMapping::Mercator;
+        };
+        WorldMapping::Crs(Arc::clone(mapping))
     }
 
     // MARK: - Still images
@@ -1199,13 +1221,17 @@ impl Map {
     ///
     /// Over terrain, the area is where the view meets the plane through the
     /// camera's center, as [`camera_for_lat_lngs`](Self::camera_for_lat_lngs)
-    /// fits it.
+    /// fits it. In a registered projection, where north needn't be up, they
+    /// are the bounds of the locations at the view's four corners.
     pub fn lat_lng_bounds_for_camera(&self, camera: &CameraOptions) -> Result<LatLngBounds, Error> {
         let shallow = self.fitting_transform(camera);
         let size = shallow.state().view().size();
 
         if shallow.state().view().is_globe() {
             return globe_bounds(&shallow);
+        }
+        if !shallow.view().world().wraps() {
+            return corner_bounds(&shallow);
         }
         Ok(LatLngBounds::hull(
             shallow.screen_coordinate_to_lat_lng(&ScreenCoordinate::new(0.0, 0.0), WrapMode::Wrapped)?,
@@ -1222,6 +1248,12 @@ impl Map {
     /// `bearing` and `pitch` (the current ones for `None`). Fails with
     /// [`ErrorKind::InvalidArgument`](mln_style::error::ErrorKind) for a center that has no
     /// `LatLng` (padding that pushes it to infinity).
+    ///
+    /// In a registered projection it fits the box sampled in the world
+    /// square as [`WorldMapping::lng_lat_box_to_world_box`] samples it, at
+    /// the bearing, grown by how far its edges curve between samples, as GL
+    /// JS fits it: the corners alone miss most of a box whose edges curve, as
+    /// a polar cap's do.
     pub fn camera_for_lat_lng_bounds(
         &self,
         bounds: &LatLngBounds,
@@ -1229,12 +1261,21 @@ impl Map {
         bearing: Option<f64>,
         pitch: Option<f64>,
     ) -> Result<CameraOptions, Error> {
-        self.camera_for_lat_lngs(
-            &[bounds.northwest(), bounds.southwest(), bounds.southeast(), bounds.northeast()],
-            padding,
-            bearing,
-            pitch,
-        )
+        let WorldMapping::Crs(mapping) = self.transform.view().world() else {
+            return self.camera_for_lat_lngs(
+                &[bounds.northwest(), bounds.southwest(), bounds.southeast(), bounds.northeast()],
+                padding,
+                bearing,
+                pitch,
+            );
+        };
+        let samples = mapping.lng_lat_box_samples(bounds);
+        self.camera_fitting(bearing, pitch, |transform| {
+            let pixels: Vec<ScreenCoordinate> =
+                samples.points.iter().map(|point| transform.world_to_screen_coordinate(point)).collect();
+            let bulge = samples.bulge * Projection::world_size(transform.view().scale());
+            camera_for_pixels(&pixels, bulge, transform, padding)
+        })
     }
 
     /// The camera that fits every point of `lat_lngs` in the view, inset by
@@ -1255,15 +1296,27 @@ impl Map {
         bearing: Option<f64>,
         pitch: Option<f64>,
     ) -> Result<CameraOptions, Error> {
+        self.camera_fitting(bearing, pitch, |transform| camera_for_lat_lngs(lat_lngs, transform, padding))
+    }
+
+    /// The camera that `fit` fits on a copy of the map's transform at
+    /// `bearing` and `pitch` (the current ones for `None`), with the bearing
+    /// and the pitch when it was given either.
+    fn camera_fitting(
+        &self,
+        bearing: Option<f64>,
+        pitch: Option<f64>,
+        fit: impl FnOnce(&Transform) -> Result<CameraOptions, Error>,
+    ) -> Result<CameraOptions, Error> {
         let transform = self.fitting_transform(&CameraOptions { bearing, pitch, ..Default::default() });
         if bearing.is_none() && pitch.is_none() {
-            return camera_for_lat_lngs(lat_lngs, &transform, padding);
+            return fit(&transform);
         }
 
         Ok(CameraOptions {
             bearing: Some(mln_style::math::rad2deg(-transform.view().angle())),
             pitch: Some(mln_style::math::rad2deg(transform.view().pitch())),
-            ..camera_for_lat_lngs(lat_lngs, &transform, padding)?
+            ..fit(&transform)?
         })
     }
 
@@ -1287,14 +1340,18 @@ impl Map {
 
     /// The bounds of the area the map shows from `camera`, with the corners
     /// unwrapped toward the center, so that the bounds can cross the
-    /// antimeridian. Fails as
-    /// [`lat_lng_bounds_for_camera`](Self::lat_lng_bounds_for_camera) does.
+    /// antimeridian; in a registered projection, whose world doesn't wrap,
+    /// as [`lat_lng_bounds_for_camera`](Self::lat_lng_bounds_for_camera)
+    /// gives them. Fails as that does.
     pub fn lat_lng_bounds_for_camera_unwrapped(&self, camera: &CameraOptions) -> Result<LatLngBounds, Error> {
         let shallow = self.fitting_transform(camera);
         let size = shallow.state().view().size();
 
         if shallow.state().view().is_globe() {
             return globe_bounds(&shallow);
+        }
+        if !shallow.view().world().wraps() {
+            return corner_bounds(&shallow);
         }
         let width = f64::from(size.width);
         let height = f64::from(size.height);
@@ -1639,7 +1696,7 @@ impl Map {
         let transform = &self.transform;
         let state = transform.state();
         let bounds = state.limits().bounds;
-        let free_camera = state.view().free_camera_options();
+        let free_camera = transform.free_camera_options();
         MapSnapshot {
             generation: self.generation,
             update_generation: self.updates.generation(),
@@ -1722,17 +1779,34 @@ fn camera_for_lat_lngs_on_screen(
     transform: &Transform,
     padding: &EdgeInsets,
 ) -> Result<CameraOptions, Error> {
+    let pixels: Vec<ScreenCoordinate> =
+        lat_lngs.iter().map(|lat_lng| transform.lat_lng_to_screen_coordinate(lat_lng)).collect();
+    camera_for_pixels(&pixels, 0.0, transform, padding)
+}
+
+/// The camera that fits every point of `pixels`, screen points (y down) of
+/// `transform`'s view, with `margin` pixels around them, in the view, inset
+/// by `padding`. Fails as `Map::camera_for_lat_lngs` does.
+fn camera_for_pixels(
+    pixels: &[ScreenCoordinate],
+    margin: f64,
+    transform: &Transform,
+    padding: &EdgeInsets,
+) -> Result<CameraOptions, Error> {
     let size = transform.state().view().size();
     // Calculate the bounds of the possibly rotated shape with respect to the viewport.
     let mut ne_pixel = ScreenCoordinate::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
     let mut sw_pixel = ScreenCoordinate::new(f64::INFINITY, f64::INFINITY);
-    for lat_lng in lat_lngs {
-        let pixel = transform.lat_lng_to_screen_coordinate(lat_lng);
+    for &pixel in pixels {
         // std::min / std::max
         sw_pixel.x = if pixel.x < sw_pixel.x { pixel.x } else { sw_pixel.x };
         ne_pixel.x = if ne_pixel.x < pixel.x { pixel.x } else { ne_pixel.x };
         sw_pixel.y = if pixel.y < sw_pixel.y { pixel.y } else { sw_pixel.y };
         ne_pixel.y = if ne_pixel.y < pixel.y { pixel.y } else { ne_pixel.y };
+    }
+    if margin != 0.0 {
+        sw_pixel = ScreenCoordinate::new(sw_pixel.x - margin, sw_pixel.y - margin);
+        ne_pixel = ScreenCoordinate::new(ne_pixel.x + margin, ne_pixel.y + margin);
     }
     let width = ne_pixel.x - sw_pixel.x;
     let height = ne_pixel.y - sw_pixel.y;
@@ -1900,6 +1974,20 @@ fn camera_for_lat_lngs_on_globe(
         zoom: Some(f64::min(globe.view().zoom() + crate::camera::scale_zoom(smallest), state.limits().max_zoom)),
         ..fit
     })
+}
+
+/// The bounds of the locations at the corners of `transform`'s view, for a
+/// world that doesn't wrap, where north needn't be up and the view's
+/// north-west corner needn't be the area's. Fails as
+/// `Map::lat_lng_bounds_for_camera` does.
+fn corner_bounds(transform: &Transform) -> Result<LatLngBounds, Error> {
+    let size = transform.state().view().size();
+    let (width, height) = (f64::from(size.width), f64::from(size.height));
+    let at = |x: f64, y: f64| transform.screen_coordinate_to_lat_lng(&ScreenCoordinate::new(x, y), WrapMode::Unwrapped);
+    let mut bounds = LatLngBounds::hull(at(0.0, 0.0)?, at(width, height)?);
+    bounds.extend(&at(width, 0.0)?);
+    bounds.extend(&at(0.0, height)?);
+    Ok(bounds)
 }
 
 /// GL JS's globe bounds: the farthest of eight edge points on each side of

@@ -23,7 +23,7 @@ use crate::buffer::LentText;
 use crate::callback::{Registration, UserData};
 use crate::completion::{self, CompletionValue, PendingCompletion};
 use crate::custom_source::{
-    CustomGeometrySourceOptions, CustomGeometrySourceType, CustomSourceHandle, CustomVectorSourceOptions,
+    self, CustomGeometrySourceOptions, CustomGeometrySourceType, CustomSourceHandle, CustomVectorSourceOptions,
     CustomVectorSourceType, CustomVectorTileData, TileDataFormat, TileFunction, TileFunctions, TileOptions,
 };
 use crate::error::Error;
@@ -1248,6 +1248,7 @@ pub(crate) unsafe extern "C" fn mln_map_add_custom_geometry_source(
                 tile_options: Arc::new(tile_options),
                 zoom_range: zooms,
                 tile_functions: Arc::new(tile_functions),
+                crs: None,
             };
             Source::new(&id, SourceData::<CustomGeometrySourceType>::new(options))
         };
@@ -1415,7 +1416,8 @@ pub(crate) unsafe extern "C" fn mln_map_add_custom_vector_source(
             source_id: Arc::new(LentText::new(&id)),
         };
         let source = |tile_functions| {
-            let options = CustomVectorSourceOptions { zoom_range: zooms, tile_functions: Arc::new(tile_functions) };
+            let options =
+                CustomVectorSourceOptions { zoom_range: zooms, tile_functions: Arc::new(tile_functions), crs: None };
             Source::new(&id, SourceData::<CustomVectorSourceType>::new(options))
         };
         add_callback_source(callbacks, source, |source, held| {
@@ -1553,6 +1555,57 @@ pub(crate) unsafe extern "C" fn mln_map_invalidate_custom_vector_source_region(
                 )
             })
         }
+    })
+}
+
+/// The bounds of the tile `tile` of the custom source `id` of `map`'s style,
+/// in the projection that the source's tiles are cut in.
+fn custom_source_tile_bounds(
+    map: &mln_engine::map::Map,
+    id: &str,
+    tile: &CanonicalTileID,
+) -> Result<LatLngBounds, Error> {
+    let source = map.source(id).ok_or_else(|| HeldSourceError::NoSource.into_error(id))?;
+    let crs = if let Some(data) = SourceData::<CustomGeometrySourceType>::recover(source) {
+        data.options.crs.clone()
+    } else if let Some(data) = SourceData::<CustomVectorSourceType>::recover(source) {
+        data.options.crs.clone()
+    } else {
+        return Err(Error::invalid_argument(format!("source \"{id}\" is not a custom source")));
+    };
+    custom_source::tile_bounds(tile, crs.as_deref())
+        .ok_or_else(|| Error::native("no corner of the tile has a coordinate in the map's projection"))
+}
+
+/// `mln_map_get_custom_source_tile_bounds()`.
+///
+/// # Safety
+///
+/// Each pointer is null or valid for the header's use of it.
+#[unsafe(no_mangle)]
+pub(crate) unsafe extern "C" fn mln_map_get_custom_source_tile_bounds(
+    map: mln_map,
+    source_id: mln_buffer_view,
+    tile_id: mln_canonical_tile_id,
+    completion: *const mln_completion,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
+    export!(out_diagnostic, {
+        // SAFETY: the caller's contract.
+        let id = unsafe { required_text(source_id, "source_id") }?;
+        let tile = self::tile_id(tile_id);
+        let object = map::resolve(map)?;
+        // SAFETY: the caller's contract.
+        let pending = unsafe { PendingCompletion::new(completion) }?;
+        // The query fails a tile outside its zoom level, as the commands of
+        // custom sources fail theirs.
+        let sent = object.map.with_core(move |core| custom_source_tile_bounds(core, &id, &tile?))?;
+        let handle = object.map.clone();
+        completion::forward(sent, Some(pending.accept()), move |result| {
+            let bounds = result.map_err(Error::from).and_then(|bounds| bounds);
+            (bounds.map(|bounds| Plain(vec![geo::from_lat_lng_bounds(bounds)])), map::snapshot_generations(&handle))
+        });
+        Ok(())
     })
 }
 
@@ -2119,6 +2172,12 @@ pub(crate) unsafe extern "C" fn mln_map_get_style_transition_options(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::generated::types::{
+        MLN_STATUS_INVALID_ARGUMENT, MLN_STATUS_NOT_FOUND, MLN_STATUS_OK, mln_completion_result,
+    };
+    use crate::map::mln_map_set_style_json;
+    use crate::map::tests::{create_map, options, release_map, view};
+    use crate::runtime::tests::{Waiter, channel_completion, create as create_runtime, release as release_runtime};
 
     fn pixels(width: u32, height: u32, stride: u32, bytes: &[u8]) -> mln_premultiplied_rgba8_image {
         mln_premultiplied_rgba8_image {
@@ -2217,5 +2276,116 @@ mod tests {
         assert!(check(r#"{"total":5}"#).unwrap_err().message().contains("GeoJSON source options"));
         assert!(check(r#"{"total":NaN}"#).unwrap_err().message().contains("cluster_properties"));
         assert_eq!(check("").unwrap(), GeoJsonSourceOptions::default());
+    }
+    fn set_style(map: mln_map, json: &str) {
+        let styled = Waiter::new();
+        // SAFETY: local arguments.
+        let status =
+            unsafe { mln_map_set_style_json(map, view(json), &raw const styled.descriptor, core::ptr::null_mut()) };
+        assert_eq!(status, MLN_STATUS_OK);
+        assert_eq!(styled.status(), MLN_STATUS_OK);
+    }
+
+    unsafe extern "C" fn ignore_tile(_: *mut c_void, _: mln_map, _: mln_buffer_view, _: mln_canonical_tile_id) {}
+
+    /// Adds the custom geometry source `geometry` and the custom vector
+    /// source `vector`, whose hosts ignore their tiles.
+    fn add_custom_sources(map: mln_map) {
+        let geometry = mln_custom_geometry_source_options {
+            size: size_of::<mln_custom_geometry_source_options>() as u32,
+            fetch_tile: Some(ignore_tile),
+            // SAFETY: zeros are valid options, which set no fields.
+            ..unsafe { core::mem::zeroed() }
+        };
+        let vector = mln_custom_vector_source_options {
+            size: size_of::<mln_custom_vector_source_options>() as u32,
+            fetch_tile: Some(ignore_tile),
+            // SAFETY: as above.
+            ..unsafe { core::mem::zeroed() }
+        };
+        let (geometry_added, vector_added) = (Waiter::new(), Waiter::new());
+        // SAFETY: local arguments.
+        unsafe {
+            let status = mln_map_add_custom_geometry_source(
+                map,
+                view("geometry"),
+                &raw const geometry,
+                &raw const geometry_added.descriptor,
+                core::ptr::null_mut(),
+            );
+            assert_eq!(status, MLN_STATUS_OK);
+            let status = mln_map_add_custom_vector_source(
+                map,
+                view("vector"),
+                &raw const vector,
+                &raw const vector_added.descriptor,
+                core::ptr::null_mut(),
+            );
+            assert_eq!(status, MLN_STATUS_OK);
+        }
+        assert_eq!(geometry_added.status(), MLN_STATUS_OK);
+        assert_eq!(vector_added.status(), MLN_STATUS_OK);
+    }
+
+    /// Sends a tile bounds query's bounds, or its failure's status.
+    unsafe extern "C" fn send_bounds(user_data: *mut c_void, result: *const mln_completion_result) {
+        // SAFETY: the sender that `channel_completion` boxed, and the
+        // library's result, whose value is one `mln_lat_lng_bounds` on
+        // success.
+        unsafe {
+            let sender = &*user_data.cast::<std::sync::mpsc::Sender<Result<mln_lat_lng_bounds, mln_status>>>();
+            let result = &*result;
+            let _ = sender.send(match result.status {
+                MLN_STATUS_OK => Ok(*result.value.cast::<mln_lat_lng_bounds>()),
+                status => Err(status),
+            });
+        }
+    }
+
+    /// The south, west, north and east of the tile `tile` of the custom
+    /// source `source`, or the query's failure.
+    fn tile_bounds(map: mln_map, source: &str, tile: mln_canonical_tile_id) -> Result<[f64; 4], mln_status> {
+        let (completion, receiver) = channel_completion::<Result<mln_lat_lng_bounds, mln_status>>(send_bounds);
+        // SAFETY: local arguments, and a completion whose sender the library
+        // releases after its call.
+        let status = unsafe {
+            mln_map_get_custom_source_tile_bounds(map, view(source), tile, &raw const completion, core::ptr::null_mut())
+        };
+        assert_eq!(status, MLN_STATUS_OK);
+        let bounds = receiver.recv_timeout(Duration::from_secs(30)).unwrap();
+        bounds.map(|bounds| {
+            let mln_lat_lng_bounds { southwest, northeast } = bounds;
+            [southwest.latitude, southwest.longitude, northeast.latitude, northeast.longitude]
+        })
+    }
+
+    // Native: CustomGeometrySource.TileBoundsInARegisteredProjection, for
+    // either kind of custom source.
+    #[test]
+    fn a_custom_source_gives_its_tiles_bounds_in_the_maps_projection() {
+        let runtime = create_runtime();
+        let (identity, mercator) = (create_map(runtime, &options(1.0)), create_map(runtime, &options(1.0)));
+        let geojson = r#""shapes":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}"#;
+        for (map, projection) in [(identity, r#","projection":{"type":"identity"}"#), (mercator, "")] {
+            set_style(map, &format!(r#"{{"version":8{projection},"sources":{{{geojson}}},"layers":[]}}"#));
+            add_custom_sources(map);
+        }
+        let tile = |z, x, y| mln_canonical_tile_id { z, x, y };
+
+        let northeast = LatLngBounds::from_canonical_tile(1, 1, 0);
+        let northeast = [northeast.south(), northeast.west(), northeast.north(), northeast.east()];
+        for source in ["geometry", "vector"] {
+            // The identity's tile 0/0/0 spans -90 to 90 on both axes.
+            assert_eq!(tile_bounds(identity, source, tile(0, 0, 0)), Ok([-90.0, -90.0, 90.0, 90.0]));
+            assert_eq!(tile_bounds(identity, source, tile(2, 1, 2)), Ok([-45.0, -45.0, 0.0, 0.0]));
+            assert_eq!(tile_bounds(mercator, source, tile(1, 1, 0)), Ok(northeast));
+        }
+        assert_eq!(tile_bounds(identity, "missing", tile(0, 0, 0)), Err(MLN_STATUS_NOT_FOUND));
+        assert_eq!(tile_bounds(identity, "shapes", tile(0, 0, 0)), Err(MLN_STATUS_INVALID_ARGUMENT));
+        assert_eq!(tile_bounds(identity, "geometry", tile(1, 2, 0)), Err(MLN_STATUS_INVALID_ARGUMENT));
+
+        release_map(identity);
+        release_map(mercator);
+        release_runtime(runtime);
     }
 }

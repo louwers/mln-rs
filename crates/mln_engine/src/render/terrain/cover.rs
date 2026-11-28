@@ -9,6 +9,7 @@ use mln_style::range::Range;
 use mln_style::tile_id::CanonicalTileID;
 
 use crate::camera::{TileCoordinate, View};
+use crate::geo::world::WorldMapping;
 use crate::tile::OverscaledTileID;
 use crate::tile::dem::DemCoords;
 use crate::tile::dem_data::DEMData;
@@ -258,6 +259,8 @@ pub(crate) struct TerrainCover {
     /// The ranges that cull the tiles, and every source's tiles; the next
     /// update's cover takes them over.
     pub(crate) ranges: ElevationRanges,
+    /// How the view's lng/lat maps to the world square the tiles are in.
+    pub(crate) world: WorldMapping,
 }
 
 impl TerrainCover {
@@ -275,7 +278,10 @@ impl TerrainCover {
     ) -> Self {
         let tiles: Vec<TerrainTile> =
             cover_tiles(view, dem_tile_size, &ranges).into_iter().map(TerrainTile::new).collect();
-        let center = TileCoordinate::from_lat_lng(0.0, &view.center(WrapMode::Wrapped)).p;
+        let center = match view.world() {
+            WorldMapping::Mercator => TileCoordinate::from_lat_lng(0.0, &view.center(WrapMode::Wrapped)).p,
+            WorldMapping::Crs(_) => view.center_world(),
+        };
         let center = [center.x, center.y];
         let center = tiles.iter().all(|tile| place_in(tile.id.canonical, center).is_none()).then(|| {
             let z = cover_zoom(view, dem_tile_size);
@@ -292,7 +298,8 @@ impl TerrainCover {
             .filter(|id| seen.insert(*id))
             .collect();
         let tile_size = terrain_tile_size(dem_tile_size);
-        TerrainCover { source_id: source_id.to_owned(), tile_size, tiles, center, dem_tiles, ranges }
+        let world = view.world().clone();
+        TerrainCover { source_id: source_id.to_owned(), tile_size, tiles, center, dem_tiles, ranges, world }
     }
 
     /// Binds each tile's DEM from the tiles of `dem`, the terrain's source.

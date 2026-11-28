@@ -17,6 +17,7 @@ use crate::camera::{
     FreeCameraOptions, GesturePhase, MapProjection, MapView, NorthOrientation, ProjectionMode, Viewport, ViewportMode,
 };
 use crate::exec::queue::Queue;
+use crate::geo::world::WorldMapping;
 use crate::geo::{EdgeInsets, ScreenCoordinate};
 use crate::map::snapshot::{CameraBounds, FreeCamera, TileSettings};
 use crate::map::{Map, MapMode, MapOptions};
@@ -316,14 +317,14 @@ fn projection_from_a_view_matches_the_map() {
 
     let view = map.snapshot().view;
     assert!(view.camera.center.longitude() > 180.0);
-    let projection = MapProjection::from_view(&view).unwrap();
+    let projection = MapProjection::from_view(&view, &WorldMapping::Mercator).unwrap();
     for lat_lng in [ll(5.0, 185.0), ll(-10.0, 178.0), ll(12.0, -170.0)] {
         let expected = map.pixel_for_lat_lng(&lat_lng);
         let actual = projection.pixel_for_lat_lng(&lat_lng);
         assert!((actual.x - expected.x).abs() < 1e-6 && (actual.y - expected.y).abs() < 1e-6, "{lat_lng:?}");
     }
 
-    let round_trip = view.to_view().unwrap().map_view(view.extent.scale_factor);
+    let round_trip = view.to_view(&WorldMapping::Mercator).unwrap().map_view(view.extent.scale_factor);
     assert_eq!(round_trip.extent, view.extent);
     assert_eq!(round_trip.viewport, view.viewport);
     assert_eq!(round_trip.projection_mode, view.projection_mode);
@@ -343,7 +344,7 @@ fn projection_from_a_view_rejects_views_no_map_shows() {
     let run_loop = Queue::<()>::new();
     let map = map(MapOptions { size: Size::new(256, 256), ..Default::default() }, &run_loop);
     let view = map.snapshot().view;
-    assert!(MapProjection::from_view(&view).is_ok());
+    assert!(MapProjection::from_view(&view, &WorldMapping::Mercator).is_ok());
 
     let invalid: [fn(&mut MapView); 9] = [
         |view| view.camera.zoom = f64::NAN,
@@ -359,7 +360,7 @@ fn projection_from_a_view_rejects_views_no_map_shows() {
     for (index, change) in invalid.iter().enumerate() {
         let mut changed = view;
         change(&mut changed);
-        let error = MapProjection::from_view(&changed).err();
+        let error = MapProjection::from_view(&changed, &WorldMapping::Mercator).err();
         assert_eq!(error.map(|error| error.kind), Some(ErrorKind::InvalidArgument), "view {index}");
     }
 }
@@ -388,7 +389,7 @@ fn projection_from_a_globe_view_matches_the_map() {
     assert_eq!(view.projection, ProjectionDefinition::new(ProjectionType::VerticalPerspective));
     assert!(view.camera.zoom < 0.0 && view.camera.center.latitude() > 85.0, "{:?}", view.camera);
 
-    let projection = MapProjection::from_view(&view).unwrap();
+    let projection = MapProjection::from_view(&view, &WorldMapping::Mercator).unwrap();
     assert_eq!(projection.camera(), view.camera);
     let far_side = ll(-60.0, -140.0);
     assert!(map.is_location_occluded(&far_side));
@@ -402,12 +403,15 @@ fn projection_from_a_globe_view_matches_the_map() {
     // A view can name `globe`, which draws as the map would at its zoom.
     let named = MapView { projection: ProjectionDefinition::new(ProjectionType::Globe), ..view };
     assert_eq!(
-        MapProjection::from_view(&named).unwrap().pixel_for_lat_lng(&far_side),
+        MapProjection::from_view(&named, &WorldMapping::Mercator).unwrap().pixel_for_lat_lng(&far_side),
         projection.pixel_for_lat_lng(&far_side)
     );
     let flat = MapView { projection: ProjectionDefinition::default(), ..view };
-    assert!(MapProjection::from_view(&flat).is_err(), "Mercator has no zoom below 0");
+    assert!(MapProjection::from_view(&flat, &WorldMapping::Mercator).is_err(), "Mercator has no zoom below 0");
     let mut nan = view;
     nan.projection.transition = f64::NAN;
-    assert_eq!(MapProjection::from_view(&nan).err().map(|error| error.kind), Some(ErrorKind::InvalidArgument));
+    assert_eq!(
+        MapProjection::from_view(&nan, &WorldMapping::Mercator).err().map(|error| error.kind),
+        Some(ErrorKind::InvalidArgument)
+    );
 }

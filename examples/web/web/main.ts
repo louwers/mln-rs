@@ -21,7 +21,8 @@
 //                          in a style's font-faces entry without a font name:
 //                          [{"url": "...", "unicode-range": ["U+1000-109F"]}]
 //   lat, lon, zoom, bearing, pitch
-//                          the camera, unless the hash has one
+//                          the camera, unless the hash has one (default:
+//                          where the style opens, else central Amsterdam)
 //   workers=<n>            Web Workers for the tiles (default: up to 4)
 //   width, height, ratio   a fixed map size in CSS pixels and pixel ratio
 //                          (default: the window and devicePixelRatio)
@@ -51,7 +52,8 @@
 //
 // The hash holds the camera as GL JS's does, #zoom/lat/lon[/bearing/pitch],
 // and follows it, so that a link opens the same view. Picking a style keeps
-// the camera and puts the style's key in `?style=`.
+// the camera, unless the style opens somewhere of its own (styles.ts's
+// `camera`), and puts the style's key in `?style=`.
 //
 // Input: the canvas's pointer, wheel, key and focus events go to the map's
 // Web Worker, whose gesture recognizer (mln_engine::gestures) moves the camera: drag
@@ -91,7 +93,13 @@ import {
   type StartTileWorker,
   type ToMap,
 } from "./protocol.ts";
-import { STYLES, type Style, sameStyle, styleFor } from "./styles.ts";
+import {
+  STYLES,
+  type Style,
+  type StyleCamera,
+  sameStyle,
+  styleFor,
+} from "./styles.ts";
 import { wheelDelta } from "./wheel.ts";
 
 declare global {
@@ -235,14 +243,19 @@ const toMap = (message: ToMap, transfer: Transferable[] = []) => {
   sendInputs();
   map.postMessage(message, transfer);
 };
+let current = styleFor(params.get("style"));
+// The camera starts where the style opens, else in central Amsterdam.
+const place: StyleCamera = current.camera ?? {
+  center: [4.89, 52.37],
+  zoom: 13,
+};
 const camera: Camera = cameraFromHash(location.hash) ?? [
-  number("lat", 52.37),
-  number("lon", 4.89),
-  number("zoom", 13),
+  number("lat", place.center[1]),
+  number("lon", place.center[0]),
+  number("zoom", place.zoom),
   number("bearing", 0),
   number("pitch", 0),
 ];
-let current = styleFor(params.get("style"));
 const { source: style, terrain } = current;
 // The map's Web Worker fetches the style and what it needs first meanwhile.
 toMap({ type: "preload", style, ratio, zoom: camera[2] });
@@ -730,6 +743,15 @@ function pickStyle(next: Style) {
   showStyle();
   showAttribution([]);
   toMap({ type: "style", style: next.source, terrain: next.terrain });
+  if (next.camera) {
+    const [, , , bearing, pitch] = latestCamera;
+    const { center, zoom } = next.camera;
+    comparison?.lead();
+    toMap({
+      type: "jumpTo",
+      camera: [center[1], center[0], zoom, bearing, pitch],
+    });
+  }
   comparison?.setStyle(next);
   setParam("style", next.key);
 }

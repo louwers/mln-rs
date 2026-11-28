@@ -6,6 +6,7 @@ use mln_style::range::Range;
 use mln_style::tile_id::CanonicalTileID;
 
 use crate::geo::projection::Projection;
+use crate::geo::world::WorldBox;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TileRange {
@@ -78,6 +79,37 @@ impl TileRange {
     #[must_use]
     pub fn from_lat_lng_bounds(bounds: &LatLngBounds, z: u8) -> TileRange {
         Self::from_lat_lng_bounds_range(bounds, z, z)
+    }
+
+    /// The tiles from `min_zoom` to `max_zoom` that a rectangle in the world
+    /// square covers part of, as GL JS's `TileBounds` counts them: a tile
+    /// that the rectangle only touches at its edge doesn't count. A
+    /// rectangle as thin as a line covers the tiles it lies in, east and
+    /// south of a tile edge it lies on, and one outside the square covers
+    /// none.
+    #[must_use]
+    pub fn from_world_box(world_box: &WorldBox, mut min_zoom: u8, mut max_zoom: u8) -> TileRange {
+        if min_zoom > max_zoom {
+            std::mem::swap(&mut min_zoom, &mut max_zoom);
+        }
+        let WorldBox { min, max } = *world_box;
+        if !(max.x > 0.0 && max.y > 0.0 && min.x < 1.0 && min.y < 1.0) {
+            // A zoom range that no tile is in.
+            return TileRange { range: Range::new(Point::new(0, 0), Point::new(0, 0)), zoom_range: Range::new(1, 0) };
+        }
+        let max_tile = 2.0f64.powf(f64::from(max_zoom));
+        let first = |world: f64| clamp_f64((world * max_tile).floor(), 0.0, max_tile - 1.0);
+        // The last tile before the edge, and never one before the first,
+        // which `contains` would take for a range across the antimeridian.
+        let last = |world: f64, first: f64| clamp_f64((world * max_tile).ceil() - 1.0, first, max_tile - 1.0);
+        let (min_x, min_y) = (first(min.x), first(min.y));
+        TileRange {
+            range: Range::new(
+                Point::new(min_x as u32, min_y as u32),
+                Point::new(last(max.x, min_x) as u32, last(max.y, min_y) as u32),
+            ),
+            zoom_range: Range::new(min_zoom, max_zoom),
+        }
     }
 
     #[must_use]

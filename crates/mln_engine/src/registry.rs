@@ -1,6 +1,7 @@
 //! The registrations that a runtime, its renderers and its tile workers
 //! share: the expression functions, the layer types, the source types, the
-//! extension members and the routers of layers into shared targets.
+//! extension members, the routers of layers into shared targets and the
+//! projections.
 //!
 //! An app fills a [`RegistryBuilder`] by explicit calls, `mln_builtins`'s
 //! `register_builtins` first, and builds the [`Registry`] once. Tile workers
@@ -10,6 +11,7 @@
 use std::sync::Arc;
 
 use mln_style::collections::VecMap;
+use mln_style::crs::{Crs, TileMatrixSet};
 use mln_style::expression::Functions;
 use mln_style::expression::functions::RegisterError;
 use mln_style::layer::{ErasedStyleLayerType, StyleLayerType};
@@ -37,6 +39,7 @@ pub struct RegistryBuilder {
     source_types: VecMap<&'static str, &'static dyn ErasedSourceType>,
     members: Vec<&'static dyn ErasedMember>,
     routers: Vec<&'static dyn Router>,
+    projections: VecMap<String, Arc<Crs>>,
 }
 
 impl std::fmt::Debug for RegistryBuilder {
@@ -48,6 +51,7 @@ impl std::fmt::Debug for RegistryBuilder {
             .field("source_types", &self.source_types.keys().collect::<Vec<_>>())
             .field("members", &self.members.iter().map(|member| member.name()).collect::<Vec<_>>())
             .field("routers", &self.routers.len())
+            .field("projections", &self.projections.keys().collect::<Vec<_>>())
             .finish()
     }
 }
@@ -133,11 +137,45 @@ impl RegistryBuilder {
         self.routers.push(router);
     }
 
+    /// Adds the projection `crs`, which a style's `projection.type` names.
+    /// Fails for a name without a colon, which built-in projections keep, a
+    /// name that an earlier projection took, and a tile matrix set whose
+    /// origin isn't finite or whose extent isn't positive and finite.
+    pub fn add_projection(&mut self, crs: Crs) -> Result<(), RegisterError> {
+        if !crs.name.contains(':') {
+            return Err(RegisterError::ProjectionName(crs.name));
+        }
+        self.insert_projection(crs)
+    }
+
+    /// Adds `crs`, of any name. Fails as [`add_projection`](Self::add_projection)
+    /// does for a taken name or a tile matrix set.
+    fn insert_projection(&mut self, crs: Crs) -> Result<(), RegisterError> {
+        if self.projections.contains_key(crs.name.as_str()) {
+            return Err(RegisterError::Duplicate(crs.name));
+        }
+        let TileMatrixSet { origin, extent_at_zoom0: extent } = crs.tile_matrix_set;
+        let valid = origin.iter().all(|value| value.is_finite()) && extent.is_finite() && extent > 0.0;
+        if !valid {
+            return Err(RegisterError::TileMatrixSet(crs.name));
+        }
+        self.projections.insert(crs.name.clone(), Arc::new(crs));
+        Ok(())
+    }
+
     #[must_use]
     pub fn build(self) -> Arc<Registry> {
-        let RegistryBuilder { functions, layer_types, placing_types, source_types, members, routers } = self;
-        Registry::new(Arc::new(functions), layer_types, placing_types, source_types, members, routers)
+        let RegistryBuilder { functions, layer_types, placing_types, source_types, members, routers, projections } =
+            self;
+        let projections = projections.into_iter().map(|(_, crs)| crs);
+        Registry::new(Arc::new(functions), layer_types, placing_types, source_types, members, routers, projections)
     }
+}
+
+/// Adds the built-in projections, whose names have no colon: `identity`
+/// ([`Crs::identity`]). Fails when an earlier call added them.
+pub fn register_builtin_projections(builder: &mut RegistryBuilder) -> Result<(), RegisterError> {
+    builder.insert_projection(Crs::identity())
 }
 
 fn style_half(layer_type: &'static dyn ErasedLayerType) -> &'static dyn ErasedStyleLayerType {
@@ -146,7 +184,8 @@ fn style_half(layer_type: &'static dyn ErasedLayerType) -> &'static dyn ErasedSt
 
 /// The expression functions, layer types, source types and extension
 /// members that a style parses against, its renderer draws and its tile
-/// workers lay out, built by a [`RegistryBuilder`]. It doesn't change once built.
+/// workers lay out, and the projections that the style's `projection.type`
+/// names, built by a [`RegistryBuilder`]. It doesn't change once built.
 ///
 /// A map and the renderer and tile workers that draw it must be given
 /// registries filled by the same calls: they identify functions, layer
@@ -173,10 +212,11 @@ impl Registry {
         source_types: VecMap<&'static str, &'static dyn ErasedSourceType>,
         members: Vec<&'static dyn ErasedMember>,
         routers: Vec<&'static dyn Router>,
+        projections: impl IntoIterator<Item = Arc<Crs>>,
     ) -> Arc<Registry> {
         let style_halves = layer_types.values().map(|&layer_type| style_half(layer_type));
         let style_source_halves = source_types.values().map(|&source_type| source_type.style());
-        let style = StyleRegistry::new(functions, style_halves, style_source_halves, members);
+        let style = StyleRegistry::new(functions, style_halves, style_source_halves, members, projections);
         Arc::new(Registry { style: Arc::new(style), layer_types, placing_types, source_types, routers })
     }
 
@@ -246,5 +286,89 @@ mod tests {
         let mut builder = RegistryBuilder::new();
         builder.add_layer_type::<Circles>().unwrap();
         assert_eq!(builder.add_layer_type::<Circles>(), Err(RegisterError::Duplicate("circle".to_owned())));
+    }
+
+    /// The identity CRS under the name `name`.
+    fn identity_named(name: &str) -> Crs {
+        let Crs { converter, tile_matrix_set, .. } = Crs::identity();
+        Crs { name: name.to_owned(), converter, tile_matrix_set }
+    }
+
+    // GL JS: addProjection registers a CRS under its name.
+    #[test]
+    fn a_projection_registers_under_its_name() {
+        let mut builder = RegistryBuilder::new();
+        builder.add_projection(identity_named("test:crs")).unwrap();
+        let registry = builder.build();
+        let mapping = registry.style().projection("test:crs").expect("registered");
+        assert_eq!(mapping.crs().name, "test:crs");
+        assert!(registry.style().projection("test:other").is_none());
+    }
+
+    // GL JS: addProjection throws when the name is already registered.
+    #[test]
+    fn a_projection_name_registers_once() {
+        let mut builder = RegistryBuilder::new();
+        builder.add_projection(identity_named("test:crs")).unwrap();
+        assert_eq!(
+            builder.add_projection(identity_named("test:crs")),
+            Err(RegisterError::Duplicate("test:crs".to_owned()))
+        );
+    }
+
+    // GL JS: addProjection throws for a name without a colon, built in or
+    // not, and registers nothing.
+    #[test]
+    fn a_projection_name_needs_a_colon() {
+        let mut builder = RegistryBuilder::new();
+        let names = ["mercator", "globe", "vertical-perspective", "identity", "equal-earth"];
+        for name in names {
+            assert_eq!(
+                builder.add_projection(identity_named(name)),
+                Err(RegisterError::ProjectionName(name.to_owned()))
+            );
+        }
+        let registry = builder.build();
+        for name in names {
+            assert!(registry.style().projection(name).is_none(), "{name}");
+        }
+    }
+
+    // GL JS: addProjection throws for a zoom 0 extent that isn't positive.
+    #[test]
+    fn a_tile_matrix_set_needs_a_finite_origin_and_a_positive_extent() {
+        let mut builder = RegistryBuilder::new();
+        let tile_matrix_sets = [
+            TileMatrixSet { origin: [0.0, 0.0], extent_at_zoom0: 0.0 },
+            TileMatrixSet { origin: [0.0, 0.0], extent_at_zoom0: -1.0 },
+            TileMatrixSet { origin: [0.0, 0.0], extent_at_zoom0: f64::NAN },
+            TileMatrixSet { origin: [0.0, 0.0], extent_at_zoom0: f64::INFINITY },
+            TileMatrixSet { origin: [f64::NAN, 0.0], extent_at_zoom0: 1.0 },
+            TileMatrixSet { origin: [0.0, f64::NEG_INFINITY], extent_at_zoom0: 1.0 },
+        ];
+        for tile_matrix_set in tile_matrix_sets {
+            let crs = Crs { tile_matrix_set, ..identity_named("test:crs") };
+            assert_eq!(builder.add_projection(crs), Err(RegisterError::TileMatrixSet("test:crs".to_owned())));
+        }
+        assert!(builder.build().style().projection("test:crs").is_none());
+    }
+
+    // GL JS: getRegisteredProjection finds the pre-registered identity
+    // projection.
+    #[test]
+    fn the_builtin_projections_are_identity() {
+        let mut builder = RegistryBuilder::new();
+        register_builtin_projections(&mut builder).unwrap();
+        assert_eq!(register_builtin_projections(&mut builder), Err(RegisterError::Duplicate("identity".to_owned())));
+        let registry = builder.build();
+        let identity = registry.style().projection("identity").expect("identity").crs();
+        assert_eq!(identity.tile_matrix_set, TileMatrixSet { origin: [-90.0, 90.0], extent_at_zoom0: 180.0 });
+        let mut positions = [[0.0; 2]; 2];
+        identity.converter.forward(&[[12.5, -41.9], [-180.0, 90.0]], &mut positions);
+        assert_eq!(positions, [[12.5, -41.9], [-180.0, 90.0]]);
+        let mut lng_lats = [[0.0; 2]; 1];
+        identity.converter.inverse(&[[12.5, -41.9]], &mut lng_lats);
+        assert_eq!(lng_lats, [[12.5, -41.9]]);
+        assert!(RegistryBuilder::new().build().style().projection("identity").is_none());
     }
 }

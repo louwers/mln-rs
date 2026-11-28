@@ -2,42 +2,35 @@
 //! form that free camera options set and that the projection matrix is built
 //! from.
 
-#[cfg(test)]
 use std::f64::consts::PI;
 
 use glam::{DMat4, DQuat, DVec3};
-#[cfg(test)]
 use mln_style::geo::LatLng;
 
 use crate::camera::camera::FreeCameraOptions;
-#[cfg(test)]
 use crate::geo::LatLngAltitude;
-#[cfg(test)]
 use crate::geo::constants::M2PI;
 use crate::geo::projection::Projection;
 
-#[cfg(test)]
 fn mercator_x_from_lng(lng: f64) -> f64 {
     (180.0 + lng) / 360.0
 }
 
-#[cfg(test)]
 fn mercator_y_from_lat(lat: f64) -> f64 {
     (180.0 - (180.0 / PI * ((PI / 4.0) + lat * PI / 360.0).tan().ln())) / 360.0
 }
 
-#[cfg(test)]
 fn lat_from_mercator_y(y: f64) -> f64 {
     mln_style::math::rad2deg(2.0 * (PI - y * M2PI).exp().atan() - (PI / 2.0))
 }
 
-#[cfg(test)]
 fn lng_from_mercator_x(x: f64) -> f64 {
     x * 360.0 - 180.0
 }
 
-#[cfg(test)]
-fn to_mercator(location: &LatLng, altitude_meters: f64) -> DVec3 {
+/// The free camera position, in Web Mercator units, of `location` at
+/// `altitude_meters` above it.
+pub(crate) fn to_mercator(location: &LatLng, altitude_meters: f64) -> DVec3 {
     let pixels_per_meter = 1.0 / Projection::meters_per_pixel_at_latitude(location.latitude(), 0.0);
     let world_size = Projection::world_size(1.0);
     DVec3::new(
@@ -45,6 +38,15 @@ fn to_mercator(location: &LatLng, altitude_meters: f64) -> DVec3 {
         mercator_y_from_lat(location.latitude()),
         altitude_meters * pixels_per_meter / world_size,
     )
+}
+
+/// The lat/lng and the altitude in meters that a free camera's Web Mercator
+/// `position` stands for, at any position whose lat/lng isn't NaN.
+pub(crate) fn lat_lng_altitude_from_mercator(position: DVec3) -> Option<LatLngAltitude> {
+    let location = LatLng::new(lat_from_mercator_y(position.y), lng_from_mercator_x(position.x)).ok()?;
+    let meters_per_pixel = Projection::meters_per_pixel_at_latitude(location.latitude(), 0.0);
+    let altitude = position.z * Projection::world_size(1.0) * meters_per_pixel;
+    Some(LatLngAltitude { location, altitude })
 }
 
 /// The rotation of a camera with these angles, in radians: it turns `bearing`
@@ -152,14 +154,7 @@ impl FreeCameraOptions {
         if !(0.0..=1.0).contains(&position_value.y) {
             return None;
         }
-        let location =
-            LatLng::new(lat_from_mercator_y(position_value.y), lng_from_mercator_x(position_value.x)).ok()?;
-
-        let meters_per_pixel = Projection::meters_per_pixel_at_latitude(location.latitude(), 0.0);
-        let world_size = Projection::world_size(1.0);
-        let altitude = position_value.z * world_size * meters_per_pixel;
-
-        Some(LatLngAltitude { location, altitude })
+        lat_lng_altitude_from_mercator(position_value)
     }
 
     /// Helper function for setting orientation of the camera by defining a

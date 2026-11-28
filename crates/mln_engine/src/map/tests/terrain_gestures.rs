@@ -123,7 +123,7 @@ fn grab(view: &View, ground: &dyn Elevation, point: DVec2) -> GroundHit {
 
 /// Where the ground `hit` draws on `view`, as a screen point (y down).
 fn drawn(view: &View, hit: &GroundHit) -> DVec2 {
-    let point = view.lat_lng_to_screen_coordinate_at(&hit.location(WrapMode::Unwrapped), hit.height);
+    let point = view.lat_lng_to_screen_coordinate_at(&hit.location(view.world(), WrapMode::Unwrapped), hit.height);
     DVec2::new(point.x, f64::from(view.size().height) - point.y)
 }
 

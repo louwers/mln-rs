@@ -28,6 +28,7 @@ use crate::camera::{
     GesturePhase, MomentumDecay, MomentumDecayModel, MomentumEasing, MomentumGlide, MomentumSnap, TileProjector,
     TransitionOutcome,
 };
+use crate::geo::projection::Projection;
 use crate::map::events::CameraChangeMode;
 use crate::tile::UnwrappedTileID;
 
@@ -5959,4 +5960,183 @@ fn overshooting_mercator_ease_interpolates_center_and_zoom_past_target() {
     assert_double_eq(destination.latitude(), transform.view().center(WrapMode::Wrapped).latitude());
     assert_double_eq(destination.longitude(), transform.view().center(WrapMode::Wrapped).longitude());
     assert_double_eq(target_zoom, transform.view().zoom());
+}
+
+/// The answers of the Mercator transform on three cameras, each labeled by
+/// its camera and what it answers, for
+/// [`mercator_keeps_its_answers`].
+fn mercator_answers() -> Vec<(String, f64)> {
+    let cameras = [
+        ("San Francisco", Size::new(512, 512), ll(37.7749, -122.4194), 12.5, 30.0, 45.0, EdgeInsets::default()),
+        (
+            "Sydney",
+            Size::new(800, 600),
+            ll(-33.8688, 151.2093),
+            3.2,
+            -110.0,
+            0.0,
+            EdgeInsets::new(10.0, 20.0, 30.0, 40.0),
+        ),
+        ("Arctic", Size::new(1024, 768), ll(79.5, 170.25), 1.7, 10.0, 60.0, EdgeInsets::default()),
+    ];
+    let mut answers = Vec::new();
+    for (name, size, center_ll, zoom, bearing, pitch, padding) in cameras {
+        let mut add = |label: &str, value: f64| answers.push((format!("{name} {label}"), value));
+        let mut transform = Transform::new(ConstrainMode::HeightOnly, ViewportMode::Default);
+        transform.resize(size).unwrap();
+        let options = CameraOptions {
+            center: Some(center_ll),
+            zoom: Some(zoom),
+            bearing: Some(bearing),
+            pitch: Some(pitch),
+            padding: Some(padding),
+            ..CameraOptions::default()
+        };
+        transform.jump_to(&options);
+        let state = transform.state().clone();
+        let view = state.view();
+        add("center latitude", view.center(WrapMode::Unwrapped).latitude());
+        add("center longitude", view.center(WrapMode::Unwrapped).longitude());
+        let position = view.free_camera_options().position.unwrap();
+        add("camera x", position.x);
+        add("camera y", position.y);
+        add("camera z", position.z);
+        let screen =
+            view.lat_lng_to_screen_coordinate(&ll(center_ll.latitude() + 0.001, center_ll.longitude() - 0.002));
+        add("screen x", screen.x);
+        add("screen y", screen.y);
+        let at_screen = view.screen_coordinate_to_lat_lng(&sc(50.0, 60.0), WrapMode::Unwrapped).unwrap();
+        add("at screen latitude", at_screen.latitude());
+        add("at screen longitude", at_screen.longitude());
+        add("max pitch scale factor", view.max_pitch_scale_factor());
+
+        let mut moved = state.clone();
+        moved.move_lat_lng(&ll(center_ll.latitude() + 0.01, center_ll.longitude() + 0.02), &sc(100.0, 150.0)).unwrap();
+        add("moved latitude", moved.view().center(WrapMode::Unwrapped).latitude());
+        add("moved longitude", moved.view().center(WrapMode::Unwrapped).longitude());
+
+        let mut from_camera = state.clone();
+        from_camera.set_free_camera_options(&view.free_camera_options());
+        add("from camera latitude", from_camera.view().center(WrapMode::Unwrapped).latitude());
+        add("from camera longitude", from_camera.view().center(WrapMode::Unwrapped).longitude());
+        add("from camera zoom", from_camera.view().zoom());
+
+        let target = CameraOptions {
+            center: Some(ll(center_ll.latitude() + 2.0, center_ll.longitude() - 3.0)),
+            zoom: Some(zoom + 1.5),
+            bearing: Some(bearing + 20.0),
+            pitch: Some(10.0),
+            ..CameraOptions::default()
+        };
+        let second = AnimationOptions::new(Duration::from_secs(1));
+        let start = Instant::now() + Duration::from_secs(3600);
+        transform.set_frame_time(Some(start));
+        transform.ease_to(&target, &second);
+        transform.update_transitions(Some(start + Duration::from_millis(500)));
+        add("eased latitude", transform.view().center(WrapMode::Unwrapped).latitude());
+        add("eased longitude", transform.view().center(WrapMode::Unwrapped).longitude());
+        add("eased zoom", transform.view().zoom());
+        transform.update_transitions(Some(start + Duration::from_secs(1)));
+
+        transform.jump_to(&options);
+        let start = start + Duration::from_secs(10);
+        transform.set_frame_time(Some(start));
+        transform.fly_to(&target, &second, false);
+        transform.update_transitions(Some(start + Duration::from_millis(500)));
+        add("flown latitude", transform.view().center(WrapMode::Unwrapped).latitude());
+        add("flown longitude", transform.view().center(WrapMode::Unwrapped).longitude());
+        add("flown zoom", transform.view().zoom());
+        transform.update_transitions(Some(start + Duration::from_secs(1)));
+    }
+    answers
+}
+
+// gtest: Transform.MercatorBitIdentity
+// The Mercator transform's answers on three cameras as MapLibre Native's
+// were before its projection seam. The tolerances take in libm and fused
+// multiply-add differences between platforms, not a change to the math: an
+// answer that goes through the screen passes through the projection matrix
+// or its inverse, which magnifies them 1e3 to 1e4 times.
+#[test]
+fn mercator_keeps_its_answers() {
+    const MERCATOR: f64 = 1e-12;
+    const THROUGH_SCREEN: f64 = 1e-10;
+    // mln-rs's max pitch scale factor is up to 1.5e-8 off Native's on these
+    // cameras.
+    const MAX_PITCH_SCALE_FACTOR: f64 = 2e-8;
+    let expected = [
+        ("San Francisco center latitude", 37.7749, MERCATOR),
+        ("San Francisco center longitude", -122.4194, MERCATOR),
+        ("San Francisco camera x", 0.159_854_558_376_736_15, MERCATOR),
+        ("San Francisco camera y", 0.386_679_510_709_237_56, MERCATOR),
+        ("San Francisco camera z", 0.000_183_105_468_75, MERCATOR),
+        ("San Francisco screen x", 236.533_398_455_225_52, THROUGH_SCREEN),
+        ("San Francisco screen y", 256.556_825_795_493_86, THROUGH_SCREEN),
+        ("San Francisco at screen latitude", 37.764_423_616_805_36, THROUGH_SCREEN),
+        ("San Francisco at screen longitude", -122.450_054_415_613_64, THROUGH_SCREEN),
+        ("San Francisco max pitch scale factor", 1.5, MAX_PITCH_SCALE_FACTOR),
+        ("San Francisco moved latitude", 37.789_268_353_564_324, THROUGH_SCREEN),
+        ("San Francisco moved longitude", -122.376_995_417_827_84, THROUGH_SCREEN),
+        ("San Francisco from camera latitude", 37.7749, MERCATOR),
+        ("San Francisco from camera longitude", -122.4194, MERCATOR),
+        ("San Francisco from camera zoom", 12.5, MERCATOR),
+        ("San Francisco eased latitude", 39.700_872_193_482_97, MERCATOR),
+        ("San Francisco eased longitude", -125.306_835_595_921_81, MERCATOR),
+        ("San Francisco eased zoom", 13.734_648_613_495_04, MERCATOR),
+        ("San Francisco flown latitude", 39.774_242_507_916_44, MERCATOR),
+        ("San Francisco flown longitude", -125.418_399_705_294_96, MERCATOR),
+        ("San Francisco flown zoom", 11.258_193_199_328_915, MERCATOR),
+        ("Sydney center latitude", -33.868_800_000_000_02, MERCATOR),
+        ("Sydney center longitude", 151.209_299_999_999_98, MERCATOR),
+        ("Sydney camera x", 0.920_025_833_333_333_2, MERCATOR),
+        ("Sydney camera y", 0.600_092_251_458_776_2, MERCATOR),
+        ("Sydney camera z", 0.191_283_082_755_496_02, MERCATOR),
+        ("Sydney screen x", 390.023_731_355_705_93, THROUGH_SCREEN),
+        ("Sydney screen y", 310.019_179_322_483_1, THROUGH_SCREEN),
+        ("Sydney at screen latitude", -47.379_211_768_724_836, THROUGH_SCREEN),
+        ("Sydney at screen longitude", 178.081_512_635_435_4, THROUGH_SCREEN),
+        ("Sydney max pitch scale factor", 1.0, MAX_PITCH_SCALE_FACTOR),
+        ("Sydney moved latitude", -18.999_444_839_858_203, THROUGH_SCREEN),
+        ("Sydney moved longitude", 132.136_443_484_529_14, THROUGH_SCREEN),
+        ("Sydney from camera latitude", -33.868_800_000_000_02, MERCATOR),
+        ("Sydney from camera longitude", 151.209_299_999_999_98, MERCATOR),
+        ("Sydney from camera zoom", 3.2, MERCATOR),
+        ("Sydney eased latitude", -31.944_653_580_490_49, MERCATOR),
+        ("Sydney eased longitude", 148.321_864_404_078_1, MERCATOR),
+        ("Sydney eased zoom", 4.434_648_613_495_041, MERCATOR),
+        ("Sydney flown latitude", -31.996_632_184_023_433, MERCATOR),
+        ("Sydney flown longitude", 148.399_052_722_951_35, MERCATOR),
+        ("Sydney flown zoom", 4.431_189_851_753_509, MERCATOR),
+        ("Arctic center latitude", 69.115_018_594_564_19, MERCATOR),
+        ("Arctic center longitude", 170.25, MERCATOR),
+        ("Arctic camera x", 0.868_773_114_374_953_6, MERCATOR),
+        ("Arctic camera y", 0.821_467_012_244_570_4, MERCATOR),
+        ("Arctic camera z", 0.346_259_366_253_257_8, MERCATOR),
+        ("Arctic screen x", 483.831_518_150_223_64, THROUGH_SCREEN),
+        ("Arctic screen y", 463.852_284_095_300_9, THROUGH_SCREEN),
+        ("Arctic at screen latitude", 15.513_337_760_683_484, THROUGH_SCREEN),
+        ("Arctic at screen longitude", 87.665_272_005_597_84, THROUGH_SCREEN),
+        ("Arctic max pitch scale factor", 1.169_744_133_949_279_8, MAX_PITCH_SCALE_FACTOR),
+        ("Arctic moved latitude", 69.115_018_594_564_19, THROUGH_SCREEN),
+        ("Arctic moved longitude", -111.765_303_625_466_56, THROUGH_SCREEN),
+        ("Arctic from camera latitude", 69.115_018_594_564_19, MERCATOR),
+        ("Arctic from camera longitude", 170.25, MERCATOR),
+        ("Arctic from camera zoom", 1.7, MERCATOR),
+        ("Arctic eased latitude", 80.847_775_144_839_19, MERCATOR),
+        ("Arctic eased longitude", 167.362_564_404_078_1, MERCATOR),
+        ("Arctic eased zoom", 2.934_648_613_495_041, MERCATOR),
+        ("Arctic flown latitude", 80.691_007_366_241_85, MERCATOR),
+        ("Arctic flown longitude", 167.431_466_191_662_6, MERCATOR),
+        ("Arctic flown zoom", 2.895_264_021_176_888, MERCATOR),
+    ];
+    let answers = mercator_answers();
+    assert_eq!(expected.len(), answers.len());
+    let mut off = Vec::new();
+    for ((label, value, relative), (answer_label, answer)) in expected.into_iter().zip(answers) {
+        assert_eq!(label, answer_label);
+        if (value - answer).abs() > relative * value.abs() {
+            off.push(format!("{label}: {answer} is not {value}"));
+        }
+    }
+    assert!(off.is_empty(), "{off:#?}");
 }

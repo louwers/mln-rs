@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
+use mln_style::crs::TileMatrixSet;
 use mln_style::string::to_string_double;
 use mln_style::tileset::Scheme;
 
@@ -196,6 +197,41 @@ fn get_tile_bbox(x: i32, y: i32, z: i8) -> String {
         + &to_string_double(max.1)
 }
 
+/// The box of the tile in column `x` and row `y`, counted from the top, at
+/// zoom `z` of `tile_matrix_set`, in its units, y up: `minX,minY,maxX,maxY`.
+fn tile_bbox_in(tile_matrix_set: &TileMatrixSet, x: i32, y: i32, z: i8) -> String {
+    let tiles = 2f64.powi(i32::from(z));
+    let tile_extent = tile_matrix_set.extent_at_zoom0 / tiles;
+    let [grid_min_x, grid_max_y] = tile_matrix_set.origin;
+    let grid_min_y = grid_max_y - tile_matrix_set.extent_at_zoom0;
+    let row_from_bottom = tiles - f64::from(y) - 1.0;
+    [
+        grid_min_x + f64::from(x) * tile_extent,
+        grid_min_y + row_from_bottom * tile_extent,
+        grid_min_x + (f64::from(x) + 1.0) * tile_extent,
+        grid_min_y + (row_from_bottom + 1.0) * tile_extent,
+    ]
+    .map(to_string_double)
+    .join(",")
+}
+
+/// How the tokens of a tile URL template address a tile: the scheme its
+/// `{y}` counts rows in, and the tile matrix set of the map's registered
+/// projection, whose units its `{bbox}` is in. Without one, `{bbox}` is
+/// `{bbox-epsg-3857}`, as on Mercator and the globe. A [`Scheme`] converts
+/// to the addressing without one.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TileAddressing {
+    pub scheme: Scheme,
+    pub tile_matrix_set: Option<TileMatrixSet>,
+}
+
+impl From<Scheme> for TileAddressing {
+    fn from(scheme: Scheme) -> Self {
+        TileAddressing { scheme, tile_matrix_set: None }
+    }
+}
+
 fn sprite_url(base: &str, pixel_ratio: f32, extension: &str) -> String {
     let fragment = base.find('#').unwrap_or(base.len());
     let query = base.find('?').filter(|&query| query < fragment);
@@ -339,10 +375,16 @@ impl Resource {
         Resource::new(Kind::Glyphs, url)
     }
 
+    /// The request of tile `x`, `y` at zoom `z` of a tileset whose URL
+    /// template is `url_template`. `addressing` is the tileset's
+    /// [`Scheme`], or a [`TileAddressing`] that also names the tile matrix
+    /// set of the map's registered projection, which `{bbox}` gives the
+    /// tile's box in. The TMS scheme flips `{y}`; `{bbox}` in a tile matrix
+    /// set stays the box of the tile that `y` names.
     #[must_use]
     #[expect(
         clippy::too_many_arguments,
-        reason = "the tileset's template, the tile and its tileset's scheme and format"
+        reason = "the tileset's template, the tile and its tileset's addressing and format"
     )]
     pub fn tile(
         url_template: &str,
@@ -350,11 +392,13 @@ impl Resource {
         x: i32,
         y: i32,
         z: i8,
-        scheme: Scheme,
+        addressing: impl Into<TileAddressing>,
         format: TileFormat,
         loading_method: LoadingMethod,
     ) -> Resource {
+        let TileAddressing { scheme, tile_matrix_set } = addressing.into();
         let supports_ratio = url_template.contains("{ratio}");
+        let row = y;
         let mut y = y;
         if scheme == Scheme::TMS {
             y = (1i32 << z).wrapping_sub(y).wrapping_sub(1);
@@ -367,9 +411,14 @@ impl Resource {
                     TileTemplateToken::X => x.to_string(),
                     TileTemplateToken::Y => y.to_string(),
                     TileTemplateToken::Quadkey => get_quad_key(x, y, z),
-                    // The spec defines `{bbox}` as `{bbox-epsg-3857}` under every
-                    // projection mln-rs has: mercator, globe and vertical-perspective.
-                    TileTemplateToken::Bbox | TileTemplateToken::BboxEpsg3857 => get_tile_bbox(x, y, z),
+                    TileTemplateToken::Bbox => match &tile_matrix_set {
+                        Some(tile_matrix_set) => tile_bbox_in(tile_matrix_set, x, row, z),
+                        // The spec defines `{bbox}` as `{bbox-epsg-3857}`
+                        // under the mercator, globe and vertical-perspective
+                        // projections.
+                        None => get_tile_bbox(x, y, z),
+                    },
+                    TileTemplateToken::BboxEpsg3857 => get_tile_bbox(x, y, z),
                     TileTemplateToken::Prefix => {
                         [hex[x.rem_euclid(16) as usize] as char, hex[y.rem_euclid(16) as usize] as char]
                             .iter()
@@ -518,6 +567,89 @@ mod tests {
             0,
             1,
         );
+    }
+
+    /// The URL of tile `x`, `y` at zoom `z` of `url` in the identity
+    /// projection's tile matrix set, whose root tile spans -90 to 90.
+    fn identity_tile_url(url: &str, x: i32, y: i32, z: i8, scheme: Scheme) -> String {
+        let tile_matrix_set = Some(TileMatrixSet { origin: [-90.0, 90.0], extent_at_zoom0: 180.0 });
+        let addressing = TileAddressing { scheme, tile_matrix_set };
+        Resource::tile(url, 1.0, x, y, z, addressing, TileFormat::Image, LoadingMethod::All).url
+    }
+
+    // gtest: Resource.Tile, in a registered projection
+    // GL JS: CanonicalTileID .url replaces {bbox} with the tile bounds in a
+    // tile matrix set whose root tile spans -90..90.
+    #[test]
+    fn tile_bbox_in_a_registered_projections_tile_matrix_set() {
+        let t = "http://example.com/?bbox={bbox}";
+        assert_eq!("http://example.com/?bbox=0,0,90,90", identity_tile_url(t, 1, 0, 1, Scheme::XYZ));
+        assert_eq!("http://example.com/?bbox=-90,-90,0,0", identity_tile_url(t, 0, 1, 1, Scheme::XYZ));
+        assert_eq!("http://example.com/?bbox=45,-90,90,-45", identity_tile_url(t, 3, 3, 2, Scheme::XYZ));
+        // `{bbox-epsg-3857}` is in EPSG:3857 meters in any projection.
+        assert_eq!(
+            "http://example.com/?bbox=-20037508.342789244,0,0,20037508.342789244",
+            identity_tile_url("http://example.com/?bbox={bbox-epsg-3857}", 0, 0, 1, Scheme::XYZ)
+        );
+    }
+
+    // gtest: Resource.Tile, under the TMS scheme in a registered projection
+    // GL JS: CanonicalTileID .url keeps {bbox} on the tile the ID names under
+    // the tms scheme, which flips only {y}.
+    #[test]
+    fn tms_flips_only_y_and_bbox_stays_the_box_of_the_tile() {
+        let url = identity_tile_url("http://example.com/{y}?bbox={bbox}", 1, 0, 1, Scheme::TMS);
+        assert_eq!("http://example.com/1?bbox=0,0,90,90", url);
+    }
+
+    // gtest: Resource.TileBBox
+    // `{bbox}` is the tile's box in the map projection's tile matrix set, from
+    // the tile's own row in either scheme, or on Mercator, which the map asks
+    // for without a tile matrix set, `{bbox-epsg-3857}`'s: each expected box
+    // is the one GL JS's `CanonicalTileID.url` makes for the same tile, scheme
+    // and tile matrix set. A box whose numbers aren't exact in binary may
+    // differ from GL JS's in its last bits, as a fused multiply-add rounds
+    // once where two operations round twice: the tolerance scales with the
+    // zoom 0 extent.
+    #[test]
+    fn tile_bbox_is_gl_jss_box() {
+        let expect_bbox = |tile_matrix_set: Option<TileMatrixSet>, (x, y, z), scheme, path: &str, box_: [f64; 4]| {
+            let addressing = TileAddressing { scheme, tile_matrix_set };
+            let template = "http://example.com/{z}/{x}/{y}?bbox={bbox}";
+            let url = Resource::tile(template, 1.0, x, y, z, addressing, TileFormat::Image, LoadingMethod::All).url;
+            let prefix = format!("http://example.com/{path}?bbox=");
+            let numbers = url.strip_prefix(&prefix).unwrap_or_else(|| panic!("{url}"));
+            let numbers: Vec<f64> = numbers.split(',').map(|number| number.parse().unwrap()).collect();
+            let extent = tile_matrix_set.map_or(2.0 * std::f64::consts::PI * 6_378_137.0, |tms| tms.extent_at_zoom0);
+            assert_eq!(4, numbers.len(), "{url}");
+            for (expected, actual) in box_.iter().zip(&numbers) {
+                assert!((expected - actual).abs() <= extent * 1e-15, "{url}: {actual} isn't {expected}");
+            }
+        };
+        let (xyz, tms) = (Scheme::XYZ, Scheme::TMS);
+
+        expect_bbox(None, (0, 0, 1), xyz, "1/0/0", [-20_037_508.342_789_244, 0.0, 0.0, 20_037_508.342_789_244]);
+        let box_ = [-9_783.939_620_502_293, 6_721_566.519_285_258, 0.0, 6_731_350.458_905_76];
+        expect_bbox(None, (2047, 1360, 12), xyz, "12/2047/1360", box_);
+
+        // NZTM2000Quad's corners are not whole meters.
+        let nztm2000_quad =
+            TileMatrixSet { origin: [-3_260_586.728_4, 10_438_190.165_2], extent_at_zoom0: 10_018_754.171_4 };
+        let box_ = [1_122_618.221_587_5, 4_176_468.808_075_001, 1_748_790.357_299_999_8, 4_802_640.943_787_501];
+        expect_bbox(Some(nztm2000_quad), (7, 9, 4), xyz, "4/7/9", box_);
+        expect_bbox(Some(nztm2000_quad), (7, 9, 4), tms, "4/7/6", box_);
+
+        // Every number here is exact in binary, so the strings are GL JS's.
+        let identity = Some(TileMatrixSet { origin: [-90.0, 90.0], extent_at_zoom0: 180.0 });
+        let url = |tile_matrix_set, (x, y, z), scheme| {
+            let addressing = TileAddressing { scheme, tile_matrix_set };
+            let template = "http://example.com/{z}/{x}/{y}?bbox={bbox}";
+            Resource::tile(template, 1.0, x, y, z, addressing, TileFormat::Image, LoadingMethod::All).url
+        };
+        assert_eq!("http://example.com/1/1/0?bbox=0,0,90,90", url(identity, (1, 0, 1), xyz));
+        assert_eq!("http://example.com/1/1/1?bbox=0,0,90,90", url(identity, (1, 0, 1), tms));
+        let epsg3413 = Some(TileMatrixSet { origin: [-4_194_304.0, 4_194_304.0], extent_at_zoom0: 8_388_608.0 });
+        assert_eq!("http://example.com/4/7/6?bbox=-524288,-1048576,0,-524288", url(epsg3413, (7, 9, 4), tms));
     }
 
     // gtest: Resource.Glyphs

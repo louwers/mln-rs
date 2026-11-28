@@ -7,9 +7,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use geojson::{GeoJson, GeometryValue};
-use mln_builtins::sources::geojson::{GeoJSONData, create_geojson_data, set_data};
+use mln_builtins::sources::geojson::{GeoJSONData, create_geojson_data_in, set_data, set_geojson};
 use mln_builtins::sources::image::set_image;
 use mln_style::bitmap::PremultipliedImage;
+use mln_style::crs::CrsMapping;
 use mln_style::error::Error;
 use mln_style::expression::Functions;
 use mln_style::geo::{LatLng, LatLngBounds};
@@ -800,16 +801,17 @@ fn queue_geojson(
             check_clusterable(&geojson)?;
         }
         let instance = find_source(&entry.core, source_id)?.instance();
-        Ok((instance, data.load, Arc::clone(&data.options.options), data.options.synchronous_update, geojson))
+        let building = BuildFor { options: Arc::clone(&data.options.options), crs: data.options.crs.clone() };
+        Ok((instance, data.load, building, data.options.synchronous_update, geojson))
     })();
-    let (instance, load, options, synchronous, geojson) = match found {
+    let (instance, load, building, synchronous, geojson) = match found {
         Ok(found) => found,
         Err(error) => return Err((error, resolver)),
     };
     if synchronous {
-        return match create_geojson_data(geojson, &options) {
-            Ok(data) => {
-                let edit = set_data(source_id, Some(data));
+        return match building.build(geojson) {
+            Ok(built) => {
+                let edit = built.edit(source_id);
                 match entry.core.edit_style(|style| style.apply(edit)) {
                     Ok(()) => Ok(Some(resolver)),
                     Err(error) => Err((error, resolver)),
@@ -825,21 +827,58 @@ fn queue_geojson(
     });
     if update.building.is_none() {
         update.instance = instance;
-        start_geojson(update, map_id, source_id.to_owned(), (options, load), geojson, resolver, background);
+        start_geojson(update, map_id, source_id.to_owned(), (building, load), geojson, resolver, background);
     } else if let Some((_, replaced)) = update.waiting.replace((geojson, resolver)) {
         outbox.resolve(replaced, Err(Error::cancelled("newer data for the source replaced it")));
     }
     Ok(None)
 }
 
-/// Builds `geojson` with `options` for `update`'s source, whose data is at
-/// `load`, on a background thread, then installs it from the runtime's
+/// What GeoJSON data is built for: a source's options, and the registered
+/// projection of its style, `None` in a built-in projection.
+struct BuildFor {
+    options: Arc<GeoJSONOptions>,
+    crs: Option<Arc<CrsMapping>>,
+}
+
+/// GeoJSON data built for a source, and the GeoJSON it was built from in a
+/// registered projection, which the source keeps to tile again when the
+/// projection changes.
+struct Built {
+    data: Arc<dyn GeoJSONData>,
+    kept: Option<Arc<GeoJson>>,
+}
+
+impl BuildFor {
+    /// The data of `geojson`, tiled in the projection.
+    fn build(&self, geojson: GeoJson) -> Result<Built, Error> {
+        let Some(crs) = &self.crs else {
+            return Ok(Built { data: create_geojson_data_in(geojson, &self.options, None)?, kept: None });
+        };
+        let kept = Arc::new(geojson);
+        let data = create_geojson_data_in(GeoJson::clone(&kept), &self.options, Some(crs))?;
+        Ok(Built { data, kept: Some(kept) })
+    }
+}
+
+impl Built {
+    /// The edit that makes this the data of the source `id`.
+    fn edit(self, id: &str) -> Edit {
+        match self.kept {
+            Some(kept) => set_geojson(id, kept, self.data),
+            None => set_data(id, Some(self.data)),
+        }
+    }
+}
+
+/// Builds `geojson` as `building` says for `update`'s source, whose data is
+/// at `load`, on a background thread, then installs it from the runtime's
 /// thread.
 fn start_geojson(
     update: &mut GeoJsonUpdate,
     map_id: MapId,
     source_id: String,
-    (options, load): (Arc<GeoJSONOptions>, u64),
+    (building, load): (BuildFor, u64),
     geojson: GeoJson,
     resolver: Resolver<Applied>,
     background: Background,
@@ -851,23 +890,19 @@ fn start_geojson(
     update.building = Some((build, resolver));
     let next = background.clone();
     background.pool.spawn(move || {
-        let data = create_geojson_data(geojson, &options);
+        let built = building.build(geojson);
         post(&background.queue, move |core, outbox| {
-            install_geojson(core, map_id, &source_id, (build, load), data, next, outbox);
+            install_geojson(core, map_id, &source_id, (build, load), built, next, outbox);
         });
     });
 }
 
-/// The options and the data's load of the source `id`, if it's the GeoJSON
-/// source `instance`.
-fn current_geojson(
-    map: &mln_engine::map::Map,
-    id: &str,
-    instance: SourceInstance,
-) -> Option<(Arc<GeoJSONOptions>, u64)> {
+/// What data for the source `id` is built for, and the data's load, if it's
+/// the GeoJSON source `instance`.
+fn current_geojson(map: &mln_engine::map::Map, id: &str, instance: SourceInstance) -> Option<(BuildFor, u64)> {
     let source = map.source(id).filter(|source| source.instance() == instance)?;
     let data = SourceData::<GeoJsonSourceType>::recover(source)?;
-    Some((Arc::clone(&data.options.options), data.load))
+    Some((BuildFor { options: Arc::clone(&data.options.options), crs: data.options.crs.clone() }, data.load))
 }
 
 /// Installs data that a background thread built, unless something replaced
@@ -877,7 +912,7 @@ fn install_geojson(
     map_id: MapId,
     source_id: &str,
     (build, load): (u64, u64),
-    data: Result<Arc<dyn GeoJSONData>, Error>,
+    built: Result<Built, Error>,
     background: Background,
     outbox: &mut Outbox,
 ) {
@@ -886,13 +921,13 @@ fn install_geojson(
     let Some(update) = entry.geojson_updates.0.get_mut(source_id) else { return };
     let Some((_, resolver)) = update.building.take_if(|(building, _)| *building == build) else { return };
     let current = current_geojson(&entry.core, source_id, update.instance);
-    let installed = match data {
+    let installed = match built {
         Err(error) => Err(error),
         Ok(_) if current.as_ref().is_none_or(|(_, current_load)| *current_load != load) => {
             Err(Error::cancelled("the source's data was replaced before this data was ready"))
         }
-        Ok(data) => {
-            let edit = set_data(source_id, Some(data));
+        Ok(built) => {
+            let edit = built.edit(source_id);
             entry.core.edit_style(|style| style.apply(edit))
         }
     };

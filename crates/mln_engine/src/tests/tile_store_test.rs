@@ -384,7 +384,12 @@ fn queries_and_feature_state_read_the_shown_contents() {
     let query = |tile: &OneTile| -> Vec<mln_style::feature::Identifier> {
         let source = tile.store.source(key).expect("the source");
         let options = SourceQueryOptions { source_layers: Some(vec![String::new()]), filter: None };
-        source.query_source_features(&options, None).unwrap().into_iter().map(|feature| feature.id).collect()
+        source
+            .query_source_features(&options, None, &crate::geo::world::WorldMapping::Mercator)
+            .unwrap()
+            .into_iter()
+            .map(|feature| feature.id)
+            .collect()
     };
     assert_eq!(query(&tile), [mln_style::feature::Identifier::Uint(1)], "the shown contents' data");
 

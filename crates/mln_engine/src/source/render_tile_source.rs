@@ -2,9 +2,11 @@ use std::sync::Arc;
 
 use glam::Vec2;
 use mln_style::Source;
+use mln_style::crs::TileMatrixSet;
 use mln_style::error::Error;
 
 use crate::draw::context::Context;
+use crate::geo::world::WorldMapping;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::query::FeatureExtensionValue;
 use crate::render::tile::{RenderTile, TileContent};
@@ -82,10 +84,19 @@ impl RenderTileSource {
         MapSettings {
             mode: parameters.mode,
             pixel_ratio: parameters.pixel_ratio,
+            tile_matrix_set: registered_tile_matrix_set(parameters.view.world()),
             max_zoom: parameters.max_zoom,
             file_source: parameters.file_source.clone(),
             fast_pfor_enabled: self.fast_pfor_enabled,
         }
+    }
+}
+
+/// The tile matrix set of `world`, if it is a registered projection's.
+fn registered_tile_matrix_set(world: &WorldMapping) -> Option<TileMatrixSet> {
+    match world {
+        WorldMapping::Mercator => None,
+        WorldMapping::Crs(_) => Some(world.tile_matrix_set()),
     }
 }
 
@@ -196,6 +207,7 @@ impl RenderSource for RenderTileSource {
         let map = MapSettings {
             mode: parameters.mode,
             pixel_ratio: parameters.pixel_ratio,
+            tile_matrix_set: registered_tile_matrix_set(parameters.view.world()),
             max_zoom: parameters.max_zoom,
             file_source: parameters.file_source.clone(),
             fast_pfor_enabled: self.fast_pfor_enabled,

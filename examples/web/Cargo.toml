@@ -40,6 +40,8 @@ mln_engine.workspace = true
 # check/check.mjs runs on a backend of the map's kind (src/gpu_check.rs).
 mln_builtins = { workspace = true, features = ["gpu-conformance"] }
 mln_runtime.workspace = true
+# The Arctic style's projection, which the demo registers.
+mln_example_projections = { package = "mln-rs-example-projections", path = "../projections" }
 mln_style.workspace = true
 mln_webgpu = { workspace = true, optional = true }
 parking_lot.workspace = true

@@ -34,6 +34,7 @@ fn registry() -> Arc<StyleRegistry> {
         builtins.layer_types(),
         builtins.source_types(),
         members,
+        [],
     ))
 }
 

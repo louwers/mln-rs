@@ -45,6 +45,7 @@ use mln_engine::gestures::{GestureEvent, GestureRecognizer, Input, Modes, NextTi
 use mln_engine::map::MapEvent;
 use mln_engine::storage::constants::DEFAULT_MAX_CACHE_SIZE;
 use mln_runtime::frame_pacer::{FramePacer, RefreshWaiter};
+use mln_runtime::registry::{Registry, RegistryBuilder, register_builtins};
 use mln_runtime::{
     CacheDatabaseOperation, Completion, DemandMode, Device, ErrorKind, EventMask, EventType, FrameDemand,
     FrameDisposition, LogicalExtent, Map, MapOptions, Runtime, RuntimeEventKind, RuntimeOptions, ViewportOptions,
@@ -145,7 +146,7 @@ pub(crate) fn run(launch: Launch) -> Result<(), String> {
         let cache_db = args.cache.clone().map_or_else(|| std::env::temp_dir().join("mbgl-cache.db"), PathBuf::from);
         RuntimeOptions { cache_path: Some(cache_db), ..RuntimeOptions::default() }
     };
-    let runtime = Runtime::new(&runtime_options).map_err(|e| e.message)?;
+    let runtime = Runtime::with_registry(&runtime_options, registry()).map_err(|e| e.message)?;
     let network = if benchmark.is_some() { Network::Offline } else { settings.network };
     if network != Network::Online {
         log_failure(network.apply(&runtime));
@@ -175,10 +176,14 @@ pub(crate) fn run(launch: Launch) -> Result<(), String> {
     let map =
         runtime.create_map(options).and_then(|(map, created)| created.wait().map(|_| map)).map_err(|e| e.message)?;
     log_failure(map.set_bounds(BoundOptions { max_pitch: Some(settings.max_pitch), ..Default::default() }));
+    let style = match args.style.clone().or_else(|| std::env::var("MLN_STYLE_URL").ok()) {
+        Some(spec) => styles::style_for(&spec),
+        None => styles::default_style(),
+    };
     let camera = if let Some(benchmark) = &benchmark {
         benchmark.start()
     } else {
-        CameraOptions {
+        let camera = CameraOptions {
             center: LatLng::new(settings.latitude, settings.longitude).ok(),
             center_altitude: Some(settings.altitude),
             zoom: Some(settings.zoom),
@@ -187,6 +192,13 @@ pub(crate) fn run(launch: Launch) -> Result<(), String> {
             roll: Some(settings.roll),
             fov: Some(settings.fov),
             ..Default::default()
+        };
+        // Where the style opens, unless the command line gives a place.
+        match style.camera {
+            Some(place) if args.lon.is_none() && args.lat.is_none() && args.zoom.is_none() => {
+                CameraOptions { center: Some(place.center), zoom: Some(place.zoom), ..camera }
+            }
+            _ => camera,
         }
     };
     log_failure(map.update_camera(CameraUpdate { camera, ..Default::default() }));
@@ -199,11 +211,6 @@ pub(crate) fn run(launch: Launch) -> Result<(), String> {
     };
     let window = WindowSession::attach(kind, device, &map, &surfaces, map_size, Rc::clone(&paint), &inbox)
         .map_err(|e| e.message)?;
-
-    let style = match args.style.clone().or_else(|| std::env::var("MLN_STYLE_URL").ok()) {
-        Some(spec) => styles::style_for(&spec),
-        None => styles::default_style(),
-    };
 
     let refreshes = match frame_pacer {
         Some(Ok(pacer)) => {
@@ -306,6 +313,17 @@ pub(crate) fn run(launch: Launch) -> Result<(), String> {
     // open; the map and the runtime go after it.
     view.close_window();
     Ok(())
+}
+
+/// The registrations of the app's runtime: the built-ins, and EPSG:3413,
+/// which the catalog's Arctic style draws in.
+fn registry() -> Arc<Registry> {
+    let mut builder = RegistryBuilder::new();
+    register_builtins(&mut builder).expect("the built-ins register into no registrations");
+    builder
+        .add_projection(mln_example_projections::epsg3413())
+        .expect("EPSG:3413 registers once, under a name with a colon");
+    builder.build()
 }
 
 /// A physical size in the map's logical pixels.
@@ -871,7 +889,11 @@ impl View {
             }
             Action::PickStyle(index) => {
                 if let Some(style) = self.styles.get(index).cloned() {
+                    let camera = style.camera;
                     self.load_style(style);
+                    if let Some(camera) = camera {
+                        self.gestures.step_to(&CameraUpdate { camera: camera.options(), ..Default::default() });
+                    }
                 }
             }
             Action::SetProjection(projection) => {

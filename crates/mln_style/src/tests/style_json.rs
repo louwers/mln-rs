@@ -354,6 +354,18 @@ fn the_sky_and_the_projection_change_and_reset() {
 }
 
 #[test]
+fn a_registered_projection_reads_back_by_its_name() {
+    let mut style = loaded_style();
+    style.set_root_property_json("projection", r#"{"type":"EPSG:3413"}"#).unwrap();
+    assert_eq!(root_property(&style, "projection").as_deref(), Some(r#"{"type":"EPSG:3413"}"#));
+    assert_eq!(style.get_projection().registered_name(), Some("EPSG:3413"));
+
+    style.set_root_property_json("projection", r#"{"type":"mercator"}"#).unwrap();
+    assert_eq!(root_property(&style, "projection").as_deref(), Some(r#"{"type":"mercator"}"#));
+    assert_eq!(style.get_projection().registered_name(), None);
+}
+
+#[test]
 fn the_terrain_changes_resets_and_reads_back() {
     let dem_style = |terrain: &str| {
         format!(

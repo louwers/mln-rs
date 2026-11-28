@@ -1,13 +1,16 @@
 //! The map's geometry: the camera's screen coordinates, edge insets and
-//! orientation; spherical Mercator ([`projection`]); the camera's frustum
-//! and the bounding volumes it culls (`bounding_volumes`); intersection
-//! tests, point math, and the Earth's size ([`constants`]).
+//! orientation; spherical Mercator ([`projection`]); the world square and
+//! how lng/lat maps to it, in Mercator or a registered projection
+//! ([`world`]); the camera's frustum and the bounding volumes it culls
+//! (`bounding_volumes`); intersection tests, point math, and the Earth's
+//! size ([`constants`]).
 
 pub(crate) mod bounding_volumes;
 pub mod constants;
 pub mod intersection_tests;
 pub mod math;
 pub mod projection;
+pub mod world;
 
 use geometry::Point;
 use mln_style::geo::LatLng;
@@ -93,15 +96,20 @@ impl std::ops::Add for EdgeInsets {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-#[cfg(test)]
 pub(crate) struct LatLngAltitude {
     pub(crate) location: LatLng,
     pub(crate) altitude: f64,
 }
 
-/// The latitudes of the north and the south edges of `id`, in degrees.
+/// The latitudes of the north and the south edges of `id`, in degrees, by
+/// which the hillshade shader undoes Mercator's stretch of slopes: `[0, 0]`,
+/// no correction, in a registered projection's `world`, which doesn't wrap
+/// and draws in its own units.
 #[must_use]
-pub fn lat_range(id: &crate::tile::UnwrappedTileID) -> [f32; 2] {
+pub fn lat_range(id: &crate::tile::UnwrappedTileID, world: &world::WorldMapping) -> [f32; 2] {
+    if !world.wraps() {
+        return [0.0, 0.0];
+    }
     let latlng0 = LatLng::from_unwrapped_tile(id.canonical.z, id.canonical.x, id.canonical.y, id.wrap);
     let below =
         crate::tile::UnwrappedTileID::new(id.canonical.z, i64::from(id.canonical.x), i64::from(id.canonical.y) + 1);

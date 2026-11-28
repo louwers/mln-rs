@@ -5,6 +5,7 @@ use mln_style::types::ProjectionDefinition;
 
 use crate::camera::{Camera, Elevation, LogicalExtent, MapView, ProjectionMode, View, ViewportMode};
 use crate::geo::projection::Projection;
+use crate::geo::world::WorldMapping;
 use crate::geo::{EdgeInsets, ScreenCoordinate};
 
 const CENTER: (f64, f64) = (46.5, 7.9);
@@ -76,7 +77,7 @@ fn view(pitch: f64, center_altitude: f64, lowest: f64) -> View {
         viewport: crate::camera::Viewport::default(),
         projection: ProjectionDefinition::default(),
     }
-    .to_state()
+    .to_state(&WorldMapping::Mercator)
     .unwrap();
     state.set_terrain_min_elevation(Some(lowest));
     state.view().clone()
@@ -91,7 +92,7 @@ fn pixels() -> impl Iterator<Item = ScreenCoordinate> {
 
 /// Fails unless `hit` draws at `pixel`, within 0.01 px.
 fn assert_draws_at(view: &View, hit: &crate::camera::GroundHit, pixel: &ScreenCoordinate) {
-    let drawn = view.lat_lng_to_screen_coordinate_at(&hit.location(WrapMode::Unwrapped), hit.height);
+    let drawn = view.lat_lng_to_screen_coordinate_at(&hit.location(view.world(), WrapMode::Unwrapped), hit.height);
     let off = DVec2::new(drawn.x - pixel.x, drawn.y - pixel.y).length();
     assert!(off < 0.01, "{hit:?} draws {off} px from {pixel:?}");
 }
@@ -238,7 +239,7 @@ fn height_zero_matches_the_flat_conversions_bit_for_bit() {
                 viewport: crate::camera::Viewport { viewport_mode, ..crate::camera::Viewport::default() },
                 projection: ProjectionDefinition::default(),
             }
-            .to_view()
+            .to_view(&WorldMapping::Mercator)
             .unwrap()
         },
     );
@@ -303,7 +304,7 @@ fn globe_view(pitch: f64, center_altitude: f64, lowest: f64) -> View {
         viewport: crate::camera::Viewport::default(),
         projection: ProjectionDefinition::new(mln_style::types::ProjectionType::VerticalPerspective),
     }
-    .to_state()
+    .to_state(&WorldMapping::Mercator)
     .unwrap();
     state.set_terrain_min_elevation(Some(lowest));
     assert!(state.view().is_globe());
@@ -328,7 +329,7 @@ fn a_globe_ray_meets_a_plateau_where_the_sphere_puts_it() {
     let (mut on_top, mut in_front, mut on_face) = (0, 0, 0);
     for pixel in pixels() {
         let hit = view.ground_under(&pixel, &ground).unwrap_or_else(|| panic!("ground under {pixel:?}"));
-        let location = hit.location(WrapMode::Unwrapped);
+        let location = hit.location(view.world(), WrapMode::Unwrapped);
         let on_sphere =
             |height: f64| view.screen_coordinate_to_lat_lng_at(&pixel, height, WrapMode::Unwrapped).unwrap();
         let (top, sea) = (on_sphere(600.0), on_sphere(0.0));
@@ -388,7 +389,7 @@ fn polar_view(pitch: f64, bearing: f64, center_altitude: f64) -> View {
         viewport: crate::camera::Viewport::default(),
         projection: ProjectionDefinition::new(mln_style::types::ProjectionType::VerticalPerspective),
     }
-    .to_state()
+    .to_state(&WorldMapping::Mercator)
     .unwrap();
     state.set_terrain_min_elevation(Some(0.0));
     assert!(state.view().is_globe());
@@ -416,7 +417,7 @@ fn a_globe_ray_meets_a_polar_cap_at_sea_level() {
         let sea = view.screen_coordinate_to_lat_lng_at(&pixel, 0.0, WrapMode::Unwrapped).unwrap();
         if sea.latitude() > mln_style::constants::LATITUDE_MAX + 0.01 {
             assert_eq!(0.0, hit.height, "{pixel:?}");
-            let location = hit.location(WrapMode::Unwrapped);
+            let location = hit.location(view.world(), WrapMode::Unwrapped);
             let off = meters_apart(&location, &sea, 0.0);
             assert!(off < 0.01, "{pixel:?} meets the cap at {location:?}, {off} m from the sphere's point {sea:?}");
             assert_draws_at(&view, &hit, &pixel);
@@ -441,7 +442,8 @@ fn the_globe_s_eye_and_near_plane_over_a_polar_cap_keep_their_latitudes() {
 
     let view = polar_view(60.0, 180.0, 0.0);
     let location = |world: glam::DVec3| {
-        crate::camera::GroundHit { world: world.truncate(), height: world.z }.location(WrapMode::Unwrapped)
+        crate::camera::GroundHit { world: world.truncate(), height: world.z }
+            .location(&WorldMapping::Mercator, WrapMode::Unwrapped)
     };
     let on_sphere =
         |point: glam::DVec3| VerticalPerspectiveProjection::surface_vector_to_lat_lng(point.normalize()).unwrap();

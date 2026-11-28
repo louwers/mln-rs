@@ -78,7 +78,7 @@ impl Transform {
         // frame is bounded by the zoom it ends on.
         let lat_lng_end = self.state.constrained_center(
             &if self.state.limits().bounds == LatLngBounds::default() {
-                unwrapped_lat_lng.wrapped()
+                self.view().world().wrap(unwrapped_lat_lng)
             } else {
                 unwrapped_lat_lng
             },
@@ -108,7 +108,7 @@ impl Transform {
             return;
         }
 
-        if self.state.limits().bounds == LatLngBounds::default() {
+        if self.state.limits().bounds == LatLngBounds::default() && self.view().world().wraps() {
             if self.is_gesture_in_progress() {
                 // If gesture in progress, we transfer the wrap rounds from the
                 // end longitude into start, so the "scroll effect" of rounding
@@ -124,8 +124,9 @@ impl Transform {
         let start_center_alt = self.state.view().center_altitude();
 
         let start_scale = self.state.view().scale();
-        let start_point = Projection::project(&start_lat_lng, start_scale);
-        let end_point = Projection::project(&lat_lng_end, start_scale);
+        let world = self.state.view().world().clone();
+        let start_point = world.project(&start_lat_lng, start_scale);
+        let end_point = world.project(&lat_lng_end, start_scale);
 
         // Constrain camera options.
         // The target is drawn in the projection the style gives at its zoom,
@@ -222,7 +223,8 @@ impl Transform {
                 (Some(lat_lng_end), zoom)
             } else {
                 let frame_point = interpolate(&start_point, &end_point, t);
-                (frame_unproject(&frame_point, start_scale, WrapMode::Unwrapped), interpolate(&start_zoom, &zoom, t))
+                let frame_lat_lng = frame_unproject(&world, &frame_point, start_scale, WrapMode::Unwrapped);
+                (frame_lat_lng, interpolate(&start_zoom, &zoom, t))
             };
             CameraOptions {
                 center: frame_lat_lng,
@@ -298,7 +300,7 @@ impl Transform {
         // As in easeTo, the globe's flight heads for the center the zoom it
         // was given, or else starts from, allows.
         let lat_lng_end = self.state.constrained_center(
-            &camera.center.unwrap_or(self.view().center(WrapMode::Unwrapped)).wrapped(),
+            &self.view().world().wrap(camera.center.unwrap_or(self.view().center(WrapMode::Unwrapped))),
             if camera.zoom.is_some() { zoom } else { self.view().zoom() },
         );
         let center_alt = camera.center_altitude.unwrap_or(self.state.view().center_altitude());
@@ -330,13 +332,18 @@ impl Transform {
             return;
         }
 
-        // Determine endpoints.
-        let mut start_lat_lng = self.view().center(WrapMode::Unwrapped).wrapped();
-        start_lat_lng.unwrap_for_shortest_path(&lat_lng_end);
+        // Determine endpoints: in a world that doesn't wrap, the flight never
+        // goes around it the other way.
+        let world = self.state.view().world().clone();
+        let mut start_lat_lng = self.view().center(WrapMode::Unwrapped);
+        if world.wraps() {
+            start_lat_lng = start_lat_lng.wrapped();
+            start_lat_lng.unwrap_for_shortest_path(&lat_lng_end);
+        }
         let start_center_alt = self.state.view().center_altitude();
 
-        let start_point = Projection::project(&start_lat_lng, self.state.view().scale());
-        let end_point = Projection::project(&lat_lng_end, self.state.view().scale());
+        let start_point = world.project(&start_lat_lng, self.state.view().scale());
+        let end_point = world.project(&lat_lng_end, self.state.view().scale());
 
         // Constrain camera options.
         // The target is drawn in the projection the style gives at its zoom,
@@ -570,7 +577,7 @@ impl Transform {
                 }
 
                 // Convert to geographic coordinates and set the new viewpoint.
-                (frame_unproject(&frame_point, start_scale, WrapMode::Unwrapped), frame_zoom)
+                (frame_unproject(&world, &frame_point, start_scale, WrapMode::Unwrapped), frame_zoom)
             };
             CameraOptions {
                 center: frame_lat_lng,

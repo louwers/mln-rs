@@ -139,7 +139,11 @@ mod tile_worker {
     use wasm_bindgen::prelude::*;
 
     /// Runs tile workers for the map side at the other end of `port`, with
-    /// the registrations that the library's runtimes have.
+    /// the registrations that the library's runtimes have, but for their
+    /// host's projections: a host's converters run only in the instance that
+    /// registered them, and nothing that a tile worker gets is in a
+    /// registered projection, since the map side cuts GeoJSON and custom
+    /// geometry tiles in it before they cross.
     #[expect(unreachable_pub, reason = "wasm-bindgen exports only `pub` functions")]
     #[wasm_bindgen(js_name = mlnWebServeTileWorker)]
     pub fn serve(port: &web_sys::MessagePort) {

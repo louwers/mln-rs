@@ -1,5 +1,8 @@
-//! `runtime.h`: runtimes, their event handlers, and what applies to every
-//! runtime in the process, such as the network status.
+//! `runtime.h`: runtimes, their event handlers and registered projections,
+//! and what applies to every runtime in the process, such as the network
+//! status.
+
+mod projections;
 
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
@@ -68,31 +71,38 @@ pub(crate) unsafe extern "C" fn mln_runtime_create(
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
     export!(out_diagnostic, {
-        let options = if options.is_null() {
-            RuntimeOptions { network_status: Some(Arc::clone(&NETWORK_STATUS)), ..RuntimeOptions::default() }
+        let (options, (registered, converters)) = if options.is_null() {
+            let options =
+                RuntimeOptions { network_status: Some(Arc::clone(&NETWORK_STATUS)), ..RuntimeOptions::default() };
+            (options, (Vec::new(), projections::Converters::default()))
         } else {
             // SAFETY: the caller's contract.
             let options = unsafe { abi::read_sized(options) }?;
-            // SAFETY: the views of the caller's options.
+            // SAFETY: the views and the projections of the caller's options.
             unsafe {
-                RuntimeOptions {
+                let runtime_options = RuntimeOptions {
                     asset_path: path(options.asset_path, "mln_runtime_options.asset_path")?,
                     cache_path: path(options.cache_path, "mln_runtime_options.cache_path")?,
                     network_status: Some(Arc::clone(&NETWORK_STATUS)),
                     #[cfg(target_family = "wasm")]
                     fetch_preloads: None,
-                }
+                };
+                (runtime_options, projections::copy(options.projections, options.projection_count)?)
             }
         };
         // SAFETY: the caller's contract.
         let out_runtime = unsafe { handles::out_handle(out_runtime, "out_runtime") }?;
+        let registry = crate::registry::with_projections(registered)?;
         #[cfg(target_family = "wasm")]
         crate::web::set_defaults();
         // Before the runtime's threads can call the host.
         crate::process_exit::watch();
-        let runtime = Runtime::with_registry(&options, crate::registry::registry())?;
+        let runtime = Runtime::with_registry(&options, registry)?;
         *out_runtime =
             RUNTIMES.insert(Arc::new(RuntimeObject { runtime, maps: Arc::new(Mutex::new(HashMap::default())) }))?;
+        // Only now: until the runtime is in the table, a failure drops the
+        // converters unaccepted, and the caller keeps their user data.
+        converters.accept();
         Ok(())
     })
 }

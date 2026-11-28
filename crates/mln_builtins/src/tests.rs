@@ -8,6 +8,7 @@ use std::sync::Arc;
 use mln_engine::RegistryBuilder;
 use mln_engine::source::{Described, Fetch, Load, SourceType};
 use mln_style::conversion::{Convertible, Error};
+use mln_style::crs::Crs;
 use mln_style::expression::functions::RegisterError;
 use mln_style::source::{SourceData, convert_source};
 use mln_style::sources::geojson::{GeoJSONOptions, GeoJsonSourceType, geojson_source};
@@ -65,6 +66,18 @@ fn builtins_register_once() {
     let mut builder = RegistryBuilder::new();
     register_builtins(&mut builder).unwrap();
     assert!(matches!(register_builtins(&mut builder), Err(RegisterError::Duplicate(_))));
+}
+
+// GL JS: getRegisteredProjection finds the pre-registered identity
+// projection.
+#[test]
+fn builtins_register_the_identity_projection() {
+    let mut builder = RegistryBuilder::new();
+    register_builtins(&mut builder).unwrap();
+    for registry in [builder.build(), registry()] {
+        let identity = registry.style().projection("identity").expect("identity").crs();
+        assert_eq!(identity.tile_matrix_set, Crs::identity().tile_matrix_set);
+    }
 }
 
 #[test]

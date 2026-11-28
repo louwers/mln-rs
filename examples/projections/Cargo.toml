@@ -1,0 +1,23 @@
+[package]
+name = "mln-rs-example-projections"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+include.workspace = true
+# The projections that the example apps register with their runtimes: EPSG:3413
+# for the catalog's Arctic style. The library has none of its own; never
+# released.
+publish = false
+
+[dependencies]
+mln_style.workspace = true
+
+[dev-dependencies]
+# The catalog that names the projections (examples/styles.json).
+serde_json.workspace = true
+
+[lints]
+workspace = true

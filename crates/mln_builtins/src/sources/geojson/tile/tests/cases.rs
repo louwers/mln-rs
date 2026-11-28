@@ -1,12 +1,13 @@
 //! Simplification, clipping and cutting, without fixtures.
 
-use geo_types::{Coord, Geometry, LineString};
-use mln_style::feature::Value;
+use geo_types::{Coord, Geometry, LineString, MultiPoint, Point};
+use mln_style::feature::{Feature, Value};
 
+use crate::sources::geojson::Coordinates;
 use crate::sources::geojson::tile::clip::{clip_line, clip_ring};
 use crate::sources::geojson::tile::geometry::{Line, Ring, Vertex, X};
 use crate::sources::geojson::tile::simplify::simplify;
-use crate::sources::geojson::tile::{Error, Options, TileIndex};
+use crate::sources::geojson::tile::{Error, Options, TileIndex, TileOptions, cut_tile};
 
 fn p(x: f64, y: f64) -> Vertex {
     Vertex::new(x, y, 0.0)
@@ -304,4 +305,88 @@ fn a_tile_past_the_max_zoom_or_the_last_row_is_an_error() {
     // and share the tile.
     let tile = index.tile(1, 1, 1).unwrap();
     assert!(std::sync::Arc::ptr_eq(&index.tile(1, 3, 1).unwrap(), &tile));
+}
+
+/// The options of an index of features in the unit square.
+fn unit_square() -> Options {
+    Options {
+        tile: TileOptions { coordinates: Coordinates::UnitSquare, ..TileOptions::default() },
+        ..Options::default()
+    }
+}
+
+/// An index of one feature, of `geometry`.
+fn index_of(geometry: impl Into<Geometry>, options: Options) -> TileIndex {
+    TileIndex::new(&[Feature::new(geometry)], options)
+}
+
+#[test]
+fn unit_square_without_wrap_cuts_at_the_buffer_around_the_world() {
+    let from_three_worlds_north_to_east = LineString::from(vec![(0.25, -3.0), (0.75, 0.5), (1.25, 0.5)]);
+    let index = index_of(from_three_worlds_north_to_east, Options { wrap: false, ..unit_square() });
+
+    let tile = index.tile(0, 0, 0).unwrap();
+    let [feature] = &tile[..] else { panic!("{tile:?}") };
+    let expected = LineString::from(vec![(2770i16, -64), (3072, 2048), (4160, 2048)]);
+    assert_eq!(feature.geometry, Some(Geometry::LineString(expected)));
+}
+
+#[test]
+fn unit_square_wraps_around_the_antimeridian_by_default() {
+    let index = index_of(Point::new(0.999, 0.25), unit_square());
+
+    let tile = index.tile(1, 0, 0).unwrap();
+    let [feature] = &tile[..] else { panic!("{tile:?}") };
+    assert_eq!(feature.geometry, Some(Geometry::Point(Point::new(-8, 2048))));
+}
+
+#[test]
+fn unit_square_that_wraps_is_cut_above_and_below() {
+    let from_three_above_to_three_below = LineString::from(vec![(0.25, -3.0), (0.75, 3.0)]);
+    let index = index_of(from_three_above_to_three_below, unit_square());
+
+    let tile = index.tile(0, 0, 0).unwrap();
+    let [feature] = &tile[..] else { panic!("{tile:?}") };
+    let expected = LineString::from(vec![(2043i16, -64), (2395, 4160)]);
+    assert_eq!(feature.geometry, Some(Geometry::LineString(expected)));
+}
+
+#[test]
+fn lng_lat_without_wrap_copies_nothing_across_the_antimeridian() {
+    let index = index_of(Point::new(179.9, -10.0), Options { wrap: false, ..Options::default() });
+
+    assert!(index.tile(1, 0, 1).unwrap().is_empty());
+    assert_eq!(index.tile(1, 1, 1).unwrap().len(), 1);
+}
+
+#[test]
+fn unit_square_without_wrap_has_no_tile_beside_the_world() {
+    let in_the_two_top_tiles = MultiPoint::from(vec![(0.25, 0.25), (0.75, 0.25)]);
+    let index = index_of(in_the_two_top_tiles, Options { wrap: false, ..unit_square() });
+
+    assert_eq!(index.tile(1, 0, 0).unwrap().len(), 1);
+    assert!(index.tile(1, 2, 0).unwrap().is_empty());
+    assert!(index.tile(1, u32::MAX, 0).unwrap().is_empty());
+}
+
+#[test]
+fn unit_square_leaves_out_points_outside_the_world() {
+    let below_the_world = Point::new(0.5, 5.0);
+    let at_infinity = Point::new(0.5, f64::INFINITY);
+    let in_the_world = Point::new(0.5, 0.5);
+    let features = [below_the_world, at_infinity, in_the_world].map(Feature::new);
+    let index = TileIndex::new(&features, Options { wrap: false, ..unit_square() });
+
+    let tile = index.tile(0, 0, 0).unwrap();
+    let [feature] = &tile[..] else { panic!("{tile:?}") };
+    assert_eq!(feature.geometry, Some(Geometry::Point(Point::new(2048, 2048))));
+}
+
+#[test]
+fn cut_tile_unit_square() {
+    let options = TileOptions { coordinates: Coordinates::UnitSquare, ..TileOptions::default() };
+
+    let tile = cut_tile(&[Feature::new(Point::new(0.75, 0.25))], 1, 1, 0, &options, false, false);
+    let [feature] = &tile[..] else { panic!("{tile:?}") };
+    assert_eq!(feature.geometry, Some(Geometry::Point(Point::new(2048, 2048))));
 }

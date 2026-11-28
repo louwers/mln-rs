@@ -13,8 +13,9 @@
 //!
 //! A style parses against a [`StyleRegistry`]: the expression functions,
 //! layer types and source types its JSON, property values and filters may
-//! name, and the extension members (`member`) that give the style's and its
-//! layers' `<namespace>:<name>` members a type.
+//! name, the extension members (`member`) that give the style's and its
+//! layers' `<namespace>:<name>` members a type, and the projections (`crs`)
+//! its `projection.type` may name.
 //!
 //! Versions:
 //! - A [`Style`] is a value: a version of a map's style. Its parts sit
@@ -54,6 +55,7 @@ pub mod collections;
 pub mod color;
 pub mod constants;
 pub mod conversion;
+pub mod crs;
 pub mod error;
 pub mod expression;
 pub mod feature;

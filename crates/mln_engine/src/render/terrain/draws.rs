@@ -169,7 +169,7 @@ impl TerrainDraws {
             }
             let drawable = TerrainDrawableUBO { dem_coords };
             let projection = to_projection_ubo(&projection);
-            let latrange = lat_range(&tile.id.to_unwrapped());
+            let latrange = lat_range(&tile.id.to_unwrapped(), view.world());
             // The ground's depth is the surface's without the skirts, which
             // fill the cracks between tiles: a skirt that the camera sees
             // edge-on draws the depth of no ground, as a rasterizer makes it.

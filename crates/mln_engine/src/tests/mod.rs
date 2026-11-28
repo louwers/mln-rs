@@ -1,9 +1,11 @@
 // The parts of test/gl/bucket.test.cpp of the engine's stores and raster
 // masks.
 mod bucket_test;
+// Coordinate reference systems for the tests of registered projections.
+pub(crate) mod crs;
 // Cameras that move faster than the network answers.
 mod fast_camera_test;
-mod fixture_log;
+pub(crate) mod fixture_log;
 mod gtest_sky;
 mod gtest_tile_mesh;
 // gtests-data: the test/tile gtests that need the renderer's tiles or
@@ -26,6 +28,8 @@ mod tile_cover_test;
 // test/tile/geojson_tile.test.cpp and the GeoJSON parts of
 // test/style/source.test.cpp: need the camera's transform.
 mod geojson_tile_test;
+// test/util/geojson_reproject.test.cpp: GeoJSON in a registered projection.
+mod geojson_crs_test;
 mod source_test;
 // The terrain's drapes: their projection, their stencil, the tiles a drape
 // draws, what draws one again, and their byte cap.
@@ -55,18 +59,24 @@ pub(crate) mod types;
 pub(crate) mod fake_gpu;
 
 /// The registrations that the tests' maps, renderers and styles use: the
-/// specification's expression functions and the tests' layer types and
-/// source types.
+/// specification's expression functions, the tests' layer types and source
+/// types, and the built-in projections.
 pub(crate) fn registry() -> std::sync::Arc<crate::Registry> {
-    static REGISTRY: std::sync::LazyLock<std::sync::Arc<crate::Registry>> = std::sync::LazyLock::new(|| {
-        let mut builder = crate::RegistryBuilder::new();
-        mln_style::expression::functions::register_builtin_functions(builder.functions_mut())
-            .and_then(|()| types::layers::register_layer_types(&mut builder))
-            .and_then(|()| types::register_source_types(&mut builder))
-            .expect("the tests' types register into an empty builder");
-        builder.build()
-    });
+    static REGISTRY: std::sync::LazyLock<std::sync::Arc<crate::Registry>> =
+        std::sync::LazyLock::new(|| registry_builder().build());
     std::sync::Arc::clone(&REGISTRY)
+}
+
+/// A builder that holds [`registry`]'s registrations, for a test that adds
+/// its own.
+pub(crate) fn registry_builder() -> crate::RegistryBuilder {
+    let mut builder = crate::RegistryBuilder::new();
+    mln_style::expression::functions::register_builtin_functions(builder.functions_mut())
+        .and_then(|()| crate::register_builtin_projections(&mut builder))
+        .and_then(|()| types::layers::register_layer_types(&mut builder))
+        .and_then(|()| types::register_source_types(&mut builder))
+        .expect("the tests' types register into an empty builder");
+    builder
 }
 
 /// A pool for a test's background work.
@@ -198,7 +208,14 @@ pub(crate) fn map_settings(
     mode: crate::map::MapMode,
     file_source: Option<std::sync::Arc<dyn crate::storage::FileSource>>,
 ) -> crate::source::MapSettings {
-    crate::source::MapSettings { mode, pixel_ratio: 1.0, max_zoom: 22.0, file_source, fast_pfor_enabled: false }
+    crate::source::MapSettings {
+        mode,
+        pixel_ratio: 1.0,
+        tile_matrix_set: None,
+        max_zoom: 22.0,
+        file_source,
+        fast_pfor_enabled: false,
+    }
 }
 
 /// Port-only: one tile of a source of its own in a store, driven as the

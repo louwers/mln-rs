@@ -116,9 +116,15 @@ fn projection() {
         *style.get_projection().get_type().as_constant().unwrap()
     );
 
-    // A name that is not a projection keeps the default, with a warning.
+    style.load_json(r#"{"projection": {"type": "EPSG:3413"}}"#);
+    assert_eq!(Some("EPSG:3413"), style.get_projection().registered_name());
+    assert!(style.get_projection().get_type().is_undefined());
+
+    // A name that is neither built in nor a registered projection's keeps the
+    // default, with a warning.
     style.load_json(r#"{"projection": {"type": "orthographic"}}"#);
     assert!(style.get_projection().get_type().is_undefined());
+    assert_eq!(None, style.get_projection().registered_name());
 }
 
 fn make_image(id: &str) -> Arc<image::Impl> {

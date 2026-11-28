@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use mln_style::collections::VecMap;
-use mln_style::geo::WrapMode;
+use mln_style::geo::{LatLngBounds, WrapMode};
 use mln_style::hash::HashSet;
 use mln_style::layer::SourceKind;
 use mln_style::property::value::PropertyValue;
@@ -20,6 +20,7 @@ use crate::camera::VerticalPerspectiveProjection;
 use crate::draw::context::Context;
 use crate::draw::dynamic_texture_atlas::DynamicTextureAtlas;
 use crate::geo::projection::Projection;
+use crate::geo::world::{WorldBox, WorldMapping};
 use crate::layer::bucket_geometry::BucketGeometry;
 use crate::layer::layer_drawing::ChangedBuckets;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
@@ -164,6 +165,9 @@ pub(crate) struct SourceTiles {
     /// unloads, or the tile could not come back while its symbols show.
     max_content_elevation: f32,
     style: Option<Arc<SourceStyle>>,
+    /// The source's bounds in the world square of a registered projection,
+    /// with the mapping and the bounds it was found for.
+    bounds_world_box: Option<(WorldMapping, LatLngBounds, WorldBox)>,
     /// The last update's ideal cover, inside the source's bounds, for the
     /// benchmarks' measure of what a frame shows (`crate::bench`).
     #[cfg(feature = "bench")]
@@ -391,9 +395,29 @@ impl SourceTiles {
             last_subdivision_granularity: SubdivisionGranularitySetting::none(),
             max_content_elevation: 0.0,
             style: None,
+            bounds_world_box: None,
             #[cfg(feature = "bench")]
             ideal: Vec::new(),
         }
+    }
+
+    /// The tiles from `min_zoom` to `max_zoom` inside the source's `bounds`
+    /// in `world`: on Mercator by the bounds' corners, in a registered
+    /// projection by the rectangle the bounds make in its world square,
+    /// which the source keeps while the mapping and the bounds stay.
+    fn tile_range(&mut self, world: &WorldMapping, bounds: &LatLngBounds, min_zoom: u8, max_zoom: u8) -> TileRange {
+        if world.wraps() {
+            return TileRange::from_lat_lng_bounds_range(bounds, min_zoom, max_zoom);
+        }
+        let world_box = match &self.bounds_world_box {
+            Some((mapping, kept, world_box)) if mapping == world && kept == bounds => *world_box,
+            _ => {
+                let world_box = world.lng_lat_box_to_world_box(bounds);
+                self.bounds_world_box = Some((world.clone(), *bounds, world_box));
+                world_box
+            }
+        };
+        TileRange::from_world_box(&world_box, min_zoom, max_zoom)
     }
 
     pub(crate) fn tile(&self, id: &OverscaledTileID) -> Option<&Tile> {
@@ -639,7 +663,7 @@ impl SourceTiles {
             return;
         }
 
-        self.handle_wrap_jump(parameters.view.center(WrapMode::Unwrapped).longitude() as f32, ctx);
+        self.handle_wrap_jump(parameters.view.world_copy_longitude() as f32, ctx);
 
         let zoom = mln_style::math::clamp_f64(
             parameters.view.zoom() + parameters.tile_lod_zoom_shift,
@@ -759,7 +783,7 @@ impl SourceTiles {
             } else {
                 std::cmp::min(tile_zoom, i32::from(zoom_range.max))
             };
-            tile_range = Some(TileRange::from_lat_lng_bounds_range(bounds, zoom_range.min, max_zoom as u8));
+            tile_range = Some(self.tile_range(parameters.view.world(), bounds, zoom_range.min, max_zoom as u8));
         }
 
         #[cfg(feature = "bench")]
@@ -1387,15 +1411,18 @@ impl SourceTiles {
         Ok(result)
     }
 
+    /// The features of the source's tiles that `options` select, in
+    /// longitude/latitude as `world`, the map's mapping, gives them.
     pub(crate) fn query_source_features(
         &self,
         options: &crate::query::SourceQueryOptions,
         global_state: Option<&mln_style::expression::GlobalStateMap>,
+        world: &WorldMapping,
     ) -> Result<Vec<crate::tile::feature::Feature>, mln_style::error::Error> {
         let mut result = Vec::new();
         for tile in self.cover() {
             if let Some(contents) = tile.contents().and_then(Contents::geometry) {
-                contents.query_source_features(&tile.id, &mut result, options, global_state)?;
+                contents.query_source_features(&tile.id, &mut result, options, global_state, world)?;
             }
         }
         Ok(result)

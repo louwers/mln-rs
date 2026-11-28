@@ -59,6 +59,10 @@ fn issue_8542() {
 
     // Query before data is set
     let source = tiles.store.source(tiles.key).expect("the source");
-    let features = source.query_source_features(&SourceQueryOptions::new(Some(vec!["layer".to_owned()]), None), None);
+    let features = source.query_source_features(
+        &SourceQueryOptions::new(Some(vec!["layer".to_owned()]), None),
+        None,
+        &crate::geo::world::WorldMapping::Mercator,
+    );
     assert_eq!(features.unwrap(), Vec::new());
 }

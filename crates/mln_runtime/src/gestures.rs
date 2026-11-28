@@ -4,6 +4,7 @@
 
 use mln_engine::camera::{CameraDelta, CameraOptions, CameraUpdate};
 use mln_engine::geo::ScreenCoordinate;
+use mln_engine::geo::world::WorldMapping;
 use mln_engine::gestures::{GestureCamera, PendingEnd};
 use mln_engine::map::MapSnapshot;
 use mln_style::geo::{LatLng, LatLngBounds, WrapMode};
@@ -16,6 +17,12 @@ impl Map {
     /// that is gone.
     fn gesture_snapshot(&self) -> Option<MapSnapshot> {
         self.snapshot().ok()
+    }
+
+    /// The map's snapshot for the recognizer, with how the map's lng/lat
+    /// maps to its world square, which converts the snapshot's view.
+    fn gesture_snapshot_with_world(&self) -> Option<(MapSnapshot, WorldMapping)> {
+        self.snapshot_with_world().ok()
     }
 }
 
@@ -36,8 +43,8 @@ impl GestureCamera for Map {
     }
 
     fn zoom_range(&self) -> (f64, f64) {
-        let Some(snapshot) = self.gesture_snapshot() else { return (0.0, 0.0) };
-        let Ok(mut state) = snapshot.view.to_state() else {
+        let Some((snapshot, world)) = self.gesture_snapshot_with_world() else { return (0.0, 0.0) };
+        let Ok(mut state) = snapshot.view.to_state(&world) else {
             return (snapshot.bounds.min_zoom, snapshot.bounds.max_zoom);
         };
         let bounds = snapshot.bounds;
@@ -54,7 +61,7 @@ impl GestureCamera for Map {
     }
 
     /// On the ground the map draws, so that a box zoom over terrain centers
-    /// on the ground it boxed.
+    /// on the ground it boxed, and in the projection it draws in.
     fn lat_lng_for_pixel(&self, pixel: ScreenCoordinate) -> Option<LatLng> {
         self.projection(None).ok()?.lat_lng_for_pixel(&pixel, WrapMode::Unwrapped).ok()
     }

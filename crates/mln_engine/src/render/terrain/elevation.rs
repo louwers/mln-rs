@@ -10,6 +10,7 @@ use mln_style::hash::HashMap;
 use mln_style::tile_id::CanonicalTileID;
 
 use crate::camera::{Elevation, TileCoordinate};
+use crate::geo::world::WorldMapping;
 use crate::render::terrain::cover::{TerrainCover, dem_contents, place_in, world_copy};
 use crate::tile::dem::{self, DemCoords, DemUnpack};
 use crate::tile::{OverscaledTileID, UnwrappedTileID};
@@ -60,6 +61,8 @@ pub struct TerrainElevation {
     range: Option<(f64, f64)>,
     unpack: DemUnpack,
     exaggeration: f32,
+    /// How the map's lng/lat maps to the world square the tiles are in.
+    world: WorldMapping,
 }
 
 impl fmt::Debug for TerrainElevation {
@@ -97,7 +100,7 @@ impl TerrainElevation {
             .chain(cover.center.iter().map(|tile| (tile, false)))
             .map(|(tile, drawn)| DrawnTile { id: tile.id, dem: drawn_dem(dem, tile.dem), drawn })
             .collect();
-        TerrainElevation::of_drawn(tiles, unpack, exaggeration)
+        TerrainElevation::of_drawn(tiles, unpack, exaggeration, cover.world.clone())
     }
 
     /// The ground of a frame that drew `tile` alone, over `dem`, the DEM
@@ -119,12 +122,12 @@ impl TerrainElevation {
         let coords = DemCoords { scale: 1.0 / tiles, offset: [x / tiles, y / tiles] };
         let dem_tile = DrawnDem { id: dem_id, image, dim, coords, min, max };
         let tiles = vec![DrawnTile { id: tile, dem: Some(dem_tile), drawn: true }];
-        TerrainElevation::of_drawn(tiles, DemUnpack::of(dem.encoding), exaggeration)
+        TerrainElevation::of_drawn(tiles, DemUnpack::of(dem.encoding), exaggeration, WorldMapping::Mercator)
     }
 
     /// The ground of `tiles`, nearest the center first, decoded by `unpack`
-    /// and raised by `exaggeration`.
-    fn of_drawn(tiles: Vec<DrawnTile>, unpack: DemUnpack, exaggeration: f32) -> TerrainElevation {
+    /// and raised by `exaggeration`, in the world square of `world`.
+    fn of_drawn(tiles: Vec<DrawnTile>, unpack: DemUnpack, exaggeration: f32, world: WorldMapping) -> TerrainElevation {
         let mut index = HashMap::default();
         let mut copies = HashMap::default();
         let mut zooms = Vec::new();
@@ -142,7 +145,7 @@ impl TerrainElevation {
             range = Some(range.map_or((min, max), |(low, high)| (low.min(min), high.max(max))));
         }
         zooms.sort_unstable_by(|a, b| b.cmp(a));
-        TerrainElevation { tiles, zooms, index, copies, range, unpack, exaggeration }
+        TerrainElevation { tiles, zooms, index, copies, range, unpack, exaggeration, world }
     }
 
     /// Whether `other` is the same ground: the same tiles, drawn or kept
@@ -165,6 +168,7 @@ impl TerrainElevation {
         };
         self.unpack == other.unpack
             && self.exaggeration == other.exaggeration
+            && self.world == other.world
             && self.tiles.len() == other.tiles.len()
             && self.tiles.iter().zip(&other.tiles).all(|(a, b)| same_tile(a, b))
     }
@@ -196,9 +200,19 @@ impl TerrainElevation {
     }
 
     /// The tile at `location`, and where in it: a drawn one, else the tile
-    /// the cover keeps under the center.
+    /// the cover keeps under the center. A registered projection's world has
+    /// no copies, and no ground outside its square.
     fn tile_at_location(&self, location: LatLng) -> Option<(&DrawnTile, [f32; 2])> {
-        let world = TileCoordinate::from_lat_lng(0.0, &location).p;
+        let world = match &self.world {
+            WorldMapping::Mercator => TileCoordinate::from_lat_lng(0.0, &location).p,
+            world @ WorldMapping::Crs(_) => {
+                let world = world.world_from_lat_lng(&location);
+                if !(0.0..1.0).contains(&world.x) || !(0.0..=1.0).contains(&world.y) {
+                    return None;
+                }
+                world
+            }
+        };
         let world = DVec2::new(world.x, world.y.clamp(0.0, 1.0));
         self.drawn_tile_at(world, false).or_else(|| {
             let center = self.tiles.last().filter(|tile| !tile.drawn)?;
@@ -345,6 +359,7 @@ mod tests {
             center: None,
             dem_tiles: Vec::new(),
             ranges: ElevationRanges::default(),
+            world: WorldMapping::Mercator,
         };
         let ground = TerrainElevation::new(&cover, None, DemUnpack::of(RasterEncoding::Terrarium), 1.0);
         for copy in [i16::MAX, i16::MIN] {

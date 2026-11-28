@@ -1,10 +1,12 @@
 //! The registrations that a style parses against: its expression functions,
-//! its layer types, its source types and its extension members.
+//! its layer types, its source types and its extension members, and the
+//! projections that its `projection.type` can name.
 
 use std::sync::Arc;
 
 use crate::collections::VecMap;
 use crate::conversion::{Convertible, Error};
+use crate::crs::{Crs, CrsMapping};
 use crate::expression::Functions;
 use crate::feature::Value;
 use crate::layer::{ErasedStyleLayerType, Layer, SourceKind};
@@ -14,13 +16,15 @@ use crate::source::ErasedStyleSourceType;
 
 /// The expression functions, layer types, source types and extension
 /// members that a style's JSON, its layers' property values and its filters
-/// parse against.
+/// parse against, and the registered projections that its `projection.type`
+/// can name.
 pub struct StyleRegistry {
     functions: Arc<Functions>,
     layer_types: VecMap<&'static str, &'static dyn ErasedStyleLayerType>,
     source_types: VecMap<&'static str, &'static dyn ErasedStyleSourceType>,
     root_members: VecMap<&'static str, &'static dyn ErasedMember>,
     layer_members: VecMap<&'static str, &'static dyn ErasedMember>,
+    projections: VecMap<String, Arc<CrsMapping>>,
 }
 
 /// A member's JSON value, and its parsed value where the registry has the
@@ -28,15 +32,18 @@ pub struct StyleRegistry {
 pub(crate) type MemberValue = (Value, Option<Arc<dyn std::any::Any + Send + Sync>>);
 
 impl StyleRegistry {
-    /// The registry of `functions`, `layer_types`, `source_types` and
-    /// `members`. A type is known by its name, and a member by its place and
-    /// name: of two of one name, the first counts.
+    /// The registry of `functions`, `layer_types`, `source_types`, `members`
+    /// and `projections`, each projection with the one mapping that every
+    /// map drawn in it shares. A type or a projection is known by its name,
+    /// and a member by its place and name: of two of one name, the first
+    /// counts.
     #[must_use]
     pub fn new(
         functions: Arc<Functions>,
         layer_types: impl IntoIterator<Item = &'static dyn ErasedStyleLayerType>,
         source_types: impl IntoIterator<Item = &'static dyn ErasedStyleSourceType>,
         members: impl IntoIterator<Item = &'static dyn ErasedMember>,
+        projections: impl IntoIterator<Item = Arc<Crs>>,
     ) -> Self {
         let mut layers_by_name = VecMap::new();
         for layer_type in layer_types {
@@ -54,18 +61,23 @@ impl StyleRegistry {
             };
             by_name.entry(member.name()).or_insert(member);
         }
+        let mut projections_by_name = VecMap::new();
+        for crs in projections {
+            projections_by_name.entry(crs.name.clone()).or_insert_with(|| Arc::new(CrsMapping::new(crs)));
+        }
         StyleRegistry {
             functions,
             layer_types: layers_by_name,
             source_types: sources_by_name,
             root_members,
             layer_members,
+            projections: projections_by_name,
         }
     }
 
-    /// The built-in expression functions and the style halves of the
-    /// built-in layer and source types, for this crate's tests, which can't
-    /// reach `mln_builtins::registry`.
+    /// The built-in expression functions, the style halves of the built-in
+    /// layer and source types, and the `identity` projection, for this
+    /// crate's tests, which can't reach `mln_builtins::registry`.
     #[cfg(test)]
     pub(crate) fn with_builtins() -> Arc<Self> {
         use crate::layer::style_entry;
@@ -95,7 +107,8 @@ impl StyleRegistry {
             style_source_entry::<GeoJsonSourceType>(),
             style_source_entry::<ImageSourceType>(),
         ];
-        Arc::new(StyleRegistry::new(Functions::with_builtins(), layer_types, source_types, []))
+        let projections = [Arc::new(Crs::identity())];
+        Arc::new(StyleRegistry::new(Functions::with_builtins(), layer_types, source_types, [], projections))
     }
 
     #[must_use]
@@ -121,6 +134,13 @@ impl StyleRegistry {
     /// The source types, in name order.
     pub fn source_types(&self) -> impl Iterator<Item = &'static dyn ErasedStyleSourceType> + '_ {
         self.source_types.values().copied()
+    }
+
+    /// The mapping of the registered projection `name`, which a style's
+    /// `projection.type` can name.
+    #[must_use]
+    pub fn projection(&self, name: &str) -> Option<&Arc<CrsMapping>> {
+        self.projections.get(name)
     }
 
     /// The extension member `name` at `place`, if the registry has it.
@@ -202,6 +222,7 @@ impl std::fmt::Debug for StyleRegistry {
             .field("source_types", &self.source_types.keys().collect::<Vec<_>>())
             .field("root_members", &self.root_members.keys().collect::<Vec<_>>())
             .field("layer_members", &self.layer_members.keys().collect::<Vec<_>>())
+            .field("projections", &self.projections.keys().collect::<Vec<_>>())
             .finish_non_exhaustive()
     }
 }

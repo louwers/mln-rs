@@ -3,14 +3,16 @@
 // tile's mask, shades that texture. The tile's value keeps the target, with
 // the id of the tile's contents and the generation of the DEM's border it
 // was made at, which the tile's next value takes while they are the same.
-// The slopes depend on nothing but the DEM and its tile's zoom, so the layer
-// draws into each target until it holds them (`Target::holds`): once, unless
-// the frame that drew them failed.
+// The slopes depend on nothing but the DEM, its tile's zoom and the width of
+// the world the map draws in, so the layer draws into each target until it
+// holds them (`Target::holds`): once, unless the frame that drew them failed,
+// and again in a new target when the world's width changes.
 
 use std::mem::offset_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use geometry::Point;
 use glam::dcamera::rh::proj::opengl::orthographic;
 use glam::{DMat4, DVec3};
 use mln_engine::draw::globe::GlobeTileMeshCache;
@@ -19,6 +21,7 @@ use mln_engine::draw::{
     Resources, SegmentBase, SharedAttribute, SharedIndexes, SharedTexture, SharedVertices, SimpleIdentity, StoredQuads,
     Target, Textures, Uniforms, VertexAttributeArray, cast_matrix, projection_data, to_projection_ubo,
 };
+use mln_engine::geo::world::WorldMapping;
 use mln_engine::layer::{
     DemContents, EvaluateCx, EvaluatedLayer, Evaluation, FrameTile, Layer, LayerValues, OnTerrain, PrepareCx,
     SurfaceLight, TileCx, TileData, UpdateCx, copied_vertices,
@@ -46,6 +49,11 @@ use crate::layers::hillshade::ubo::{HillshadeDrawableUBO, HillshadePrepareDrawab
 /// The slots of the programs' textures that the draws bind.
 const IMAGE_SLOT: usize = programs::HILLSHADE.texture_slot("image");
 
+/// The log2 of Mercator's width at zoom 0 in meters, 40,075,016.69 m. With
+/// the 3 that the prepare shader adds, it makes the 28.2562 that the shader
+/// used before it took the width from its block.
+const MERCATOR_LOG2_WORLD_WIDTH: f32 = 25.2562;
+
 /// What the layer keeps of a tile: the draw that shades its DEM's slopes,
 /// and the target they are prepared in.
 pub(crate) struct HillshadeTile {
@@ -67,10 +75,15 @@ struct DemTarget {
     blocks: (HillshadePrepareDrawableUBO, HillshadePrepareTilePropsUBO),
     /// The generation of the DEM's border the target was made at.
     generation: u64,
+    /// The [`log2_world_width`] its slopes are prepared for.
+    log2_world_width: f32,
 }
 
 pub(crate) struct RenderHillshadeLayer {
     maxzoom: u8,
+    /// The [`log2_world_width`] of the world the map draws in, which the
+    /// DEMs' slopes are prepared for.
+    log2_world_width: f32,
 
     static_data_shared_vertices: Option<SharedVertices>,
     /// The triangles of the static data's quad.
@@ -167,6 +180,17 @@ fn method_to_int(method: HillshadeMethodType) -> i32 {
     method as i32
 }
 
+/// The log2 of the width in meters of `world` at zoom 0, from which the
+/// prepare shader gets the meters a DEM pixel spans: Mercator's
+/// [`MERCATOR_LOG2_WORLD_WIDTH`], and a registered projection's the zoom 0
+/// extent of its tile matrix set, its units taken as meters.
+fn log2_world_width(world: &WorldMapping) -> f32 {
+    match world {
+        WorldMapping::Mercator => MERCATOR_LOG2_WORLD_WIDTH,
+        WorldMapping::Crs(_) => world.meters_per_world_unit(&Point::new(0.5, 0.5)).log2() as f32,
+    }
+}
+
 /// The vertex attributes of a hillshade (or prepare) draw over
 /// `vertices`.
 fn hillshade_vertex_attributes(vertices: &SharedVertices) -> VertexAttributeArray {
@@ -207,8 +231,9 @@ fn static_quad<'a>(
 }
 
 /// The target of the slopes of `dem`, the DEM of the tile `tile_id`, of a
-/// source of `maxzoom`: `previous`, if that was made of the same DEM at its
-/// border's generation, or a new one, drawn over `quad`, the static data's
+/// source of `maxzoom`, in a world `2^log2_world_width` meters wide:
+/// `previous`, if that was made of the same DEM at its border's generation
+/// for that width, or a new one, drawn over `quad`, the static data's
 /// ([`static_quad`]).
 fn dem_target(
     previous: Option<DemTarget>,
@@ -216,15 +241,21 @@ fn dem_target(
     dem: &DemContents,
     tile_id: &UnwrappedTileID,
     maxzoom: u8,
-    (vertices, indexes): (&SharedVertices, &SharedIndexes),
+    log2_world_width: f32,
+    quad: (&SharedVertices, &SharedIndexes),
 ) -> DemTarget {
     match previous {
-        Some(previous) if previous.id == dem.id() && previous.generation == dem.generation() => previous,
+        Some(previous)
+            if previous.id == dem.id()
+                && previous.generation == dem.generation()
+                && previous.log2_world_width == log2_world_width =>
+        {
+            previous
+        }
         _ => {
             let shader =
                 res.context.shader_key(&programs::HILLSHADE_PREPARE, Uniforms::default(), ProjectionVariant::Mercator);
-            let attrs = hillshade_vertex_attributes(vertices);
-            DemTarget::new(res, dem, tile_id, maxzoom, &shader, attrs, indexes)
+            DemTarget::new(res, dem, tile_id, maxzoom, log2_world_width, &shader, quad)
         }
     }
 }
@@ -247,6 +278,7 @@ impl Layer for RenderHillshadeLayer {
     fn new(_values: &LayerValues<Hillshade>) -> Self {
         RenderHillshadeLayer {
             maxzoom: TERRAIN_RGB_MAXZOOM,
+            log2_world_width: MERCATOR_LOG2_WORLD_WIDTH,
             static_data_shared_vertices: None,
             static_data_indices: None,
             globe_meshes: GlobeTileMeshCache::new(),
@@ -297,14 +329,22 @@ impl Layer for RenderHillshadeLayer {
         if !dem.has_data() {
             return None;
         }
-        let RenderHillshadeLayer { maxzoom, static_data_shared_vertices, static_data_indices, globe_meshes, .. } = self;
+        let RenderHillshadeLayer {
+            maxzoom,
+            log2_world_width,
+            static_data_shared_vertices,
+            static_data_indices,
+            globe_meshes,
+            ..
+        } = self;
         let context = &mut *cx.res.context;
         let hillshade_shader =
             context.shader_key(&programs::HILLSHADE, Uniforms::default(), cx.base.projection_variant);
         let quad = static_quad(static_data_shared_vertices, static_data_indices, context);
         let tile_id = tile.draw_id();
         let previous = previous.map(|previous| previous.dem);
-        let target = dem_target(previous, &mut cx.res, dem, &tile_id.to_unwrapped(), *maxzoom, quad);
+        let unwrapped = tile_id.to_unwrapped();
+        let target = dem_target(previous, &mut cx.res, dem, &unwrapped, *maxzoom, *log2_world_width, quad);
         let target_texture = target.target.texture();
         let context = &mut *cx.res.context;
 
@@ -407,27 +447,36 @@ impl Layer for RenderHillshadeLayer {
         }
     }
 
-    /// Keeps the source's maximum zoom, which the DEMs' preparation reads.
+    /// Keeps a tile's value whose slopes are prepared for the width of the
+    /// world the map draws in.
+    fn keeps(&self, _values: &LayerValues<Hillshade>, tile: &HillshadeTile) -> bool {
+        tile.dem.log2_world_width == self.log2_world_width
+    }
+
+    /// Keeps the source's maximum zoom, which the DEMs' preparation reads,
+    /// and the width of the world the map draws in, which their slopes are
+    /// prepared for.
     fn update(&mut self, cx: UpdateCx<'_, '_, Self>, _tiles: &[FrameTile<'_, RenderHillshadeLayer>]) {
         if let Some(max_zoom) = cx.source_max_zoom() {
             self.maxzoom = max_zoom;
         }
+        self.log2_world_width = log2_world_width(cx.parameters.view.world());
     }
 }
 
 impl DemTarget {
     /// The target of the slopes of `dem`, which the draw of `shader`
-    /// prepares from it, drawn over `attrs` with the `quad` of the
-    /// static data, with the uniforms of `tile_id`, the tile it is made for,
-    /// of a source of `maxzoom`.
+    /// prepares from it, drawn over `quad`, the static data's, with the
+    /// uniforms of `tile_id`, the tile it is made for, of a source of
+    /// `maxzoom`, in a world `2^log2_world_width` meters wide.
     fn new(
         res: &mut Resources<'_>,
         dem: &DemContents,
         tile_id: &UnwrappedTileID,
         maxzoom: u8,
+        log2_world_width: f32,
         shader: &ShaderKey,
-        attrs: VertexAttributeArray,
-        indexes: &SharedIndexes,
+        (vertices, indexes): (&SharedVertices, &SharedIndexes),
     ) -> DemTarget {
         let (dem_contents_id, generation) = (dem.id(), dem.generation());
         let (tilesize, stride, encoding, dem_image) = {
@@ -449,7 +498,7 @@ impl DemTarget {
             });
         });
         let geometry = DrawGeometry {
-            vertices: attrs,
+            vertices: hillshade_vertex_attributes(vertices),
             vertex_count: 4,
             mode: DrawMode::Triangles(),
             indexes: indexes.clone().into(),
@@ -470,9 +519,11 @@ impl DemTarget {
             zoom: f32::from(tile_id.canonical.z),
             maxzoom: f32::from(maxzoom),
             unpack_scale: unpack.scale,
+            log2_world_width,
             ..HillshadePrepareTilePropsUBO::default()
         };
-        DemTarget { id: dem_contents_id, target, _dem: dem, prepare, blocks: (draw_ubo, tile_props), generation }
+        let blocks = (draw_ubo, tile_props);
+        DemTarget { id: dem_contents_id, target, _dem: dem, prepare, blocks, generation, log2_world_width }
     }
 }
 
@@ -497,7 +548,7 @@ impl RenderHillshadeLayer {
         );
         let drawable = HillshadeDrawableUBO { matrix: cast_matrix(&projection.fallback_matrix) };
         let tile_props = HillshadeTilePropsUBO {
-            latrange: mln_engine::geo::lat_range(tile_id),
+            latrange: mln_engine::geo::lat_range(tile_id, frame.view.world()),
             exaggeration: *evaluated.hillshade_exaggeration.uniform(),
             method: method_to_int(*evaluated.hillshade_method.uniform()),
             num_lights: num_lights as i32,
@@ -536,5 +587,27 @@ impl RenderHillshadeLayer {
             }
         }
         illumination
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use mln_style::crs::{Crs, CrsMapping};
+
+    use super::*;
+
+    // gtest: HillshadeTweaker.WorldWidthOfTheProjection
+    // GL JS: hillshadeUniformPrepareValues keeps the world width the shader
+    // always used on a mercator map, and takes the world width from the zoom
+    // 0 extent of a registered CRS.
+    #[test]
+    fn the_slopes_are_prepared_for_the_width_of_the_maps_world() {
+        assert_eq!(25.2562, log2_world_width(&WorldMapping::Mercator));
+        // The identity's world is 180 units wide, its units taken as meters.
+        let identity = WorldMapping::Crs(Arc::new(CrsMapping::new(Arc::new(Crs::identity()))));
+        let identity_width = log2_world_width(&identity);
+        assert!((identity_width - 7.491_853).abs() < 1e-6, "{identity_width}");
     }
 }

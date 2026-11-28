@@ -20,6 +20,7 @@ use crate::draw::dynamic_texture_atlas::{AtlasLease, BinUse, DynamicTextureAtlas
 use crate::draw::identity::SimpleIdentity;
 use crate::draw::tile_render_data::TileAtlasTextures;
 use crate::exec::pool::TaskGroup;
+use crate::geo::world::WorldMapping;
 use crate::image::image_store::ImageType;
 use crate::layer::bucket::{ErasedBucket, LayerFeatureStates};
 use crate::layer::bucket_geometry::BucketGeometry;
@@ -468,8 +469,14 @@ impl GeometryContents {
             &id.to_unwrapped(),
             view.projection_data_with(&id.to_unwrapped(), proj_matrix),
         );
-        let selection =
-            FeatureSelection { layers, options, global_state, tile_id: id, feature_state: Some(feature_state) };
+        let selection = FeatureSelection {
+            layers,
+            options,
+            global_state,
+            tile_id: id,
+            feature_state: Some(feature_state),
+            world: view.world(),
+        };
         let tile_size = mln_style::constants::TILE_SIZE_D * f64::from(id.overscale_factor());
         let scale = 2f64.powf(view.zoom() - f64::from(id.overscaled_z));
         let region = QueryRegion {
@@ -487,13 +494,15 @@ impl GeometryContents {
 
     /// Adds the features of tile `id` that `options` select to `result`:
     /// those of the source layers it names, or for data of one layer, such
-    /// as GeoJSON's, those of that layer whatever it names.
+    /// as GeoJSON's, those of that layer whatever it names, in
+    /// longitude/latitude as `world`, the map's mapping, gives them.
     pub(crate) fn query_source_features(
         &self,
         id: &OverscaledTileID,
         result: &mut Vec<Feature>,
         options: &SourceQueryOptions,
         global_state: Option<&GlobalStateMap>,
+        world: &WorldMapping,
     ) -> Result<(), Error> {
         let Some(data) = self.result.feature_index.data() else {
             return Ok(());
@@ -501,7 +510,7 @@ impl GeometryContents {
         if matches!(data, TileData::Features(_)) {
             // Ignore the source layer: there is only one.
             if let Some(layer) = data.layer("")? {
-                query_layer_source_features(&layer, result, options, global_state, id)?;
+                query_layer_source_features(&layer, result, options, global_state, id, world)?;
             }
             return Ok(());
         }
@@ -514,7 +523,7 @@ impl GeometryContents {
             // Gather the features of every source layer.
             if let Some(layer) = data.layer(source_layer)? {
                 let start = result.len();
-                query_layer_source_features(&layer, result, options, global_state, id)?;
+                query_layer_source_features(&layer, result, options, global_state, id, world)?;
                 for feature in &mut result[start..] {
                     feature.source_layer.clone_from(source_layer);
                 }
@@ -650,13 +659,15 @@ pub(crate) fn release(contents: Contents, pool: &TaskGroup) {
     }
 }
 
-/// The feature loop of a tile's source query.
+/// The feature loop of a tile's source query, of tile `id` of a map whose
+/// mapping is `world`.
 pub(crate) fn query_layer_source_features(
     layer: &crate::tile::TileLayer<'_>,
     result: &mut Vec<Feature>,
     options: &SourceQueryOptions,
     global_state: Option<&GlobalStateMap>,
     id: &OverscaledTileID,
+    world: &WorldMapping,
 ) -> Result<(), Error> {
     for i in 0..layer.len() {
         let feature = layer.feature(i)?;
@@ -671,7 +682,7 @@ pub(crate) fn query_layer_source_features(
             }
         }
 
-        let converted = crate::tile::convert_feature(&feature, &feature.geometry()?, &id.canonical)?;
+        let converted = crate::tile::convert_feature(&feature, &feature.geometry()?, &id.canonical, world)?;
         result.push(Feature::from(converted));
     }
     Ok(())

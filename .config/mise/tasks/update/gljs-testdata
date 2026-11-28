@@ -8,8 +8,10 @@
 # test/integration/render/tests, and the tiles, images and GeoJSON files they
 # load from test/integration/assets, to
 # tools/render-test/testdata/metrics/integration/gljs, which this task
-# rewrites whole. Fixtures that GL JS adds to the selection come along; add
-# those that don't pass to an ignore file in tools/render-test/ignores.
+# rewrites whole. The tests of the built-in identity projection
+# (projection/identity) come too, for the registered projections they draw in.
+# Fixtures that GL JS adds to the selection come along; add those that don't
+# pass to an ignore file in tools/render-test/ignores.
 #
 # GL JS's tests allow a difference of 0.00025 unless they say otherwise,
 # where the runner's default is stricter, so the copy of a test that sets no
@@ -109,6 +111,13 @@ declare -A allowed=(
     # 65536 on RADV (70 on OpenGL), 75 on lavapipe (WebGPU and Vulkan) and 70
     # on llvmpipe.
     [terrain/fog-sky-blend-globe]=0.0012
+    #
+    # The built-in identity projection's tile draws in place, and the fill
+    # outlines along its coasts are 2 px wide, as in MapLibre Native, where GL
+    # JS draws them 1 px wide: on Mesa 26.0.8, 143 of 262144 with Vulkan and
+    # 74 with WebGPU, which draws 1 px outlines on a CPU rasterizer, on
+    # lavapipe, and 73 with OpenGL on llvmpipe.
+    [projection/identity/tiles]=0.0006
 )
 
 checkout="${usage_checkout:-$PWD/../maplibre-gl-js}"
@@ -126,7 +135,7 @@ fi
 # The selection leaves out GL JS's custom layers, which are JavaScript of its
 # own harness that the runner doesn't have: custom-layer-js, and the globe's
 # projection/globe/terrain/custom, the one subdirectory there to start "cu".
-selected='^(terrain/.*|projection/globe/terrain/([^c]|c[^u]).*|image/.*|regressions/mapbox-gl-js#3010|sky/fog-.*|terrain-shading/default|high-pitch/terrain-pitch95|(fill-layer-blend|fill-layer-opacity|line-layer-blend|line-layer-opacity|line-opacity|raster-layer-blend)/terrain)$'
+selected='^(terrain/.*|projection/globe/terrain/([^c]|c[^u]).*|projection/identity/.*|image/.*|regressions/mapbox-gl-js#3010|sky/fog-.*|terrain-shading/default|high-pitch/terrain-pitch95|(fill-layer-blend|fill-layer-opacity|line-layer-blend|line-layer-opacity|line-opacity|raster-layer-blend)/terrain)$'
 
 rm -rf "$dest"
 mkdir -p "$dest/render-tests" "$dest/assets"

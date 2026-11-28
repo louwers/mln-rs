@@ -27,7 +27,9 @@ extern "C" {
  * `view` is the view to convert for, such as a frame result's, or null for the
  * map's current view. Over terrain, coordinates convert on the ground that the
  * map drew. The projection doesn't follow the map, so create a new one after
- * the map's view or terrain changes.
+ * the map's view or terrain changes. A view converts in the projection that the
+ * map's style draws in when the projection is created, also a view from before
+ * the style switched to or from a registered projection.
  *
  * Returns:
  * - MLN_STATUS_INVALID_STATE until mln_runtime_create_map() completes with
@@ -189,7 +191,11 @@ MLN_API mln_status mln_map_projection_get_terrain_elevation(
  * Computes how many meters one screen pixel covers at `latitude`, at the
  * projection's zoom.
  *
- * The result ignores the camera's pitch.
+ * The result ignores the camera's pitch. On a map in a registered projection,
+ * it is the ground distance, on a sphere of the earth's mean radius, from
+ * where `latitude` crosses the meridian through the camera's center to the
+ * point 100 pixels from there along the projection's x axis, over 100, as
+ * MapLibre GL JS's geolocate control measures it.
  */
 MLN_API mln_status mln_map_projection_meters_per_pixel_at_latitude(
   mln_map_projection projection, double latitude,

@@ -85,10 +85,13 @@ impl Transform {
 /// Whether a move can hold a location on the plane `height` meters above
 /// sea level under `point` of `view`, measured from the bottom edge (y up):
 /// whether the point's line of sight starts above the plane and descends to
-/// meet it before the far plane, which the view fits to the horizon. It asks
-/// the line itself, which a roll turns away from the screen's rows. On the
-/// globe the plane is the sphere at that height, which the eye must be
-/// above and the line must meet. Never while the view shows nothing.
+/// meet it before the far plane, which the view fits to the horizon, at a
+/// place with a location of its own ([`View::has_lat_lng_at`]), which past a
+/// registered projection's edge it hasn't, as GL JS's `isPointOnMapSurface`
+/// has it. It asks the line itself, which a roll turns away from the
+/// screen's rows. On the globe the plane is the sphere at that height, which
+/// the eye must be above and the line must meet. Never while the view shows
+/// nothing.
 pub(super) fn sees_plane(view: &View, point: &ScreenCoordinate, height: f64) -> bool {
     if view.is_globe() {
         let above =
@@ -96,5 +99,5 @@ pub(super) fn sees_plane(view: &View, point: &ScreenCoordinate, height: f64) -> 
         return above && VerticalPerspectiveProjection::screen_coordinate_hits_globe(view, point, height);
     }
     let Some((near, far)) = view.line_of_sight(point) else { return false };
-    far.z < near.z && far.z <= height && height < near.z
+    far.z < near.z && far.z <= height && height < near.z && view.has_lat_lng_at(point, height)
 }

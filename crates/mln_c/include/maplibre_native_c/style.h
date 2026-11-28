@@ -305,8 +305,10 @@ typedef struct mln_canonical_tile_id {
 /**
  * Asks for the data of a tile in a custom source.
  *
- * `map` and `source_id` name the source that asks. Return quickly. Once the
- * data is ready, pass it to mln_map_set_custom_geometry_source_tile_data() or
+ * `map` and `source_id` name the source that asks, and
+ * mln_map_get_custom_source_tile_bounds() reads the coordinates that the tile
+ * spans. Return quickly. Once the data is ready, pass it to
+ * mln_map_set_custom_geometry_source_tile_data() or
  * mln_map_set_custom_vector_source_tile_data(). If it fails to load, report
  * that with mln_map_set_custom_geometry_source_tile_error() or
  * mln_map_set_custom_vector_source_tile_error().
@@ -823,6 +825,25 @@ MLN_API mln_status mln_map_invalidate_custom_vector_source_tile(
 MLN_BINDING("execution=command")
 MLN_API mln_status mln_map_invalidate_custom_vector_source_region(
   mln_map map, mln_buffer_view source_id, mln_lat_lng_bounds bounds,
+  const mln_completion* completion, mln_diagnostic* out_diagnostic
+) MLN_NOEXCEPT;
+
+/**
+ * Reads the coordinates that a tile of a custom source spans, in the
+ * projection that the map draws in.
+ *
+ * In a registered projection, they are the bounds of the tile's four corners,
+ * which can miss part of the tile, such as a pole inside it. Elsewhere, they
+ * are the tile's bounds in Mercator.
+ *
+ * Completes with:
+ * - MLN_STATUS_NOT_FOUND when the style has no source named `source_id`.
+ * - MLN_STATUS_INVALID_ARGUMENT when the source named `source_id` isn't a
+ *   custom source, or `tile_id` names no tile at a zoom level from 0 to 32.
+ */
+MLN_BINDING("execution=query;result=mln_lat_lng_bounds")
+MLN_API mln_status mln_map_get_custom_source_tile_bounds(
+  mln_map map, mln_buffer_view source_id, mln_canonical_tile_id tile_id,
   const mln_completion* completion, mln_diagnostic* out_diagnostic
 ) MLN_NOEXCEPT;
 

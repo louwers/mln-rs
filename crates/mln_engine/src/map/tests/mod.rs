@@ -2,6 +2,8 @@ mod ground;
 mod map_events;
 mod map_snapshot;
 mod map_updates;
+mod registered_projection;
+mod registered_projection_camera;
 mod style_loader;
 mod style_members;
 mod style_sources;

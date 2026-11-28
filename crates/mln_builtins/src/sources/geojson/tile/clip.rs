@@ -1,12 +1,12 @@
 //! Cuts features to the band between two lines parallel to an axis, and
-//! wraps them around the antimeridian.
+//! wraps them around the antimeridian or cuts them at the world's edges.
 
 use std::borrow::Cow;
 use std::sync::Arc;
 
 use smallvec::smallvec;
 
-use super::geometry::{Feature, Geometry, Line, Parts, Ring, Vertex, X};
+use super::geometry::{Bbox, Feature, Geometry, Line, Parts, Ring, Vertex, X};
 
 /// The parts of `features` between `k1` and `k2` on `AXIS`. `min` and `max`
 /// bound all of them on that axis: if they lie inside, they come back
@@ -211,4 +211,23 @@ pub(super) fn wrap(features: Vec<Feature>, buffer: f64, line_metrics: bool) -> V
     merged.extend(center.into_owned());
     merged.append(&mut right);
     merged
+}
+
+/// `features` without what lies past `buffer` (in the unit square) beyond
+/// the world's edges on `AXIS`.
+pub(super) fn clip_to_world<const AXIS: usize>(
+    features: Vec<Feature>,
+    buffer: f64,
+    line_metrics: bool,
+) -> Vec<Feature> {
+    let mut bbox = Bbox::EMPTY;
+    for feature in &features {
+        bbox.extend(feature.bbox);
+    }
+    let (min, max) = bbox.range::<AXIS>();
+    if let Cow::Owned(clipped) = clip::<AXIS>(&features, -buffer, 1.0 + buffer, min, max, line_metrics) {
+        clipped
+    } else {
+        features
+    }
 }

@@ -93,7 +93,37 @@ pub fn convert_geometry(
         let y2 = 180.0 - (f64::from(p.y) + y0) * 360.0 / size;
         Coord { x: (f64::from(p.x) + x0) * 360.0 / size - 180.0, y: (y2 * PI / 180.0).exp().atan() * 360.0 / PI - 90.0 }
     };
-    let line_string = |points: &[Point<i16>]| LineString(points.iter().map(tile_coordinates_to_lat_lng).collect());
+    tile_geometry(feature_type, geometries, tile_coordinates_to_lat_lng)
+}
+
+/// Converts `geometries`, the geometry of a feature of type `feature_type`
+/// in `tile_id`, from tile coordinates to the world square, which tile
+/// 0/0/0 covers from 0 to 1 on both axes, y down: the place of a map in a
+/// registered projection, whose mapping takes it to longitude/latitude.
+/// Fails as [`convert_geometry`] does.
+pub fn convert_geometry_to_world(
+    feature_type: FeatureType,
+    geometries: &GeometryCollection,
+    tile_id: &CanonicalTileID,
+) -> Result<Geometry<f64>, OutOfRange> {
+    let size = f64::from(EXTENT) * 2f64.powi(i32::from(tile_id.z));
+    let x0 = f64::from(EXTENT) * f64::from(tile_id.x);
+    let y0 = f64::from(EXTENT) * f64::from(tile_id.y);
+    tile_geometry(feature_type, geometries, |p: &Point<i16>| Coord {
+        x: (f64::from(p.x) + x0) / size,
+        y: (f64::from(p.y) + y0) / size,
+    })
+}
+
+/// `geometries`, the geometry of a feature of type `feature_type`, as a
+/// geometry of `point`'s coordinates of its tile coordinates. Fails as
+/// [`convert_geometry`] does.
+fn tile_geometry(
+    feature_type: FeatureType,
+    geometries: &GeometryCollection,
+    point: impl Fn(&Point<i16>) -> Coord<f64>,
+) -> Result<Geometry<f64>, OutOfRange> {
+    let line_string = |points: &[Point<i16>]| LineString(points.iter().map(&point).collect());
 
     match feature_type {
         FeatureType::Unknown => {
@@ -104,11 +134,9 @@ pub fn convert_geometry(
         FeatureType::Point => {
             let first = geometries.first().ok_or(OutOfRange { index: 0, len: geometries.len() })?;
             if let [p] = first.as_slice() {
-                Ok(Geometry::Point(tile_coordinates_to_lat_lng(p).into()))
+                Ok(Geometry::Point(point(p).into()))
             } else {
-                Ok(Geometry::MultiPoint(
-                    first.iter().map(|p| geo_types::Point(tile_coordinates_to_lat_lng(p))).collect(),
-                ))
+                Ok(Geometry::MultiPoint(first.iter().map(|p| geo_types::Point(point(p))).collect()))
             }
         }
 

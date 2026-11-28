@@ -19,7 +19,8 @@ mod tile_feature;
 mod value;
 
 pub use convert::{
-    OutOfRange, classify_rings, convert_geometry, convert_geometry_to_tile, signed_area, to_geometry_collection,
+    OutOfRange, classify_rings, convert_geometry, convert_geometry_to_tile, convert_geometry_to_world, signed_area,
+    to_geometry_collection,
 };
 pub use item::{Feature, Identifier, PropertyMap};
 pub use tile_feature::{GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileFeature};

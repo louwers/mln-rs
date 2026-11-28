@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::conversion::Convertible;
+use crate::crs::CrsMapping;
 use crate::error::Error;
 use crate::expression::GlobalStateMap;
 use crate::feature::Value;
@@ -282,6 +283,13 @@ impl Style {
         &self.projection
     }
 
+    /// The mapping of the registered projection that the style's projection
+    /// names, if the registry has it; `None` for the built-in projections.
+    #[must_use]
+    pub fn crs_mapping(&self) -> Option<&Arc<CrsMapping>> {
+        self.projection.registered_name().and_then(|name| self.registry.projection(name))
+    }
+
     /// The extension members of the style's root.
     #[must_use]
     pub fn members(&self) -> &Arc<Members> {
@@ -433,7 +441,18 @@ impl Style {
                     self.terrain = terrain.map(Arc::new);
                 }
             }
-            Edit::SetProjection(projection) => self.projection = Arc::new(projection),
+            Edit::SetProjection(projection) => {
+                self.projection = Arc::new(projection);
+                let crs = self.crs_mapping().cloned();
+                let moved: Vec<Source> =
+                    self.sources.iter().filter_map(|source| source.in_projection(crs.as_ref())).collect();
+                if !moved.is_empty() {
+                    let sources = Arc::make_mut(&mut self.sources);
+                    for source in moved {
+                        sources.set(source);
+                    }
+                }
+            }
             Edit::SetMember { name, value } => {
                 let value = self
                     .registry
@@ -471,6 +490,7 @@ impl Style {
                 if self.sources.get(source.id()).is_some() {
                     return Err(Error::already_exists(format!("source \"{}\" already exists", source.id())));
                 }
+                let source = source.in_projection(self.crs_mapping()).unwrap_or(source);
                 for layer in self.layers.iter().filter(|layer| layer.get_source_id() == source.id()) {
                     check_source_feeds(&source, layer)?;
                 }

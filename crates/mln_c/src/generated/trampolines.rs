@@ -19,6 +19,40 @@ unsafe extern "C" fn mln_completion_callback(
         &[JsValue::from(user_data as usize), JsValue::from(result as usize)],
     );
 }
+/// `mln_projection_forward_callback`, forwarded to the host's dispatcher.
+unsafe extern "C" fn mln_projection_forward_callback(
+    user_data: *mut ::core::ffi::c_void,
+    coordinates: *const mln_lat_lng,
+    coordinate_count: usize,
+    out_points: *mut mln_projected_point,
+) {
+    let _ = dispatch(
+        "mln_projection_forward_callback",
+        &[
+            JsValue::from(user_data as usize),
+            JsValue::from(coordinates as usize),
+            JsValue::from(coordinate_count),
+            JsValue::from(out_points as usize),
+        ],
+    );
+}
+/// `mln_projection_inverse_callback`, forwarded to the host's dispatcher.
+unsafe extern "C" fn mln_projection_inverse_callback(
+    user_data: *mut ::core::ffi::c_void,
+    points: *const mln_projected_point,
+    point_count: usize,
+    out_coordinates: *mut mln_lat_lng,
+) {
+    let _ = dispatch(
+        "mln_projection_inverse_callback",
+        &[
+            JsValue::from(user_data as usize),
+            JsValue::from(points as usize),
+            JsValue::from(point_count),
+            JsValue::from(out_coordinates as usize),
+        ],
+    );
+}
 /// `mln_runtime_event_callback`, forwarded to the host's dispatcher.
 unsafe extern "C" fn mln_runtime_event_callback(
     user_data: *mut ::core::ffi::c_void,
@@ -196,6 +230,12 @@ pub(crate) fn pointer(name: &str) -> Option<usize> {
     match name {
         "mln_user_data_release" => Some(mln_user_data_release as *const () as usize),
         "mln_completion_callback" => Some(mln_completion_callback as *const () as usize),
+        "mln_projection_forward_callback" => {
+            Some(mln_projection_forward_callback as *const () as usize)
+        }
+        "mln_projection_inverse_callback" => {
+            Some(mln_projection_inverse_callback as *const () as usize)
+        }
         "mln_runtime_event_callback" => {
             Some(mln_runtime_event_callback as *const () as usize)
         }

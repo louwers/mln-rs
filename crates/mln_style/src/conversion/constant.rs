@@ -3,6 +3,7 @@ use std::str::FromStr;
 use super::{Converter, Convertible, Error, convert};
 use crate::color::Color;
 use crate::padding::Padding;
+use crate::projection::is_registered_projection_name;
 use crate::types::{
     AlignmentType, AnchorOffsetPair, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType,
     IconOverlapType, IconTextFitType, LayerBlendType, LightAnchorType, LineCapType, LineJoinType, ProjectionDefinition,
@@ -164,7 +165,9 @@ impl Converter for ProjectionDefinition {
             if let Some(type_) = projection_type_from_name(&name) {
                 return Some(ProjectionDefinition::new(type_));
             }
-            error.message = "projection type must be mercator, vertical-perspective or globe".to_owned();
+            error.message = "projection type must be mercator, vertical-perspective, globe, identity or a registered \
+                             name with a colon"
+                .to_owned();
             return None;
         }
         if value.is_array() && value.array_length() == 3 {
@@ -177,7 +180,13 @@ impl Converter for ProjectionDefinition {
                 if let (Some(from), Some(to)) = (from, to) {
                     return Some(ProjectionDefinition::between(from, to, transition));
                 }
-                error.message = "projection type must be mercator, vertical-perspective or globe".to_owned();
+                let registered = [from_name, to_name].into_iter().find(|name| is_registered_projection_name(name));
+                error.message = match registered {
+                    Some(name) => {
+                        format!("the registered projection \"{name}\" works only as a plain name, not in a transition")
+                    }
+                    None => "projection type must be mercator, vertical-perspective or globe".to_owned(),
+                };
                 return None;
             }
         }

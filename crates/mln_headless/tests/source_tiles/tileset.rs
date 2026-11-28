@@ -23,7 +23,7 @@ use mln_style::Edit;
 use mln_style::size::Size;
 use mln_style::source::SourceCommon;
 
-use super::host::{Host, point_tile};
+use super::host::{Host, point_tile, wait};
 
 /// A white map of a vector source "tiles" at `test://tiles/{z}/{x}/{y}`,
 /// with `members` added to the source, whose points draw as red circles.
@@ -339,4 +339,42 @@ fn a_tile_request_names_the_format_its_source_decodes() {
         let resource = host.network.requests("test://tiles/0/0/0").remove(0).0;
         assert_eq!(resource.tile_data.map(|tile| tile.format), Some(format), "{kind}{members}");
     }
+}
+
+/// Sets the style's projection to the one of type `type_`.
+fn set_projection(host: &Host, type_: &str) {
+    let json = format!(r#"{{"type":"{type_}"}}"#);
+    wait(host.map.with_core(move |map| map.edit_style(|style| style.set_root_property_json("projection", &json))))
+        .unwrap();
+}
+
+/// A tile's `{bbox}` is its box in the grid of the map's projection, and a
+/// source whose URLs hold one asks for its tiles again when the map changes
+/// to a projection of another grid, and back (MapLibre Native's
+/// `Map.TilesLoadAgainWhenTheProjectionChanges`).
+#[test]
+fn a_tiles_bbox_is_in_the_grid_of_the_maps_projection() {
+    let style = r#"{"version":8,"sources":{
+            "raster":{"type":"raster","tiles":["test://raster?bbox={bbox}"]},
+            "vector":{"type":"vector","tiles":["test://vector?bbox={bbox}"]}},
+        "layers":[{"id":"raster","type":"raster","source":"raster"},
+            {"id":"vector","type":"fill","source":"vector","source-layer":"water"}]}"#;
+    let host = Host::new(MapMode::Continuous, style);
+    host.move_to(0.0, 0.0);
+    host.frame();
+    // A view of zoom 0 shows the root tile, whose box spans the whole grid.
+    let extent = "20037508.342789244";
+    let mercator = format!("?bbox=-{extent},-{extent},{extent},{extent}");
+    let requested = |bbox: &str, count| {
+        for source in ["raster", "vector"] {
+            host.network.wait_for(&format!("test://{source}{bbox}"), count);
+        }
+    };
+    requested(&mercator, 1);
+    set_projection(&host, "identity");
+    host.frame();
+    requested("?bbox=-90,-90,90,90", 1);
+    set_projection(&host, "mercator");
+    host.frame();
+    requested(&mercator, 2);
 }

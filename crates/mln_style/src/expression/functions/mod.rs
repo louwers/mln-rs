@@ -136,7 +136,9 @@ impl FunctionDef {
     }
 }
 
-/// Why [`Functions::add`] refused a function.
+/// Why a registration was refused: a function by [`Functions::add`], or a
+/// layer type, a source type, an extension member or a projection by the
+/// runtime's registry.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum RegisterError {
     #[error("\"{0}\" is already registered")]
@@ -151,6 +153,13 @@ pub enum RegisterError {
     EvalMismatch(String),
     #[error("\"{0}\" claims a role that another function has")]
     RoleTaken(String),
+    #[error(
+        "the projection name \"{0}\" needs a colon, like \"EPSG:2193\": names without one are kept for built-in \
+         projections"
+    )]
+    ProjectionName(String),
+    #[error("the projection \"{0}\" needs a tile matrix set with a finite origin and a positive, finite extent")]
+    TileMatrixSet(String),
 }
 
 /// The expression functions that parsing resolves names against.

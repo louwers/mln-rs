@@ -9,6 +9,7 @@ use mln_builtins::sources::geojson::TileFeatures;
 use mln_engine::exec::pool::{Pool, TaskGroup};
 use mln_engine::tile::OverscaledTileID;
 use mln_engine::tile::tile_range::TileRange;
+use mln_style::crs::{CrsMapping, WorldBox};
 use mln_style::error::Error;
 use mln_style::geo::LatLngBounds;
 use mln_style::hash::HashMap;
@@ -72,6 +73,23 @@ impl<D> TileState<D> {
 
     fn required(&self) -> bool {
         self.subscribers.iter().any(|subscriber| subscriber.required)
+    }
+}
+
+/// A region whose tiles a provider invalidates: lng/lat bounds, or, in a
+/// registered projection, the rectangle in its world square around them.
+enum Region {
+    LngLat(LatLngBounds),
+    World(WorldBox),
+}
+
+impl Region {
+    /// The region's tiles at zoom `z`.
+    fn tile_range(&self, z: u8) -> TileRange {
+        match self {
+            Region::LngLat(bounds) => TileRange::from_lat_lng_bounds(bounds, z),
+            Region::World(world_box) => TileRange::from_world_box(world_box, z, z),
+        }
     }
 }
 
@@ -200,17 +218,15 @@ impl<D: Clone> CustomTileLoader<D> {
         }
     }
 
-    /// Invalidates each tile that `bounds` intersect, at the tile's own zoom.
-    fn invalidate_region(&mut self, bounds: &LatLngBounds) {
+    /// Invalidates each tile that `region` intersects, at the tile's own
+    /// zoom.
+    fn invalidate_region(&mut self, region: &Region) {
         let mut tile_ranges: HashMap<u8, TileRange> = HashMap::default();
         let intersecting: Vec<CanonicalTileID> = self
             .tile_states
             .keys()
             .filter(|tile_id| {
-                tile_ranges
-                    .entry(tile_id.z)
-                    .or_insert_with(|| TileRange::from_lat_lng_bounds(bounds, tile_id.z))
-                    .contains(tile_id)
+                tile_ranges.entry(tile_id.z).or_insert_with(|| region.tile_range(tile_id.z)).contains(tile_id)
             })
             .copied()
             .collect();
@@ -258,22 +274,31 @@ impl<D: Clone> CustomTileLoader<D> {
 pub(crate) struct CustomProvider<D: Clone + Send + 'static> {
     fetch_tile_function: Option<HostFunction>,
     cancel_tile_function: Option<HostFunction>,
+    /// The registered projection whose grid the tiles are in; `None` for
+    /// Mercator's.
+    crs: Option<Arc<CrsMapping>>,
     loader: Mutex<CustomTileLoader<D>>,
     calls: TaskGroup,
     this: Weak<Self>,
 }
 
 impl<D: Clone + Send + 'static> CustomProvider<D> {
-    /// A provider whose host functions, which `host` makes for it, run on
-    /// `pool`. `host` gets the provider, for the handle that the functions
-    /// give the host.
+    /// A provider of tiles in the grid of the registered projection `crs`, or
+    /// of Mercator's with `None`, whose host functions, which `host` makes
+    /// for it, run on `pool`. `host` gets the provider, for the handle that
+    /// the functions give the host.
     #[must_use]
-    pub(crate) fn new(pool: &Pool, host: impl FnOnce(&Weak<Self>) -> HostFunctions) -> Arc<Self> {
+    pub(crate) fn new(
+        pool: &Pool,
+        crs: Option<Arc<CrsMapping>>,
+        host: impl FnOnce(&Weak<Self>) -> HostFunctions,
+    ) -> Arc<Self> {
         Arc::new_cyclic(|this| {
             let (fetch_tile_function, cancel_tile_function) = host(this);
             CustomProvider {
                 fetch_tile_function,
                 cancel_tile_function,
+                crs,
                 loader: Mutex::new(CustomTileLoader::new()),
                 calls: TaskGroup::serial(pool),
                 this: Weak::clone(this),
@@ -335,9 +360,14 @@ impl<D: Clone + Send + 'static> CustomProvider<D> {
         self.with_loader(move |loader| loader.invalidate_tile(&tile_id));
     }
 
-    /// Invalidates each tile that `bounds` intersect, at the tile's own zoom.
+    /// Invalidates each tile that `bounds` intersect, at the tile's own zoom,
+    /// in the grid that the tiles are in.
     pub(crate) fn invalidate_region(&self, bounds: LatLngBounds) {
-        self.with_loader(move |loader| loader.invalidate_region(&bounds));
+        let region = match &self.crs {
+            Some(crs) => Region::World(crs.lng_lat_box_to_world_box(&bounds)),
+            None => Region::LngLat(bounds),
+        };
+        self.with_loader(move |loader| loader.invalidate_region(&region));
     }
 
     /// Runs `change` on the tiles' state in the provider's turn, then the
@@ -389,10 +419,10 @@ impl CustomGeometryProvider {
     /// functions run on `pool`. It cuts the host's GeoJSON in its turn,
     /// only for a tile that needs it.
     pub(crate) fn of_source(options: &CustomGeometrySourceOptions, pool: &Pool) -> Arc<Self> {
-        let tile_options = Arc::clone(&options.tile_options);
-        CustomProvider::new(pool, |provider| {
+        let (tile_options, crs) = (Arc::clone(&options.tile_options), options.crs.clone());
+        CustomProvider::new(pool, options.crs.clone(), |provider| {
             let make: MakeData<_, Arc<TileFeatures>> = Arc::new(move |geojson, tile_id: &CanonicalTileID| {
-                Arc::new(tile_features(geojson, tile_id, &tile_options))
+                Arc::new(tile_features(geojson, tile_id, &tile_options, crs.as_deref()))
             });
             host_functions(&options.tile_functions, Responder { provider: Weak::clone(provider), make })
         })
@@ -403,7 +433,7 @@ impl CustomVectorProvider {
     /// The provider of the tiles of a source of `options`, whose host
     /// functions run on `pool`.
     pub(crate) fn of_source(options: &CustomVectorSourceOptions, pool: &Pool) -> Arc<Self> {
-        CustomProvider::new(pool, |provider| {
+        CustomProvider::new(pool, options.crs.clone(), |provider| {
             let make: MakeData<CustomVectorTileData, CustomVectorTileData> = Arc::new(|data, _| data);
             host_functions(&options.tile_functions, Responder { provider: Weak::clone(provider), make })
         })
@@ -469,6 +499,8 @@ impl<A: Send + 'static, D: Clone + Send + 'static> CustomTileResponder<A> for Re
 mod tests {
     use std::thread::ThreadId;
 
+    use mln_style::crs::Crs;
+
     use super::*;
 
     /// What the host was asked, in order.
@@ -479,7 +511,7 @@ mod tests {
     fn recorded(pool: &Pool, cancels: bool) -> (Arc<CustomProvider<u32>>, Calls) {
         let calls = Calls::default();
         let (fetches, cancelled) = (Arc::clone(&calls), Arc::clone(&calls));
-        let provider = CustomProvider::new(pool, |_| {
+        let provider = CustomProvider::new(pool, None, |_| {
             let fetch: HostFunction = Box::new(move |tile_id| fetches.lock().push(HostCall::Fetch(*tile_id)));
             let cancel: HostFunction = Box::new(move |tile_id| cancelled.lock().push(HostCall::Cancel(*tile_id)));
             (Some(fetch), cancels.then_some(cancel))
@@ -685,7 +717,7 @@ mod tests {
     fn host_calls_run_off_the_calling_thread_in_order_and_may_reenter() {
         let pool = Pool::new(4);
         let fetches: Arc<Mutex<Vec<(ThreadId, CanonicalTileID)>>> = Arc::default();
-        let provider = CustomProvider::new(&pool, |provider: &Weak<CustomProvider<u32>>| {
+        let provider = CustomProvider::new(&pool, None, |provider: &Weak<CustomProvider<u32>>| {
             let (fetches, provider) = (Arc::clone(&fetches), Weak::clone(provider));
             let fetch: HostFunction = Box::new(move |tile_id: &CanonicalTileID| {
                 fetches.lock().push((std::thread::current().id(), *tile_id));
@@ -714,5 +746,48 @@ mod tests {
         let caller = std::thread::current().id();
         assert!(fetches.iter().all(|(thread, _)| *thread != caller));
         assert_eq!((0..8).collect::<Vec<u32>>(), *received.lock());
+    }
+
+    /// A tile that records when its data goes stale.
+    struct Invalidations(CanonicalTileID, Arc<Mutex<Vec<CanonicalTileID>>>);
+
+    impl CustomTileSubscriber<u32> for Invalidations {
+        fn set_tile_data(&self, _data: u32) {}
+        fn set_tile_error(&self, _error: Error) {}
+        fn invalidate_tile_data(&self) {
+            self.1.lock().push(self.0);
+        }
+    }
+
+    /// The tiles 2/2/0 and 2/2/1, of the grid of the registered projection
+    /// `crs` or Mercator's, that a region from 60 to 80 N and 0 to 30 E
+    /// invalidates.
+    fn invalidated_in(crs: Option<Arc<CrsMapping>>) -> Vec<CanonicalTileID> {
+        let pool = Pool::local();
+        let provider = CustomProvider::new(&pool, crs, |_| (None, None));
+        let invalidated: Arc<Mutex<Vec<CanonicalTileID>>> = Arc::default();
+        for (key, y) in [0, 1].into_iter().enumerate() {
+            let tile = CanonicalTileID::new(2, 2, y);
+            let subscriber = Box::new(Invalidations(tile, Arc::clone(&invalidated)));
+            provider.fetch_tile(OverscaledTileID::new(2, 0, tile), key as SubscriberKey, subscriber);
+        }
+        let (north_east, south_west) =
+            (mln_style::geo::LatLng::new(80.0, 30.0).unwrap(), mln_style::geo::LatLng::new(60.0, 0.0).unwrap());
+        provider.invalidate_region(LatLngBounds::hull(south_west, north_east));
+        pool.run_all();
+        let mut invalidated = invalidated.lock().clone();
+        invalidated.sort();
+        invalidated
+    }
+
+    // A region invalidates the tiles it covers in the grid of the
+    // registered projection that the tiles are in: in the identity
+    // projection's, it lies in tile 2/2/0, and in Mercator's it reaches into
+    // 2/2/1 too.
+    #[test]
+    fn a_region_invalidates_its_tiles_in_the_grid_of_a_registered_projection() {
+        let identity = Arc::new(CrsMapping::new(Arc::new(Crs::identity())));
+        assert_eq!(vec![CanonicalTileID::new(2, 2, 0)], invalidated_in(Some(identity)));
+        assert_eq!(vec![CanonicalTileID::new(2, 2, 0), CanonicalTileID::new(2, 2, 1)], invalidated_in(None));
     }
 }

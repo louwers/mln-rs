@@ -9,6 +9,7 @@ use mln_style::geo::{LatLng, WrapMode};
 use crate::camera::transform::{TerrainGround, Transform, flip_y, lowest_ground};
 use crate::camera::{Camera, CameraOptions, Elevation, MapView, TransformState, View};
 use crate::geo::ScreenCoordinate;
+use crate::geo::world::WorldMapping;
 use crate::map::map::Map;
 
 /// Converts coordinates for one camera and size, without a map: on the
@@ -38,11 +39,13 @@ impl MapProjection {
     }
 
     /// A projection for one view of a map, from a [`MapSnapshot`] or a
-    /// rendered frame, on the flat map. `Err`: as [`MapView::to_state`].
+    /// rendered frame, on the flat map, where lng/lat maps to the world
+    /// square as `world`, the map's mapping ([`View::world`]), maps it.
+    /// `Err`: as [`MapView::to_state`].
     ///
     /// [`MapSnapshot`]: crate::map::MapSnapshot
-    pub fn from_view(view: &MapView) -> Result<Self, Error> {
-        Ok(Self::from_state(view.to_state()?))
+    pub fn from_view(view: &MapView, world: &WorldMapping) -> Result<Self, Error> {
+        Ok(Self::from_state(view.to_state(world)?))
     }
 
     /// The projection on `ground`, the ground a renderer drew of a terrain
@@ -80,6 +83,26 @@ impl MapProjection {
     #[must_use]
     pub fn elevation(&self, lat_lng: &LatLng) -> Option<f64> {
         self.state.view().drawn_height_at(lat_lng, &**self.ground.as_ref()?)
+    }
+
+    /// How many meters a pixel spans at `latitude` on the meridian through
+    /// the camera's center, as [`meters_per_pixel_at`](Self::meters_per_pixel_at)
+    /// measures them.
+    #[must_use]
+    pub fn meters_per_pixel_at_latitude(&self, latitude: f64) -> f64 {
+        let view = self.state.view();
+        let longitude = view.center(WrapMode::Unwrapped).longitude();
+        view.meters_per_pixel_at_lng_lat([longitude, latitude])
+    }
+
+    /// How many meters a pixel spans at `lat_lng`, at the camera's zoom,
+    /// whatever its pitch and bearing, as [`View::meters_per_pixel_at`]
+    /// measures them: in a registered projection, the ground distance from
+    /// `lat_lng` to the place 100 pixels from it along the projection's x
+    /// axis, over 100, as GL JS's geolocate control measures it.
+    #[must_use]
+    pub fn meters_per_pixel_at(&self, lat_lng: &LatLng) -> f64 {
+        self.state.view().meters_per_pixel_at(lat_lng)
     }
 
     /// Whether the globe hides `lat_lng` from the camera; a Mercator view

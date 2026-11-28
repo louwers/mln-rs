@@ -383,6 +383,117 @@ MLN_API mln_status mln_network_set_status(
   mln_network_status status, mln_diagnostic* out_diagnostic
 ) MLN_NOEXCEPT;
 
+/** A geographic coordinate, in degrees. */
+typedef struct mln_lat_lng {
+  double latitude;
+  double longitude;
+} mln_lat_lng;
+
+/** A point in the plane of a registered projection, in its units. */
+typedef struct mln_projected_point {
+  double x;
+  /** Grows toward the top of the map. */
+  double y;
+} mln_projected_point;
+
+/**
+ * The square tile grid over the plane of a registered projection.
+ *
+ * Tile 0/0/0 is the square of side `extent_at_zoom0` whose top-left corner is
+ * `origin`, and each zoom level splits every tile into four, as in a quad tree
+ * tile matrix set of the OGC Two Dimensional Tile Matrix Set standard.
+ */
+typedef struct mln_tile_matrix_set {
+  /** The top-left corner of tile 0/0/0: its least x and its greatest y. */
+  mln_projected_point origin;
+  /** The side of tile 0/0/0, in the projection's units. */
+  double extent_at_zoom0;
+} mln_tile_matrix_set;
+
+/**
+ * Converts coordinates to points of a registered projection.
+ *
+ * Write the point of each of `coordinates` at the same index of `out_points`,
+ * or NaN as both of its members where the coordinate has no point. Give the
+ * same answer for the same coordinate every time.
+ *
+ * Threads:
+ * Runs on library threads, several at once. It can't call the library.
+ *
+ * Lifetimes:
+ * `coordinates` and `out_points` stay valid until the callback returns.
+ */
+MLN_BINDING("synchronous=true")
+typedef void (*mln_projection_forward_callback)(
+  void* user_data,
+  const mln_lat_lng* coordinates MLN_BINDING("length=coordinate_count"),
+  size_t coordinate_count,
+  mln_projected_point* out_points
+    MLN_BINDING("direction=out;length=coordinate_count")
+);
+
+/**
+ * Converts points of a registered projection to coordinates.
+ *
+ * Write the coordinate of each of `points` at the same index of
+ * `out_coordinates`, or NaN as both of its members where the point has no
+ * coordinate. Give the same answer for the same point every time.
+ *
+ * Threads:
+ * Runs on library threads, several at once. It can't call the library.
+ *
+ * Lifetimes:
+ * `points` and `out_coordinates` stay valid until the callback returns.
+ */
+MLN_BINDING("synchronous=true")
+typedef void (*mln_projection_inverse_callback)(
+  void* user_data,
+  const mln_projected_point* points MLN_BINDING("length=point_count"),
+  size_t point_count,
+  mln_lat_lng* out_coordinates MLN_BINDING("direction=out;length=point_count")
+);
+
+/**
+ * The callbacks that convert between coordinates and the points of a
+ * registered projection.
+ *
+ * Set both.
+ *
+ * Lifetimes:
+ * The library calls `release_user_data` once the runtime, its maps, and the
+ * projections that mln_map_projection_create() made from them are released.
+ */
+typedef struct mln_projection_converter {
+  mln_projection_forward_callback forward MLN_BINDING("nullable=true");
+  mln_projection_inverse_callback inverse MLN_BINDING("nullable=true");
+  void* user_data MLN_BINDING("kind=context");
+  mln_user_data_release release_user_data;
+} mln_projection_converter MLN_BINDING(
+  "kind=callback_registration;release=release_user_data"
+);
+
+/**
+ * A projection that a runtime's maps draw in when their style's
+ * `projection.type` names it.
+ *
+ * A style that names a projection its runtime doesn't have draws in Mercator.
+ * A map in a registered projection takes every tile source of its style to be
+ * cut in `tile_matrix_set`, and draws the tiles as they are. It counts the
+ * projection's units as meters wherever it converts meters, as for altitudes,
+ * and draws one copy of the world, across which nothing wraps.
+ */
+typedef struct mln_registered_projection {
+  uint32_t size;
+  /**
+   * The name that `projection.type` gives, such as `EPSG:3413`. It needs a
+   * colon: names without one, such as `identity`, are kept for the built-in
+   * projections.
+   */
+  mln_buffer_view name MLN_BINDING("required=true");
+  mln_tile_matrix_set tile_matrix_set MLN_BINDING("required=true");
+  mln_projection_converter converter MLN_BINDING("required=true");
+} mln_registered_projection;
+
 /** Options for mln_runtime_create(). */
 typedef struct mln_runtime_options {
   uint32_t size;
@@ -397,6 +508,13 @@ typedef struct mln_runtime_options {
    * memory.
    */
   mln_buffer_view cache_path;
+  /**
+   * The projections, beside the built-in ones, that the styles of the
+   * runtime's maps can name.
+   */
+  const mln_registered_projection* projections
+    MLN_BINDING("length=projection_count");
+  size_t projection_count;
 } mln_runtime_options;
 
 /** Statistics about the frames that a map renders. */
@@ -974,9 +1092,16 @@ typedef struct mln_resource_provider {
  *
  * Returns:
  * - MLN_STATUS_INVALID_ARGUMENT when the cache database file that `options`
- *   names can't be opened or created.
+ *   names can't be opened or created, or when a projection of `options` has a
+ *   name without a colon or the name of another of them, an origin that isn't
+ *   finite, an extent that isn't positive and finite, or a converter without
+ *   both callbacks.
  * - MLN_STATUS_UNSUPPORTED in a browser for a cache path: the browser caches
  *   the runtime's requests.
+ *
+ * Lifetimes:
+ * When this function returns an error, the caller keeps the `user_data` of each
+ * projection's converter and the library doesn't call its `release_user_data`.
  */
 MLN_API mln_status mln_runtime_create(
   const mln_runtime_options* options MLN_BINDING("nullable=true"),

@@ -1166,6 +1166,218 @@ static void a_geometry_tile_takes_one_feature_or_a_bare_geometry(void) {
   }
 }
 
+// Answers each fetch with the box from 0 to 20 E and 20 to 40 N, in lng/lat
+// as a host always gives it. The null completion discards the command's
+// outcome.
+static void answer_with_a_box(
+  void* user_data, mln_map map, mln_buffer_view source_id,
+  mln_canonical_tile_id tile_id
+) {
+  (void)user_data;
+  (void)mln_map_set_custom_geometry_source_tile_data(
+    map, source_id, tile_id,
+    MLN_BUFFER_LITERAL(
+      "{\"type\":\"FeatureCollection\",\"features\":[{\"type\":\"Feature\","
+      "\"geometry\":{\"type\":\"Polygon\",\"coordinates\":[[[0,20],[20,20],"
+      "[20,40],[0,40],[0,20]]]},\"properties\":{}}]}"
+    ),
+    NULL, NULL
+  );
+}
+
+typedef struct point_target {
+  const mln_test_render_fixture* fixture;
+  mln_screen_point point;
+} point_target;
+
+static bool one_feature_at_point(void* context) {
+  const point_target* target = context;
+  const mln_rendered_query_geometry geometry = {
+    .size = sizeof(mln_rendered_query_geometry),
+    .type = MLN_RENDERED_QUERY_GEOMETRY_TYPE_POINT,
+    .data = {.point = target->point},
+  };
+  const mln_test_feature_list list =
+    mln_test_style_query_rendered_with(target->fixture, &geometry, NULL);
+  return list.status == MLN_STATUS_OK && list.count == 1;
+}
+
+// gtest: CustomGeometrySource.InARegisteredProjection
+// On a map drawn in a registered projection, the host's GeoJSON is cut in the
+// projection's world square. The view is centered on 10 E, 30 N, inside the
+// box in the identity projection; cut in Mercator's square, the whole box
+// would draw below that point.
+static void a_geometry_tile_is_cut_in_the_maps_registered_projection(void) {
+  mln_runtime runtime = mln_test_create_runtime();
+  mln_map map = mln_test_create_map(runtime);
+  mln_test_load_style_and_wait(
+    map, MLN_BUFFER_LITERAL(
+           "{\"version\":8,\"projection\":{\"type\":\"identity\"},"
+           "\"center\":[10,30],\"zoom\":0,\"sources\":{},\"layers\":[]}"
+         )
+  );
+  const mln_custom_geometry_source_options options = {
+    .size = sizeof(mln_custom_geometry_source_options),
+    .fields = MLN_CUSTOM_GEOMETRY_SOURCE_OPTION_CLIP,
+    .clip = true,
+    .fetch_tile = answer_with_a_box,
+  };
+  MLN_TEST_AWAIT_OK(mln_map_add_custom_geometry_source(
+    map, MLN_BUFFER_LITERAL("custom"), &options, &completion.descriptor, NULL
+  ));
+  MLN_TEST_AWAIT_OK(mln_map_add_style_layer_json(
+    map,
+    MLN_BUFFER_LITERAL(
+      "{\"id\":\"box\",\"type\":\"fill\",\"source\":\"custom\","
+      "\"paint\":{\"fill-color\":\"red\"}}"
+    ),
+    MLN_BUFFER_LITERAL(""), &completion.descriptor, NULL
+  ));
+  mln_test_render_fixture fixture = {0};
+  TEST_ASSERT_TRUE(mln_test_render_fixture_create_offscreen(map, &fixture));
+
+  point_target target = {.fixture = &fixture};
+  mln_map_projection projection = MLN_HANDLE_NULL;
+  MLN_TEST_OK_MESSAGE(
+    mln_map_projection_create(map, NULL, &projection, MLN_TEST_DIAGNOSTIC),
+    mln_test_last_error()
+  );
+  MLN_TEST_OK(mln_map_projection_pixel_for_lat_lng(
+    projection, (mln_lat_lng){.latitude = 30.0, .longitude = 10.0},
+    &target.point, NULL
+  ));
+  mln_map_projection_release(projection);
+  TEST_ASSERT_TRUE(mln_test_style_render_until(
+    &fixture, one_feature_at_point, &target, "the box at 10 E, 30 N"
+  ));
+
+  mln_test_render_fixture_destroy(&fixture);
+  mln_test_destroy_map(map);
+  mln_test_destroy_runtime(runtime);
+}
+
+static void ignore_tile(
+  void* user_data, mln_map map, mln_buffer_view source_id,
+  mln_canonical_tile_id tile_id
+) {
+  (void)user_data;
+  (void)map;
+  (void)source_id;
+  (void)tile_id;
+}
+
+static mln_lat_lng_bounds tile_bounds(
+  mln_map map, const char* source_id, mln_canonical_tile_id tile_id
+) {
+  mln_test_completion completion =
+    mln_test_completion_default(sizeof(mln_lat_lng_bounds));
+  MLN_TEST_OK(mln_map_get_custom_source_tile_bounds(
+    map, mln_buffer_view_from_cstr(source_id), tile_id, &completion.descriptor,
+    NULL
+  ));
+  mln_lat_lng_bounds bounds = {0};
+  MLN_TEST_OK(
+    mln_test_completion_finish_value(&completion, &bounds, sizeof(bounds))
+  );
+  return bounds;
+}
+
+static void expect_bounds(
+  mln_lat_lng_bounds bounds, double south, double west, double north,
+  double east
+) {
+  TEST_ASSERT_DOUBLE_WITHIN(1e-9, south, bounds.southwest.latitude);
+  TEST_ASSERT_DOUBLE_WITHIN(1e-9, west, bounds.southwest.longitude);
+  TEST_ASSERT_DOUBLE_WITHIN(1e-9, north, bounds.northeast.latitude);
+  TEST_ASSERT_DOUBLE_WITHIN(1e-9, east, bounds.northeast.longitude);
+}
+
+static void add_ignoring_sources(mln_map map) {
+  const mln_custom_geometry_source_options geometry = {
+    .size = sizeof(mln_custom_geometry_source_options),
+    .fetch_tile = ignore_tile,
+  };
+  MLN_TEST_AWAIT_OK(mln_map_add_custom_geometry_source(
+    map, MLN_BUFFER_LITERAL("custom-geometry"), &geometry,
+    &completion.descriptor, NULL
+  ));
+  const mln_custom_vector_source_options vector = {
+    .size = sizeof(mln_custom_vector_source_options),
+    .fetch_tile = ignore_tile,
+  };
+  MLN_TEST_AWAIT_OK(mln_map_add_custom_vector_source(
+    map, MLN_BUFFER_LITERAL("custom-vector"), &vector, &completion.descriptor,
+    NULL
+  ));
+}
+
+// A tile of either kind of custom source spans its Mercator bounds, and in a
+// registered projection the bounds of its corners, which a fetch callback
+// reads.
+static void a_custom_source_gives_its_tiles_bounds_in_the_maps_projection(
+  void
+) {
+  mln_runtime runtime = mln_test_create_runtime();
+  mln_map identity = mln_test_create_map(runtime);
+  mln_map mercator = mln_test_create_map(runtime);
+  mln_test_load_style_and_wait(
+    identity, MLN_BUFFER_LITERAL(
+                "{\"version\":8,\"projection\":{\"type\":\"identity\"},"
+                "\"sources\":{\"shapes\":" MLN_TEST_EMPTY_GEOJSON_SOURCE
+                "},\"layers\":[]}"
+              )
+  );
+  mln_test_load_style_and_wait(mercator, mln_test_empty_style_json);
+  add_ignoring_sources(identity);
+  add_ignoring_sources(mercator);
+
+  const char* const kinds[] = {"custom-geometry", "custom-vector"};
+  for (size_t index = 0; index < 2; index += 1) {
+    // The identity's tile 0/0/0 spans -90 to 90 on both axes.
+    expect_bounds(
+      tile_bounds(identity, kinds[index], (mln_canonical_tile_id){0, 0, 0}),
+      -90.0, -90.0, 90.0, 90.0
+    );
+    expect_bounds(
+      tile_bounds(identity, kinds[index], (mln_canonical_tile_id){2, 1, 2}),
+      -45.0, -45.0, 0.0, 0.0
+    );
+    // Mercator's tile 1/1/0 spans the northeast of its world.
+    expect_bounds(
+      tile_bounds(mercator, kinds[index], (mln_canonical_tile_id){1, 1, 0}),
+      0.0, 0.0, 85.05112877980659, 180.0
+    );
+  }
+
+  const mln_canonical_tile_id root = {0, 0, 0};
+  MLN_TEST_EXPECT_COMMAND_FAILED(
+    MLN_STATUS_NOT_FOUND, "does not exist",
+    mln_map_get_custom_source_tile_bounds(
+      identity, MLN_BUFFER_LITERAL("missing"), root, &completion.descriptor,
+      NULL
+    )
+  );
+  MLN_TEST_EXPECT_COMMAND_FAILED(
+    MLN_STATUS_INVALID_ARGUMENT, "is not a custom source",
+    mln_map_get_custom_source_tile_bounds(
+      identity, MLN_BUFFER_LITERAL("shapes"), root, &completion.descriptor,
+      NULL
+    )
+  );
+  MLN_TEST_EXPECT_COMMAND_FAILED(
+    MLN_STATUS_INVALID_ARGUMENT, "within zoom bounds",
+    mln_map_get_custom_source_tile_bounds(
+      identity, MLN_BUFFER_LITERAL("custom-geometry"),
+      (mln_canonical_tile_id){.z = 1, .x = 2, .y = 0}, &completion.descriptor,
+      NULL
+    )
+  );
+
+  mln_test_destroy_map(identity);
+  mln_test_destroy_map(mercator);
+  mln_test_destroy_runtime(runtime);
+}
+
 MLN_TEST_GROUP {
   RUN_TEST(a_style_replacement_releases_a_dropped_source_unsubscribed);
   RUN_TEST(an_explicit_removal_releases_once);
@@ -1177,4 +1389,6 @@ MLN_TEST_GROUP {
   RUN_TEST(tile_operations_check_their_tile_and_source_kind);
   RUN_TEST(custom_sources_take_and_validate_every_option);
   RUN_TEST(a_geometry_tile_takes_one_feature_or_a_bare_geometry);
+  RUN_TEST(a_geometry_tile_is_cut_in_the_maps_registered_projection);
+  RUN_TEST(a_custom_source_gives_its_tiles_bounds_in_the_maps_projection);
 }

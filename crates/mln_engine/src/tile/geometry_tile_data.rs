@@ -4,6 +4,7 @@
 
 use std::f64::consts::PI;
 
+use geo_types::{Coord, Geometry, Polygon};
 use geometry::Point;
 use i_overlay::core::fill_rule::FillRule;
 use i_overlay::core::overlay::{Overlay, ShapeType};
@@ -11,10 +12,12 @@ use i_overlay::core::overlay_rule::OverlayRule;
 use i_overlay::i_float::int::point::IntPoint;
 use mln_style::constants::EXTENT;
 use mln_style::feature::{
-    Feature, GeometryCollection, GeometryCoordinates, GeometryTileFeature, convert_geometry, signed_area,
+    Feature, GeometryCollection, GeometryCoordinates, GeometryTileFeature, convert_geometry, convert_geometry_to_world,
+    signed_area,
 };
 use mln_style::tile_id::CanonicalTileID;
 
+use crate::geo::world::WorldMapping;
 use crate::tile::TileError;
 
 /// Repairs the rings of a polygon from a version 1 vector tile, whose spec
@@ -56,17 +59,64 @@ pub fn limit_holes(polygon: &mut GeometryCollection, max_holes: u32) {
 }
 
 /// Converts a feature of `tile_id` whose geometry is `geometries` to a
-/// `Feature` in longitude/latitude, with its properties and id. Fails as
-/// [`convert_geometry`] does.
+/// `Feature` in longitude/latitude, with its properties and id: through
+/// `world`, the mapping of the map whose tile it is, from that map's world
+/// square. Fails as [`convert_geometry`] does.
 pub(crate) fn convert_feature(
     feature: &dyn GeometryTileFeature,
     geometries: &GeometryCollection,
     tile_id: &CanonicalTileID,
+    world: &WorldMapping,
 ) -> Result<Feature<f64>, TileError> {
-    let mut converted = Feature::new(convert_geometry(feature.get_type(), geometries, tile_id)?);
+    let geometry = match world {
+        WorldMapping::Mercator => convert_geometry(feature.get_type(), geometries, tile_id)?,
+        WorldMapping::Crs(_) => {
+            let mut geometry = convert_geometry_to_world(feature.get_type(), geometries, tile_id)?;
+            lng_lats_from_world(world, &mut geometry);
+            geometry
+        }
+    };
+    let mut converted = Feature::new(geometry);
     converted.properties = feature.get_properties().into_owned();
     converted.id = feature.get_id();
     Ok(converted)
+}
+
+/// Replaces each point of `geometry`, a place in the world square of
+/// `world`, by its longitude and latitude, in one batch.
+fn lng_lats_from_world(world: &WorldMapping, geometry: &mut Geometry<f64>) {
+    let mut places = Vec::new();
+    for_each_coord_mut(geometry, &mut |coord| places.push([coord.x, coord.y]));
+    let mut lng_lats = vec![[0.0; 2]; places.len()];
+    world.lng_lats_from_world(&places, &mut lng_lats);
+    let mut lng_lats = lng_lats.into_iter();
+    for_each_coord_mut(geometry, &mut |coord| {
+        if let Some([lng, lat]) = lng_lats.next() {
+            *coord = Coord { x: lng, y: lat };
+        }
+    });
+}
+
+/// Calls `f` with every point of `geometry`, of the kinds that
+/// [`convert_geometry`] makes, in order.
+fn for_each_coord_mut(geometry: &mut Geometry<f64>, f: &mut impl FnMut(&mut Coord<f64>)) {
+    match geometry {
+        Geometry::Point(point) => f(&mut point.0),
+        Geometry::MultiPoint(points) => points.iter_mut().for_each(|point| f(&mut point.0)),
+        Geometry::LineString(line) => line.0.iter_mut().for_each(f),
+        Geometry::MultiLineString(lines) => lines.iter_mut().for_each(|line| line.0.iter_mut().for_each(&mut *f)),
+        Geometry::Polygon(polygon) => polygon_coords_mut(polygon, f),
+        Geometry::MultiPolygon(polygons) => polygons.iter_mut().for_each(|polygon| polygon_coords_mut(polygon, f)),
+        // The conversion makes none of these.
+        Geometry::Line(_) | Geometry::GeometryCollection(_) | Geometry::Rect(_) | Geometry::Triangle(_) => {}
+    }
+}
+
+/// Calls `f` with every point of `polygon`'s exterior, then of its
+/// interiors.
+fn polygon_coords_mut(polygon: &mut Polygon<f64>, f: &mut impl FnMut(&mut Coord<f64>)) {
+    polygon.exterior_mut(|exterior| exterior.0.iter_mut().for_each(&mut *f));
+    polygon.interiors_mut(|interiors| interiors.iter_mut().for_each(|ring| ring.0.iter_mut().for_each(&mut *f)));
 }
 
 /// Whether the edge from `a` to `b` runs along a line the tile was clipped

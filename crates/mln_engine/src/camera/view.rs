@@ -24,6 +24,7 @@ use crate::camera::vertical_perspective_projection::VerticalPerspectiveProjectio
 pub use crate::geo::NorthOrientation;
 use crate::geo::constants::M2PI;
 use crate::geo::projection::Projection;
+use crate::geo::world::WorldMapping;
 use crate::geo::{EdgeInsets, ScreenCoordinate};
 use crate::tile::UnwrappedTileID;
 
@@ -68,6 +69,25 @@ pub(crate) fn map_offset(center: &LatLng, scale: f64, globe: bool) -> (f64, f64)
     (x, y)
 }
 
+/// How many pixels apart the places are whose ground distance gives a
+/// registered projection's meters per pixel: GL JS's geolocate control's
+/// default width.
+const SCALE_SPAN_PX: f64 = 100.0;
+
+/// The earth's mean radius in meters, GL JS's `earthRadius`, on which its
+/// `LngLat.distanceTo` measures.
+const MEAN_EARTH_RADIUS_M: f64 = 6_371_008.8;
+
+/// The ground distance in meters between two lng/lats in degrees, GL JS's
+/// `LngLat.distanceTo`: the spherical law of cosines on the earth's mean
+/// radius.
+fn ground_distance([lng_a, lat_a]: [f64; 2], [lng_b, lat_b]: [f64; 2]) -> f64 {
+    let (lat_a, lat_b) = (lat_a.to_radians(), lat_b.to_radians());
+    let cos = lat_a.sin() * lat_b.sin() + lat_a.cos() * lat_b.cos() * (lng_b - lng_a).to_radians().cos();
+    // `Math.min`, which keeps a NaN.
+    MEAN_EARTH_RADIUS_M * (if cos > 1.0 { 1.0 } else { cos }).acos()
+}
+
 /// The fractional part of `x`, with the sign of `x`.
 fn modf_fraction(x: f64) -> f64 {
     if x.is_infinite() {
@@ -77,7 +97,7 @@ fn modf_fraction(x: f64) -> f64 {
 }
 
 /// What a view shows, in the units its math works in.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ViewParams {
     pub(crate) size: Size,
     pub(crate) frustum_offset: EdgeInsets,
@@ -94,6 +114,9 @@ pub(crate) struct ViewParams {
     pub(crate) globe_free_bearing: bool,
     /// The style's projection, as it was last set.
     pub(crate) projection_definition: ProjectionDefinition,
+    /// How lng/lat maps to the world square: Mercator, or a registered
+    /// projection's.
+    pub(crate) world: WorldMapping,
     /// 0 is Mercator, 1 is the globe, in between is the transition.
     pub(crate) projection_transition: f64,
     pub(crate) padding: EdgeInsets,
@@ -132,6 +155,7 @@ impl ViewParams {
             center_clamped_to_ground: true,
             globe_free_bearing: false,
             projection_definition: ProjectionDefinition::default(),
+            world: WorldMapping::Mercator,
             projection_transition: 0.0,
             padding: EdgeInsets::default(),
             x: 0.0,
@@ -309,9 +333,15 @@ impl View {
     // MARK: - Camera
 
     /// The center. `WrapMode::Unwrapped` keeps the copy of the world that
-    /// the camera is in.
+    /// the camera is in; a registered projection's world has no copies.
     #[must_use]
     pub fn center(&self, wrap_mode: WrapMode) -> LatLng {
+        if let WorldMapping::Crs(_) = self.params.world {
+            let center = self.center_world();
+            let mut lng_lat = [[0.0; 2]];
+            self.params.world.lng_lats_from_world(&[[center.x, center.y]], &mut lng_lat);
+            return LatLng::saturating(lng_lat[0][1], lng_lat[0][0], WrapMode::Unwrapped);
+        }
         let world_size = Projection::world_size(self.params.scale);
         LatLng::saturating(
             mln_style::math::rad2deg(2.0 * (self.params.y / (world_size / M2PI)).exp().atan() - 0.5 * PI),
@@ -321,9 +351,12 @@ impl View {
     }
 
     /// The world copy of `location` nearest the center, which bounds can keep
-    /// past the antimeridian.
+    /// past the antimeridian; `location` itself in a world that doesn't wrap.
     #[must_use]
     pub fn lat_lng_near_center(&self, location: &LatLng) -> LatLng {
+        if !self.params.world.wraps() {
+            return *location;
+        }
         let center = self.center(WrapMode::Unwrapped);
         let wrapped_center = center.wrapped();
         let mut nearest = location.wrapped();
@@ -345,7 +378,42 @@ impl View {
     /// `pixelsPerMeter`, inverted): the scale of every height the matrices
     /// place, so that a point at the center's altitude draws at the center.
     pub(crate) fn meters_per_pixel(&self) -> f64 {
-        Projection::meters_per_pixel_at_latitude(self.center(WrapMode::Unwrapped).latitude(), self.zoom())
+        match &self.params.world {
+            WorldMapping::Mercator => {
+                Projection::meters_per_pixel_at_latitude(self.center(WrapMode::Unwrapped).latitude(), self.zoom())
+            }
+            WorldMapping::Crs(_) => {
+                self.params.world.meters_per_world_unit(&self.center_world())
+                    / Projection::world_size(self.params.scale)
+            }
+        }
+    }
+
+    /// How many meters a pixel spans at `lat_lng`, at the zoom, whatever the
+    /// pitch and bearing: Web Mercator's scale at its latitude, also on the
+    /// globe, or in a registered projection the ground distance from
+    /// `lat_lng` to the place 100 pixels from it along the projection's x
+    /// axis, over 100, as GL JS's geolocate control measures it. NaN where
+    /// the projection has no place there.
+    #[must_use]
+    pub fn meters_per_pixel_at(&self, lat_lng: &LatLng) -> f64 {
+        self.meters_per_pixel_at_lng_lat([lat_lng.longitude(), lat_lng.latitude()])
+    }
+
+    /// [`meters_per_pixel_at`](Self::meters_per_pixel_at) a lng/lat in
+    /// degrees.
+    pub(crate) fn meters_per_pixel_at_lng_lat(&self, lng_lat: [f64; 2]) -> f64 {
+        let world = &self.params.world;
+        if world.wraps() {
+            return Projection::meters_per_pixel_at_latitude(lng_lat[1], self.zoom());
+        }
+        let mut place = [[0.0; 2]];
+        world.world_from_lng_lats(&[lng_lat], &mut place);
+        let [x, y] = place[0];
+        let span = SCALE_SPAN_PX / Projection::world_size(self.params.scale);
+        let mut end = [[0.0; 2]];
+        world.lng_lats_from_world(&[[x + span, y]], &mut end);
+        ground_distance(lng_lat, end[0]) / SCALE_SPAN_PX
     }
 
     /// The center's altitude in pixels at the zoom.
@@ -393,6 +461,27 @@ impl View {
     #[must_use]
     pub(crate) fn y(&self) -> f64 {
         self.params.y
+    }
+
+    /// How lng/lat maps to the world square: Mercator, or the registered
+    /// projection the map draws in.
+    #[must_use]
+    pub fn world(&self) -> &WorldMapping {
+        &self.params.world
+    }
+
+    /// The center's place in the world square.
+    pub(crate) fn center_world(&self) -> Point<f64> {
+        let world_size = Projection::world_size(self.params.scale);
+        Point::new(0.5 - self.params.x / world_size, 0.5 - self.params.y / world_size)
+    }
+
+    /// The center's longitude, unwrapped, which tiles follow into another
+    /// world copy as the center crosses the antimeridian; 0 in a world that
+    /// doesn't wrap, which has no copies.
+    #[must_use]
+    pub fn world_copy_longitude(&self) -> f64 {
+        if self.params.world.wraps() { self.center(WrapMode::Unwrapped).longitude() } else { 0.0 }
     }
 
     /// The map's rotation, counterclockwise: the negated bearing.
@@ -523,8 +612,9 @@ impl View {
         FreeCameraOptions { position: Some(camera.position), orientation: Some(camera.orientation) }
     }
 
-    /// Where the camera's eye is: its Web Mercator point at zoom 0 (from 0
-    /// to 1 across, y south) and its altitude in meters, of the meters the
+    /// Where the camera's eye is: its point in the world square at zoom 0,
+    /// Web Mercator's or a registered projection's (from 0 to 1 across, y
+    /// south), and its altitude in meters, of the meters the
     /// view places heights in ([`center_altitude`](Self::center_altitude)).
     /// On the globe it is the point under the eye, in the world copy nearest
     /// the center, with y past 0 or 1 over a polar cap, and the eye's height
@@ -599,7 +689,7 @@ impl View {
         if !self.is_globe() {
             return self.clone();
         }
-        View::new(ViewParams { projection_transition: 0.0, ..self.params })
+        View::new(ViewParams { projection_transition: 0.0, ..self.params.clone() })
     }
 
     /// The tile-to-world matrix of a tile at the view's scale.
@@ -935,9 +1025,22 @@ impl View {
             return VerticalPerspectiveProjection::lat_lng_to_screen_coordinate(self, lat_lng, height);
         }
 
-        let pt = Projection::project(lat_lng, self.params.scale);
+        let pt = self.params.world.project(lat_lng, self.params.scale);
         let p = self.matrices.coord * DVec4::new(pt.x / TILE_SIZE_D, pt.y / TILE_SIZE_D, height, 1.0);
         (ScreenCoordinate::new(p.x / p.w, f64::from(self.params.size.height) - p.y / p.w), p)
+    }
+
+    /// The screen point, measured from the bottom edge (y up), of a place in
+    /// the world square at sea level on the flat map; zero while the size is
+    /// empty.
+    pub(crate) fn world_to_screen_coordinate(&self, world: &Point<f64>) -> ScreenCoordinate {
+        if self.params.size.is_empty() {
+            return ScreenCoordinate::new(0.0, 0.0);
+        }
+        let world_size = Projection::world_size(self.params.scale);
+        let p = self.matrices.coord
+            * DVec4::new(world.x * world_size / TILE_SIZE_D, world.y * world_size / TILE_SIZE_D, 0.0, 1.0);
+        ScreenCoordinate::new(p.x / p.w, f64::from(self.params.size.height) - p.y / p.w)
     }
 
     /// Whether the globe hides a location from the camera; a Mercator view
@@ -1046,7 +1149,30 @@ impl View {
         } else {
             self.mercator_screen_coordinate_to_tile_coordinate(point, 0, height)
         };
-        Projection::unproject(&coord.p, 1.0 / TILE_SIZE_D, wrap_mode)
+        self.params.world.unproject(&coord.p, 1.0 / TILE_SIZE_D, wrap_mode)
+    }
+
+    /// Whether the line of sight through `point`, measured from the bottom
+    /// edge (y up), meets the plane `height` meters above sea level at a
+    /// place with a location of its own ([`WorldMapping::has_lat_lng`]):
+    /// anywhere in a world that wraps and on the globe, and in a registered
+    /// projection's world not past where its converter answers, as above or
+    /// below the identity's square, which the map shows as it shows the sky.
+    pub(crate) fn has_lat_lng_at(&self, point: &ScreenCoordinate, height: f64) -> bool {
+        if self.params.world.wraps() || self.is_globe() {
+            return true;
+        }
+        self.params.world.has_lat_lng(&self.screen_coordinate_to_world_at(point, height))
+    }
+
+    /// The place in the world square where the line of sight through
+    /// `point`, measured from the bottom edge (y up), meets the plane
+    /// `height` meters above sea level on the flat map, where
+    /// [`screen_coordinate_to_lat_lng_at`](Self::screen_coordinate_to_lat_lng_at)
+    /// finds its location.
+    #[must_use]
+    pub fn screen_coordinate_to_world_at(&self, point: &ScreenCoordinate, height: f64) -> Point<f64> {
+        self.mercator_screen_coordinate_to_tile_coordinate(point, 0, height).p
     }
 
     /// The line of sight through `point`, measured from the bottom edge (y
@@ -1089,7 +1215,8 @@ impl View {
             0.0,
         );
         // A point on the screen has a LatLng unless the view holds NaN.
-        let Ok(lat_lng) = Projection::unproject(&corner.p, 1.0 / TILE_SIZE_D, WrapMode::Unwrapped) else {
+        let world = &self.params.world;
+        let Ok(lat_lng) = world.unproject(&corner.p, 1.0 / TILE_SIZE_D, WrapMode::Unwrapped) else {
             return 0.0;
         };
 
@@ -1097,7 +1224,7 @@ impl View {
         let pt = if self.is_globe() {
             Point::new(corner.p.x * scale, corner.p.y * scale)
         } else {
-            let pt = Projection::project(&lat_lng, scale);
+            let pt = world.project(&lat_lng, scale);
             Point::new(pt.x / TILE_SIZE_D, pt.y / TILE_SIZE_D)
         };
         let top_point = self.matrices.coord * DVec4::new(pt.x, pt.y, 0.0, 1.0);

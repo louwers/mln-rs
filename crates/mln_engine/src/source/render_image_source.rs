@@ -18,6 +18,7 @@ use crate::draw::context::Context;
 use crate::draw::identity::SimpleIdentity;
 use crate::draw::quads::{RasterLayoutVertex, StoredQuads};
 use crate::draw::segment::SegmentBase;
+use crate::geo::world::{WorldBox, WorldMapping};
 use crate::layer::layer_drawing::MadeFrom;
 use crate::layer::layer_type::ErasedEvaluatedLayer;
 use crate::log_target;
@@ -25,6 +26,7 @@ use crate::render::tile::{RenderTile, TileContent};
 use crate::source::render_source::{RenderSource, RenderSourceBase, RenderTileParameters, TileOrder};
 use crate::source::{ImageOf, SourceImage};
 use crate::tile::UnwrappedTileID;
+use crate::tile::tile_range::TileRange;
 use crate::tile_store::store::TileStore;
 use crate::tile_store::tile_cover::{TileCoverParameters, tile_cover, tile_cover_bounds};
 use crate::tile_store::tile_parameters::TileParameters;
@@ -160,6 +162,18 @@ impl ImageQuad {
 
 fn to_vertex_coordinate(value: f64) -> i16 {
     mln_style::math::clamp_f64(value.round(), f64::from(i16::MIN), f64::from(i16::MAX)) as i16
+}
+
+/// The tiles at `zoom` that the rectangle from `min` to `max` in the world
+/// square reaches into ([`TileRange::from_world_box`]), row by row from its
+/// top left: none for a rectangle outside the square.
+fn world_square_cover(min: TileCoordinatePoint, max: TileCoordinatePoint, zoom: u8) -> Vec<UnwrappedTileID> {
+    let tiles = TileRange::from_world_box(&WorldBox { min, max }, zoom, zoom);
+    if tiles.zoom_range.min > tiles.zoom_range.max {
+        return Vec::new();
+    }
+    let (columns, rows) = (tiles.range.min.x..=tiles.range.max.x, tiles.range.min.y..=tiles.range.max.y);
+    rows.flat_map(|y| columns.clone().map(move |x| UnwrappedTileID::new(zoom, i64::from(x), i64::from(y)))).collect()
 }
 
 // The unit square as a grid of `cells` x `cells`, textured edge to edge,
@@ -368,17 +382,28 @@ impl RenderSource for RenderImageSource {
             return;
         };
 
-        // Compute the z0 tile coordinates for the given LatLngs
+        // Compute the z0 tile coordinates for the given LatLngs, in the world
+        // the map draws in
+        let world = view.world();
         let mut ne_point: TileCoordinatePoint = Point::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
         let mut sw_point: TileCoordinatePoint = Point::new(f64::INFINITY, f64::INFINITY);
         let mut tile_coordinates: Vec<TileCoordinatePoint> = Vec::new();
         for lat_lng in &coords {
-            let point = TileCoordinate::from_lat_lng(0.0, lat_lng).p;
+            let point = match world {
+                WorldMapping::Mercator => TileCoordinate::from_lat_lng(0.0, lat_lng).p,
+                WorldMapping::Crs(_) => world.world_from_lat_lng(lat_lng),
+            };
             tile_coordinates.push(point);
             sw_point.x = if point.x < sw_point.x { point.x } else { sw_point.x };
             ne_point.x = if ne_point.x < point.x { point.x } else { ne_point.x };
             sw_point.y = if point.y < sw_point.y { point.y } else { sw_point.y };
             ne_point.y = if ne_point.y < point.y { point.y } else { ne_point.y };
+        }
+        // A corner that a registered projection has no place for leaves the
+        // image nowhere to draw.
+        if !tile_coordinates.iter().all(|point| point.x.is_finite() && point.y.is_finite()) {
+            self.base.enabled = false;
+            return;
         }
 
         // Calculate the optimum zoom level to determine the tile ids to use
@@ -396,13 +421,20 @@ impl RenderSource for RenderImageSource {
             return;
         }
 
-        let mut image_bounds = LatLngBounds::hull(coords[0], coords[1]);
-        image_bounds.extend(&coords[2]);
-        image_bounds.extend(&coords[3]);
-        let tile_cover_ids = tile_cover_bounds(&image_bounds, zoom);
+        let tile_cover_ids = if world.wraps() {
+            let mut image_bounds = LatLngBounds::hull(coords[0], coords[1]);
+            image_bounds.extend(&coords[2]);
+            image_bounds.extend(&coords[3]);
+            tile_cover_bounds(&image_bounds, zoom)
+        } else {
+            // In a registered projection, the lng/lat box of the corners can
+            // lie far from the image.
+            world_square_cover(sw_point, ne_point, zoom)
+        };
         self.tile_ids.clear();
         // The cover is empty, for example, when the image lies wholly outside
-        // the latitudes a Web Mercator map can show (beyond about ±85.05°).
+        // the latitudes a Web Mercator map can show (beyond about ±85.05°), or
+        // outside a registered projection's world square.
         if tile_cover_ids.is_empty() {
             self.base.enabled = false;
             return;
@@ -577,5 +609,21 @@ impl RenderSource for RenderImageSource {
 
     fn max_zoom(&self) -> Option<u8> {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // MapLibre Native's RenderImageSource, which finds an image's tiles in a
+    // registered projection with TileRange::fromWorldBox: the tiles that the
+    // rectangle of the corners reaches into, so that a far edge on a tile's
+    // edge takes no tile past it.
+    #[test]
+    fn a_far_edge_on_a_tile_edge_takes_no_tile_past_it() {
+        let cover = world_square_cover(Point::new(0.25, 0.4), Point::new(0.5, 0.6), 2);
+        assert_eq!(vec![UnwrappedTileID::new(2, 1, 1), UnwrappedTileID::new(2, 1, 2)], cover);
+        assert_eq!(Vec::<UnwrappedTileID>::new(), world_square_cover(Point::new(1.1, 0.4), Point::new(1.2, 0.6), 2));
     }
 }

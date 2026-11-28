@@ -13,6 +13,7 @@ use std::fmt::Write as _;
 
 use mln_engine::storage::resource::Kind;
 
+use crate::abi::{self, sized_elements};
 use crate::buffer;
 use crate::error::Error;
 use crate::generated::types::{
@@ -212,67 +213,7 @@ impl UrlPattern {
     }
 }
 
-/// A struct of the headers that leads with its `size`, in an array whose
-/// elements a caller built against later headers may make larger.
-///
-/// # Safety
-///
-/// The type is a `#[repr(C)]` bindgen struct whose first field is
-/// `size: u32`.
-unsafe trait SizedElement: Copy {}
-
-// SAFETY: bindgen structs of the headers that start with `size: u32`.
-unsafe impl SizedElement for mln_resource_route {}
-// SAFETY: as above.
-unsafe impl SizedElement for mln_http_header_rule {}
-// SAFETY: as above.
-unsafe impl SizedElement for mln_resource_transform_rule {}
-
-const _: () = {
-    assert!(core::mem::offset_of!(mln_resource_route, size) == 0);
-    assert!(core::mem::offset_of!(mln_http_header_rule, size) == 0);
-    assert!(core::mem::offset_of!(mln_resource_transform_rule, size) == 0);
-};
-
-/// Copies a caller's array of `count` sized elements, stepping by each one's
-/// declared size. An element smaller than this library's struct, or whose
-/// size would misalign the next, is rejected.
-///
-/// # Safety
-///
-/// `elements` is null, or points to `count` readable elements, each of the
-/// size it declares.
-unsafe fn sized_elements<T: SizedElement>(
-    elements: *const T,
-    count: usize,
-    what: &str,
-    plural: &str,
-    count_name: &str,
-) -> Result<Vec<T>, Error> {
-    if count == 0 {
-        return Ok(Vec::new());
-    }
-    if elements.is_null() {
-        return Err(Error::invalid_argument(format!("{plural} must not be null with a nonzero {count_name}")));
-    }
-    let mut copied = Vec::with_capacity(count.min(1024));
-    let mut cursor = elements;
-    for index in 0..count {
-        // SAFETY: the caller's contract makes the element readable, the
-        // checks on the sizes before keep it aligned, and it starts with its
-        // `size: u32`.
-        let size = unsafe { cursor.cast::<u32>().read() } as usize;
-        if size < size_of::<T>() || !size.is_multiple_of(align_of::<T>()) {
-            return Err(Error::invalid_argument(format!("{what} {index} has an invalid size")));
-        }
-        // SAFETY: as above, and the element holds at least a `T`.
-        copied.push(unsafe { cursor.read() });
-        // SAFETY: the next element starts `size` bytes on, within the
-        // caller's array, or just past its end after the last.
-        cursor = unsafe { cursor.byte_add(size) };
-    }
-    Ok(copied)
-}
+abi::sized_element!(mln_resource_route, mln_http_header_rule, mln_resource_transform_rule);
 
 /// The items of a caller's plain array.
 ///

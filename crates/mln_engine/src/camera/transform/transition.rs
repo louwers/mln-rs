@@ -19,7 +19,6 @@ use crate::camera::{
     VerticalPerspectiveProjection,
 };
 use crate::geo::ScreenCoordinate;
-use crate::geo::projection::Projection;
 use crate::log_target;
 use crate::map::events::{CameraChange, CameraChangeMode, CameraChangeSource};
 
@@ -293,11 +292,11 @@ fn anchored_end(
     let view = state.view();
     let center = view.center(WrapMode::Unwrapped);
     let on_ground = view.line_of_sight(anchor).and_then(|(near, far)| {
-        let world = Projection::project(&center, 1.0 / TILE_SIZE_D);
+        let world = view.world().project(&center, 1.0 / TILE_SIZE_D);
         let at = DVec3::new(world.x, world.y, view.center_altitude());
         view.ground_along(at - (far - near), at + (far - near), ground)
     });
-    on_ground.map_or(center, |hit| hit.location(WrapMode::Unwrapped)).wrapped()
+    view.world().wrap(on_ground.map_or(center, |hit| hit.location(view.world(), WrapMode::Unwrapped)))
 }
 
 /// A command made of several transitions, which ends once with the
@@ -343,6 +342,11 @@ impl Transform {
         if let Some(a) = anchor.as_mut() {
             anchor_height = self.anchor_height(a, a);
             a.y = f64::from(self.state.view().size().height) - a.y;
+        }
+        // An anchor past a registered projection's edge holds nothing, and
+        // the command turns around the center, as GL JS's gestures do there.
+        anchor = anchor.filter(|a| self.state.view().has_lat_lng_at(a, anchor_height));
+        if let Some(a) = anchor.as_mut() {
             // An anchor that has no LatLng (NaN or infinite) is logged and
             // ignored.
             match self.state.view().screen_coordinate_to_lat_lng_at(a, anchor_height, WrapMode::Unwrapped) {

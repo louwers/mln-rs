@@ -34,6 +34,8 @@ mln_engine = { workspace = true, features = ["font-face-shaper"] }
 mln_runtime = { workspace = true, features = ["default", "webgpu"] }
 # The responses of the offline mode's resource provider.
 mln_style.workspace = true
+# The Arctic style's projection, which the app registers.
+mln_example_projections = { package = "mln-rs-example-projections", path = "../projections" }
 mln_webgpu.workspace = true
 parking_lot.workspace = true
 serde_json.workspace = true

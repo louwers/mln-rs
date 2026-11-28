@@ -378,7 +378,7 @@ impl RenderOrchestrator {
         // The sources' tiles are in other world copies once the center has
         // crossed the antimeridian (`SourceTiles::handle_wrap_jump`), and
         // the layers' draws go with them.
-        let longitude = update_parameters.view.center(mln_style::geo::WrapMode::Unwrapped).longitude() as f32;
+        let longitude = update_parameters.view.world_copy_longitude() as f32;
         let wrap_delta = ((longitude - self.longitude) / 360.0).round() as i16;
         self.longitude = longitude;
         if wrap_delta != 0 {
@@ -1455,6 +1455,7 @@ impl RenderOrchestrator {
                 global_state: self.global_state.as_deref(),
                 tile_id: &query_data.tile_id,
                 feature_state: self.tile_store.source(query_data.source).map(|source| &source.info.feature_state),
+                world: self.view.world(),
             };
             let bucket_symbols =
                 feature_index.lookup_symbol_features(&symbol_features, &selection, &query_data.feature_sort_order)?;
@@ -1614,7 +1615,7 @@ impl RenderOrchestrator {
             return Ok(Vec::new());
         };
 
-        source.query_source_features(options, self.global_state.as_deref())
+        source.query_source_features(options, self.global_state.as_deref(), self.view.world())
     }
 
     /// Queries a feature extension of the source `source_id`; a null value

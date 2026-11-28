@@ -10,6 +10,7 @@ use crate::camera::vertical_perspective_projection::VerticalPerspectiveProjectio
 use crate::camera::{Elevation, View};
 use crate::geo::ScreenCoordinate;
 use crate::geo::projection::Projection;
+use crate::geo::world::WorldMapping;
 
 /// How far apart, in pixels at the zoom across the ground, a ray samples the
 /// ground, and the most samples it takes (GL JS's `raycastTerrain`).
@@ -31,9 +32,10 @@ const BAND_PADDING: f64 = 10.0;
 /// A point of the ground a frame drew.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct GroundHit {
-    /// Its Web Mercator point at zoom 0 (from 0 to 1 across, y south), with
-    /// x in the world copy the view shows it in. On a globe's polar cap y is
-    /// past 0 or 1.
+    /// Its point in the map's world square at zoom 0, Web Mercator's or a
+    /// registered projection's (from 0 to 1 across, y south), with x in the
+    /// world copy the view shows it in. On a globe's polar cap y is past 0
+    /// or 1.
     pub(crate) world: DVec2,
     /// The height of the surface there, in meters with the terrain's
     /// exaggeration ([`Elevation::surface_at`]).
@@ -41,13 +43,15 @@ pub(crate) struct GroundHit {
 }
 
 impl GroundHit {
-    /// Its location, in the world copy of [`world`](Self::world) unless
-    /// `wrap_mode` wraps it.
+    /// Its location where lng/lat maps to the world square as `mapping`,
+    /// the map's, maps it: in the world copy of [`world`](Self::world)
+    /// unless `wrap_mode` wraps it, which a registered projection's world
+    /// doesn't.
     #[must_use]
-    pub(crate) fn location(&self, wrap_mode: WrapMode) -> LatLng {
+    pub(crate) fn location(&self, mapping: &WorldMapping, wrap_mode: WrapMode) -> LatLng {
         let world = Point::new(self.world.x, self.world.y);
         // A finite point of the world always has a location.
-        Projection::unproject(&world, 1.0 / TILE_SIZE_D, wrap_mode).unwrap_or_default()
+        mapping.unproject(&world, 1.0 / TILE_SIZE_D, wrap_mode).unwrap_or_default()
     }
 }
 
@@ -90,7 +94,7 @@ impl View {
         wrap_mode: WrapMode,
     ) -> Result<LatLng, Error> {
         match self.ground_under(point, ground) {
-            Some(hit) => Ok(hit.location(wrap_mode)),
+            Some(hit) => Ok(hit.location(self.world(), wrap_mode)),
             None => self.screen_coordinate_to_lat_lng_at(point, self.center_altitude(), wrap_mode),
         }
     }
@@ -120,7 +124,7 @@ impl View {
         if self.is_globe() && near.latitude().abs() > LATITUDE_MAX {
             return Some(0.0);
         }
-        let world = Projection::project(&near, 1.0 / TILE_SIZE_D);
+        let world = self.world().project(&near, 1.0 / TILE_SIZE_D);
         ground.surface_at(DVec2::new(world.x, world.y))
     }
 
