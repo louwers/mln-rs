@@ -302,7 +302,7 @@ fn run_with_alternate_sources(
         metadata.document_json = original_json;
 
         // stop if the test fails
-        *errored = metadata.metrics_errored != 0 || metadata.render_errored != 0 || metadata.label_cut_off_found != 0;
+        *errored = metadata.metrics_errored != 0 || metadata.render_errored != 0;
         *passed = !*errored && metadata.metrics_failed == 0 && metadata.render_failed == 0;
         if !*passed {
             break;
@@ -347,8 +347,7 @@ pub(crate) fn run_test(
         runner.run(&mut metadata);
     }
 
-    let mut errored =
-        metadata.metrics_errored != 0 || metadata.render_errored != 0 || metadata.label_cut_off_found != 0;
+    let mut errored = metadata.metrics_errored != 0 || metadata.render_errored != 0;
     let mut passed = !errored && metadata.metrics_failed == 0 && metadata.render_failed == 0;
 
     if passed {

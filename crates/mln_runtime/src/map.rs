@@ -809,6 +809,12 @@ impl Map {
         self.shared.tile_cache_enabled
     }
 
+    /// How many worker instances behind the worker codec the tile workers
+    /// of a session's renderer run in, or 0 for the runtime's pool.
+    pub(crate) fn tile_worker_instances(&self) -> usize {
+        self.shared.runtime.tile_worker_instances.load(Ordering::SeqCst)
+    }
+
     /// How the map's renderers draw glyphs from local fonts: with system
     /// fonts, from the fonts the system chooses, or in the browser, which
     /// has no font files, from the browser's canvas, falling back to its

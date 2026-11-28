@@ -57,6 +57,9 @@ mod render;
 mod resources;
 mod runtime;
 mod style;
+#[cfg(all(feature = "testing", not(target_family = "wasm")))]
+#[doc(hidden)]
+pub mod testing;
 #[cfg(target_family = "wasm")]
 pub mod web;
 

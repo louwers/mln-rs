@@ -1,7 +1,7 @@
 // Runs the runner as src/main.rs would: from the package directory (where
 // `cargo test` runs the tests), with the manifest for the OS and backend, and
 // the HTML report and the actual/diff images in <name> in the test output
-// directory (mln_headless::test_output_dir). Fill
+// directory (render_test::test_output_dir). Fill
 // outlines are 2 px wide, as C++ draws them on OpenGL, so OpenGL, Vulkan and
 // WebGPU take C++'s OpenGL or Vulkan expectations; WebGPU on a CPU
 // rasterizer and D3D12 draw them 1 px wide (ignores/rust-port-1px-outlines.json):
@@ -42,7 +42,7 @@ pub(crate) fn run(name: &str, args: &[&str], factory: Option<ImplFactory>) -> i3
             _ => "manifests/linux-wgpu.json",
         }
     };
-    let output = mln_headless::test_output_dir(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let output = render_test::test_output_dir(env!("CARGO_TARGET_TMPDIR")).join(name);
     let jobs = std::env::var("MLN_RENDER_TEST_JOBS").unwrap_or_else(|_| "0".to_string());
     let mut argv =
         vec!["render-test", "--manifestPath", manifest, "--output", output.to_str().unwrap(), "--jobs", &jobs];

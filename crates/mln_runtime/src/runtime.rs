@@ -122,6 +122,10 @@ pub(crate) struct RuntimeShared {
     /// Where the runtime's background work runs: its maps', and their
     /// render sessions'.
     pub(crate) pool: Pool,
+    /// How many worker instances behind the worker codec the tile workers
+    /// of the renderers that sessions make from now on run in, or 0 for
+    /// none: they run on `pool` (`testing::set_tile_worker_codec`).
+    pub(crate) tile_worker_instances: AtomicUsize,
     /// The runtime's thread, which the drop waits for after the shutdown
     /// unless a release or disposal detached it, except in the browser,
     /// where the thread is the host's.
@@ -689,6 +693,7 @@ impl Runtime {
                 font_face_engine: font_face_engine(),
                 registry,
                 pool,
+                tile_worker_instances: AtomicUsize::new(0),
                 thread_end,
             }),
         })

@@ -1,8 +1,8 @@
 // C++ `TestRunner::Impl` holds the `HeadlessFrontend`,
 // `FileSource` and `Map` of one map configuration, and the operations reach
-// them through `TestContext::getFrontend()` / `getMap()`. Here that pair is
-// the `TestRunnerImpl` trait: map.rs implements it over `mln_engine::map::Map` +
-// `mln_headless::HeadlessFrontend`, the tests over a mock map, and
+// them through `TestContext::getFrontend()` / `getMap()`. Here that is the
+// `TestRunnerImpl` trait: map.rs implements it over an `mln_runtime` map and
+// its offscreen render session, the tests over a mock map, and
 // `--self-check` replaces rendering with the test's expected image.
 
 use std::fmt::Write;
@@ -11,8 +11,6 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use geometry::Point;
-use mln_engine::exec::pool::Pool;
-use mln_engine::exec::queue::Queue;
 use mln_engine::image::{decode_image, encode_png};
 use mln_engine::tile::feature::Feature;
 use mln_style::bitmap::PremultipliedImage;
@@ -91,19 +89,19 @@ pub(crate) fn in_assets_suite(style_path: &str, asset_path: &str) -> bool {
         .is_some_and(|suite| std::path::Path::new(style_path).starts_with(suite))
 }
 
-/// A frontend, file source and map for one map mode, pixel ratio and
+/// A file source, and a map with its render session, for one map mode, pixel ratio and
 /// cross-source collision setting, seen through the calls the runner and the
 /// operations make. The provided methods return `MapError::Unsupported`;
 /// implementations override what they support.
 pub trait TestRunnerImpl {
     /// Prepares the map for a test: clears the renderer's data, sets the
-    /// frontend's and the map's size, the map's projection mode (axonometric,
+    /// session's and the map's size, the map's projection mode (axonometric,
     /// x and y skew) from `metadata`, and loads its style.
     fn reset_context(&mut self, metadata: &TestMetadata) -> Result<(), MapError>;
 
     fn jump_to_default_camera(&mut self) -> Result<(), MapError>;
 
-    /// `frontend.render(map).image`; `Err` carries the exception message.
+    /// A still image of the map; `Err` carries why it failed.
     fn render(&mut self) -> Result<PremultipliedImage, String>;
 
     /// Port-only: `map.dumpDebugLogs()` and the renderer's, for a test that
@@ -171,12 +169,12 @@ pub trait TestRunnerImpl {
     fn set_layer_property(&mut self, _layer: &str, _name: &str, _value: &serde_json::Value) -> Result<(), MapError> {
         unsupported("Layer::setProperty")
     }
-    fn set_global_state_property(&mut self, _name: &str, _value: &Value) -> Result<(), MapError> {
+    /// Sets the global state property `name` to the JSON value `value`.
+    fn set_global_state_property(&mut self, _name: &str, _value: &serde_json::Value) -> Result<(), MapError> {
         unsupported("Style::setGlobalStateProperty")
     }
-    /// `frontend.render(map)` (an exception makes the operation return
-    /// false), then `frontend.getRenderer()->setFeatureState(sourceID,
-    /// sourceLayer, featureID, state)`.
+    /// Renders a still image, as C++ does (a failure makes the operation
+    /// return false), then sets the feature's state.
     fn set_feature_state(
         &mut self,
         _source_id: &str,
@@ -186,7 +184,7 @@ pub trait TestRunnerImpl {
     ) -> Result<bool, MapError> {
         unsupported("setFeatureState operation (Renderer feature state)")
     }
-    /// `frontend.render(map)`, then `getRenderer()->getFeatureState(..)`.
+    /// Renders a still image, then reads the feature's state.
     fn get_feature_state(
         &mut self,
         _source_id: &str,
@@ -195,7 +193,7 @@ pub trait TestRunnerImpl {
     ) -> Result<bool, MapError> {
         unsupported("getFeatureState operation (Renderer feature state)")
     }
-    /// `frontend.render(map)`, then `getRenderer()->removeFeatureState(..)`.
+    /// Renders a still image, then removes the feature's state.
     fn remove_feature_state(
         &mut self,
         _source_id: &str,
@@ -205,7 +203,7 @@ pub trait TestRunnerImpl {
     ) -> Result<bool, MapError> {
         unsupported("removeFeatureState operation (Renderer feature state)")
     }
-    /// The `sleep` operation: run the runner's queue for `duration`.
+    /// The `sleep` operation: wait for `duration` while the map runs.
     fn sleep(&mut self, _duration: Duration) -> Result<(), MapError> {
         unsupported("sleep operation")
     }
@@ -231,10 +229,6 @@ pub trait TestRunnerImpl {
     fn tile_cover_for_camera(&mut self, _camera: &CameraOptions, _zoom: u8) -> Result<Vec<TileId>, MapError> {
         unsupported("Map::latLngBoundsForCamera + util::tileCover")
     }
-    fn collect_placed_symbol_data(&mut self, _enable: bool) {}
-    fn get_placed_symbols_data(&mut self) -> Vec<PlacedSymbol> {
-        Vec::new()
-    }
     /// Queries the rendered features at a query test's point or box.
     fn query_rendered_features(
         &mut self,
@@ -243,20 +237,6 @@ pub trait TestRunnerImpl {
     ) -> Result<Vec<Feature>, MapError> {
         unsupported("Renderer::queryRenderedFeatures")
     }
-}
-
-/// A placed symbol's data, boxes as minX, minY, maxX, maxY.
-#[derive(Clone, Debug, PartialEq)]
-pub struct PlacedSymbol {
-    /// Contents of the label
-    pub(crate) key: String,
-    pub(crate) text_collision_box: Option<[f32; 4]>,
-    pub(crate) icon_collision_box: Option<[f32; 4]>,
-    pub(crate) text_placed: bool,
-    pub(crate) icon_placed: bool,
-    pub(crate) intersects_tile_border: bool,
-    pub(crate) viewport_padding: f32,
-    pub(crate) layer: String,
 }
 
 /// An `UnwrappedTileID` of the tile-mode cover.
@@ -275,21 +255,18 @@ pub enum QueryGeometry {
     Box(ScreenBox),
 }
 
-/// Creates the `TestRunner::Impl` for a test: `HeadlessFrontend(size,
-/// pixelRatio, swapBehavior(mapMode))`, the file source, and
-/// `Map(frontend, MapOptions().withMapMode(..).withSize(..)
-/// .withPixelRatio(..).withCrossSourceCollisions(..), resourceOptions)`, plus
-/// `map.setBounds(BoundOptions().withMaxPitch(..))` when `maxPitch` is set.
-pub type ImplFactory = Box<
-    dyn Fn(&TestMetadata, &ResourceOptions, &ImplOptions, &Queue<()>, &Pool) -> Result<Box<dyn TestRunnerImpl>, String>,
->;
+/// Creates the `TestRunner::Impl` for a test: the file source, and a map of
+/// the test's map mode, size, pixel ratio and cross-source collisions with a
+/// render session that draws it, plus the `maxPitch` bound when it is set.
+pub type ImplFactory =
+    Box<dyn Fn(&TestMetadata, &ResourceOptions, &ImplOptions) -> Result<Box<dyn TestRunnerImpl>, String>>;
 
 /// Port-only: how the runner's options that C++ does not have set up a map.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ImplOptions {
     /// Set by `--tileWorkerCodec=<n>`: the map's tile workers are in n
-    /// worker instances, reached through the worker codec (0: on the map's
-    /// thread pool, as in C++).
+    /// worker instances, reached through the worker codec (0: on the
+    /// runtime's thread pool, as in C++).
     pub(crate) tile_worker_codec: usize,
 }
 
@@ -365,11 +342,6 @@ pub(crate) struct TestRunner {
     watchdog: Option<crate::watchdog::Watchdog>,
     /// What the factory sets up the maps with.
     impl_options: ImplOptions,
-    /// The queue of the runner's thread, which its frontends run while they
-    /// wait.
-    queue: Queue<()>,
-    /// Where the runner's maps run their background work.
-    pool: Pool,
 }
 
 impl TestRunner {
@@ -390,8 +362,6 @@ impl TestRunner {
             output_path,
             watchdog: None,
             impl_options: ImplOptions::default(),
-            queue: Queue::new(),
-            pool: Pool::new(4),
         }
     }
 
@@ -868,28 +838,12 @@ impl TestRunner {
         check_gfx(result_metadata);
     }
 
-    pub(crate) fn append_label_cut_off_results(
-        result_metadata: &mut TestMetadata,
-        cut_off_labels_report: &str,
-        duplications_report: &str,
-    ) {
-        if result_metadata.label_cut_off_found != 0 {
-            // Append label cut-off statistics.
-            result_metadata.error_message += "\n Label cut-offs:";
-            result_metadata.error_message += cut_off_labels_report;
-            if result_metadata.duplications_count != 0 {
-                result_metadata.error_message += "\n\n Label duplications:";
-                result_metadata.error_message += duplications_report;
-            }
-        }
-    }
-
     pub(crate) fn run(&mut self, metadata: &mut TestMetadata) {
         ProxyFileSource::set_tracking_active(false);
 
         let mut ctx = TestContext::new(metadata);
         // The per-test time limit, stopped when `run` returns.
-        let _watchdog_guard = self.watchdog.as_ref().map(|watchdog| watchdog.arm(&self.queue));
+        let _watchdog_guard = self.watchdog.as_ref().map(crate::watchdog::Watchdog::arm);
 
         let operations = match parse_test_operations(ctx.metadata) {
             Ok(operations) => operations,
@@ -919,9 +873,6 @@ impl TestRunner {
             u32::from(assets_only)
         );
 
-        let mut cut_off_labels_report = String::new();
-        let mut duplications_report = String::new();
-
         let result_image = if self.self_check {
             // The operations parsed above don't run: there is no map.
             self_check_image(ctx.metadata)
@@ -937,9 +888,8 @@ impl TestRunner {
                     asset_path: asset_path.to_string(),
                     assets_only,
                 };
-                let created = catch_unwind(AssertUnwindSafe(|| {
-                    factory(ctx.metadata, &resource_options, &self.impl_options, &self.queue, &self.pool)
-                }));
+                let created =
+                    catch_unwind(AssertUnwindSafe(|| factory(ctx.metadata, &resource_options, &self.impl_options)));
                 match created {
                     Ok(Ok(runner_impl)) => {
                         self.maps.insert(key.clone(), runner_impl);
@@ -958,12 +908,11 @@ impl TestRunner {
             }
 
             ctx.runner_impl = Some(self.maps.get_mut(&key).expect("inserted above").as_mut());
-            // C++ catches exceptions only around frontend.render(); a Rust
-            // panic anywhere in the map code errors this test instead of
+            // C++ catches exceptions only around frontend.render(). A panic
+            // here, such as a test's timeout or a map whose runtime stopped
+            // after a panic in the library, errors this test instead of
             // ending the run, and drops the map, which may be inconsistent.
-            let rendered = catch_unwind(AssertUnwindSafe(|| {
-                render_with_map(&mut ctx, &operations, &mut cut_off_labels_report, &mut duplications_report)
-            }));
+            let rendered = catch_unwind(AssertUnwindSafe(|| render_with_map(&mut ctx, &operations)));
             match rendered {
                 Ok(image) => image,
                 Err(panic) => {
@@ -984,7 +933,7 @@ impl TestRunner {
             }
         }
 
-        // C++ queries after the operations, on the frontend's renderer.
+        // C++ queries after the operations, the features of the last frame.
         let mut features = Vec::new();
         if !ctx.metadata.render_test && ctx.runner_impl.is_some() {
             // `queryGeometry[0]` and `[1]` are numbers: a point; else a box.
@@ -1028,7 +977,6 @@ impl TestRunner {
             if !metadata.ignore_probing {
                 Self::check_probing_results(metadata);
             }
-            Self::append_label_cut_off_results(metadata, &cut_off_labels_report, &duplications_report);
             self.check_render_test_results(&result_image, metadata);
         } else if metadata.render_errored == 0 {
             self.check_query_test_results(&result_image, &features, metadata);
@@ -1038,19 +986,14 @@ impl TestRunner {
 
 /// The map part of `TestRunner::run`: `resetContext`, the default camera,
 /// then `runTest` (or, in tile mode, one `runTest` per covering tile).
-fn render_with_map(
-    ctx: &mut TestContext<'_>,
-    operations: &[TestOperation],
-    cut_off_labels_report: &mut String,
-    duplications_report: &mut String,
-) -> PremultipliedImage {
+fn render_with_map(ctx: &mut TestContext<'_>, operations: &[TestOperation]) -> PremultipliedImage {
     let runner_impl = &mut **ctx.runner_impl.as_mut().expect("runnerImpl");
     if let Err(error) = runner_impl.reset_context(ctx.metadata) {
         return map_error_image(ctx, error);
     }
 
     if ctx.metadata.map_mode == MapMode::Tile {
-        return render_tiles(ctx, operations, cut_off_labels_report, duplications_report);
+        return render_tiles(ctx, operations);
     }
 
     if let Err(error) = ctx.get_map().jump_to_default_camera() {
@@ -1084,26 +1027,13 @@ fn get_image_tile_offset(dims: &std::collections::BTreeSet<u32>, dim: u32, pixel
     }
 }
 
-fn tile_id_string(tile_id: &TileId) -> String {
-    format!("{}/{}/{}{}{}", tile_id.z, tile_id.x, tile_id.y, if tile_id.wrap >= 0 { "+" } else { "" }, tile_id.wrap)
-}
-
-struct SymbolLocationAndStatus {
-    tile_id: TileId,
-    location: [f32; 4],
-    placed: bool,
-    is_icon: bool,
-}
-
 /// The `MapMode::Tile` branch of `TestRunner::run`: one `runTest` per tile
 /// covering the default camera's view, each centered on its tile, copied
-/// into one image, with the label cut-off and duplication reports.
-fn render_tiles(
-    ctx: &mut TestContext<'_>,
-    operations: &[TestOperation],
-    cut_off_labels_report: &mut String,
-    duplications_report: &mut String,
-) -> PremultipliedImage {
+/// into one image. C++ also reports the labels that a tile border cuts off
+/// from the renderer's placed-symbol debug data, which the runtime doesn't
+/// expose: the stitched image shows a cut-off label against the expected
+/// one.
+fn render_tiles(ctx: &mut TestContext<'_>, operations: &[TestOperation]) -> PremultipliedImage {
     let camera = match ctx.get_map().default_camera() {
         Ok(camera) => camera,
         Err(error) => return map_error_image(ctx, error),
@@ -1126,8 +1056,6 @@ fn render_tiles(
     let pixel_ratio = ctx.metadata.pixel_ratio;
     let tile_screen_size = get_tile_screen_pixel_size(pixel_ratio);
 
-    let mut symbol_index: HashMap<String, Vec<SymbolLocationAndStatus>> = HashMap::default();
-
     let mut result = PremultipliedImage::new(Size::new(
         x_dims.len() as u32 * tile_screen_size,
         y_dims.len() as u32 * tile_screen_size,
@@ -1140,7 +1068,6 @@ fn render_tiles(
         if let Err(error) = reset {
             return map_error_image(ctx, error);
         }
-        ctx.get_map().collect_placed_symbol_data(true);
         let camera_for_tile = CameraOptions { center: Some(get_tile_center_coordinates(tile_id)), ..camera.clone() };
         if let Err(error) = ctx.get_map().jump_to(&camera_for_tile) {
             return map_error_image(ctx, error);
@@ -1156,72 +1083,6 @@ fn render_tiles(
         }
         let x_offset = get_image_tile_offset(&x_dims, tile_id.x, pixel_ratio);
         let y_offset = get_image_tile_offset(&y_dims, tile_id.y, pixel_ratio);
-
-        let placed_symbols = ctx.get_map().get_placed_symbols_data();
-
-        let mut find_cut_offs = |metadata: &mut TestMetadata,
-                                 placed_symbol: &PlacedSymbol,
-                                 mut bbox: [f32; 4],
-                                 placed: bool,
-                                 is_icon: bool| {
-            // box.min.x += xOffset - viewportPadding (unsigned + float)
-            let dx = x_offset as f32 - placed_symbol.viewport_padding;
-            let dy = y_offset as f32 - placed_symbol.viewport_padding;
-            bbox[0] += dx;
-            bbox[2] += dx;
-            bbox[1] += dy;
-            bbox[3] += dy;
-
-            let symbols = symbol_index.entry(placed_symbol.key.clone()).or_default();
-            let Some(it) = symbols.iter().find(|a| a.is_icon == is_icon && a.location == bbox) else {
-                symbols.push(SymbolLocationAndStatus { tile_id: *tile_id, location: bbox, placed, is_icon });
-                return;
-            };
-            let key = &placed_symbol.key;
-            let kind = if is_icon { "icon" } else { "text" };
-            let location = format!(
-                "(({}, {}), ({}, {}))",
-                ostream_float(f64::from(bbox[0])),
-                ostream_float(f64::from(bbox[1])),
-                ostream_float(f64::from(bbox[2])),
-                ostream_float(f64::from(bbox[3]))
-            );
-            if *tile_id == it.tile_id && is_icon == it.is_icon {
-                metadata.duplications_count += 1;
-                let _ = write!(
-                    duplications_report,
-                    "\n{}. \"{key}\" {kind} {location} from layer: {} at {}",
-                    metadata.duplications_count,
-                    placed_symbol.layer,
-                    tile_id_string(tile_id)
-                );
-                return;
-            }
-            if it.placed != placed && is_icon == it.is_icon {
-                metadata.label_cut_off_found += 1;
-                let _ = write!(
-                    cut_off_labels_report,
-                    "\n{}. \"{key}\" {kind} {location} from layer: {}{}{} and{}{}",
-                    metadata.label_cut_off_found,
-                    placed_symbol.layer,
-                    if placed { " is placed at " } else { " is not placed at " },
-                    tile_id_string(tile_id),
-                    if it.placed { " placed at " } else { " not placed at " },
-                    tile_id_string(&it.tile_id)
-                );
-            }
-        };
-
-        for placed_symbol in &placed_symbols {
-            if placed_symbol.intersects_tile_border {
-                if let Some(text_box) = placed_symbol.text_collision_box {
-                    find_cut_offs(ctx.metadata, placed_symbol, text_box, placed_symbol.text_placed, false);
-                }
-                if let Some(icon_box) = placed_symbol.icon_collision_box {
-                    find_cut_offs(ctx.metadata, placed_symbol, icon_box, placed_symbol.icon_placed, true);
-                }
-            }
-        }
 
         let size = result_for_tile.size;
         if let Err(e) = PremultipliedImage::copy(

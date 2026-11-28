@@ -45,6 +45,9 @@ bench = [
   "mln_d3d12?/bench",
   "mln_mtl?/bench",
 ]
+# `testing`, the settings of the test tools (tools/render-test) that no host
+# has a use for. Not API: hidden from the documentation.
+testing = []
 
 [dependencies]
 geo-types.workspace = true

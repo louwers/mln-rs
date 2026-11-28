@@ -17,7 +17,7 @@ fn self_check(name: &str, jobs: usize, worker_program: &Path) -> (RunResult, Str
     std::env::set_current_dir(&package_dir).unwrap_or_else(|e| panic!("chdir {}: {e}", package_dir.display()));
     let manifest =
         if cfg!(target_vendor = "apple") { "manifests/macos-wgpu.json" } else { "manifests/linux-wgpu.json" };
-    let output = mln_headless::test_output_dir(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let output = render_test::test_output_dir(env!("CARGO_TARGET_TMPDIR")).join(name);
     let args = [
         "render-test",
         "--manifestPath",

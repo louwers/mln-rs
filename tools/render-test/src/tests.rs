@@ -617,15 +617,9 @@ impl Suite {
 }
 
 fn mock_factory() -> ImplFactory {
-    Box::new(
-        |_metadata: &TestMetadata,
-         _options: &ResourceOptions,
-         _impl_options: &ImplOptions,
-         _: &mln_engine::exec::queue::Queue<()>,
-         _: &mln_engine::exec::pool::Pool| {
-            Ok(Box::new(MockMap::new(Rc::new(RefCell::new(Vec::new())), [0, 0, 0, 0])))
-        },
-    )
+    Box::new(|_metadata: &TestMetadata, _options: &ResourceOptions, _impl_options: &ImplOptions| {
+        Ok(Box::new(MockMap::new(Rc::new(RefCell::new(Vec::new())), [0, 0, 0, 0])))
+    })
 }
 
 fn status<'a>(result: &'a RunResult, id: &str) -> &'a str {

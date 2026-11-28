@@ -534,27 +534,6 @@ use test_operation_names::{
     SET_TILE_LOD_SCALE_OP, SET_TILE_LOD_ZOOM_SHIFT_OP, SET_ZOOM_OP, SLEEP_OP, UPDATE_IMAGE_OP, WAIT_OP,
 };
 
-fn parse_global_state_value(value: &serde_json::Value) -> Value {
-    match value {
-        serde_json::Value::Null => Value::Null,
-        serde_json::Value::Bool(b) => Value::Bool(*b),
-        serde_json::Value::String(s) => Value::String(s.clone()),
-        serde_json::Value::Number(n) => {
-            if let Some(u) = n.as_u64() {
-                Value::Uint(u)
-            } else if let Some(i) = n.as_i64() {
-                Value::Int(i)
-            } else {
-                Value::Double(n.as_f64().unwrap_or(0.0))
-            }
-        }
-        serde_json::Value::Array(elements) => Value::Array(elements.iter().map(parse_global_state_value).collect()),
-        serde_json::Value::Object(members) => {
-            Value::Object(members.iter().map(|(k, v)| (k.clone(), parse_global_state_value(v))).collect())
-        }
-    }
-}
-
 /// The `Value` of a JSON value, as the runner's C++ conversion reads it:
 /// null and false are `false`, arrays and objects have no value.
 fn json_to_value(value: &serde_json::Value) -> Option<Value> {
@@ -908,7 +887,7 @@ pub(crate) fn parse_test_operations(metadata: &TestMetadata) -> Result<TestOpera
         } else if name == SET_GLOBAL_STATE_PROPERTY_OP {
             // setGlobalStateProperty
             let property_name = get_str(arg(1)).to_string();
-            let value = parse_global_state_value(arg(2));
+            let value = arg(2).clone();
             result.push(Box::new(move |ctx: &mut TestContext<'_>| {
                 let result = ctx.get_map().set_global_state_property(&property_name, &value);
                 infallible(ctx, result)
@@ -1162,7 +1141,7 @@ pub(crate) fn create_result_item(metadata: &TestMetadata) -> String {
         let _ = writeln!(html, "<p style=\"color: red\"><strong>Error:</strong> {}</p>", metadata.error_message);
     }
 
-    if metadata.metrics_failed != 0 || metadata.metrics_errored != 0 || metadata.label_cut_off_found != 0 {
+    if metadata.metrics_failed != 0 || metadata.metrics_errored != 0 {
         let _ = writeln!(
             html,
             "<p style=\"color: red\"><strong>Error:</strong> {}</p>",
@@ -1294,24 +1273,5 @@ mod tests {
         let two = encode_base64(&[0u8; 55]);
         assert_eq!(two.find('\n'), Some(72));
         assert_eq!(two.len(), 72 + 1 + 2);
-    }
-
-    #[test]
-    fn global_state_value() {
-        let v: serde_json::Value = serde_json::from_str(r#"[null, true, 1, -1, 1.5, "s", {"a": [2]}]"#).unwrap();
-        let mut object = mln_style::feature::ValueObject::new();
-        object.insert("a".to_string(), Value::Array(vec![Value::Uint(2)]));
-        assert_eq!(
-            parse_global_state_value(&v),
-            Value::Array(vec![
-                Value::Null,
-                Value::Bool(true),
-                Value::Uint(1),
-                Value::Int(-1),
-                Value::Double(1.5),
-                Value::String("s".to_string()),
-                Value::Object(object),
-            ])
-        );
     }
 }

@@ -933,6 +933,7 @@ fn attach_unlocked<R>(
                 font_face_engine: map.font_face_engine(),
                 registry: Arc::clone(map.registry()),
                 tile_cache_enabled: map.tile_cache_enabled(),
+                tile_worker_instances: map.tile_worker_instances(),
                 local_glyphs: map.local_glyphs(),
                 failure: None,
                 pool: map.pool(),
