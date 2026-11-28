@@ -23,7 +23,7 @@ globalThis.Worker = class extends NativeWorker {
   }
 };
 
-const glue = await import(`${pkg}/maplibre_native_c.js`);
+const glue = await import(`${pkg}/index.js`);
 const wasm = await glue.default();
 // A panic logs its message before it aborts the instance, which fails the
 // check.

@@ -86,8 +86,6 @@ pub(crate) unsafe extern "C" fn mln_runtime_create(
         };
         // SAFETY: the caller's contract.
         let out_runtime = unsafe { handles::out_handle(out_runtime, "out_runtime") }?;
-        #[cfg(target_family = "wasm")]
-        crate::web::set_defaults();
         // Before the runtime's threads can call the host.
         crate::process_exit::watch();
         let runtime = Runtime::with_registry(&options, crate::registry::registry())?;
