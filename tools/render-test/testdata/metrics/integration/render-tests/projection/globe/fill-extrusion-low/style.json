@@ -1,0 +1,114 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 256,
+      "height": 256
+    }
+  },
+  "center": [
+    0,
+    45
+  ],
+  "zoom": 4,
+  "projection": {
+    "type": "globe"
+  },
+  "sources": {
+    "extrusion": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "height": 0
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    -5,
+                    43
+                  ],
+                  [
+                    -1,
+                    43
+                  ],
+                  [
+                    -1,
+                    47
+                  ],
+                  [
+                    -5,
+                    47
+                  ],
+                  [
+                    -5,
+                    43
+                  ]
+                ]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "height": 1000
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    1,
+                    43
+                  ],
+                  [
+                    5,
+                    43
+                  ],
+                  [
+                    5,
+                    47
+                  ],
+                  [
+                    1,
+                    47
+                  ],
+                  [
+                    1,
+                    43
+                  ]
+                ]
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "white"
+      }
+    },
+    {
+      "id": "extrusion",
+      "type": "fill-extrusion",
+      "source": "extrusion",
+      "paint": {
+        "fill-extrusion-color": "#ff0000",
+        "fill-extrusion-height": [
+          "get",
+          "height"
+        ]
+      }
+    }
+  ]
+}
