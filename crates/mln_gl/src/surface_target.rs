@@ -445,7 +445,12 @@ impl EglWindow {
 
     /// Makes no context current on this thread.
     fn clear_current(&mut self) -> Result<(), egl::Error> {
-        self.context_state = ContextState::Idle;
+        // A presenting context stays presenting, so it is made current on the
+        // window's surface again, which is the only way where EGL makes no
+        // context current without a surface.
+        if self.context_state.is_on_surface() {
+            self.context_state = ContextState::PresentingOffSurface;
+        }
         self.egl.make_current(self.display, None, None, None)
     }
 
